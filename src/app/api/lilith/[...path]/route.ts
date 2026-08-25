@@ -27,6 +27,7 @@ const ALLOWED = [
   "memory/overview",
   "memory/records",
   "memory/entities",
+  "memory/entity",
   "memory/search",
 ];
 

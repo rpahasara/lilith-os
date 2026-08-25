@@ -31,6 +31,7 @@ import {
   Workflow,
   Database,
   GitBranch,
+  BookMarked,
 } from "lucide-react";
 
 /* ----------------------------------------------------------------- categories */
@@ -94,7 +95,8 @@ export type ProvenanceKind =
   | "inferred"
   | "automation"
   | "project_data"
-  | "career_event";
+  | "career_event"
+  | "curated_memory";
 
 export const PROVENANCE_META: Record<
   ProvenanceKind,
@@ -108,6 +110,7 @@ export const PROVENANCE_META: Record<
   automation: { label: "Automation", icon: Workflow, accent: "cyan" },
   project_data: { label: "Project data", icon: Database, accent: "cyan" },
   career_event: { label: "Career event", icon: Briefcase, accent: "amber" },
+  curated_memory: { label: "Curated memory", icon: BookMarked, accent: "green" },
 };
 
 export interface Provenance {
