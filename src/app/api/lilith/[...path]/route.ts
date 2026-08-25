@@ -22,6 +22,12 @@ const ALLOWED = [
   "os/overview",
   "system/status",
   "audit/recent",
+  // Memory (endpoints not live yet — the client falls back to demo until the
+  // backend ships these; allow-listing now keeps the frontend live-ready).
+  "memory/overview",
+  "memory/records",
+  "memory/entities",
+  "memory/search",
 ];
 
 function baseUrl() {

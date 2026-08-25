@@ -24,7 +24,7 @@ export interface NavItem {
 export const nav: NavItem[] = [
   { label: "Command", href: "/", icon: LayoutGrid, ready: true },
   { label: "Career", href: "/career", icon: Briefcase, ready: true },
-  { label: "Memory", href: "/memory", icon: Brain },
+  { label: "Memory", href: "/memory", icon: Brain, ready: true },
   { label: "Automations", href: "/automations", icon: Workflow },
   { label: "Meetings", href: "/meetings", icon: CalendarClock },
   { label: "System", href: "/system", icon: Activity },
