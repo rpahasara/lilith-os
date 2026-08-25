@@ -26,6 +26,6 @@ export const nav: NavItem[] = [
   { label: "Career", href: "/career", icon: Briefcase, ready: true },
   { label: "Memory", href: "/memory", icon: Brain, ready: true },
   { label: "Automations", href: "/automations", icon: Workflow },
-  { label: "Meetings", href: "/meetings", icon: CalendarClock },
+  { label: "Meetings", href: "/meetings", icon: CalendarClock, ready: true },
   { label: "System", href: "/system", icon: Activity },
 ];

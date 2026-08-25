@@ -29,6 +29,9 @@ const ALLOWED = [
   "memory/entities",
   "memory/entity",
   "memory/search",
+  // Meetings (read-only). Single prefix covers /meetings/overview, /upcoming,
+  // /context, /followups and the dynamic /meetings/{id}/prep. Proxy is GET-only.
+  "meetings",
 ];
 
 function baseUrl() {
