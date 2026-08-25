@@ -1,26 +1,219 @@
 @import "tailwindcss";
 
+/* =========================================================================
+   LILITH OS — Design tokens
+   Base: deep space near-black (NASA color grading)
+   Primary: violet — the AI presence identity
+   Secondary: electric cyan — system, data, telemetry
+   ========================================================================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces (dark by intent — Lilith OS is a night product) */
+  --base: #060711;
+  --base-2: #080a16;
+  --panel: 255 255 255; /* rgb channels for translucent glass fills */
+
+  /* Ink */
+  --ink: #eef1fb;
+  --ink-muted: #9aa3c4;
+  --ink-faint: #5f6788;
+
+  /* Lines */
+  --line: 255 255 255; /* used at low alpha */
+
+  /* Brand — violet (Lilith presence) */
+  --violet: #8b5cf6;
+  --violet-bright: #a78bfa;
+  --violet-deep: #6d28d9;
+
+  /* Brand — cyan (system / data) */
+  --cyan: #22d3ee;
+  --cyan-bright: #67e8f9;
+  --cyan-deep: #0891b2;
+
+  /* Semantic */
+  --green: #34d399;
+  --amber: #fbbf24;
+  --rose: #fb7185;
+
+  /* Radii */
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --radius-xl: 1.75rem;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-base: var(--base);
+  --color-base-2: var(--base-2);
+
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+
+  --color-violet: var(--violet);
+  --color-violet-bright: var(--violet-bright);
+  --color-violet-deep: var(--violet-deep);
+
+  --color-cyan: var(--cyan);
+  --color-cyan-bright: var(--cyan-bright);
+  --color-cyan-deep: var(--cyan-deep);
+
+  --color-green: var(--green);
+  --color-amber: var(--amber);
+  --color-rose: var(--rose);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ------------------------------------------------------------------ base */
+* {
+  border-color: rgb(var(--line) / 0.08);
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--base);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden; /* command-center: shell owns scroll regions */
+}
+
+/* Cinematic backdrop: deep space with two faint auroral pools */
+.lilith-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(120% 90% at 18% 8%, rgba(139, 92, 246, 0.14), transparent 55%),
+    radial-gradient(110% 90% at 88% 92%, rgba(34, 211, 238, 0.1), transparent 52%),
+    radial-gradient(80% 60% at 50% 120%, rgba(109, 40, 217, 0.12), transparent 60%),
+    linear-gradient(180deg, var(--base-2), var(--base));
+}
+.lilith-bg::after {
+  /* subtle film grain to kill banding on the gradients */
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ------------------------------------------------------------------ glass */
+@utility glass {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(var(--panel) / 0.06),
+      rgb(var(--panel) / 0.025)
+    );
+  border: 1px solid rgb(var(--line) / 0.08);
+  box-shadow:
+    0 1px 0 0 rgb(var(--panel) / 0.06) inset,
+    0 20px 50px -30px rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+@utility glass-strong {
+  background:
+    linear-gradient(
+      180deg,
+      rgb(var(--panel) / 0.09),
+      rgb(var(--panel) / 0.035)
+    );
+  border: 1px solid rgb(var(--line) / 0.1);
+  box-shadow:
+    0 1px 0 0 rgb(var(--panel) / 0.08) inset,
+    0 30px 70px -40px rgba(0, 0, 0, 0.95);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+}
+
+@utility hairline {
+  border: 1px solid rgb(var(--line) / 0.08);
+}
+
+/* micro-label: uppercase mono eyebrow used across panels */
+@utility eyebrow {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------ scroll */
+/* Only styles the scrollbar — pair with an overflow utility where needed. */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line) / 0.14) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: rgb(var(--line) / 0.14);
+  border-radius: 999px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--line) / 0.24);
+}
+
+/* ------------------------------------------------------------------ motion */
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+@keyframes drift {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-breathe { animation: breathe 5.5s ease-in-out infinite; }
+
+/* live status dot */
+.status-dot {
+  position: relative;
+}
+.status-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.25;
+  animation: breathe 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* focus ring — accessible + on-brand */
+:focus-visible {
+  outline: 2px solid var(--violet-bright);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
