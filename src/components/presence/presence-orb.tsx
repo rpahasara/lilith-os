@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
-import type { PresenceState } from "@/lib/presence";
+import type { PresenceSignal } from "@/lib/presence";
 
 // Load the WebGL scene only on the client; render a soft glow while it boots.
 const OrbScene = dynamic(
@@ -17,7 +17,14 @@ const OrbScene = dynamic(
   },
 );
 
-export function PresenceOrb({ state }: { state: PresenceState }) {
+export function PresenceOrb({
+  signal,
+  paused = false,
+}: {
+  signal: PresenceSignal;
+  /** Pause the render loop (e.g. hidden tab) to save GPU/CPU. */
+  paused?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   // R3F sizes its canvas from a ResizeObserver that can miss late layout
@@ -44,7 +51,7 @@ export function PresenceOrb({ state }: { state: PresenceState }) {
     <div ref={ref} className="relative h-full w-full">
       {/* ambient bloom behind the canvas — fakes post-processing glow cheaply */}
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-[62%] w-[62%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.35),rgba(34,211,238,0.12)_45%,transparent_70%)] blur-2xl" />
-      <OrbScene state={state} />
+      <OrbScene signal={signal} paused={paused} />
     </div>
   );
 }

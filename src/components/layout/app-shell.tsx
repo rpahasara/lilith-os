@@ -6,7 +6,7 @@ import { ConversationProvider } from "@/components/conversation/conversation-pro
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <PresenceProvider defaultMode="orb">
+    <PresenceProvider defaultRenderer="orb">
       {/* Conversation lives above the routed pages so the transcript + session
           survive navigation between workspaces. */}
       <ConversationProvider>

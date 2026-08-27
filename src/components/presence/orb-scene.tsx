@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { PRESENCE, type PresenceState } from "@/lib/presence";
+import {
+  IDLE_SIGNAL,
+  orbParamsFromSignal,
+  type PresenceSignal,
+} from "@/lib/presence";
 
 /* ---------------------------------------------------------------- shaders */
 // Ashima 3D simplex noise — public domain.
@@ -97,25 +101,27 @@ void main(){
 `;
 
 /* ---------------------------------------------------------------- core orb */
-function Core({ state }: { state: PresenceState }) {
+function Core({ signal }: { signal: PresenceSignal }) {
   const mat = useRef<THREE.ShaderMaterial>(null);
   const mesh = useRef<THREE.Mesh>(null);
 
+  const idle = orbParamsFromSignal(IDLE_SIGNAL);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uAmp: { value: PRESENCE.idle.amplitude },
-      uSpeed: { value: PRESENCE.idle.speed },
-      uColorMix: { value: PRESENCE.idle.colorMix },
-      uIntensity: { value: PRESENCE.idle.intensity },
+      uAmp: { value: idle.amplitude },
+      uSpeed: { value: idle.speed },
+      uColorMix: { value: idle.colorMix },
+      uIntensity: { value: idle.intensity },
       uColorA: { value: new THREE.Color("#8b5cf6") },
       uColorB: { value: new THREE.Color("#22d3ee") },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
   useFrame((_, delta) => {
-    const p = PRESENCE[state];
+    const p = orbParamsFromSignal(signal);
     const u = uniforms;
     u.uTime.value += delta;
     // smooth state transitions
@@ -146,7 +152,7 @@ function Core({ state }: { state: PresenceState }) {
 }
 
 /* ---------------------------------------------------------------- particles */
-function Halo({ state }: { state: PresenceState }) {
+function Halo({ signal }: { signal: PresenceSignal }) {
   const points = useRef<THREE.Points>(null);
   const COUNT = 900;
 
@@ -168,7 +174,7 @@ function Halo({ state }: { state: PresenceState }) {
 
   useFrame((_, delta) => {
     if (!points.current) return;
-    const speed = PRESENCE[state].speed;
+    const speed = orbParamsFromSignal(signal).speed;
     points.current.rotation.y -= delta * 0.05 * (0.6 + speed);
     points.current.rotation.z += delta * 0.02;
   });
@@ -189,7 +195,13 @@ function Halo({ state }: { state: PresenceState }) {
 }
 
 /* ---------------------------------------------------------------- scene */
-export function OrbScene({ state }: { state: PresenceState }) {
+export function OrbScene({
+  signal,
+  paused = false,
+}: {
+  signal: PresenceSignal;
+  paused?: boolean;
+}) {
   // This component mounts together with the <canvas> (it arrives via a dynamic
   // import), so nudging a re-measure here — after the canvas exists — reliably
   // sizes the drawing buffer to the container on first paint.
@@ -207,11 +219,12 @@ export function OrbScene({ state }: { state: PresenceState }) {
     <Canvas
       camera={{ position: [0, 0, 4.2], fov: 45 }}
       dpr={[1, 2]}
+      frameloop={paused ? "never" : "always"}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       style={{ background: "transparent" }}
     >
-      <Core state={state} />
-      <Halo state={state} />
+      <Core signal={signal} />
+      <Halo signal={signal} />
     </Canvas>
   );
 }

@@ -6,47 +6,55 @@ import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
 import { ConversationView } from "@/components/conversation/conversation-view";
 import { useConversation } from "@/components/conversation/conversation-provider";
-import { PRESENCE, type PresenceState } from "@/lib/presence";
+import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/primitives";
 
-const CHIP_STATES: PresenceState[] = ["idle", "listening", "thinking", "speaking"];
-
 export function PresenceHero() {
-  const { state, setState } = usePresence();
+  const { signal, emit, override } = usePresence();
   const { messages, status, error, send } = useConversation();
   const [greeting, setGreeting] = useState("Good evening");
 
   const hasConversation = messages.length > 0 || !!error;
   const isSending = status === "sending";
+  const activity = signal.activity;
 
   useEffect(() => {
     setGreeting(greetingFor(new Date()));
   }, []);
 
-  // Drive the presence orb from the real conversation lifecycle.
+  // Drive the presence from the real conversation lifecycle — via semantic
+  // events, not by poking the renderer. The engine maps these to signals.
   const lastLilith = [...messages].reverse().find((m) => m.role === "lilith");
   const seenReply = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isSending) setState("thinking");
-  }, [isSending, setState]);
+    if (isSending) emit({ type: "conversation.response_started" });
+  }, [isSending, emit]);
 
   useEffect(() => {
     if (lastLilith && lastLilith.id !== seenReply.current) {
       seenReply.current = lastLilith.id;
-      setState("speaking", 2600);
+      emit({ type: "conversation.response_complete" });
     }
-  }, [lastLilith, setState]);
+  }, [lastLilith, emit]);
 
   useEffect(() => {
-    if (error) setState("idle");
-  }, [error, setState]);
+    if (error) emit({ type: "conversation.error" });
+  }, [error, emit]);
 
   function handleFocus(focused: boolean) {
-    if (isSending || state === "thinking" || state === "speaking") return;
-    setState(focused ? "listening" : "idle");
+    // Don't yank her out of an active thinking/speaking beat.
+    if (isSending || activity === "thinking" || activity === "speaking") return;
+    emit({
+      type: focused ? "conversation.input_focus" : "conversation.input_blur",
+    });
+  }
+
+  function handleSubmit(text: string) {
+    emit({ type: "conversation.user_message" });
+    send(text);
   }
 
   return (
@@ -81,30 +89,30 @@ export function PresenceHero() {
           <div className="flex flex-col items-center gap-3 text-center">
             <AnimatePresence mode="wait">
               <motion.p
-                key={state}
+                key={activity}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.4 }}
                 className="max-w-md text-[15px] text-ink-muted"
               >
-                {PRESENCE[state].hint}
+                {ACTIVITY_META[activity].hint}
               </motion.p>
             </AnimatePresence>
 
             <div className="flex items-center gap-1.5">
-              {CHIP_STATES.map((s) => (
+              {CHIP_ACTIVITIES.map((a) => (
                 <button
-                  key={s}
-                  onClick={() => setState(s)}
+                  key={a}
+                  onClick={() => override({ activity: a })}
                   className={cn(
                     "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-all",
-                    state === s
+                    activity === a
                       ? "bg-white/10 text-ink"
                       : "text-ink-faint hover:text-ink-muted",
                   )}
                 >
-                  {PRESENCE[s].label}
+                  {ACTIVITY_META[a].label}
                 </button>
               ))}
             </div>
@@ -114,7 +122,12 @@ export function PresenceHero() {
 
       {/* command input — the primary conversation surface */}
       <div className="w-full max-w-xl">
-        <CommandInput onFocusChange={handleFocus} onSubmit={send} loading={isSending} />
+        <CommandInput
+          onFocusChange={handleFocus}
+          onSubmit={handleSubmit}
+          onType={() => emit({ type: "conversation.typing" })}
+          loading={isSending}
+        />
       </div>
     </div>
   );

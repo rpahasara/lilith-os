@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 interface CommandInputProps {
   onFocusChange?: (focused: boolean) => void;
   onSubmit?: (text: string) => void;
+  /** Fired on each keystroke — used to arm presence typing-suppression. */
+  onType?: () => void;
   /** While true the input is locked and shows a working state (prevents
    *  duplicate sends). */
   loading?: boolean;
@@ -15,7 +17,7 @@ interface CommandInputProps {
 
 const SUGGESTIONS = ["Plan my day", "Summarise inbox", "Draft a reply", "What did I miss?"];
 
-export function CommandInput({ onFocusChange, onSubmit, loading = false }: CommandInputProps) {
+export function CommandInput({ onFocusChange, onSubmit, onType, loading = false }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
 
@@ -47,7 +49,10 @@ export function CommandInput({ onFocusChange, onSubmit, loading = false }: Comma
         )}
         <input
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            onType?.();
+          }}
           disabled={loading}
           onFocus={() => {
             setFocused(true);
