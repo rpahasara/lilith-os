@@ -15,6 +15,7 @@ import {
   IDLE_SIGNAL,
   applyMapping,
   initialEngineState,
+  readRendererOverride,
   resolveSignal,
   subscribePresence,
   type EngineState,
@@ -164,6 +165,21 @@ export function PresenceProvider({
 
   // Subscribe the orchestrator to the module-wide bus.
   useEffect(() => subscribePresence(emit), [emit]);
+
+  // Dev-only preview: honor a stored renderer override on boot, and expose a
+  // console helper (`window.__lilithPresence`). Never present in production and
+  // adds no UI. Toggle with e.g. `__lilithPresence.setRendererKind("avatar")`.
+  useEffect(() => {
+    const rendererOverride = readRendererOverride();
+    if (rendererOverride) setRendererKind(rendererOverride);
+    if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+      (window as unknown as Record<string, unknown>).__lilithPresence = {
+        setRendererKind,
+        emit,
+        override,
+      };
+    }
+  }, [emit, override]);
 
   // Clean up the expiry timer on unmount.
   useEffect(() => {

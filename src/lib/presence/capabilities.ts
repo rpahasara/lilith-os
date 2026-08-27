@@ -9,11 +9,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { RendererKind } from "./types";
 
 /** User preference for how present Lilith should be. Control lands in Settings. */
 export type PresencePreference = "full" | "orb" | "off";
 
 export const PRESENCE_PREF_KEY = "lilith-os:presence-pref";
+
+/**
+ * Dev-only override for which renderer the engine boots into. Not a user
+ * setting — it exists so `rendererKind="avatar"` can be previewed without a
+ * real model. Set via `localStorage["lilith-os:presence-renderer"] = "avatar"`
+ * (or the dev `window.__lilithPresence.setRendererKind` helper).
+ */
+export const PRESENCE_RENDERER_KEY = "lilith-os:presence-renderer";
 
 /** One-shot WebGL support probe. Returns false if a context can't be created. */
 export function detectWebGL(): boolean {
@@ -50,6 +59,18 @@ export function writePresencePreference(pref: PresencePreference): void {
   } catch {
     /* ignore */
   }
+}
+
+/** Read the dev renderer override, if any (see {@link PRESENCE_RENDERER_KEY}). */
+export function readRendererOverride(): RendererKind | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = window.localStorage.getItem(PRESENCE_RENDERER_KEY);
+    if (v === "orb" || v === "avatar" || v === "edge" || v === "voice") return v;
+  } catch {
+    /* storage unavailable */
+  }
+  return null;
 }
 
 /* ----------------------------------------------------------------- hooks */

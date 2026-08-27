@@ -9,6 +9,7 @@ import {
 } from "@/lib/presence";
 import { usePresence } from "./presence-engine";
 import { PresenceOrb } from "./presence-orb";
+import { AvatarPresence } from "./avatar-presence";
 import { PresenceErrorBoundary, StaticPresence } from "./presence-fallback";
 
 /**
@@ -95,10 +96,12 @@ export function PresenceStage() {
     content = <StaticPresence animate={false} />;
   } else if (!webgl || degraded) {
     content = <StaticPresence />;
+  } else if (kind === "avatar") {
+    content = <AvatarPresence signal={signal} paused={hidden} />;
   } else if (kind === "orb") {
     content = <PresenceOrb signal={signal} paused={hidden} />;
   } else {
-    // Avatar/edge/voice renderers land in later phases; orb is the safe default.
+    // edge/voice renderers land in later phases; orb is the safe default.
     content = <PresenceOrb signal={signal} paused={hidden} />;
   }
 
