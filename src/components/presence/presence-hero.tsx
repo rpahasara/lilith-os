@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
+import { ConversationView } from "@/components/conversation/conversation-view";
+import { useConversation } from "@/components/conversation/conversation-provider";
 import { PRESENCE, type PresenceState } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
@@ -13,40 +15,37 @@ const CHIP_STATES: PresenceState[] = ["idle", "listening", "thinking", "speaking
 
 export function PresenceHero() {
   const { state, setState } = usePresence();
+  const { messages, status, error, send } = useConversation();
   const [greeting, setGreeting] = useState("Good evening");
-  const [line, setLine] = useState<string>("I've reviewed your day. Here's what matters.");
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const hasConversation = messages.length > 0 || !!error;
+  const isSending = status === "sending";
 
   useEffect(() => {
     setGreeting(greetingFor(new Date()));
-    return () => timers.current.forEach(clearTimeout);
   }, []);
 
-  function clearTimers() {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-  }
+  // Drive the presence orb from the real conversation lifecycle.
+  const lastLilith = [...messages].reverse().find((m) => m.role === "lilith");
+  const seenReply = useRef<string | null>(null);
 
-  function handleSubmit(text: string) {
-    clearTimers();
-    setState("thinking");
-    setLine(`Working on “${text}”…`);
-    timers.current.push(
-      setTimeout(() => {
-        setState("speaking");
-        setLine("Done. I've drafted a plan and surfaced the key context.");
-      }, 1600),
-    );
-    timers.current.push(
-      setTimeout(() => {
-        setState("idle");
-        setLine("Anything else on your mind?");
-      }, 4600),
-    );
-  }
+  useEffect(() => {
+    if (isSending) setState("thinking");
+  }, [isSending, setState]);
+
+  useEffect(() => {
+    if (lastLilith && lastLilith.id !== seenReply.current) {
+      seenReply.current = lastLilith.id;
+      setState("speaking", 2600);
+    }
+  }, [lastLilith, setState]);
+
+  useEffect(() => {
+    if (error) setState("idle");
+  }, [error, setState]);
 
   function handleFocus(focused: boolean) {
-    if (state === "thinking" || state === "speaking") return;
+    if (isSending || state === "thinking" || state === "speaking") return;
     setState(focused ? "listening" : "idle");
   }
 
@@ -74,46 +73,48 @@ export function PresenceHero() {
         <div className="pointer-events-none absolute bottom-6 left-1/2 h-8 w-40 -translate-x-1/2 rounded-[100%] bg-violet-bright/20 blur-2xl" />
       </div>
 
-      {/* dynamic line + state chips */}
-      <div className="mb-4 flex flex-col items-center gap-3 text-center">
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={line}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-md text-[15px] text-ink-muted"
-          >
-            {line}
-          </motion.p>
-        </AnimatePresence>
+      {/* conversation region: live transcript once talking, else the idle hint + state chips */}
+      <div className="mb-4 flex w-full flex-col items-center gap-3">
+        {hasConversation ? (
+          <ConversationView />
+        ) : (
+          <div className="flex flex-col items-center gap-3 text-center">
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={state}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.4 }}
+                className="max-w-md text-[15px] text-ink-muted"
+              >
+                {PRESENCE[state].hint}
+              </motion.p>
+            </AnimatePresence>
 
-        <div className="flex items-center gap-1.5">
-          {CHIP_STATES.map((s) => (
-            <button
-              key={s}
-              onClick={() => {
-                clearTimers();
-                setState(s);
-                setLine(PRESENCE[s].hint);
-              }}
-              className={cn(
-                "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-all",
-                state === s
-                  ? "bg-white/10 text-ink"
-                  : "text-ink-faint hover:text-ink-muted",
-              )}
-            >
-              {PRESENCE[s].label}
-            </button>
-          ))}
-        </div>
+            <div className="flex items-center gap-1.5">
+              {CHIP_STATES.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setState(s)}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-all",
+                    state === s
+                      ? "bg-white/10 text-ink"
+                      : "text-ink-faint hover:text-ink-muted",
+                  )}
+                >
+                  {PRESENCE[s].label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* command input */}
+      {/* command input — the primary conversation surface */}
       <div className="w-full max-w-xl">
-        <CommandInput onFocusChange={handleFocus} onSubmit={handleSubmit} />
+        <CommandInput onFocusChange={handleFocus} onSubmit={send} loading={isSending} />
       </div>
     </div>
   );
