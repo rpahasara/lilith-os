@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import {
   VRMLoaderPlugin,
+  VRMLookAtBoneApplier,
+  VRMLookAtExpressionApplier,
   type VRM,
   type VRMHumanBoneName,
   type VRMPose,
@@ -312,6 +314,9 @@ function HsinAvatar({
   springsEnabled,
   autoBlinkEnabled,
   manualBlinkSequence,
+  lookAtEnabled,
+  lookAtStrength,
+  centerEyesSequence,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -330,6 +335,9 @@ function HsinAvatar({
   springsEnabled: boolean;
   autoBlinkEnabled: boolean;
   manualBlinkSequence: number;
+  lookAtEnabled: boolean;
+  lookAtStrength: number;
+  centerEyesSequence: number;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -341,7 +349,7 @@ function HsinAvatar({
   armIkTargets: ArmIkTargets;
   handOrientationTargets: HandOrientationTargets;
 }) {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const rig = useRef<THREE.Group>(null);
   const avatarFrame = useRef<THREE.Group>(null);
   const time = useRef(0);
@@ -365,6 +373,10 @@ function HsinAvatar({
     weight: 0,
     manualSequence: manualBlinkSequence,
   });
+  const lookAtPointer = useRef(new THREE.Vector2());
+  const smoothedLookAtPointer = useRef(new THREE.Vector2());
+  const centeredLookAtPointer = useRef(new THREE.Vector2());
+  const lastCenterEyesSequence = useRef(centerEyesSequence);
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -430,6 +442,66 @@ function HsinAvatar({
       vrmaPlayback?.mixer.uncacheRoot(vrm.scene);
     };
   }, [vrm, vrmaPlayback]);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const handlePointerMove = (event: PointerEvent) => {
+      const bounds = canvas.getBoundingClientRect();
+      if (bounds.width <= 0 || bounds.height <= 0) return;
+      lookAtPointer.current.set(
+        THREE.MathUtils.clamp(
+          ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+          -1,
+          1,
+        ),
+        THREE.MathUtils.clamp(
+          1 - ((event.clientY - bounds.top) / bounds.height) * 2,
+          -1,
+          1,
+        ),
+      );
+    };
+    const handlePointerLeave = () => lookAtPointer.current.set(0, 0);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    return () => {
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    const lookAt = vrm.lookAt;
+    if (!lookAt) {
+      console.warn("[Hsin LookAt] No VRM LookAt component is available");
+      return;
+    }
+    const applier = lookAt.applier;
+    const expressionDriven = applier instanceof VRMLookAtExpressionApplier;
+    const rangeApplier =
+      expressionDriven || applier instanceof VRMLookAtBoneApplier
+        ? applier
+        : null;
+    const originalAutoUpdate = lookAt.autoUpdate;
+    lookAt.autoUpdate = false;
+    console.info(
+      `[Hsin LookAt] ${JSON.stringify({
+        applierType: expressionDriven ? "expression" : "bone-or-custom",
+        expressionDriven,
+        offsetFromHeadBone: lookAt.offsetFromHeadBone.toArray(),
+        rangeMapHorizontalInner: rangeApplier?.rangeMapHorizontalInner ?? null,
+        rangeMapHorizontalOuter: rangeApplier?.rangeMapHorizontalOuter ?? null,
+        rangeMapVerticalDown: rangeApplier?.rangeMapVerticalDown ?? null,
+        rangeMapVerticalUp: rangeApplier?.rangeMapVerticalUp ?? null,
+        workflow: "manual yaw/pitch + lookAt.update(delta)",
+      })}`,
+    );
+    return () => {
+      lookAt.reset();
+      lookAt.update(0);
+      lookAt.autoUpdate = originalAutoUpdate;
+    };
+  }, [vrm]);
 
   const poseDiagnostic = useMemo(() => {
     const normalizedNodes = new Map<VRMHumanBoneName, THREE.Object3D>();
@@ -1302,8 +1374,42 @@ function HsinAvatar({
       }
 
       expressionManager.setValue("blink", blink.weight);
-      expressionManager.update();
     }
+
+    const lookAt = vrm.lookAt;
+    if (lookAt) {
+      if (centerEyesSequence !== lastCenterEyesSequence.current) {
+        lastCenterEyesSequence.current = centerEyesSequence;
+        lookAtPointer.current.set(0, 0);
+      }
+      const target = lookAtEnabled
+        ? lookAtPointer.current
+        : centeredLookAtPointer.current;
+      const applyDeadzone = (value: number) =>
+        Math.abs(value) < 0.08
+          ? 0
+          : Math.sign(value) * ((Math.abs(value) - 0.08) / 0.92);
+      const targetX = applyDeadzone(target.x);
+      const targetY = applyDeadzone(target.y);
+      smoothedLookAtPointer.current.set(
+        THREE.MathUtils.damp(
+          smoothedLookAtPointer.current.x,
+          targetX,
+          4.2,
+          d,
+        ),
+        THREE.MathUtils.damp(
+          smoothedLookAtPointer.current.y,
+          targetY,
+          3.8,
+          d,
+        ),
+      );
+      lookAt.yaw = smoothedLookAtPointer.current.x * 12 * lookAtStrength;
+      lookAt.pitch = -smoothedLookAtPointer.current.y * 8 * lookAtStrength;
+      lookAt.update(d);
+    }
+    expressionManager?.update();
 
     if (poseMode === "relaxed") {
       vrm.humanoid.setNormalizedPose(normalizedStandingPose);
@@ -1659,6 +1765,9 @@ export function AvatarScene({
   springsEnabled = false,
   autoBlinkEnabled = true,
   manualBlinkSequence = 0,
+  lookAtEnabled = true,
+  lookAtStrength = 0.45,
+  centerEyesSequence = 0,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -1679,6 +1788,9 @@ export function AvatarScene({
   springsEnabled?: boolean;
   autoBlinkEnabled?: boolean;
   manualBlinkSequence?: number;
+  lookAtEnabled?: boolean;
+  lookAtStrength?: number;
+  centerEyesSequence?: number;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -1721,6 +1833,9 @@ export function AvatarScene({
         springsEnabled={springsEnabled}
         autoBlinkEnabled={autoBlinkEnabled}
         manualBlinkSequence={manualBlinkSequence}
+        lookAtEnabled={lookAtEnabled}
+        lookAtStrength={lookAtStrength}
+        centerEyesSequence={centerEyesSequence}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}

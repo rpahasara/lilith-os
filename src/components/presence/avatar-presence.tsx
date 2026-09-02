@@ -146,6 +146,9 @@ export function AvatarPresence({
   const [springsEnabled, setSpringsEnabled] = useState(false);
   const [autoBlinkEnabled, setAutoBlinkEnabled] = useState(true);
   const [manualBlinkSequence, setManualBlinkSequence] = useState(0);
+  const [lookAtEnabled, setLookAtEnabled] = useState(true);
+  const [lookAtStrength, setLookAtStrength] = useState(0.45);
+  const [centerEyesSequence, setCenterEyesSequence] = useState(0);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -208,6 +211,9 @@ export function AvatarPresence({
         springsEnabled={springsEnabled}
         autoBlinkEnabled={autoBlinkEnabled}
         manualBlinkSequence={manualBlinkSequence}
+        lookAtEnabled={lookAtEnabled}
+        lookAtStrength={lookAtStrength}
+        centerEyesSequence={centerEyesSequence}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -285,6 +291,36 @@ export function AvatarPresence({
         >
           Manual Blink Test
         </button>
+      </div>
+      <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => setLookAtEnabled((current) => !current)}
+            className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${lookAtEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            LookAt {lookAtEnabled ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCenterEyesSequence((current) => current + 1)}
+            className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100"
+          >
+            Center Eyes
+          </button>
+        </div>
+        <label className="block text-[10px] uppercase tracking-wider text-white/60">
+          LookAt strength {lookAtStrength.toFixed(2)}
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={lookAtStrength}
+            onChange={(event) => setLookAtStrength(Number(event.target.value))}
+            className="mt-1 block w-full"
+          />
+        </label>
       </div>
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
