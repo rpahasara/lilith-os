@@ -30,7 +30,7 @@ import { PresenceErrorBoundary, StaticPresence } from "./presence-fallback";
  * `degraded` after two consecutive low windows so we don't oscillate. Skips
  * hidden-tab windows (which read as 0 fps). One-way: reload to re-evaluate.
  */
-function usePerfGuard(enabled: boolean): boolean {
+function usePerfGuard(enabled: boolean, graceMs = 0): boolean {
   const [degraded, setDegraded] = useState(false);
   const lowStreak = useRef(0);
 
@@ -41,10 +41,17 @@ function usePerfGuard(enabled: boolean): boolean {
     let raf = 0;
     let frames = 0;
     let windowStart = performance.now();
+    const measureAfter = windowStart + graceMs;
     let stopped = false;
 
     const tick = (now: number) => {
       if (stopped) return;
+      if (now < measureAfter) {
+        frames = 0;
+        windowStart = now;
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       frames += 1;
       const elapsed = now - windowStart;
       if (elapsed >= 1000) {
@@ -70,7 +77,7 @@ function usePerfGuard(enabled: boolean): boolean {
       stopped = true;
       cancelAnimationFrame(raf);
     };
-  }, [enabled, degraded]);
+  }, [enabled, degraded, graceMs]);
 
   return degraded;
 }
@@ -82,12 +89,13 @@ export function PresenceStage() {
   const webgl = useWebGL();
   const hidden = usePageHidden();
 
-  const wantsLive = preference !== "off" && !reducedMotion && webgl;
-  const degraded = usePerfGuard(wantsLive);
-
   // Which renderer would we *like* to draw? "orb" preference pins the orb even
   // when an avatar becomes available; "full" follows the engine's rendererKind.
   const kind = preference === "orb" ? "orb" : rendererKind;
+  const wantsLive = preference !== "off" && !reducedMotion && webgl;
+  // Large local avatars need time to download and parse before FPS is a useful
+  // signal. The guard remains active after this one-time startup grace period.
+  const degraded = usePerfGuard(wantsLive, kind === "avatar" ? 20_000 : 0);
 
   let content: React.ReactNode;
   if (preference === "off") {
