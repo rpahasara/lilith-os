@@ -143,7 +143,7 @@ export function AvatarPresence({
   const [inspectPose, setInspectPose] = useState(false);
   const [inspectionView, setInspectionView] =
     useState<PoseInspectionView>("front");
-  const [springsEnabled, setSpringsEnabled] = useState(true);
+  const [springsEnabled, setSpringsEnabled] = useState(false);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
