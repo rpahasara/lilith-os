@@ -339,7 +339,7 @@ function HsinAvatar({
   const rightActualWristMarker = useRef<THREE.Mesh>(null);
   const handTargetMarker = useRef<THREE.Mesh>(null);
   const loggedHandView = useRef<HandInspectionView | null>(null);
-  const previousSpringsEnabled = useRef(springsEnabled);
+  const previousSpringsEnabled = useRef(false);
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -1160,6 +1160,56 @@ function HsinAvatar({
 
       vrm.humanoid.update();
       vrm.nodeConstraintManager?.update();
+
+      const springBoneManager = vrm.springBoneManager;
+      const wasSpringsEnabled = previousSpringsEnabled.current;
+      if (springsEnabled && springBoneManager) {
+        const isFirstEnabledFrame = !wasSpringsEnabled;
+        if (isFirstEnabledFrame) {
+          springBoneManager.reset();
+          vrm.scene.updateMatrixWorld(true);
+          springBoneManager.setInitState();
+        }
+        const before = isFirstEnabledFrame
+          ? [...springBoneManager.joints].map((joint) => ({
+              name: joint.bone.name,
+              quaternion: joint.bone.quaternion.clone(),
+            }))
+          : [];
+        springBoneManager.update(d);
+        if (isFirstEnabledFrame) {
+          const joints = [...springBoneManager.joints];
+          const groups: Record<string, { count: number; maxDegrees: number }> = {};
+          before.forEach(({ name, quaternion }, index) => {
+            const joint = joints[index];
+            if (!joint) return;
+            const lowerName = name.toLowerCase();
+            const group = /tail/.test(lowerName)
+              ? "tail"
+              : /hair|bang|ponytail/.test(lowerName)
+                ? "hair"
+                : /cloth|skirt|ribbon|sleeve|dress/.test(lowerName)
+                  ? "cloth/skirt/ribbon"
+                  : "other";
+            const degrees = THREE.MathUtils.radToDeg(
+              quaternion.angleTo(joint.bone.quaternion),
+            );
+            const result = (groups[group] ??= { count: 0, maxDegrees: 0 });
+            result.count += 1;
+            result.maxDegrees = Math.max(result.maxDegrees, degrees);
+          });
+          console.info(
+            `[Hsin spring init test] firstFrame=${JSON.stringify(groups)}`,
+          );
+        }
+      } else if (!springsEnabled && wasSpringsEnabled && springBoneManager) {
+        springBoneManager.reset();
+        vrm.scene.updateMatrixWorld(true);
+        console.info(
+          "[Hsin spring init test] disabled; restored captured canonical spring state",
+        );
+      }
+      previousSpringsEnabled.current = springsEnabled;
     }
 
     if (poseMode === "relaxed") {

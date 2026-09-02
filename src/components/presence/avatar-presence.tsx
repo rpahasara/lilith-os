@@ -143,7 +143,7 @@ export function AvatarPresence({
   const [inspectPose, setInspectPose] = useState(false);
   const [inspectionView, setInspectionView] =
     useState<PoseInspectionView>("front");
-  const [springsEnabled, setSpringsEnabled] = useState(false);
+  const [springsEnabled, setSpringsEnabled] = useState(true);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -259,6 +259,13 @@ export function AvatarPresence({
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        onClick={() => setSpringsEnabled((current) => !current)}
+        className={`w-full rounded-lg border border-white/10 px-3 py-2 text-[10px] uppercase tracking-wider ${springsEnabled ? "bg-amber-400/25 text-amber-100" : "bg-emerald-400/20 text-emerald-100"}`}
+      >
+        Springs Test {springsEnabled ? "On" : "Off"}
+      </button>
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
           <div className="uppercase tracking-wider text-emerald-200">
@@ -475,13 +482,6 @@ export function AvatarPresence({
                 {label}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => setSpringsEnabled((current) => !current)}
-              className={`rounded px-2 py-1 ${springsEnabled ? "bg-amber-400/25 text-amber-200" : "bg-emerald-400/20 text-emerald-200"}`}
-            >
-              Springs {springsEnabled ? "On" : "Off"}
-            </button>
           </div>
         )}
         <div className="space-y-1 rounded-lg border border-white/10 bg-black/70 p-2 normal-case tracking-normal text-white/70">
