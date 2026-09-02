@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { VRMLoaderPlugin, type VRM } from "@pixiv/three-vrm";
 import * as THREE from "three";
@@ -8,6 +8,70 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
+
+type MaterialAssignment = {
+  mesh: THREE.Mesh;
+  material: THREE.Material | THREE.Material[];
+};
+
+function createBasicMaterialFallback(source: THREE.Material) {
+  const mtoon = source as THREE.Material & {
+    isMToonMaterial?: boolean;
+    color?: THREE.Color;
+    map?: THREE.Texture | null;
+    alphaMap?: THREE.Texture | null;
+    ignoreVertexColor?: boolean;
+  };
+  const fallback = new THREE.MeshBasicMaterial({
+    color: mtoon.color?.clone() ?? new THREE.Color(0xffffff),
+    map: mtoon.map ?? null,
+    alphaMap: mtoon.alphaMap ?? null,
+  });
+
+  // Copy render-state values explicitly. The texture objects are intentionally
+  // shared and never mutated, so their loader-assigned color spaces stay intact.
+  fallback.name = `${source.name || "MToon"} [MeshBasic fallback]`;
+  fallback.opacity = source.opacity;
+  fallback.transparent = source.transparent;
+  fallback.alphaTest = source.alphaTest;
+  fallback.alphaHash = source.alphaHash;
+  fallback.alphaToCoverage = source.alphaToCoverage;
+  fallback.side = source.side;
+  fallback.shadowSide = source.shadowSide;
+  fallback.depthTest = source.depthTest;
+  fallback.depthWrite = source.depthWrite;
+  fallback.depthFunc = source.depthFunc;
+  fallback.colorWrite = source.colorWrite;
+  fallback.blending = source.blending;
+  fallback.blendSrc = source.blendSrc;
+  fallback.blendDst = source.blendDst;
+  fallback.blendEquation = source.blendEquation;
+  fallback.blendSrcAlpha = source.blendSrcAlpha;
+  fallback.blendDstAlpha = source.blendDstAlpha;
+  fallback.blendEquationAlpha = source.blendEquationAlpha;
+  fallback.premultipliedAlpha = source.premultipliedAlpha;
+  fallback.dithering = source.dithering;
+  fallback.polygonOffset = source.polygonOffset;
+  fallback.polygonOffsetFactor = source.polygonOffsetFactor;
+  fallback.polygonOffsetUnits = source.polygonOffsetUnits;
+  fallback.clippingPlanes = source.clippingPlanes;
+  fallback.clipIntersection = source.clipIntersection;
+  fallback.clipShadows = source.clipShadows;
+  fallback.stencilWrite = source.stencilWrite;
+  fallback.stencilWriteMask = source.stencilWriteMask;
+  fallback.stencilFunc = source.stencilFunc;
+  fallback.stencilRef = source.stencilRef;
+  fallback.stencilFuncMask = source.stencilFuncMask;
+  fallback.stencilFail = source.stencilFail;
+  fallback.stencilZFail = source.stencilZFail;
+  fallback.stencilZPass = source.stencilZPass;
+  fallback.toneMapped = source.toneMapped;
+  fallback.visible = source.visible;
+  fallback.vertexColors = mtoon.ignoreVertexColor !== true;
+  fallback.userData = { ...source.userData, mtoonFallbackSource: source.name };
+
+  return fallback;
+}
 
 /**
  * First-pass VRM renderer. Presence signals continue to drive subtle whole-body
@@ -21,6 +85,66 @@ function HsinAvatar({ signal }: { signal: PresenceSignal }) {
     loader.register((parser) => new VRMLoaderPlugin(parser));
   });
   const vrm = gltf.userData.vrm as VRM;
+
+  useLayoutEffect(() => {
+    const fallbacks = new Map<THREE.Material, THREE.MeshBasicMaterial>();
+    const assignments: MaterialAssignment[] = [];
+
+    vrm.scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+
+      const original = object.material;
+      const materials = Array.isArray(original) ? original : [original];
+      if (
+        !materials.some(
+          (material) =>
+            (material as THREE.Material & { isMToonMaterial?: boolean })
+              .isMToonMaterial === true,
+        )
+      ) {
+        return;
+      }
+
+      assignments.push({ mesh: object, material: original });
+      object.material = materials.map((material) => {
+        if (
+          (material as THREE.Material & { isMToonMaterial?: boolean })
+            .isMToonMaterial !== true
+        ) {
+          return material;
+        }
+        let fallback = fallbacks.get(material);
+        if (!fallback) {
+          fallback = createBasicMaterialFallback(material);
+          fallbacks.set(material, fallback);
+        }
+        return fallback;
+      });
+      if (!Array.isArray(original)) object.material = object.material[0];
+    });
+
+    const diagnostics = [...fallbacks].map(([source, fallback]) => ({
+      material: source.name,
+      sourceType: "MToonMaterial",
+      fallbackType: fallback.type,
+      hasBaseColorMap: Boolean(fallback.map),
+      textureColorSpace: fallback.map?.colorSpace ?? "none",
+      alphaTest: fallback.alphaTest,
+      transparent: fallback.transparent,
+      side: fallback.side === THREE.DoubleSide ? "DoubleSide" : fallback.side,
+    }));
+    console.table(diagnostics);
+    console.info(
+      `[Hsin material fallback] ${JSON.stringify(diagnostics)}`,
+    );
+
+    return () => {
+      assignments.forEach(({ mesh, material }) => {
+        mesh.material = material;
+      });
+      fallbacks.forEach((material) => material.dispose());
+    };
+  }, [vrm]);
 
   const framing = useMemo(() => {
     const scene = vrm.scene;
