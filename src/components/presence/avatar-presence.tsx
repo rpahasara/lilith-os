@@ -149,6 +149,9 @@ export function AvatarPresence({
   const [lookAtEnabled, setLookAtEnabled] = useState(true);
   const [lookAtStrength, setLookAtStrength] = useState(0.45);
   const [centerEyesSequence, setCenterEyesSequence] = useState(0);
+  const [headAttentionEnabled, setHeadAttentionEnabled] = useState(true);
+  const [headAttentionStrength, setHeadAttentionStrength] = useState(1);
+  const [centerHeadSequence, setCenterHeadSequence] = useState(0);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -214,6 +217,9 @@ export function AvatarPresence({
         lookAtEnabled={lookAtEnabled}
         lookAtStrength={lookAtStrength}
         centerEyesSequence={centerEyesSequence}
+        headAttentionEnabled={headAttentionEnabled}
+        headAttentionStrength={headAttentionStrength}
+        centerHeadSequence={centerHeadSequence}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -318,6 +324,38 @@ export function AvatarPresence({
             step={0.05}
             value={lookAtStrength}
             onChange={(event) => setLookAtStrength(Number(event.target.value))}
+            className="mt-1 block w-full"
+          />
+        </label>
+      </div>
+      <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => setHeadAttentionEnabled((current) => !current)}
+            className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${headAttentionEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Head Attention {headAttentionEnabled ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCenterHeadSequence((current) => current + 1)}
+            className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100"
+          >
+            Center Head
+          </button>
+        </div>
+        <label className="block text-[10px] uppercase tracking-wider text-white/60">
+          Head strength {headAttentionStrength.toFixed(2)}
+          <input
+            type="range"
+            min={0}
+            max={1.5}
+            step={0.05}
+            value={headAttentionStrength}
+            onChange={(event) =>
+              setHeadAttentionStrength(Number(event.target.value))
+            }
             className="mt-1 block w-full"
           />
         </label>

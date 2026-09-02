@@ -317,6 +317,9 @@ function HsinAvatar({
   lookAtEnabled,
   lookAtStrength,
   centerEyesSequence,
+  headAttentionEnabled,
+  headAttentionStrength,
+  centerHeadSequence,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -338,6 +341,9 @@ function HsinAvatar({
   lookAtEnabled: boolean;
   lookAtStrength: number;
   centerEyesSequence: number;
+  headAttentionEnabled: boolean;
+  headAttentionStrength: number;
+  centerHeadSequence: number;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -377,6 +383,10 @@ function HsinAvatar({
   const smoothedLookAtPointer = useRef(new THREE.Vector2());
   const centeredLookAtPointer = useRef(new THREE.Vector2());
   const lastCenterEyesSequence = useRef(centerEyesSequence);
+  const smoothedHeadAttention = useRef(new THREE.Vector2());
+  const lastCenterHeadSequence = useRef(centerHeadSequence);
+  const pointerMovementVersion = useRef(0);
+  const centerHeadAtPointerVersion = useRef(0);
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -460,8 +470,12 @@ function HsinAvatar({
           1,
         ),
       );
+      pointerMovementVersion.current += 1;
     };
-    const handlePointerLeave = () => lookAtPointer.current.set(0, 0);
+    const handlePointerLeave = () => {
+      lookAtPointer.current.set(0, 0);
+      pointerMovementVersion.current += 1;
+    };
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerleave", handlePointerLeave);
     return () => {
@@ -1268,6 +1282,48 @@ function HsinAvatar({
       addMicroMotion("neck", 0, headDrift * 0.42, headTilt * 0.16);
       addMicroMotion("head", 0, headDrift * 0.78, headTilt * 0.42);
 
+      if (centerHeadSequence !== lastCenterHeadSequence.current) {
+        lastCenterHeadSequence.current = centerHeadSequence;
+        centerHeadAtPointerVersion.current = pointerMovementVersion.current;
+      }
+      const headTargetIsCentered =
+        !headAttentionEnabled ||
+        centerHeadAtPointerVersion.current === pointerMovementVersion.current;
+      const headTarget = headTargetIsCentered
+        ? centeredLookAtPointer.current
+        : lookAtPointer.current;
+      const applyHeadDeadzone = (value: number) =>
+        Math.abs(value) < 0.12
+          ? 0
+          : Math.sign(value) * ((Math.abs(value) - 0.12) / 0.88);
+      smoothedHeadAttention.current.set(
+        THREE.MathUtils.damp(
+          smoothedHeadAttention.current.x,
+          applyHeadDeadzone(headTarget.x),
+          1.55,
+          d,
+        ),
+        THREE.MathUtils.damp(
+          smoothedHeadAttention.current.y,
+          applyHeadDeadzone(headTarget.y),
+          1.35,
+          d,
+        ),
+      );
+      const attentionYaw =
+        smoothedHeadAttention.current.x * 3 * headAttentionStrength;
+      const attentionPitch =
+        -smoothedHeadAttention.current.y * 1.5 * headAttentionStrength;
+      const attentionRoll =
+        -smoothedHeadAttention.current.x * 0.65 * headAttentionStrength;
+      addMicroMotion(
+        "neck",
+        attentionPitch * 0.35,
+        attentionYaw * 0.35,
+        attentionRoll * 0.25,
+      );
+      addMicroMotion("head", attentionPitch, attentionYaw, attentionRoll);
+
       vrm.humanoid.update();
       vrm.nodeConstraintManager?.update();
 
@@ -1768,6 +1824,9 @@ export function AvatarScene({
   lookAtEnabled = true,
   lookAtStrength = 0.45,
   centerEyesSequence = 0,
+  headAttentionEnabled = true,
+  headAttentionStrength = 1,
+  centerHeadSequence = 0,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -1791,6 +1850,9 @@ export function AvatarScene({
   lookAtEnabled?: boolean;
   lookAtStrength?: number;
   centerEyesSequence?: number;
+  headAttentionEnabled?: boolean;
+  headAttentionStrength?: number;
+  centerHeadSequence?: number;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -1836,6 +1898,9 @@ export function AvatarScene({
         lookAtEnabled={lookAtEnabled}
         lookAtStrength={lookAtStrength}
         centerEyesSequence={centerEyesSequence}
+        headAttentionEnabled={headAttentionEnabled}
+        headAttentionStrength={headAttentionStrength}
+        centerHeadSequence={centerHeadSequence}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}
