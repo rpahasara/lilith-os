@@ -144,6 +144,8 @@ export function AvatarPresence({
   const [inspectionView, setInspectionView] =
     useState<PoseInspectionView>("front");
   const [springsEnabled, setSpringsEnabled] = useState(false);
+  const [autoBlinkEnabled, setAutoBlinkEnabled] = useState(true);
+  const [manualBlinkSequence, setManualBlinkSequence] = useState(0);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -204,6 +206,8 @@ export function AvatarPresence({
         inspectPose={inspectPose}
         inspectionView={inspectionView}
         springsEnabled={springsEnabled}
+        autoBlinkEnabled={autoBlinkEnabled}
+        manualBlinkSequence={manualBlinkSequence}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -266,6 +270,22 @@ export function AvatarPresence({
       >
         Springs Test {springsEnabled ? "On" : "Off"}
       </button>
+      <div className="grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={() => setAutoBlinkEnabled((current) => !current)}
+          className={`rounded-lg border border-white/10 px-2 py-2 text-[10px] uppercase tracking-wider ${autoBlinkEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+        >
+          Auto Blink {autoBlinkEnabled ? "On" : "Off"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setManualBlinkSequence((current) => current + 1)}
+          className="rounded-lg border border-white/10 bg-violet-400/20 px-2 py-2 text-[10px] uppercase tracking-wider text-violet-100"
+        >
+          Manual Blink Test
+        </button>
+      </div>
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
           <div className="uppercase tracking-wider text-emerald-200">

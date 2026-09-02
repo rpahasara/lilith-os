@@ -20,6 +20,20 @@ import type { PresenceSignal } from "@/lib/presence";
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
+
+type BlinkPhase = "waiting" | "closing" | "holding" | "opening";
+
+function randomBlinkDelay() {
+  const normalDelay = THREE.MathUtils.randFloat(2.5, 6);
+  return Math.random() < 0.12
+    ? normalDelay + THREE.MathUtils.randFloat(2.5, 5)
+    : normalDelay;
+}
+
+function smoothStep01(value: number) {
+  const clamped = THREE.MathUtils.clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
+}
 const HSIN_HAND_OVERRIDE_BONES = [
   "leftHand",
   "rightHand",
@@ -287,8 +301,8 @@ function createBasicMaterialFallback(source: THREE.Material) {
 
 /**
  * First-pass VRM renderer. Presence signals continue to drive subtle whole-body
- * motion, while expressions, gaze, blinking, springs, and optimization remain
- * intentionally disabled for the next integration phases.
+ * motion. Natural blinking is driven through the VRM expression system, while
+ * gaze and other expressions remain reserved for later integration phases.
  */
 function HsinAvatar({
   signal,
@@ -296,6 +310,8 @@ function HsinAvatar({
   poseTuning,
   inspectPose,
   springsEnabled,
+  autoBlinkEnabled,
+  manualBlinkSequence,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -312,6 +328,8 @@ function HsinAvatar({
   poseTuning: RelaxedPoseTuning;
   inspectPose: boolean;
   springsEnabled: boolean;
+  autoBlinkEnabled: boolean;
+  manualBlinkSequence: number;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -340,6 +358,13 @@ function HsinAvatar({
   const handTargetMarker = useRef<THREE.Mesh>(null);
   const loggedHandView = useRef<HandInspectionView | null>(null);
   const previousSpringsEnabled = useRef(false);
+  const blinkState = useRef({
+    phase: "waiting" as BlinkPhase,
+    elapsed: 0,
+    duration: randomBlinkDelay(),
+    weight: 0,
+    manualSequence: manualBlinkSequence,
+  });
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -387,7 +412,20 @@ function HsinAvatar({
   }, [vrm, vrmAnimation]);
 
   useEffect(() => {
+    const expressionManager = vrm.expressionManager;
+    console.info(
+      `[Hsin blink] ${JSON.stringify({
+        api: "VRMExpressionManager.setValue/getValue/update",
+        blinkAvailable: expressionManager?.getExpression("blink") != null,
+        mappedExpressions:
+          expressionManager?.expressions.map((expression) =>
+            expression.expressionName,
+          ) ?? [],
+      })}`,
+    );
     return () => {
+      expressionManager?.setValue("blink", 0);
+      expressionManager?.update();
       vrmaPlayback?.mixer.stopAllAction();
       vrmaPlayback?.mixer.uncacheRoot(vrm.scene);
     };
@@ -1212,6 +1250,61 @@ function HsinAvatar({
       previousSpringsEnabled.current = springsEnabled;
     }
 
+    const expressionManager = vrm.expressionManager;
+    if (expressionManager?.getExpression("blink")) {
+      const blink = blinkState.current;
+      if (manualBlinkSequence !== blink.manualSequence) {
+        blink.manualSequence = manualBlinkSequence;
+        blink.phase = "closing";
+        blink.elapsed = 0;
+        blink.duration = THREE.MathUtils.randFloat(0.04, 0.065);
+      } else if (blink.phase === "waiting") {
+        if (autoBlinkEnabled) {
+          blink.elapsed += d;
+          if (blink.elapsed >= blink.duration) {
+            blink.phase = "closing";
+            blink.elapsed = 0;
+            blink.duration = THREE.MathUtils.randFloat(0.04, 0.065);
+          }
+        } else {
+          blink.elapsed = 0;
+          blink.duration = randomBlinkDelay();
+        }
+      } else {
+        blink.elapsed += d;
+      }
+
+      if (blink.phase === "closing") {
+        blink.weight = smoothStep01(blink.elapsed / blink.duration);
+        if (blink.elapsed >= blink.duration) {
+          blink.phase = "holding";
+          blink.elapsed = 0;
+          blink.duration = THREE.MathUtils.randFloat(0.015, 0.03);
+          blink.weight = 1;
+        }
+      } else if (blink.phase === "holding") {
+        blink.weight = 1;
+        if (blink.elapsed >= blink.duration) {
+          blink.phase = "opening";
+          blink.elapsed = 0;
+          blink.duration = THREE.MathUtils.randFloat(0.07, 0.11);
+        }
+      } else if (blink.phase === "opening") {
+        blink.weight = 1 - smoothStep01(blink.elapsed / blink.duration);
+        if (blink.elapsed >= blink.duration) {
+          blink.phase = "waiting";
+          blink.elapsed = 0;
+          blink.duration = randomBlinkDelay();
+          blink.weight = 0;
+        }
+      } else {
+        blink.weight = 0;
+      }
+
+      expressionManager.setValue("blink", blink.weight);
+      expressionManager.update();
+    }
+
     if (poseMode === "relaxed") {
       vrm.humanoid.setNormalizedPose(normalizedStandingPose);
 
@@ -1564,6 +1657,8 @@ export function AvatarScene({
   inspectPose = false,
   inspectionView = "front",
   springsEnabled = false,
+  autoBlinkEnabled = true,
+  manualBlinkSequence = 0,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -1582,6 +1677,8 @@ export function AvatarScene({
   inspectPose?: boolean;
   inspectionView?: PoseInspectionView;
   springsEnabled?: boolean;
+  autoBlinkEnabled?: boolean;
+  manualBlinkSequence?: number;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -1622,6 +1719,8 @@ export function AvatarScene({
         poseTuning={poseTuning}
         inspectPose={inspectPose}
         springsEnabled={springsEnabled}
+        autoBlinkEnabled={autoBlinkEnabled}
+        manualBlinkSequence={manualBlinkSequence}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}
