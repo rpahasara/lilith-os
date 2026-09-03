@@ -18,6 +18,7 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
+import type { SpeechPlaybackSnapshot, VisemeCue } from "@/lib/hsin-lip-sync";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -68,6 +69,70 @@ const HSIN_FAKE_SPEECH_SEQUENCE: Array<VisemeInspectName | null> = [
   null,
   "ee",
 ];
+
+const SPEECH_CROSSFADE_MS = 90;
+
+function getCueWeight(cue: VisemeCue | undefined) {
+  if (!cue || cue.viseme === "sil") return null;
+  const viseme = cue.viseme as VisemeInspectName;
+  return {
+    viseme,
+    weight: HSIN_VISEME_MAX_WEIGHTS[viseme] * (cue.weight ?? 1),
+  };
+}
+
+function sampleTimedSpeech(
+  playback: SpeechPlaybackSnapshot,
+  nowMs: number,
+): Record<VisemeInspectName, number> {
+  const weights: Record<VisemeInspectName, number> = {
+    aa: 0,
+    ih: 0,
+    ou: 0,
+    ee: 0,
+    oh: 0,
+  };
+  if (playback.status === "idle" || playback.cues.length === 0) return weights;
+
+  const elapsedMs =
+    playback.status === "paused"
+      ? playback.pausedAtMs
+      : Math.max(0, nowMs - playback.startedAtMs);
+  const nextIndex = playback.cues.findIndex((cue) => cue.startMs > elapsedMs);
+  const currentIndex = nextIndex === -1 ? playback.cues.length - 1 : nextIndex - 1;
+  if (currentIndex < 0) return weights;
+
+  const currentCue = playback.cues[currentIndex];
+  const nextCue = nextIndex === -1 ? undefined : playback.cues[nextIndex];
+  const currentShape = getCueWeight(currentCue);
+  const nextShape = getCueWeight(nextCue);
+  const currentEndMs = currentCue.durationMs == null
+    ? (nextCue?.startMs ?? playback.endMs)
+    : Math.min(currentCue.startMs + currentCue.durationMs, nextCue?.startMs ?? Infinity);
+
+  let currentAmount = 1;
+  let nextAmount = 0;
+  const fadeIn = smoothStep01((elapsedMs - currentCue.startMs) / SPEECH_CROSSFADE_MS);
+  currentAmount *= fadeIn;
+
+  if (nextCue && elapsedMs >= nextCue.startMs - SPEECH_CROSSFADE_MS) {
+    const blend = smoothStep01(
+      (elapsedMs - (nextCue.startMs - SPEECH_CROSSFADE_MS)) /
+        SPEECH_CROSSFADE_MS,
+    );
+    currentAmount *= 1 - blend;
+    nextAmount = blend;
+  } else if (elapsedMs >= currentEndMs - SPEECH_CROSSFADE_MS) {
+    currentAmount *= 1 - smoothStep01(
+      (elapsedMs - (currentEndMs - SPEECH_CROSSFADE_MS)) /
+        SPEECH_CROSSFADE_MS,
+    );
+  }
+
+  if (currentShape) weights[currentShape.viseme] += currentShape.weight * currentAmount;
+  if (nextShape) weights[nextShape.viseme] += nextShape.weight * nextAmount;
+  return weights;
+}
 
 const HSIN_EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
   "happy",
@@ -398,6 +463,7 @@ function HsinAvatar({
   visemeInspectName,
   visemeInspectWeight,
   fakeSpeechEnabled,
+  speechPlayback,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -430,6 +496,7 @@ function HsinAvatar({
   visemeInspectName: VisemeInspectName;
   visemeInspectWeight: number;
   fakeSpeechEnabled: boolean;
+  speechPlayback: SpeechPlaybackSnapshot;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -1595,7 +1662,9 @@ function HsinAvatar({
         }
       });
       const expressionState: FaceExpressionState =
-        forcedExpressionState ??
+        speechPlayback.status !== "idle"
+          ? "speaking"
+          : forcedExpressionState ??
         (signal.activity === "listening" ||
         signal.activity === "thinking" ||
         signal.activity === "speaking"
@@ -1626,6 +1695,8 @@ function HsinAvatar({
     };
     if (visemeInspectEnabled) {
       visemeWeights[visemeInspectName] = visemeInspectWeight;
+    } else if (speechPlayback.status !== "idle") {
+      Object.assign(visemeWeights, sampleTimedSpeech(speechPlayback, performance.now()));
     } else if (fakeSpeechEnabled) {
       const segmentDuration = 0.14;
       const sequencePosition = renderState.clock.elapsedTime / segmentDuration;
@@ -2038,6 +2109,7 @@ export function AvatarScene({
   visemeInspectName = "aa",
   visemeInspectWeight = 0.5,
   fakeSpeechEnabled = false,
+  speechPlayback,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -2072,6 +2144,7 @@ export function AvatarScene({
   visemeInspectName?: VisemeInspectName;
   visemeInspectWeight?: number;
   fakeSpeechEnabled?: boolean;
+  speechPlayback: SpeechPlaybackSnapshot;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -2128,6 +2201,7 @@ export function AvatarScene({
         visemeInspectName={visemeInspectName}
         visemeInspectWeight={visemeInspectWeight}
         fakeSpeechEnabled={fakeSpeechEnabled}
+        speechPlayback={speechPlayback}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}

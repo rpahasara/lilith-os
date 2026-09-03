@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
+import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
 import type {
   FaceExpressionState,
   ExpressionInspectName,
@@ -135,6 +142,22 @@ const EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
 
 const VISEME_INSPECT_NAMES: VisemeInspectName[] = ["aa", "ih", "ou", "ee", "oh"];
 
+const TIMED_SPEECH_TEST_CUES: VisemeCue[] = [
+  { viseme: "aa", startMs: 0, durationMs: 260 },
+  { viseme: "ih", startMs: 320 },
+  { viseme: "ou", startMs: 680 },
+  { viseme: "sil", startMs: 1020, durationMs: 220 },
+  { viseme: "ee", startMs: 1300 },
+  { viseme: "oh", startMs: 1660 },
+  { viseme: "aa", startMs: 2020, weight: 0.85 },
+  { viseme: "sil", startMs: 2380, durationMs: 180 },
+  { viseme: "ou", startMs: 2640 },
+  { viseme: "ih", startMs: 3000 },
+  { viseme: "ee", startMs: 3340 },
+  { viseme: "oh", startMs: 3680 },
+  { viseme: "sil", startMs: 4020, durationMs: 260 },
+];
+
 // Load the WebGL scene only on the client; soft glow while it boots.
 const AvatarScene = dynamic(
   () => import("./avatar-scene").then((m) => m.AvatarScene),
@@ -183,6 +206,11 @@ export function AvatarPresence({
     useState<VisemeInspectName>("aa");
   const [visemeInspectWeight, setVisemeInspectWeight] = useState(0.5);
   const [fakeSpeechEnabled, setFakeSpeechEnabled] = useState(false);
+  const speechPlayback = useSyncExternalStore(
+    hsinLipSync.subscribe,
+    hsinLipSync.getSnapshot,
+    hsinLipSync.getServerSnapshot,
+  );
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -263,6 +291,7 @@ export function AvatarPresence({
         visemeInspectName={visemeInspectName}
         visemeInspectWeight={visemeInspectWeight}
         fakeSpeechEnabled={fakeSpeechEnabled}
+        speechPlayback={speechPlayback}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -548,6 +577,28 @@ export function AvatarPresence({
         >
           Fake Speech {fakeSpeechEnabled ? "On" : "Off"}
         </button>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setFakeSpeechEnabled(false);
+              setVisemeInspectEnabled(false);
+              setExpressionInspectEnabled(false);
+              setForcedExpressionState(null);
+              hsinLipSync.startSpeech(TIMED_SPEECH_TEST_CUES);
+            }}
+            className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${speechPlayback.status !== "idle" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Play Timed Speech
+          </button>
+          <button
+            type="button"
+            onClick={() => hsinLipSync.stopSpeech()}
+            className="rounded bg-black/40 px-2 py-1.5 text-[10px] uppercase tracking-wider text-white/55"
+          >
+            Stop Speech
+          </button>
+        </div>
       </div>
       <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
         <div className="grid grid-cols-2 gap-1">
