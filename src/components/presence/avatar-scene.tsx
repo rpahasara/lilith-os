@@ -19,6 +19,13 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
 import type { SpeechPlaybackSnapshot, VisemeCue } from "@/lib/hsin-lip-sync";
+import {
+  HsinAmbientIdle,
+  type AmbientBone,
+  type AmbientPhase,
+  type AmbientVariationName,
+  type AmbientIdleState,
+} from "@/lib/hsin-ambient-idle";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -531,6 +538,10 @@ function HsinAvatar({
   centerEyesSequence,
   headAttentionEnabled,
   headAttentionStrength,
+  ambientIdleEnabled,
+  ambientTriggerSequence,
+  ambientTriggerVariation,
+  onAmbientStateChange,
   centerHeadSequence,
   forcedExpressionState,
   expressionInspectEnabled,
@@ -567,6 +578,10 @@ function HsinAvatar({
   centerEyesSequence: number;
   headAttentionEnabled: boolean;
   headAttentionStrength: number;
+  ambientIdleEnabled: boolean;
+  ambientTriggerSequence: number;
+  ambientTriggerVariation: AmbientVariationName | null;
+  onAmbientStateChange?: (state: AmbientIdleState) => void;
   centerHeadSequence: number;
   forcedExpressionState: FaceExpressionState | null;
   expressionInspectEnabled: boolean;
@@ -885,6 +900,12 @@ function HsinAvatar({
   }, [neutralPose]);
   const naturalIdleQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const naturalIdleEuler = useMemo(() => new THREE.Euler(0, 0, 0, "XYZ"), []);
+  // Ambient Idle Phase 1 POC: deterministic scheduler layered additively on
+  // Natural Idle V2 (dev-gated; default OFF). Pure, torso/neck/head only.
+  const ambientIdle = useMemo(() => new HsinAmbientIdle(), []);
+  const lastAmbientPhase = useRef<AmbientPhase>("idle");
+  const lastAmbientVariation = useRef<AmbientVariationName | null>(null);
+  const lastAmbientTrigger = useRef(ambientTriggerSequence);
 
   const applyHsinRelaxedHands = () => {
     HSIN_HAND_OVERRIDE_BONES.forEach((boneName) => {
@@ -1612,6 +1633,60 @@ function HsinAvatar({
         attentionRoll,
       );
 
+      // Ambient Idle Phase 1 (dev-gated, default OFF): occasional subtle pose
+      // variations, layered additively on the micro-motion above via the same
+      // seam. Suppressed during expression/viseme inspect so diagnostics stay
+      // clean. Touches only torso/neck/head — never arms/hands/springs.
+      const ambientSuppressed =
+        expressionInspectEnabled || visemeInspectEnabled;
+      if (ambientIdleEnabled && !ambientSuppressed) {
+        if (ambientTriggerSequence !== lastAmbientTrigger.current) {
+          lastAmbientTrigger.current = ambientTriggerSequence;
+          // null variation = alternate (scheduler picks, avoiding repeat);
+          // a named variation = dev "trigger this one" button.
+          ambientIdle.trigger(ambientTriggerVariation ?? undefined);
+        }
+        const ambientOffsets = ambientIdle.update(d);
+        (Object.keys(ambientOffsets) as AmbientBone[]).forEach((bone) => {
+          const offset = ambientOffsets[bone];
+          if (offset) {
+            addMicroMotion(
+              bone as VRMHumanBoneName,
+              offset.x,
+              offset.y,
+              offset.z,
+            );
+          }
+        });
+        const ambientState = ambientIdle.getState();
+        if (
+          ambientState.phase !== lastAmbientPhase.current ||
+          ambientState.variation !== lastAmbientVariation.current
+        ) {
+          lastAmbientPhase.current = ambientState.phase;
+          lastAmbientVariation.current = ambientState.variation;
+          onAmbientStateChange?.(ambientState);
+          console.info(
+            `[Hsin ambient idle] ${JSON.stringify({
+              phase: ambientState.phase,
+              variation: ambientState.variation,
+              timeRemaining: Number(ambientState.timeRemaining.toFixed(2)),
+            })}`,
+          );
+        }
+      } else {
+        lastAmbientTrigger.current = ambientTriggerSequence;
+        if (
+          lastAmbientPhase.current !== "idle" ||
+          lastAmbientVariation.current !== null
+        ) {
+          ambientIdle.reset();
+          lastAmbientPhase.current = "idle";
+          lastAmbientVariation.current = null;
+          onAmbientStateChange?.(ambientIdle.getState());
+        }
+      }
+
       vrm.humanoid.update();
       vrm.nodeConstraintManager?.update();
 
@@ -2247,6 +2322,10 @@ export function AvatarScene({
   centerEyesSequence = 0,
   headAttentionEnabled = true,
   headAttentionStrength = 1,
+  ambientIdleEnabled = false,
+  ambientTriggerSequence = 0,
+  ambientTriggerVariation = null,
+  onAmbientStateChange,
   centerHeadSequence = 0,
   forcedExpressionState = null,
   expressionInspectEnabled = false,
@@ -2285,6 +2364,10 @@ export function AvatarScene({
   centerEyesSequence?: number;
   headAttentionEnabled?: boolean;
   headAttentionStrength?: number;
+  ambientIdleEnabled?: boolean;
+  ambientTriggerSequence?: number;
+  ambientTriggerVariation?: AmbientVariationName | null;
+  onAmbientStateChange?: (state: AmbientIdleState) => void;
   centerHeadSequence?: number;
   forcedExpressionState?: FaceExpressionState | null;
   expressionInspectEnabled?: boolean;
@@ -2354,6 +2437,10 @@ export function AvatarScene({
         centerEyesSequence={centerEyesSequence}
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
+        ambientIdleEnabled={ambientIdleEnabled}
+        ambientTriggerSequence={ambientTriggerSequence}
+        ambientTriggerVariation={ambientTriggerVariation}
+        onAmbientStateChange={onAmbientStateChange}
         centerHeadSequence={centerHeadSequence}
         forcedExpressionState={forcedExpressionState}
         expressionInspectEnabled={expressionInspectEnabled}

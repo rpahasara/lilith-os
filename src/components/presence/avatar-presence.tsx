@@ -10,6 +10,10 @@ import {
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
+import type {
+  AmbientVariationName,
+  AmbientIdleState,
+} from "@/lib/hsin-ambient-idle";
 import {
   CURRENT_AVATAR_FRAMING,
   PROPOSED_AVATAR_FRAMING,
@@ -201,6 +205,24 @@ export function AvatarPresence({
   const [centerEyesSequence, setCenterEyesSequence] = useState(0);
   const [headAttentionEnabled, setHeadAttentionEnabled] = useState(true);
   const [headAttentionStrength, setHeadAttentionStrength] = useState(1);
+  // Ambient Idle Phase 1 POC — dev-gated, default OFF.
+  const [ambientIdleEnabled, setAmbientIdleEnabled] = useState(false);
+  const [ambientTriggerSequence, setAmbientTriggerSequence] = useState(0);
+  const [ambientTriggerVariation, setAmbientTriggerVariation] =
+    useState<AmbientVariationName | null>(null);
+  const [ambientState, setAmbientState] = useState<AmbientIdleState>({
+    phase: "idle",
+    variation: null,
+    weight: 0,
+    timeRemaining: 0,
+  });
+  const triggerAmbient = useCallback(
+    (variation: AmbientVariationName | null) => {
+      setAmbientTriggerVariation(variation);
+      setAmbientTriggerSequence((current) => current + 1);
+    },
+    [],
+  );
   const [centerHeadSequence, setCenterHeadSequence] = useState(0);
   const [forcedExpressionState, setForcedExpressionState] =
     useState<FaceExpressionState | null>(null);
@@ -308,6 +330,10 @@ export function AvatarPresence({
         centerEyesSequence={centerEyesSequence}
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
+        ambientIdleEnabled={ambientIdleEnabled}
+        ambientTriggerSequence={ambientTriggerSequence}
+        ambientTriggerVariation={ambientTriggerVariation}
+        onAmbientStateChange={setAmbientState}
         centerHeadSequence={centerHeadSequence}
         forcedExpressionState={forcedExpressionState}
         expressionInspectEnabled={expressionInspectEnabled}
@@ -817,6 +843,53 @@ export function AvatarPresence({
             className="mt-1 block w-full"
           />
         </label>
+        <div className="space-y-1 rounded-lg border border-violet-300/20 bg-violet-950/20 p-2">
+          <button
+            type="button"
+            onClick={() => setAmbientIdleEnabled((current) => !current)}
+            className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${ambientIdleEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Ambient Idle (POC) {ambientIdleEnabled ? "On" : "Off"}
+          </button>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              disabled={!ambientIdleEnabled}
+              onClick={() => triggerAmbient("weightShiftLeft")}
+              className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
+            >
+              Trigger Weight Shift
+            </button>
+            <button
+              type="button"
+              disabled={!ambientIdleEnabled}
+              onClick={() => triggerAmbient("gentleHeadTurnRight")}
+              className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
+            >
+              Trigger Head Turn
+            </button>
+          </div>
+          <button
+            type="button"
+            disabled={!ambientIdleEnabled}
+            onClick={() => triggerAmbient(null)}
+            className="w-full rounded bg-black/40 px-2 py-1.5 text-[10px] uppercase tracking-wider text-white/55 disabled:opacity-30"
+          >
+            Trigger Ambient (Alternate)
+          </button>
+          <div className="grid grid-cols-2 gap-1 pt-0.5 text-[10px] uppercase tracking-wider text-white/60">
+            <div>
+              Current
+              <div className="text-cyan-100 normal-case">
+                {ambientState.variation ?? "idle"}
+              </div>
+            </div>
+            <div>
+              Phase
+              <div className="text-cyan-100 capitalize">{ambientState.phase}</div>
+            </div>
+          </div>
+        </div>
       </div>
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
