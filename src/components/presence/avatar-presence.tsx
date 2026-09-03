@@ -1020,7 +1020,15 @@ export function AvatarPresence({
               onClick={() => triggerAmbient("weightShiftLeft")}
               className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
             >
-              Trigger Weight Shift
+              Trigger Weight Shift Left
+            </button>
+            <button
+              type="button"
+              disabled={!ambientIdleEnabled}
+              onClick={() => triggerAmbient("weightShiftRight")}
+              className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
+            >
+              Trigger Weight Shift Right
             </button>
             <button
               type="button"
@@ -1028,9 +1036,25 @@ export function AvatarPresence({
               onClick={() => triggerAmbient("gentleHeadTurnRight")}
               className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
             >
-              Trigger Head Turn
+              Trigger Head Turn Right
+            </button>
+            <button
+              type="button"
+              disabled={!ambientIdleEnabled}
+              onClick={() => triggerAmbient("curiousGlanceLeft")}
+              className="rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
+            >
+              Trigger Glance Left
             </button>
           </div>
+          <button
+            type="button"
+            disabled={!ambientIdleEnabled}
+            onClick={() => triggerAmbient("softPostureReset")}
+            className="w-full rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100 disabled:opacity-30"
+          >
+            Trigger Posture Reset
+          </button>
           <button
             type="button"
             disabled={!ambientIdleEnabled}

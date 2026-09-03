@@ -14,8 +14,11 @@
  * durations are randomized but bounded. The RNG is seeded so a session is
  * reproducible for debugging.
  *
- * Scope (Phase 1): torso/neck/head only, two variations, no arms/hands, no
- * springs, no 360 turn, no speaking gestures, no priority arbitration.
+ * Scope: torso/neck/head only, no arms/hands, no springs, no 360 turn, no
+ * speaking gestures, no priority arbitration. Phase 1 shipped two variations
+ * (weightShiftLeft, gentleHeadTurnRight); Phase 2 adds three more
+ * (weightShiftRight, softPostureReset, curiousGlanceLeft) through the same
+ * scheduler and selection logic — those two remain byte-for-byte unchanged.
  */
 
 export type AmbientBone =
@@ -32,7 +35,13 @@ export type AmbientOffsets = Partial<Record<AmbientBone, AmbientBoneOffset>>;
 
 export type AmbientPhase = "idle" | "enter" | "hold" | "exit";
 
-export type AmbientVariationName = "weightShiftLeft" | "gentleHeadTurnRight";
+export type AmbientVariationName =
+  | "weightShiftLeft"
+  | "gentleHeadTurnRight"
+  // Phase 2 additions (torso/neck/head only, still no arms/hands):
+  | "weightShiftRight"
+  | "softPostureReset"
+  | "curiousGlanceLeft";
 
 export interface AmbientIdleConfig {
   /** Seconds of neutral idle before a variation may begin. */
@@ -94,6 +103,62 @@ const VARIATIONS: Record<AmbientVariationName, AmbientOffsets> = {
     neck: { x: 0, y: -3.8, z: 0 },
     head: { x: 0.5, y: -6.8, z: -0.9 },
   },
+  // --- Phase 2 -----------------------------------------------------------
+  // A. Weight transfer onto the OTHER hip — the complement of weightShiftLeft.
+  // Same contrapposto structure (pelvis rolls/yaws one way; spine/chest
+  // counter so the head stays near-upright), NOT a blind negation: magnitudes
+  // are authored a touch smaller/asymmetric (3.0 vs 3.2, 1.7 vs 1.8, ...) so
+  // the two shifts read as related-but-distinct natural settles.
+  weightShiftRight: {
+    hips: { x: 0, y: -1.0, z: -3.0 },
+    spine: { x: 0, y: 0.5, z: 1.7 },
+    chest: { x: 0, y: 0.4, z: 0.8 },
+    upperChest: { x: 0, y: 0, z: 0.3 },
+    neck: { x: 0, y: 0, z: -0.2 },
+    head: { x: 0, y: 0, z: -0.25 },
+  },
+  // B. A quiet posture straighten / settle. Visibility-tuned: a clearer
+  // chest/upperChest opening with a small spine base and a subtle head lift,
+  // plus a tiny counter-roll (upperChest +0.2 / head -0.2) so it does NOT read
+  // as a uniform forward/back pitch (i.e. not "breathing"). Still small: no
+  // stretch, no dramatic chest push, no upward head snap. Slightly slower
+  // enter/exit + longer hold (see VARIATION_TIMING) so the settle reads clearly.
+  softPostureReset: {
+    spine: { x: -0.6, y: 0, z: 0 },
+    chest: { x: -1.1, y: 0, z: 0 },
+    upperChest: { x: -0.9, y: 0, z: 0.2 },
+    neck: { x: -0.3, y: 0, z: 0 },
+    head: { x: -0.8, y: 0, z: -0.2 },
+  },
+  // C. A brief glance to the other side — the counterpart to gentleHeadTurnRight.
+  // Head leads, neck follows, upperChest/chest follow only slightly (same
+  // head > neck > upperChest > chest hierarchy). Authored a touch smaller than
+  // the right turn (not a blind mirror) and given a shorter hold below so it
+  // reads as "briefly noticing something", not a settled turn.
+  curiousGlanceLeft: {
+    chest: { x: 0, y: 0.7, z: 0 },
+    upperChest: { x: 0, y: 1.2, z: 0 },
+    neck: { x: 0, y: 3.5, z: 0 },
+    head: { x: 0.4, y: 6.2, z: 0.8 },
+  },
+};
+
+/**
+ * Optional per-variation timing override (seconds). Any field omitted falls back
+ * to the shared config value, so the scheduler stays a single state machine —
+ * only the specified phase durations differ. Cooldown is always shared.
+ */
+const VARIATION_TIMING: Partial<
+  Record<
+    AmbientVariationName,
+    { enter?: number; exit?: number; holdMin?: number; holdMax?: number }
+  >
+> = {
+  // A posture straighten/settle: slightly slower enter/exit + longer hold so it
+  // reads clearly as an intentional adjustment, not breathing.
+  softPostureReset: { enter: 1.4, exit: 1.5, holdMin: 4, holdMax: 6 },
+  // A glance is a brief notice, not a settled pose.
+  curiousGlanceLeft: { holdMin: 2.5, holdMax: 4 },
 };
 
 const VARIATION_NAMES = Object.keys(VARIATIONS) as AmbientVariationName[];
@@ -160,7 +225,7 @@ export class HsinAmbientIdle {
     this.lastVariation = this.variation;
     this.phase = "enter";
     this.timer = 0;
-    this.phaseDuration = this.config.enterDuration;
+    this.phaseDuration = this.enterDuration();
   }
 
   private randRange(min: number, max: number): number {
@@ -169,6 +234,26 @@ export class HsinAmbientIdle {
 
   private randomCooldown(): number {
     return this.randRange(this.config.cooldownMin, this.config.cooldownMax);
+  }
+
+  /** Enter ramp for the active variation (per-variation override, else default). */
+  private enterDuration(): number {
+    const t = this.variation ? VARIATION_TIMING[this.variation] : undefined;
+    return t?.enter ?? this.config.enterDuration;
+  }
+
+  /** Exit ramp for the active variation (per-variation override, else default). */
+  private exitDuration(): number {
+    const t = this.variation ? VARIATION_TIMING[this.variation] : undefined;
+    return t?.exit ?? this.config.exitDuration;
+  }
+
+  /** Hold window for the active variation (per-variation override, else default). */
+  private randomHold(): number {
+    const t = this.variation ? VARIATION_TIMING[this.variation] : undefined;
+    const min = t?.holdMin ?? this.config.holdMin;
+    const max = t?.holdMax ?? this.config.holdMax;
+    return this.randRange(min, max);
   }
 
   private pickVariation(): AmbientVariationName {
@@ -197,7 +282,7 @@ export class HsinAmbientIdle {
           this.lastVariation = this.variation;
           this.phase = "enter";
           this.timer = 0;
-          this.phaseDuration = this.config.enterDuration;
+          this.phaseDuration = this.enterDuration();
         }
         break;
       }
@@ -207,10 +292,7 @@ export class HsinAmbientIdle {
           this.weight = 1;
           this.phase = "hold";
           this.timer = 0;
-          this.phaseDuration = this.randRange(
-            this.config.holdMin,
-            this.config.holdMax,
-          );
+          this.phaseDuration = this.randomHold();
         }
         break;
       }
@@ -219,7 +301,7 @@ export class HsinAmbientIdle {
         if (this.timer >= this.phaseDuration) {
           this.phase = "exit";
           this.timer = 0;
-          this.phaseDuration = this.config.exitDuration;
+          this.phaseDuration = this.exitDuration();
         }
         break;
       }
