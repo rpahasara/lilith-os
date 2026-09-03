@@ -6,6 +6,7 @@ import type { PresenceSignal } from "@/lib/presence";
 import type {
   FaceExpressionState,
   ExpressionInspectName,
+  VisemeInspectName,
   HandInspectionView,
   ArmIkTargets,
   HandOrientationTargets,
@@ -132,6 +133,8 @@ const EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
   "neutral",
 ];
 
+const VISEME_INSPECT_NAMES: VisemeInspectName[] = ["aa", "ih", "ou", "ee", "oh"];
+
 // Load the WebGL scene only on the client; soft glow while it boots.
 const AvatarScene = dynamic(
   () => import("./avatar-scene").then((m) => m.AvatarScene),
@@ -175,6 +178,11 @@ export function AvatarPresence({
   const [expressionInspectName, setExpressionInspectName] =
     useState<ExpressionInspectName>("happy");
   const [expressionInspectWeight, setExpressionInspectWeight] = useState(0.5);
+  const [visemeInspectEnabled, setVisemeInspectEnabled] = useState(false);
+  const [visemeInspectName, setVisemeInspectName] =
+    useState<VisemeInspectName>("aa");
+  const [visemeInspectWeight, setVisemeInspectWeight] = useState(0.5);
+  const [fakeSpeechEnabled, setFakeSpeechEnabled] = useState(false);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -234,7 +242,11 @@ export function AvatarPresence({
         poseTuning={poseTuning}
         inspectPose={inspectPose}
         inspectionView={inspectionView}
-        springsEnabled={expressionInspectEnabled ? false : springsEnabled}
+        springsEnabled={
+          expressionInspectEnabled || visemeInspectEnabled
+            ? false
+            : springsEnabled
+        }
         autoBlinkEnabled={autoBlinkEnabled}
         manualBlinkSequence={manualBlinkSequence}
         lookAtEnabled={lookAtEnabled}
@@ -247,6 +259,10 @@ export function AvatarPresence({
         expressionInspectEnabled={expressionInspectEnabled}
         expressionInspectName={expressionInspectName}
         expressionInspectWeight={expressionInspectWeight}
+        visemeInspectEnabled={visemeInspectEnabled}
+        visemeInspectName={visemeInspectName}
+        visemeInspectWeight={visemeInspectWeight}
+        fakeSpeechEnabled={fakeSpeechEnabled}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -393,6 +409,8 @@ export function AvatarPresence({
                 setHandInspectionView(null);
                 setInspectPose(false);
                 setSpringsEnabled(false);
+                setVisemeInspectEnabled(false);
+                setFakeSpeechEnabled(false);
               }
               return !current;
             });
@@ -443,6 +461,93 @@ export function AvatarPresence({
             </label>
           </>
         )}
+      </div>
+      <div className="space-y-2 rounded-lg border border-rose-300/20 bg-rose-950/20 p-2">
+        <button
+          type="button"
+          onClick={() => {
+            setVisemeInspectEnabled((current) => {
+              if (!current) {
+                setExpressionInspectEnabled(false);
+                setFakeSpeechEnabled(false);
+                setSpringsEnabled(false);
+                setHandInspectionView(null);
+                setInspectPose(false);
+              }
+              return !current;
+            });
+          }}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${visemeInspectEnabled ? "bg-rose-400/25 text-rose-100" : "bg-black/40 text-white/55"}`}
+        >
+          Viseme Inspect {visemeInspectEnabled ? "On" : "Off"}
+        </button>
+        {visemeInspectEnabled && (
+          <>
+            <div className="grid grid-cols-3 gap-1">
+              {VISEME_INSPECT_NAMES.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => {
+                    setVisemeInspectName(name);
+                    if (visemeInspectWeight === 0) setVisemeInspectWeight(0.5);
+                  }}
+                  className={`rounded px-2 py-1 text-[10px] uppercase ${visemeInspectName === name && visemeInspectWeight > 0 ? "bg-rose-400/25 text-rose-100" : "bg-black/40 text-white/55"}`}
+                >
+                  {name}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setVisemeInspectWeight(0)}
+                className="rounded bg-black/40 px-2 py-1 text-[10px] uppercase text-white/55"
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[0.25, 0.5, 0.75, 1].map((weight) => (
+                <button
+                  key={weight}
+                  type="button"
+                  onClick={() => setVisemeInspectWeight(weight)}
+                  className={`rounded px-1 py-1 text-[10px] ${visemeInspectWeight === weight ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+                >
+                  {weight.toFixed(2)}
+                </button>
+              ))}
+            </div>
+            <label className="block text-[10px] uppercase tracking-wider text-white/60">
+              {visemeInspectName} {visemeInspectWeight.toFixed(2)}
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={visemeInspectWeight}
+                onChange={(event) =>
+                  setVisemeInspectWeight(Number(event.target.value))
+                }
+                className="mt-1 block w-full"
+              />
+            </label>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setFakeSpeechEnabled((current) => {
+              const next = !current;
+              setVisemeInspectEnabled(false);
+              setExpressionInspectEnabled(false);
+              setForcedExpressionState(next ? "speaking" : null);
+              return next;
+            });
+          }}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${fakeSpeechEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+        >
+          Fake Speech {fakeSpeechEnabled ? "On" : "Off"}
+        </button>
       </div>
       <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
         <div className="grid grid-cols-2 gap-1">

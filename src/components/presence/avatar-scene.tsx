@@ -42,6 +42,33 @@ export type ExpressionInspectName =
   | "openSmall"
   | "neutral";
 
+export type VisemeInspectName = "aa" | "ih" | "ou" | "ee" | "oh";
+
+const HSIN_VISEMES: VisemeInspectName[] = ["aa", "ih", "ou", "ee", "oh"];
+
+const HSIN_VISEME_MAX_WEIGHTS: Record<VisemeInspectName, number> = {
+  aa: 0.65,
+  ih: 0.45,
+  ou: 0.55,
+  ee: 0.45,
+  oh: 0.55,
+};
+
+const HSIN_FAKE_SPEECH_SEQUENCE: Array<VisemeInspectName | null> = [
+  "aa",
+  "ih",
+  null,
+  "ou",
+  "ee",
+  "oh",
+  null,
+  "ih",
+  "aa",
+  "ou",
+  null,
+  "ee",
+];
+
 const HSIN_EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
   "happy",
   "puzzled",
@@ -367,6 +394,10 @@ function HsinAvatar({
   expressionInspectEnabled,
   expressionInspectName,
   expressionInspectWeight,
+  visemeInspectEnabled,
+  visemeInspectName,
+  visemeInspectWeight,
+  fakeSpeechEnabled,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -395,6 +426,10 @@ function HsinAvatar({
   expressionInspectEnabled: boolean;
   expressionInspectName: ExpressionInspectName;
   expressionInspectWeight: number;
+  visemeInspectEnabled: boolean;
+  visemeInspectName: VisemeInspectName;
+  visemeInspectWeight: number;
+  fakeSpeechEnabled: boolean;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -439,7 +474,7 @@ function HsinAvatar({
   const pointerMovementVersion = useRef(0);
   const centerHeadAtPointerVersion = useRef(0);
   const stateExpressionWeights = useRef({ happy: 0, puzzled: 0 });
-  const previousExpressionInspectEnabled = useRef(false);
+  const previousFaceInspectEnabled = useRef(false);
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -498,10 +533,30 @@ function HsinAvatar({
           ) ?? [],
       })}`,
     );
+    console.info(
+      `[Hsin visemes] ${JSON.stringify(
+        HSIN_VISEMES.map((name) => {
+          const expression = expressionManager?.getExpression(name);
+          const bindTypes =
+            expression?.binds.map((bind) => bind.constructor.name) ?? [];
+          return {
+            name,
+            available: expression != null,
+            isBinary: expression?.isBinary ?? null,
+            bindCount: bindTypes.length,
+            bindTypes,
+            morphOnly:
+              bindTypes.length > 0 &&
+              bindTypes.every((type) => type === "VRMExpressionMorphTargetBind"),
+          };
+        }),
+      )}`,
+    );
     return () => {
       expressionManager?.setValue("blink", 0);
       expressionManager?.setValue("happy", 0);
       expressionManager?.setValue("puzzled", 0);
+      HSIN_VISEMES.forEach((name) => expressionManager?.setValue(name, 0));
       expressionManager?.update();
       vrmaPlayback?.mixer.stopAllAction();
       vrmaPlayback?.mixer.uncacheRoot(vrm.scene);
@@ -1136,7 +1191,7 @@ function HsinAvatar({
     };
   }, [vrm]);
 
-  useFrame((_, delta) => {
+  useFrame((renderState, delta) => {
     if (!rig.current) return;
 
     const d = Math.min(delta, 0.05);
@@ -1343,6 +1398,7 @@ function HsinAvatar({
       }
       const headTargetIsCentered =
         expressionInspectEnabled ||
+        visemeInspectEnabled ||
         !headAttentionEnabled ||
         centerHeadAtPointerVersion.current === pointerMovementVersion.current;
       const headTarget = headTargetIsCentered
@@ -1561,6 +1617,39 @@ function HsinAvatar({
       expressionManager?.setValue("happy", stateWeights.happy);
       expressionManager?.setValue("puzzled", stateWeights.puzzled);
     }
+    const visemeWeights: Record<VisemeInspectName, number> = {
+      aa: 0,
+      ih: 0,
+      ou: 0,
+      ee: 0,
+      oh: 0,
+    };
+    if (visemeInspectEnabled) {
+      visemeWeights[visemeInspectName] = visemeInspectWeight;
+    } else if (fakeSpeechEnabled) {
+      const segmentDuration = 0.14;
+      const sequencePosition = renderState.clock.elapsedTime / segmentDuration;
+      const sequenceIndex = Math.floor(sequencePosition);
+      const outgoing =
+        HSIN_FAKE_SPEECH_SEQUENCE[
+          sequenceIndex % HSIN_FAKE_SPEECH_SEQUENCE.length
+        ];
+      const incoming =
+        HSIN_FAKE_SPEECH_SEQUENCE[
+          (sequenceIndex + 1) % HSIN_FAKE_SPEECH_SEQUENCE.length
+        ];
+      const blend = smoothStep01(sequencePosition - sequenceIndex);
+      if (outgoing) {
+        visemeWeights[outgoing] +=
+          HSIN_VISEME_MAX_WEIGHTS[outgoing] * (1 - blend);
+      }
+      if (incoming) {
+        visemeWeights[incoming] += HSIN_VISEME_MAX_WEIGHTS[incoming] * blend;
+      }
+    }
+    HSIN_VISEMES.forEach((name) =>
+      expressionManager?.setValue(name, visemeWeights[name]),
+    );
     expressionManager?.update();
 
     if (poseMode === "relaxed") {
@@ -1696,7 +1785,8 @@ function HsinAvatar({
     }
     }
 
-    if (expressionInspectEnabled) {
+    const faceInspectEnabled = expressionInspectEnabled || visemeInspectEnabled;
+    if (faceInspectEnabled) {
       rig.current.updateMatrixWorld(true);
       const rawHead = vrm.humanoid.getRawBoneNode("head");
       if (rawHead) {
@@ -1708,7 +1798,7 @@ function HsinAvatar({
         camera.lookAt(faceTarget);
         camera.updateProjectionMatrix();
       }
-    } else if (previousExpressionInspectEnabled.current) {
+    } else if (previousFaceInspectEnabled.current) {
       camera.position.set(0, 0, 4.25);
       camera.lookAt(new THREE.Vector3());
       camera.updateProjectionMatrix();
@@ -1757,7 +1847,7 @@ function HsinAvatar({
     } else {
       loggedHandView.current = null;
     }
-    previousExpressionInspectEnabled.current = expressionInspectEnabled;
+    previousFaceInspectEnabled.current = faceInspectEnabled;
 
     if (inspectPose && armOverlay.current) {
       vrm.scene.updateMatrixWorld(true);
@@ -1944,6 +2034,10 @@ export function AvatarScene({
   expressionInspectEnabled = false,
   expressionInspectName = "happy",
   expressionInspectWeight = 0.5,
+  visemeInspectEnabled = false,
+  visemeInspectName = "aa",
+  visemeInspectWeight = 0.5,
+  fakeSpeechEnabled = false,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -1974,6 +2068,10 @@ export function AvatarScene({
   expressionInspectEnabled?: boolean;
   expressionInspectName?: ExpressionInspectName;
   expressionInspectWeight?: number;
+  visemeInspectEnabled?: boolean;
+  visemeInspectName?: VisemeInspectName;
+  visemeInspectWeight?: number;
+  fakeSpeechEnabled?: boolean;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -2026,6 +2124,10 @@ export function AvatarScene({
         expressionInspectEnabled={expressionInspectEnabled}
         expressionInspectName={expressionInspectName}
         expressionInspectWeight={expressionInspectWeight}
+        visemeInspectEnabled={visemeInspectEnabled}
+        visemeInspectName={visemeInspectName}
+        visemeInspectWeight={visemeInspectWeight}
+        fakeSpeechEnabled={fakeSpeechEnabled}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}
