@@ -20,6 +20,23 @@ import {
   PROPOSED_FORWARD_GAZE,
   FRONT_FACING_CANDIDATE,
   STRONG_FRONT_FACING_CANDIDATE,
+  HSIN_ARM_BONES,
+  HSIN_ARM_REFERENCE_V1_DELTAS,
+  HSIN_ARM_REFERENCE_V2_DELTAS,
+  HSIN_ARM_REFERENCE_V3_DELTAS,
+  HSIN_ARM_BASELINE_DELTAS,
+  HSIN_ARM_LEFT_V1_DELTAS,
+  HSIN_ARM_LEFT_V2_DELTAS,
+  HSIN_ARM_FINAL_CANDIDATE_DELTAS,
+  HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS,
+  HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V2,
+  HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V3,
+  HSIN_RIGHT_HAND_ORIENT_V3,
+  HSIN_RIGHT_HAND_ORIENT_V4,
+  HSIN_CANONICAL_NEUTRAL,
+  type ArmPoseMode,
+  type ArmCalibrationOffsets,
+  type ArmGeometryReport,
   type AvatarPresentationFraming,
   type ForwardGazeCalibration,
   type FrontFacingCalibration,
@@ -223,6 +240,93 @@ export function AvatarPresence({
     },
     [],
   );
+  // Arm / shoulder neutral-pose polish POC (dev-only A/B). Default CURRENT so
+  // production arms are unchanged. Calibration deltas start at zero, so the
+  // reference candidate is identical to current until tuned.
+  const [armPoseMode, setArmPoseMode] = useState<ArmPoseMode>("current");
+  // Deep-copies a preset into calibration state so slider edits never mutate the
+  // exported constant.
+  const cloneArmPreset = useCallback(
+    (preset: ArmCalibrationOffsets): ArmCalibrationOffsets =>
+      Object.fromEntries(
+        HSIN_ARM_BONES.map((bone) => [
+          bone,
+          [...(preset[bone] ?? [0, 0, 0])],
+        ]),
+      ) as ArmCalibrationOffsets,
+    [],
+  );
+  // Seeded with Reference Candidate V2 (the current review target). V1/V2 preset
+  // buttons switch between them; "Reset Deltas" returns to zero (= Current).
+  const [armCalibration, setArmCalibration] = useState<ArmCalibrationOffsets>(
+    () =>
+      Object.fromEntries(
+        HSIN_ARM_BONES.map((bone) => [
+          bone,
+          [...(HSIN_ARM_REFERENCE_V2_DELTAS[bone] ?? [0, 0, 0])],
+        ]),
+      ) as ArmCalibrationOffsets,
+  );
+  const [armCandidateQuats, setArmCandidateQuats] = useState<
+    Record<string, [number, number, number, number]>
+  >({});
+  const [armValuesCopied, setArmValuesCopied] = useState(false);
+  // Arm geometry diagnostic (dev-only): skeleton markers, sleeve isolation, and
+  // a live world-space geometry readout of the active candidate.
+  const [showArmSkeleton, setShowArmSkeleton] = useState(false);
+  const [armAnatomyView, setArmAnatomyView] = useState(false);
+  const [armGeometry, setArmGeometry] = useState<ArmGeometryReport | null>(null);
+  const [rightFingerPreset, setRightFingerPreset] = useState<
+    "original" | "relaxedV1" | "relaxedV2" | "relaxedV3"
+  >("original");
+  const rightFingerDeltas =
+    rightFingerPreset === "relaxedV1"
+      ? HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS
+      : rightFingerPreset === "relaxedV2"
+        ? HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V2
+        : rightFingerPreset === "relaxedV3"
+          ? HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V3
+          : null;
+  const setRightHandOrient = useCallback(
+    (delta: [number, number, number]) => {
+      setArmCalibration((current) => ({
+        ...current,
+        rightHand: [...delta] as [number, number, number],
+      }));
+    },
+    [],
+  );
+  // One-click combined setup for the both-sides review: Left V2 + Right V3 arm
+  // chain + V4 right hand + Relaxed V3 right fingers, in Reference Candidate mode.
+  const applyFinalArmCandidate = useCallback(() => {
+    setArmPoseMode("referenceCandidate");
+    setArmCalibration(cloneArmPreset(HSIN_ARM_FINAL_CANDIDATE_DELTAS));
+    setRightFingerPreset("relaxedV3");
+  }, [cloneArmPreset]);
+  const setArmDelta = useCallback(
+    (bone: string, axis: 0 | 1 | 2, value: number) => {
+      setArmCalibration((current) => {
+        const previous = current[bone as keyof ArmCalibrationOffsets] ?? [
+          0, 0, 0,
+        ];
+        const next: [number, number, number] = [
+          previous[0],
+          previous[1],
+          previous[2],
+        ];
+        next[axis] = value;
+        return { ...current, [bone]: next };
+      });
+    },
+    [],
+  );
+  const resetArmCalibration = useCallback(() => {
+    setArmCalibration(
+      Object.fromEntries(
+        HSIN_ARM_BONES.map((bone) => [bone, [0, 0, 0]]),
+      ) as ArmCalibrationOffsets,
+    );
+  }, []);
   const [centerHeadSequence, setCenterHeadSequence] = useState(0);
   const [forcedExpressionState, setForcedExpressionState] =
     useState<FaceExpressionState | null>(null);
@@ -334,6 +438,13 @@ export function AvatarPresence({
         ambientTriggerSequence={ambientTriggerSequence}
         ambientTriggerVariation={ambientTriggerVariation}
         onAmbientStateChange={setAmbientState}
+        armPoseMode={armPoseMode}
+        armCalibration={armCalibration}
+        onArmCandidateChange={setArmCandidateQuats}
+        showArmSkeleton={showArmSkeleton}
+        armAnatomyView={armAnatomyView}
+        onArmGeometryChange={setArmGeometry}
+        rightFingerDeltas={rightFingerDeltas}
         centerHeadSequence={centerHeadSequence}
         forcedExpressionState={forcedExpressionState}
         expressionInspectEnabled={expressionInspectEnabled}
@@ -891,6 +1002,306 @@ export function AvatarPresence({
           </div>
         </div>
       </div>
+      {SHOW_CALIBRATION_DEBUG && (
+        <div className="space-y-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-2 text-[10px] text-white/70">
+          <div className="uppercase tracking-wider text-amber-200">
+            Arm Neutral Polish (POC)
+          </div>
+          <div className="grid grid-cols-2 gap-1 rounded border border-emerald-300/30 bg-emerald-950/20 p-1">
+            <button
+              type="button"
+              onClick={() => setArmPoseMode("current")}
+              className={`rounded px-1 py-1.5 uppercase tracking-wider ${armPoseMode === "current" ? "bg-white/20 text-white" : "bg-black/40 text-white/55"}`}
+            >
+              Current Production
+            </button>
+            <button
+              type="button"
+              onClick={applyFinalArmCandidate}
+              className="rounded bg-emerald-400/30 px-1 py-1.5 uppercase tracking-wider text-emerald-100"
+            >
+              Final Arm Candidate
+            </button>
+          </div>
+          <div className="text-[9px] normal-case text-white/45">
+            Final = Left V2 + Right V3 + Right Hand V4 + Relaxed V3 fingers.
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {(["current", "referenceCandidate"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setArmPoseMode(mode)}
+                className={`rounded px-2 py-1.5 uppercase tracking-wider ${armPoseMode === mode ? "bg-amber-400/25 text-amber-100" : "bg-black/40 text-white/55"}`}
+              >
+                {mode === "current" ? "Current Arms" : "Reference Candidate"}
+              </button>
+            ))}
+          </div>
+          <div className="text-[9px] normal-case text-white/45">
+            Candidate only differs in Natural Idle V2. Use the views below to
+            validate front & side.
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {(
+              [
+                ["front", "Front"],
+                ["leftThreeQuarter", "L¾"],
+                ["rightThreeQuarter", "R¾"],
+                ["side", "Side"],
+              ] as const
+            ).map(([view, label]) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => {
+                  setInspectionView(view);
+                  setInspectPose(true);
+                }}
+                className={`rounded px-1 py-1 uppercase tracking-wider ${inspectPose && inspectionView === view ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setInspectPose(false)}
+            className={`w-full rounded px-2 py-1 uppercase tracking-wider ${!inspectPose ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Presentation View
+          </button>
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+            {HSIN_ARM_BONES.map((bone) => {
+              const delta = armCalibration[bone] ?? [0, 0, 0];
+              return (
+                <fieldset
+                  key={bone}
+                  className="rounded border border-white/10 p-1"
+                >
+                  <legend className="pr-1 text-white/85">{bone}</legend>
+                  {(
+                    [
+                      ["Pitch", 0],
+                      ["Yaw", 1],
+                      ["Roll", 2],
+                    ] as const
+                  ).map(([label, axis]) => (
+                    <label
+                      key={label}
+                      className="block normal-case text-white/55"
+                    >
+                      {label} {delta[axis].toFixed(1)}°
+                      <input
+                        type="range"
+                        min={-25}
+                        max={25}
+                        step={0.5}
+                        value={delta[axis]}
+                        onChange={(event) =>
+                          setArmDelta(bone, axis, Number(event.target.value))
+                        }
+                        className="mt-0.5 block w-full"
+                      />
+                    </label>
+                  ))}
+                </fieldset>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <button
+              type="button"
+              onClick={() =>
+                setArmCalibration(cloneArmPreset(HSIN_ARM_REFERENCE_V1_DELTAS))
+              }
+              className="rounded bg-violet-400/20 px-2 py-1.5 uppercase tracking-wider text-violet-100"
+            >
+              V1
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setArmCalibration(cloneArmPreset(HSIN_ARM_REFERENCE_V2_DELTAS))
+              }
+              className="rounded bg-amber-400/20 px-2 py-1.5 uppercase tracking-wider text-amber-100"
+            >
+              V2
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setArmCalibration(cloneArmPreset(HSIN_ARM_REFERENCE_V3_DELTAS))
+              }
+              className="rounded bg-emerald-400/25 px-2 py-1.5 uppercase tracking-wider text-emerald-100"
+            >
+              V3
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() =>
+                setArmCalibration(cloneArmPreset(HSIN_ARM_BASELINE_DELTAS))
+              }
+              className="rounded bg-black/40 px-2 py-1.5 uppercase tracking-wider text-white/70"
+            >
+              Baseline (V3+V4)
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setArmCalibration(cloneArmPreset(HSIN_ARM_LEFT_V1_DELTAS))
+              }
+              className="rounded bg-sky-400/20 px-2 py-1.5 uppercase tracking-wider text-sky-100/80"
+            >
+              Left V1
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setArmCalibration(cloneArmPreset(HSIN_ARM_LEFT_V2_DELTAS))
+            }
+            className="w-full rounded bg-sky-400/30 px-2 py-1.5 uppercase tracking-wider text-sky-100"
+          >
+            Left V2
+          </button>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={resetArmCalibration}
+              className="rounded bg-black/40 px-2 py-1.5 uppercase tracking-wider text-white/55"
+            >
+              Reset Deltas
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const frozen = Object.fromEntries(
+                  HSIN_ARM_BONES.map((bone) => [
+                    bone,
+                    armCandidateQuats[bone] ?? HSIN_CANONICAL_NEUTRAL[bone],
+                  ]),
+                );
+                navigator.clipboard
+                  ?.writeText(JSON.stringify(frozen, null, 2))
+                  .then(() => {
+                    setArmValuesCopied(true);
+                    setTimeout(() => setArmValuesCopied(false), 1500);
+                  });
+              }}
+              className="rounded bg-amber-400/20 px-2 py-1.5 uppercase tracking-wider text-amber-100"
+            >
+              {armValuesCopied ? "Copied ✓" : "Copy Candidate"}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setShowArmSkeleton((current) => !current)}
+              className={`rounded px-2 py-1.5 uppercase tracking-wider ${showArmSkeleton ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+            >
+              Show Arm Skeleton {showArmSkeleton ? "On" : "Off"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setArmAnatomyView((current) => !current)}
+              className={`rounded px-2 py-1.5 uppercase tracking-wider ${armAnatomyView ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+            >
+              Arm Anatomy View {armAnatomyView ? "On" : "Off"}
+            </button>
+          </div>
+          <div className="space-y-1 rounded border border-rose-300/20 bg-rose-950/20 p-1">
+            <div className="text-[9px] uppercase tracking-wider text-rose-200">
+              Right hand — orientation
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                onClick={() => setRightHandOrient(HSIN_RIGHT_HAND_ORIENT_V3)}
+                className="rounded bg-black/40 px-2 py-1.5 uppercase tracking-wider text-white/70"
+              >
+                V3 Hand
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightHandOrient(HSIN_RIGHT_HAND_ORIENT_V4)}
+                className="rounded bg-rose-400/25 px-2 py-1.5 uppercase tracking-wider text-rose-100"
+              >
+                V4 Hand
+              </button>
+            </div>
+            <div className="text-[9px] uppercase tracking-wider text-rose-200">
+              Right hand — fingers
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {(
+                [
+                  ["original", "Original"],
+                  ["relaxedV1", "Relaxed V1"],
+                  ["relaxedV2", "Relaxed V2"],
+                  ["relaxedV3", "Relaxed V3"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setRightFingerPreset(key)}
+                  className={`rounded px-1 py-1.5 uppercase tracking-wider ${rightFingerPreset === key ? "bg-rose-400/25 text-rose-100" : "bg-black/40 text-white/55"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="text-[9px] uppercase tracking-wider text-rose-200">
+              Right hand — close-up
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                type="button"
+                onClick={() => setHandInspectionView("rightFront")}
+                className={`rounded px-1 py-1.5 uppercase tracking-wider ${handInspectionView === "rightFront" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              >
+                Front
+              </button>
+              <button
+                type="button"
+                onClick={() => setHandInspectionView("rightSide")}
+                className={`rounded px-1 py-1.5 uppercase tracking-wider ${handInspectionView === "rightSide" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              >
+                Side
+              </button>
+              <button
+                type="button"
+                onClick={() => setHandInspectionView(null)}
+                className={`rounded px-1 py-1.5 uppercase tracking-wider ${handInspectionView === null ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+          {showArmSkeleton && armGeometry && (
+            <div className="space-y-0.5 rounded border border-white/10 p-1 normal-case text-[9px] text-white/60">
+              {(["left", "right"] as const).map((side) => {
+                const g = armGeometry[side];
+                return (
+                  <div key={side}>
+                    <span className="uppercase text-white/85">{side}</span> bend{" "}
+                    {g.elbowBendDeg.toFixed(1)}° · wristY{" "}
+                    {g.wristHeightFromHips.toFixed(3)} · elbowX{" "}
+                    {g.elbowLateralFromHips.toFixed(3)} · wristX{" "}
+                    {g.wristLateralFromHips.toFixed(3)}
+                  </div>
+                );
+              })}
+              <div className="text-white/35">
+                world units · wristY = height above hips (negative = below)
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
           <div className="uppercase tracking-wider text-emerald-200">

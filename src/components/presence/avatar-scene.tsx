@@ -402,13 +402,13 @@ export type CanonicalNeutralQuaternions = Partial<
 >;
 export const HSIN_CANONICAL_NEUTRAL: CanonicalNeutralQuaternions = {
   leftShoulder: [0, 0, 0, 1],
-  leftUpperArm: [0.46008867595713404, -0.10919560299218388, -0.7345722710784305, 0.4866192650377313],
-  leftLowerArm: [0.40729593027403904, -0.3232519079154474, -0.5781911406869105, 0.628739400739605],
-  leftHand: [0.37961383389756165, 0.08173997048984835, -0.3308682189071233, 0.8600803079103376],
+  leftUpperArm: [0.4541432127634268, -0.0426923047968934, -0.785247660585315, 0.41870923199439014],
+  leftLowerArm: [0.31640274953606456, -0.2644316369546037, -0.5833062520046406, 0.699799275389612],
+  leftHand: [0.3204702949775492, 0.09904316316938458, -0.30887489160836107, 0.8899918781653732],
   rightShoulder: [0, 0, 0, 1],
-  rightUpperArm: [0.1733831295720082, 0.01748003896988334, 0.0310141588666062, 0.9842107805583236],
-  rightLowerArm: [0.912644066417831, -0.16118115248821804, 0.0911740866053977, 0.3644018798614617],
-  rightHand: [-0.2685427777613197, -0.4272972001976144, 0.37631632414628446, 0.7769735538591662],
+  rightUpperArm: [0.14836292766267567, 0.006328333798608223, 0.10033261419537595, 0.9838098192310416],
+  rightLowerArm: [0.8800640980894184, -0.1309145001712487, 0.05559680533923466, 0.4530536084560439],
+  rightHand: [-0.3184310463714805, -0.3632447591159741, 0.19831716500713806, 0.8528336389619452],
   leftThumbMetacarpal: [0.028104056619524264, -0.12135558144911059, -0.020506064544840368, 0.9919992369803303],
   leftThumbProximal: [0.009631758520114525, -0.02585555855285681, -0.03511450401887338, 0.9990023478086718],
   leftThumbDistal: [0, 0, -0.01745240643728351, 0.9998476951563913],
@@ -425,21 +425,285 @@ export const HSIN_CANONICAL_NEUTRAL: CanonicalNeutralQuaternions = {
   leftLittleIntermediate: [0, 0, -0.11320321376790672, 0.9935718556765875],
   leftLittleDistal: [0, 0, -0.043619387365336, 0.9990482215818578],
   rightThumbMetacarpal: [0.02785323130294883, 0.10402238117315392, 0.020086672024403115, 0.9939819250509717],
-  rightThumbProximal: [0.009405762322721644, 0.02593862593505052, 0.026395337515045917, 0.99927073682621],
-  rightThumbDistal: [0, 0, 0.01745240643728351, 0.9998476951563913],
-  rightIndexProximal: [0, 0, 0.03489949670250097, 0.9993908270190958],
-  rightIndexIntermediate: [0, 0, 0.06104853953485687, 0.9981347984218669],
-  rightIndexDistal: [0, 0, 0.01745240643728351, 0.9998476951563913],
-  rightMiddleProximal: [0, 0, 0.052335956242943835, 0.9986295347545738],
-  rightMiddleIntermediate: [0, 0, 0.07845909572784494, 0.996917333733128],
-  rightMiddleDistal: [0, 0, 0.026176948307873153, 0.9996573249755573],
-  rightRingProximal: [0, 0, 0.0697564737441253, 0.9975640502598242],
-  rightRingIntermediate: [0, 0, 0.09584575252022398, 0.9953961983671789],
-  rightRingDistal: [0, 0, 0.03489949670250097, 0.9993908270190958],
-  rightLittleProximal: [0, 0, 0.08715574274765817, 0.9961946980917455],
-  rightLittleIntermediate: [0, 0, 0.11320321376790672, 0.9935718556765875],
-  rightLittleDistal: [0, 0, 0.043619387365336, 0.9990482215818578],
+  rightThumbProximal: [0.010305277576737538, 0.02559456845380277, 0.06125330397338194, 0.9977408240981595],
+  rightThumbDistal: [0, 0, 0.05233595624294383, 0.9986295347545739],
+  rightIndexProximal: [-0.0006090802009086826, -0.017441774902830158, 0.10451254307640284, 0.9943704248665338],
+  rightIndexIntermediate: [0, 0, 0.1478094111296106, 0.9890158633619167],
+  rightIndexDistal: [0, 0, 0.06104853953485687, 0.998134798421867],
+  rightMiddleProximal: [-0.00022843406864775454, -0.008723545132608727, 0.13052122218260645, 0.9914071101914461],
+  rightMiddleIntermediate: [0, 0, 0.17364817766693036, 0.9848077530122081],
+  rightMiddleDistal: [0, 0, 0.0697564737441253, 0.9975640502598242],
+  rightRingProximal: [0.0003045516968497588, 0.008721219528731424, 0.17364156567641253, 0.9847702545505929],
+  rightRingIntermediate: [0, 0, 0.21643961393810285, 0.9762960071199334],
+  rightRingDistal: [0, 0, 0.09584575252022398, 0.9953961983671787],
+  rightLittleProximal: [0.0007612632768451532, 0.01743579561349186, 0.21640664913655128, 0.9761473125092532],
+  rightLittleIntermediate: [0, 0, 0.2588190451025208, 0.9659258262890682],
+  rightLittleDistal: [0, 0, 0.11320321376790672, 0.9935718556765875],
 };
+
+// --- Arm / shoulder neutral-pose polish POC (dev-only A/B) ---------------
+// The eight shoulder->hand bones that are safe to retune for the reference
+// neutral. Fingers are deliberately excluded and never touched by this POC.
+export const HSIN_ARM_BONES: VRMHumanBoneName[] = [
+  "leftShoulder",
+  "leftUpperArm",
+  "leftLowerArm",
+  "leftHand",
+  "rightShoulder",
+  "rightUpperArm",
+  "rightLowerArm",
+  "rightHand",
+];
+
+export type ArmPoseMode = "current" | "referenceCandidate";
+
+// Per-bone local-space Euler delta (degrees, XYZ = pitch/yaw/roll) that is
+// post-multiplied onto the frozen canonical arm quaternion to author the
+// reference candidate. Empty/zero => candidate is byte-identical to current.
+export type ArmCalibrationOffsets = Partial<
+  Record<VRMHumanBoneName, [number, number, number]>
+>;
+
+export const HSIN_ARM_CALIBRATION_ZERO: ArmCalibrationOffsets =
+  Object.fromEntries(
+    HSIN_ARM_BONES.map((bone) => [bone, [0, 0, 0] as [number, number, number]]),
+  );
+
+// Reference Candidate V1 — conservative local-space Euler deltas (degrees,
+// XYZ = pitch/yaw/roll) authored from the two Hsin reference stills toward a
+// more relaxed neutral: elbows lowered, forearms more vertical, less forearm
+// twist, wrists nearer neutral. Small by design (well within the POC safety
+// bounds: upperArm <=6, lowerArm <=8, hand <=8, shoulder <=3). Shoulders are
+// left untouched. Signs are a reasoned first pass on Hsin's non-canonical rest
+// basis and are meant to be visually reviewed / tuned via the dev sliders.
+export const HSIN_ARM_REFERENCE_V1_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-2, 0, -2],
+  leftLowerArm: [-3, 0, 4],
+  leftHand: [-5, 0, 4],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-2, 0, 2],
+  rightLowerArm: [-5, 0, -3],
+  rightHand: [0, 5, -4],
+};
+
+// Reference Candidate V2 — retunes the whole shoulder->hand chain toward the
+// black-background reference silhouette (arms readable as separate from the
+// sleeves). Emphasis shifts to the upper/lower arms: larger frontal-plane roll
+// on the upper arm to lower the elbow and open a torso->arm gap (mirrored L/R),
+// more lower-arm pitch to let the forearm descend toward the thigh, and a small
+// lower-arm roll to reduce twist. Hands get only secondary cleanup; shoulders
+// stay untouched. Within the wider V2 exploration bounds (shoulder <=4,
+// upperArm <=10, lowerArm <=12, hand <=8). Not a scalar multiple of V1.
+export const HSIN_ARM_REFERENCE_V2_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-3, 0, -8],
+  leftLowerArm: [-6, 0, 6],
+  leftHand: [-4, 0, 3],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-8, 0, -5],
+  rightHand: [0, 4, -3],
+};
+
+// Reference Candidate V3 — refines V2 from the skeleton/anatomy diagnostic: a
+// touch more lower-arm pitch for a slightly more relaxed elbow bend (toward
+// ~15-22deg), and a stronger RIGHT-HAND-only de-rotation to pull the splayed,
+// outward-facing palm back toward the forearm line (the right hand was the
+// largest remaining visible issue). Upper arms and left hand keep V2; no forearm
+// re-rotation is used to fix the palm. Bone lengths unchanged (rotation only).
+export const HSIN_ARM_REFERENCE_V3_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-3, 0, -8],
+  leftLowerArm: [-9, 0, 6],
+  leftHand: [-4, 0, 3],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-11, 0, -5],
+  rightHand: [0, 12, -10],
+};
+
+// Provisional right-side baseline: V3 arm chain with the V4 right-hand
+// orientation folded in ([-6,18,-14]). Left side matches V3. Used as the start
+// point for the left-arm pass so the accepted right side is preserved.
+export const HSIN_ARM_BASELINE_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-3, 0, -8],
+  leftLowerArm: [-9, 0, 6],
+  leftHand: [-4, 0, 3],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-11, 0, -5],
+  rightHand: [-6, 18, -14],
+};
+
+// Left Arm V1 — retunes ONLY the left arm on top of the baseline (right side
+// unchanged). Opens the left upper arm further out/down so it reads outside the
+// sleeve with a lower, unburied elbow; deepens forearm descent toward the thigh;
+// small extra wrist relax. Tuned independently — NOT mirrored from the right.
+export const HSIN_ARM_LEFT_V1_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-4, 0, -12],
+  leftLowerArm: [-12, 0, 8],
+  leftHand: [-6, 0, 5],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-11, 0, -5],
+  rightHand: [-6, 18, -14],
+};
+
+// Left Arm V2 — softening pass over Left V1 (right side still frozen). Eases the
+// upper-arm pitch slightly (less "arranged"), deepens forearm descent while
+// cutting forearm twist (roll 8->5) to reduce stiffness, and lets the hand hang
+// and settle beside the thigh (more pitch, less roll) so it rests rather than
+// hovers. Left side only; tuned independently from the right.
+export const HSIN_ARM_LEFT_V2_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-3, 0, -12],
+  leftLowerArm: [-14, 0, 5],
+  leftHand: [-8, 0, 2],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-11, 0, -5],
+  rightHand: [-6, 18, -14],
+};
+
+// FINAL ARM CANDIDATE — the accepted combined neutral for the full-silhouette
+// review: LEFT = Left V2, RIGHT arm chain = V3, RIGHT hand = V4. Identical in
+// value to HSIN_ARM_LEFT_V2_DELTAS; named separately so it is unambiguous when
+// frozen into HSIN_CANONICAL_NEUTRAL later. Paired with the Relaxed V3 right
+// fingers. Nothing else (torso, lengths, etc.) changes.
+export const HSIN_ARM_FINAL_CANDIDATE_DELTAS: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [-3, 0, -12],
+  leftLowerArm: [-14, 0, 5],
+  leftHand: [-8, 0, 2],
+  rightShoulder: [0, 0, 0],
+  rightUpperArm: [-3, 0, 8],
+  rightLowerArm: [-11, 0, -5],
+  rightHand: [-6, 18, -14],
+};
+
+// RIGHT-HAND finger bones (thumb + 4 fingers x proximal/intermediate/distal).
+// Isolated to the right hand for the relaxed-fingers POC; the left hand's 15
+// finger bones are never referenced here.
+export const HSIN_RIGHT_FINGER_BONES: VRMHumanBoneName[] = [
+  "rightThumbMetacarpal",
+  "rightThumbProximal",
+  "rightThumbDistal",
+  "rightIndexProximal",
+  "rightIndexIntermediate",
+  "rightIndexDistal",
+  "rightMiddleProximal",
+  "rightMiddleIntermediate",
+  "rightMiddleDistal",
+  "rightRingProximal",
+  "rightRingIntermediate",
+  "rightRingDistal",
+  "rightLittleProximal",
+  "rightLittleIntermediate",
+  "rightLittleDistal",
+];
+
+// RIGHT HAND RELAXED FINGERS (dev-only) — small additive local Euler deltas
+// (degrees, XYZ) post-multiplied onto the frozen canonical right-finger
+// quaternions: a gentle curl (+Z, matching the canonical flexion sign) plus a
+// slight draw-together (Y) so the fingers read relaxed rather than splayed.
+// Small by design; no clenched fist, no straightening, no generic humanoid
+// rotations. Left fingers are untouched.
+export const HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS: ArmCalibrationOffsets = {
+  rightThumbMetacarpal: [0, 0, 0],
+  rightThumbProximal: [0, 0, 3],
+  rightThumbDistal: [0, 0, 3],
+  rightIndexProximal: [0, -2, 5],
+  rightIndexIntermediate: [0, 0, 7],
+  rightIndexDistal: [0, 0, 4],
+  rightMiddleProximal: [0, -1, 5],
+  rightMiddleIntermediate: [0, 0, 7],
+  rightMiddleDistal: [0, 0, 4],
+  rightRingProximal: [0, 1, 5],
+  rightRingIntermediate: [0, 0, 7],
+  rightRingDistal: [0, 0, 4],
+  rightLittleProximal: [0, 2, 6],
+  rightLittleIntermediate: [0, 0, 8],
+  rightLittleDistal: [0, 0, 4],
+};
+
+// RIGHT HAND RELAXED FINGERS V2 (dev-only) — stronger, coordinated group curl so
+// all four fingers read as one relaxed hand shape (not single-finger twitches).
+// Deeper proximal/intermediate flexion (+Z, canonical sign) increasing from
+// index -> little, plus a small draw-together (Y) toward the middle. Thumb curls
+// gently inward. Still no fist / claw / straight-splay. Left fingers untouched.
+export const HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V2: ArmCalibrationOffsets = {
+  rightThumbMetacarpal: [0, 0, 0],
+  rightThumbProximal: [0, 0, 6],
+  rightThumbDistal: [0, 0, 5],
+  rightIndexProximal: [0, -3, 10],
+  rightIndexIntermediate: [0, 0, 12],
+  rightIndexDistal: [0, 0, 6],
+  rightMiddleProximal: [0, -1, 10],
+  rightMiddleIntermediate: [0, 0, 12],
+  rightMiddleDistal: [0, 0, 6],
+  rightRingProximal: [0, 1, 12],
+  rightRingIntermediate: [0, 0, 14],
+  rightRingDistal: [0, 0, 7],
+  rightLittleProximal: [0, 3, 14],
+  rightLittleIntermediate: [0, 0, 16],
+  rightLittleDistal: [0, 0, 8],
+};
+
+// RIGHT HAND RELAXED FINGERS V3 (dev-only) — final softening pass over V2. Same
+// group-curl idea but with a smoother, non-uniform progression so the hand reads
+// soft rather than claw-like: index eased off, middle relaxed, ring near V2,
+// little slightly stronger than ring; thumb curl reduced; Y draw-together
+// softened so the fingers don't pinch. Left fingers untouched.
+export const HSIN_RIGHT_HAND_RELAXED_FINGER_DELTAS_V3: ArmCalibrationOffsets = {
+  rightThumbMetacarpal: [0, 0, 0],
+  rightThumbProximal: [0, 0, 4],
+  rightThumbDistal: [0, 0, 4],
+  rightIndexProximal: [0, -2, 8],
+  rightIndexIntermediate: [0, 0, 10],
+  rightIndexDistal: [0, 0, 5],
+  rightMiddleProximal: [0, -1, 9],
+  rightMiddleIntermediate: [0, 0, 11],
+  rightMiddleDistal: [0, 0, 5],
+  rightRingProximal: [0, 1, 12],
+  rightRingIntermediate: [0, 0, 14],
+  rightRingDistal: [0, 0, 7],
+  rightLittleProximal: [0, 2, 15],
+  rightLittleIntermediate: [0, 0, 17],
+  rightLittleDistal: [0, 0, 8],
+};
+
+// RIGHT-HAND-only orientation deltas (local Euler degrees) for the hand-focused
+// comparison. V3 is the current V3-candidate right hand; V4 pushes the palm
+// further back toward the forearm line (stronger de-rotation) within the wider
+// hand-only bounds (pitch <=12, yaw <=20, roll <=16). Hand bone only.
+export const HSIN_RIGHT_HAND_ORIENT_V3: [number, number, number] = [0, 12, -10];
+export const HSIN_RIGHT_HAND_ORIENT_V4: [number, number, number] = [-6, 18, -14];
+
+// World-space arm geometry measured after the active candidate pose is applied.
+// Dev-only diagnostic (arm polish); never used by production runtime.
+export type ArmJointGeometry = {
+  shoulder: [number, number, number];
+  elbow: [number, number, number];
+  wrist: [number, number, number];
+  hand: [number, number, number];
+  upperArmVector: [number, number, number];
+  forearmVector: [number, number, number];
+  elbowBendDeg: number;
+  elbowLateralFromHips: number;
+  elbowDepthFromHips: number;
+  wristLateralFromHips: number;
+  wristDepthFromHips: number;
+  wristHeightFromHips: number;
+};
+export type ArmGeometryReport = {
+  hips: [number, number, number];
+  left: ArmJointGeometry;
+  right: ArmJointGeometry;
+};
+
 export type HandOrientationTargets = {
   left: [number, number, number];
   right: [number, number, number];
@@ -542,6 +806,13 @@ function HsinAvatar({
   ambientTriggerSequence,
   ambientTriggerVariation,
   onAmbientStateChange,
+  armPoseMode,
+  armCalibration,
+  onArmCandidateChange,
+  showArmSkeleton,
+  armAnatomyView,
+  onArmGeometryChange,
+  rightFingerDeltas,
   centerHeadSequence,
   forcedExpressionState,
   expressionInspectEnabled,
@@ -582,6 +853,15 @@ function HsinAvatar({
   ambientTriggerSequence: number;
   ambientTriggerVariation: AmbientVariationName | null;
   onAmbientStateChange?: (state: AmbientIdleState) => void;
+  armPoseMode: ArmPoseMode;
+  armCalibration: ArmCalibrationOffsets;
+  onArmCandidateChange?: (
+    quaternions: Record<string, [number, number, number, number]>,
+  ) => void;
+  showArmSkeleton: boolean;
+  armAnatomyView: boolean;
+  onArmGeometryChange?: (geometry: ArmGeometryReport) => void;
+  rightFingerDeltas: ArmCalibrationOffsets | null;
   centerHeadSequence: number;
   forcedExpressionState: FaceExpressionState | null;
   expressionInspectEnabled: boolean;
@@ -906,6 +1186,24 @@ function HsinAvatar({
   const lastAmbientPhase = useRef<AmbientPhase>("idle");
   const lastAmbientVariation = useRef<AmbientVariationName | null>(null);
   const lastAmbientTrigger = useRef(ambientTriggerSequence);
+  // Arm neutral-pose polish POC (dev-only A/B): reused temporaries + a signature
+  // so the resulting candidate quaternions are reported to the dev UI only when
+  // they actually change (not every frame).
+  const armDeltaQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const armDeltaEuler = useMemo(() => new THREE.Euler(0, 0, 0, "XYZ"), []);
+  const lastArmCandidateSignature = useRef<string>("");
+  // Arm geometry-diagnostic markers (dev-only): spheres per joint + a line
+  // chain, plus a throttle for the geometry readout.
+  const armSkelLeftShoulder = useRef<THREE.Mesh>(null);
+  const armSkelLeftElbow = useRef<THREE.Mesh>(null);
+  const armSkelLeftWrist = useRef<THREE.Mesh>(null);
+  const armSkelLeftHand = useRef<THREE.Mesh>(null);
+  const armSkelRightShoulder = useRef<THREE.Mesh>(null);
+  const armSkelRightElbow = useRef<THREE.Mesh>(null);
+  const armSkelRightWrist = useRef<THREE.Mesh>(null);
+  const armSkelRightHand = useRef<THREE.Mesh>(null);
+  const armSkeletonLines = useRef<THREE.LineSegments>(null);
+  const lastArmGeometryTime = useRef(0);
 
   const applyHsinRelaxedHands = () => {
     HSIN_HAND_OVERRIDE_BONES.forEach((boneName) => {
@@ -938,6 +1236,50 @@ function HsinAvatar({
           ?.quaternion.fromArray(quaternion);
       },
     );
+  };
+
+  // Dev-only: measure world-space arm geometry after the active pose is applied.
+  // Uses raw humanoid bone world positions (shoulder = upperArm root, elbow =
+  // lowerArm, wrist = hand, hand-tip approximated by middleProximal).
+  const measureArmGeometry = (): ArmGeometryReport | null => {
+    vrm.scene.updateMatrixWorld(true);
+    const wp = (name: VRMHumanBoneName) =>
+      vrm.humanoid.getRawBoneNode(name)?.getWorldPosition(new THREE.Vector3()) ??
+      null;
+    const hips = wp("hips");
+    if (!hips) return null;
+    const r3 = (v: THREE.Vector3): [number, number, number] => [v.x, v.y, v.z];
+    const perSide = (s: "left" | "right"): ArmJointGeometry | null => {
+      const shoulder = wp(`${s}UpperArm` as VRMHumanBoneName);
+      const elbow = wp(`${s}LowerArm` as VRMHumanBoneName);
+      const wrist = wp(`${s}Hand` as VRMHumanBoneName);
+      const hand =
+        wp(`${s}MiddleProximal` as VRMHumanBoneName) ?? wrist?.clone() ?? null;
+      if (!shoulder || !elbow || !wrist || !hand) return null;
+      const bendDeg =
+        180 -
+        THREE.MathUtils.radToDeg(
+          shoulder.clone().sub(elbow).angleTo(wrist.clone().sub(elbow)),
+        );
+      return {
+        shoulder: r3(shoulder),
+        elbow: r3(elbow),
+        wrist: r3(wrist),
+        hand: r3(hand),
+        upperArmVector: r3(elbow.clone().sub(shoulder)),
+        forearmVector: r3(wrist.clone().sub(elbow)),
+        elbowBendDeg: bendDeg,
+        elbowLateralFromHips: elbow.x - hips.x,
+        elbowDepthFromHips: elbow.z - hips.z,
+        wristLateralFromHips: wrist.x - hips.x,
+        wristDepthFromHips: wrist.z - hips.z,
+        wristHeightFromHips: wrist.y - hips.y,
+      };
+    };
+    const left = perSide("left");
+    const right = perSide("right");
+    if (!left || !right) return null;
+    return { hips: r3(hips), left, right };
   };
 
   const normalizedStandingPose = useMemo<VRMPose>(() => {
@@ -1330,6 +1672,76 @@ function HsinAvatar({
     });
   }, [revealHands, vrm]);
 
+  // ARM ANATOMY VIEW (dev-only): reversibly hide the large red/white sleeve
+  // ("Cloth") material so the bare arms are visible for skeleton calibration.
+  // Reuses the proven reveal-hands hide path; restores exact visibility on OFF.
+  // Does not touch the production material fallback.
+  useEffect(() => {
+    if (!armAnatomyView) return;
+    const hidden = new Map<THREE.Material, boolean>();
+    const exposed: string[] = [];
+    vrm.scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : [object.material];
+      materials.forEach((material) => {
+        if (/Gathering Wives - Cloth Xin_/i.test(material.name)) {
+          if (!hidden.has(material)) {
+            hidden.set(material, material.visible);
+            exposed.push(material.name);
+          }
+          material.visible = false;
+        }
+      });
+    });
+    console.info(
+      `[Hsin arm anatomy view] hidden=${JSON.stringify(exposed)}`,
+    );
+    return () =>
+      hidden.forEach((visible, material) => {
+        material.visible = visible;
+      });
+  }, [armAnatomyView, vrm]);
+
+  // Dev-only measurement probe: applies canonical neutral + optional arm deltas
+  // and returns world-space arm geometry. CPU-side FK, so it works regardless of
+  // WebGL render state. Front-facing torso yaw is intentionally omitted so it is
+  // applied consistently across Current/V1/V2 comparisons.
+  useEffect(() => {
+    if (!SHOW_CALIBRATION_DEBUG || typeof window === "undefined") return;
+    const w = window as unknown as {
+      __hsinArmProbe?: (deltas?: ArmCalibrationOffsets) => ArmGeometryReport | null;
+    };
+    w.__hsinArmProbe = (deltas) => {
+      vrm.humanoid.resetNormalizedPose();
+      applyCanonicalNeutral();
+      if (deltas) {
+        HSIN_ARM_BONES.forEach((bone) => {
+          const node = poseDiagnostic.normalizedNodes.get(bone);
+          const d = deltas[bone];
+          if (node && d && (d[0] || d[1] || d[2])) {
+            armDeltaEuler.set(
+              THREE.MathUtils.degToRad(d[0]),
+              THREE.MathUtils.degToRad(d[1]),
+              THREE.MathUtils.degToRad(d[2]),
+              "XYZ",
+            );
+            node.quaternion.multiply(
+              armDeltaQuaternion.setFromEuler(armDeltaEuler),
+            );
+          }
+        });
+      }
+      vrm.humanoid.update();
+      return measureArmGeometry();
+    };
+    return () => {
+      delete w.__hsinArmProbe;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vrm]);
+
   const framing = useMemo(() => {
     const scene = vrm.scene;
     scene.updateMatrixWorld(true);
@@ -1527,6 +1939,63 @@ function HsinAvatar({
     if (poseMode === "naturalIdle") {
       vrm.humanoid.resetNormalizedPose();
       applyCanonicalNeutral();
+
+      // Arm neutral-pose polish POC (dev-only): when the reference candidate is
+      // active, post-multiply each arm bone's frozen canonical quaternion by its
+      // local Euler calibration delta. Only the 8 shoulder->hand bones; fingers
+      // are never touched. Default deltas are all zero => candidate == current.
+      if (armPoseMode === "referenceCandidate") {
+        const resolved: Record<string, [number, number, number, number]> = {};
+        HSIN_ARM_BONES.forEach((boneName) => {
+          const node = poseDiagnostic.normalizedNodes.get(boneName);
+          if (!node) return;
+          const delta = armCalibration[boneName];
+          if (delta && (delta[0] || delta[1] || delta[2])) {
+            armDeltaEuler.set(
+              THREE.MathUtils.degToRad(delta[0]),
+              THREE.MathUtils.degToRad(delta[1]),
+              THREE.MathUtils.degToRad(delta[2]),
+              "XYZ",
+            );
+            node.quaternion.multiply(
+              armDeltaQuaternion.setFromEuler(armDeltaEuler),
+            );
+          }
+          const q = node.quaternion;
+          resolved[boneName] = [q.x, q.y, q.z, q.w];
+        });
+        const signature = JSON.stringify(resolved);
+        if (signature !== lastArmCandidateSignature.current) {
+          lastArmCandidateSignature.current = signature;
+          onArmCandidateChange?.(resolved);
+        }
+      } else if (lastArmCandidateSignature.current !== "") {
+        lastArmCandidateSignature.current = "";
+      }
+
+      // RIGHT HAND RELAXED FINGERS (dev-only): post-multiply the selected finger
+      // delta set (Relaxed V1/V2; null = original) onto the frozen canonical
+      // RIGHT finger quaternions. Left fingers are never referenced.
+      // applyCanonicalNeutral already restored all fingers to canonical this
+      // frame, so this is purely additive and reversible.
+      if (rightFingerDeltas) {
+        HSIN_RIGHT_FINGER_BONES.forEach((boneName) => {
+          const node = poseDiagnostic.normalizedNodes.get(boneName);
+          if (!node) return;
+          const delta = rightFingerDeltas[boneName];
+          if (delta && (delta[0] || delta[1] || delta[2])) {
+            armDeltaEuler.set(
+              THREE.MathUtils.degToRad(delta[0]),
+              THREE.MathUtils.degToRad(delta[1]),
+              THREE.MathUtils.degToRad(delta[2]),
+              "XYZ",
+            );
+            node.quaternion.multiply(
+              armDeltaQuaternion.setFromEuler(armDeltaEuler),
+            );
+          }
+        });
+      }
 
       const addMicroMotion = (
         boneName: VRMHumanBoneName,
@@ -2138,6 +2607,62 @@ function HsinAvatar({
       );
     }
 
+    // Arm skeleton diagnostic (dev-only): spheres at shoulder/elbow/wrist/hand
+    // and a line chain, driven by actual raw bone world positions of the active
+    // candidate pose. Markers are direct scene children (world == local).
+    if (showArmSkeleton) {
+      vrm.scene.updateMatrixWorld(true);
+      const wp = (name: VRMHumanBoneName) =>
+        vrm.humanoid.getRawBoneNode(name)?.getWorldPosition(new THREE.Vector3()) ??
+        null;
+      const place = (marker: THREE.Mesh | null, p: THREE.Vector3 | null) => {
+        if (!marker) return;
+        if (p) {
+          marker.visible = true;
+          marker.position.copy(p);
+        } else {
+          marker.visible = false;
+        }
+      };
+      const lSh = wp("leftUpperArm");
+      const lEl = wp("leftLowerArm");
+      const lWr = wp("leftHand");
+      const lHa = wp("leftMiddleProximal") ?? lWr;
+      const rSh = wp("rightUpperArm");
+      const rEl = wp("rightLowerArm");
+      const rWr = wp("rightHand");
+      const rHa = wp("rightMiddleProximal") ?? rWr;
+      place(armSkelLeftShoulder.current, lSh);
+      place(armSkelLeftElbow.current, lEl);
+      place(armSkelLeftWrist.current, lWr);
+      place(armSkelLeftHand.current, lHa);
+      place(armSkelRightShoulder.current, rSh);
+      place(armSkelRightElbow.current, rEl);
+      place(armSkelRightWrist.current, rWr);
+      place(armSkelRightHand.current, rHa);
+      if (armSkeletonLines.current) {
+        const pts: number[] = [];
+        const seg = (a: THREE.Vector3 | null, b: THREE.Vector3 | null) => {
+          if (a && b) pts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        };
+        seg(lSh, lEl);
+        seg(lEl, lWr);
+        seg(lWr, lHa);
+        seg(rSh, rEl);
+        seg(rEl, rWr);
+        seg(rWr, rHa);
+        armSkeletonLines.current.geometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(pts, 3),
+        );
+      }
+      if (onArmGeometryChange && t - lastArmGeometryTime.current > 0.33) {
+        lastArmGeometryTime.current = t;
+        const geometry = measureArmGeometry();
+        if (geometry) onArmGeometryChange(geometry);
+      }
+    }
+
     if (Math.floor(t * 2) !== Math.floor((t - d) * 2)) {
       let maxPositionDrift = 0;
       let maxScaleDrift = 0;
@@ -2256,6 +2781,46 @@ function HsinAvatar({
           />
         </mesh>
       )}
+      {SHOW_CALIBRATION_DEBUG && showArmSkeleton && (
+        <>
+          <lineSegments ref={armSkeletonLines} renderOrder={1004}>
+            <bufferGeometry />
+            <lineBasicMaterial color="#f0abfc" depthTest={false} transparent opacity={0.95} />
+          </lineSegments>
+          <mesh ref={armSkelLeftShoulder} renderOrder={1005}>
+            <sphereGeometry args={[0.02, 16, 16]} />
+            <meshBasicMaterial color="#22c55e" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelLeftElbow} renderOrder={1005}>
+            <sphereGeometry args={[0.018, 16, 16]} />
+            <meshBasicMaterial color="#06b6d4" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelLeftWrist} renderOrder={1005}>
+            <sphereGeometry args={[0.016, 16, 16]} />
+            <meshBasicMaterial color="#0891b2" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelLeftHand} renderOrder={1005}>
+            <sphereGeometry args={[0.013, 16, 16]} />
+            <meshBasicMaterial color="#a3e635" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelRightShoulder} renderOrder={1005}>
+            <sphereGeometry args={[0.02, 16, 16]} />
+            <meshBasicMaterial color="#f59e0b" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelRightElbow} renderOrder={1005}>
+            <sphereGeometry args={[0.018, 16, 16]} />
+            <meshBasicMaterial color="#f97316" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelRightWrist} renderOrder={1005}>
+            <sphereGeometry args={[0.016, 16, 16]} />
+            <meshBasicMaterial color="#ea580c" depthTest={false} />
+          </mesh>
+          <mesh ref={armSkelRightHand} renderOrder={1005}>
+            <sphereGeometry args={[0.013, 16, 16]} />
+            <meshBasicMaterial color="#fbbf24" depthTest={false} />
+          </mesh>
+        </>
+      )}
     </>
   );
 }
@@ -2326,6 +2891,13 @@ export function AvatarScene({
   ambientTriggerSequence = 0,
   ambientTriggerVariation = null,
   onAmbientStateChange,
+  armPoseMode = "current",
+  armCalibration = HSIN_ARM_CALIBRATION_ZERO,
+  onArmCandidateChange,
+  showArmSkeleton = false,
+  armAnatomyView = false,
+  onArmGeometryChange,
+  rightFingerDeltas = null,
   centerHeadSequence = 0,
   forcedExpressionState = null,
   expressionInspectEnabled = false,
@@ -2368,6 +2940,15 @@ export function AvatarScene({
   ambientTriggerSequence?: number;
   ambientTriggerVariation?: AmbientVariationName | null;
   onAmbientStateChange?: (state: AmbientIdleState) => void;
+  armPoseMode?: ArmPoseMode;
+  armCalibration?: ArmCalibrationOffsets;
+  onArmCandidateChange?: (
+    quaternions: Record<string, [number, number, number, number]>,
+  ) => void;
+  showArmSkeleton?: boolean;
+  armAnatomyView?: boolean;
+  onArmGeometryChange?: (geometry: ArmGeometryReport) => void;
+  rightFingerDeltas?: ArmCalibrationOffsets | null;
   centerHeadSequence?: number;
   forcedExpressionState?: FaceExpressionState | null;
   expressionInspectEnabled?: boolean;
@@ -2441,6 +3022,13 @@ export function AvatarScene({
         ambientTriggerSequence={ambientTriggerSequence}
         ambientTriggerVariation={ambientTriggerVariation}
         onAmbientStateChange={onAmbientStateChange}
+        armPoseMode={armPoseMode}
+        armCalibration={armCalibration}
+        onArmCandidateChange={onArmCandidateChange}
+        showArmSkeleton={showArmSkeleton}
+        armAnatomyView={armAnatomyView}
+        onArmGeometryChange={onArmGeometryChange}
+        rightFingerDeltas={rightFingerDeltas}
         centerHeadSequence={centerHeadSequence}
         forcedExpressionState={forcedExpressionState}
         expressionInspectEnabled={expressionInspectEnabled}
