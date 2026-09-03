@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import type {
+  FaceExpressionState,
+  ExpressionInspectName,
   HandInspectionView,
   ArmIkTargets,
   HandOrientationTargets,
@@ -116,6 +118,20 @@ const TUNING_BONES = Object.keys(INITIAL_RELAXED_POSE) as Array<
   keyof RelaxedPoseTuning
 >;
 
+const EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
+  "happy",
+  "puzzled",
+  "angry",
+  "sad",
+  "surprised",
+  "relaxed",
+  "squint",
+  "laugh",
+  "meow",
+  "openSmall",
+  "neutral",
+];
+
 // Load the WebGL scene only on the client; soft glow while it boots.
 const AvatarScene = dynamic(
   () => import("./avatar-scene").then((m) => m.AvatarScene),
@@ -152,6 +168,13 @@ export function AvatarPresence({
   const [headAttentionEnabled, setHeadAttentionEnabled] = useState(true);
   const [headAttentionStrength, setHeadAttentionStrength] = useState(1);
   const [centerHeadSequence, setCenterHeadSequence] = useState(0);
+  const [forcedExpressionState, setForcedExpressionState] =
+    useState<FaceExpressionState | null>(null);
+  const [expressionInspectEnabled, setExpressionInspectEnabled] =
+    useState(false);
+  const [expressionInspectName, setExpressionInspectName] =
+    useState<ExpressionInspectName>("happy");
+  const [expressionInspectWeight, setExpressionInspectWeight] = useState(0.5);
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -211,7 +234,7 @@ export function AvatarPresence({
         poseTuning={poseTuning}
         inspectPose={inspectPose}
         inspectionView={inspectionView}
-        springsEnabled={springsEnabled}
+        springsEnabled={expressionInspectEnabled ? false : springsEnabled}
         autoBlinkEnabled={autoBlinkEnabled}
         manualBlinkSequence={manualBlinkSequence}
         lookAtEnabled={lookAtEnabled}
@@ -220,6 +243,10 @@ export function AvatarPresence({
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
         centerHeadSequence={centerHeadSequence}
+        forcedExpressionState={forcedExpressionState}
+        expressionInspectEnabled={expressionInspectEnabled}
+        expressionInspectName={expressionInspectName}
+        expressionInspectWeight={expressionInspectWeight}
         handInspectionView={handInspectionView}
         revealHands={
           (handInspectionView !== null || poseMode === "hsinNeutral") &&
@@ -327,6 +354,95 @@ export function AvatarPresence({
             className="mt-1 block w-full"
           />
         </label>
+      </div>
+      <div className="space-y-1 rounded-lg border border-white/10 bg-black/35 p-2">
+        <div className="text-[10px] uppercase tracking-wider text-white/50">
+          State Expression
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          {(["idle", "listening", "thinking", "speaking"] as const).map(
+            (state) => (
+              <button
+                key={state}
+                type="button"
+                onClick={() => {
+                  setExpressionInspectEnabled(false);
+                  setForcedExpressionState(state);
+                }}
+                className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${forcedExpressionState === state ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              >
+                Force {state}
+              </button>
+            ),
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setForcedExpressionState(null)}
+          className="w-full rounded bg-violet-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-violet-100"
+        >
+          Follow App State
+        </button>
+      </div>
+      <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+        <button
+          type="button"
+          onClick={() => {
+            setExpressionInspectEnabled((current) => {
+              if (!current) {
+                setHandInspectionView(null);
+                setInspectPose(false);
+                setSpringsEnabled(false);
+              }
+              return !current;
+            });
+          }}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${expressionInspectEnabled ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+        >
+          Expression Inspect {expressionInspectEnabled ? "On" : "Off"}
+        </button>
+        {expressionInspectEnabled && (
+          <>
+            <div className="grid grid-cols-2 gap-1">
+              {EXPRESSION_INSPECT_NAMES.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setExpressionInspectName(name)}
+                  className={`rounded px-2 py-1 text-[10px] ${expressionInspectName === name ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {[0.25, 0.5, 0.75, 1].map((weight) => (
+                <button
+                  key={weight}
+                  type="button"
+                  onClick={() => setExpressionInspectWeight(weight)}
+                  className={`rounded px-1 py-1 text-[10px] ${expressionInspectWeight === weight ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+                >
+                  {weight.toFixed(2)}
+                </button>
+              ))}
+            </div>
+            <label className="block text-[10px] uppercase tracking-wider text-white/60">
+              {expressionInspectName} {expressionInspectWeight.toFixed(2)}
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={expressionInspectWeight}
+                onChange={(event) =>
+                  setExpressionInspectWeight(Number(event.target.value))
+                }
+                className="mt-1 block w-full"
+              />
+            </label>
+          </>
+        )}
       </div>
       <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
         <div className="grid grid-cols-2 gap-1">

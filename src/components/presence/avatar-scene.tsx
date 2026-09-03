@@ -23,6 +23,49 @@ const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
 
+export type FaceExpressionState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking";
+
+export type ExpressionInspectName =
+  | "happy"
+  | "puzzled"
+  | "angry"
+  | "sad"
+  | "surprised"
+  | "relaxed"
+  | "squint"
+  | "laugh"
+  | "meow"
+  | "openSmall"
+  | "neutral";
+
+const HSIN_EXPRESSION_INSPECT_NAMES: ExpressionInspectName[] = [
+  "happy",
+  "puzzled",
+  "angry",
+  "sad",
+  "surprised",
+  "relaxed",
+  "squint",
+  "laugh",
+  "meow",
+  "openSmall",
+  "neutral",
+];
+
+const HSIN_STATE_EXPRESSIONS: Record<
+  FaceExpressionState,
+  Partial<Record<"happy" | "puzzled", number>>
+> = {
+  idle: { happy: 0.09 },
+  listening: { happy: 0.3 },
+  thinking: { puzzled: 0.48 },
+  speaking: { happy: 0.4 },
+};
+
 type BlinkPhase = "waiting" | "closing" | "holding" | "opening";
 
 function randomBlinkDelay() {
@@ -320,6 +363,10 @@ function HsinAvatar({
   headAttentionEnabled,
   headAttentionStrength,
   centerHeadSequence,
+  forcedExpressionState,
+  expressionInspectEnabled,
+  expressionInspectName,
+  expressionInspectWeight,
   handInspectionView,
   revealHands,
   handOverrideEnabled,
@@ -344,6 +391,10 @@ function HsinAvatar({
   headAttentionEnabled: boolean;
   headAttentionStrength: number;
   centerHeadSequence: number;
+  forcedExpressionState: FaceExpressionState | null;
+  expressionInspectEnabled: boolean;
+  expressionInspectName: ExpressionInspectName;
+  expressionInspectWeight: number;
   handInspectionView: HandInspectionView | null;
   revealHands: boolean;
   handOverrideEnabled: boolean;
@@ -387,6 +438,8 @@ function HsinAvatar({
   const lastCenterHeadSequence = useRef(centerHeadSequence);
   const pointerMovementVersion = useRef(0);
   const centerHeadAtPointerVersion = useRef(0);
+  const stateExpressionWeights = useRef({ happy: 0, puzzled: 0 });
+  const previousExpressionInspectEnabled = useRef(false);
   const previousHandOverrideEnabled = useRef(handOverrideEnabled);
   const armIkSolutionKey = useRef("");
   const armIkSolution = useRef(
@@ -447,6 +500,8 @@ function HsinAvatar({
     );
     return () => {
       expressionManager?.setValue("blink", 0);
+      expressionManager?.setValue("happy", 0);
+      expressionManager?.setValue("puzzled", 0);
       expressionManager?.update();
       vrmaPlayback?.mixer.stopAllAction();
       vrmaPlayback?.mixer.uncacheRoot(vrm.scene);
@@ -1287,6 +1342,7 @@ function HsinAvatar({
         centerHeadAtPointerVersion.current = pointerMovementVersion.current;
       }
       const headTargetIsCentered =
+        expressionInspectEnabled ||
         !headAttentionEnabled ||
         centerHeadAtPointerVersion.current === pointerMovementVersion.current;
       const headTarget = headTargetIsCentered
@@ -1465,6 +1521,46 @@ function HsinAvatar({
       lookAt.pitch = -smoothedLookAtPointer.current.y * 8 * lookAtStrength;
       lookAt.update(d);
     }
+    const stateWeights = stateExpressionWeights.current;
+    if (expressionInspectEnabled) {
+      stateWeights.happy = 0;
+      stateWeights.puzzled = 0;
+      HSIN_EXPRESSION_INSPECT_NAMES.forEach((name) =>
+        expressionManager?.setValue(name, 0),
+      );
+      expressionManager?.setValue(
+        expressionInspectName,
+        expressionInspectWeight,
+      );
+    } else {
+      HSIN_EXPRESSION_INSPECT_NAMES.forEach((name) => {
+        if (name !== "happy" && name !== "puzzled") {
+          expressionManager?.setValue(name, 0);
+        }
+      });
+      const expressionState: FaceExpressionState =
+        forcedExpressionState ??
+        (signal.activity === "listening" ||
+        signal.activity === "thinking" ||
+        signal.activity === "speaking"
+          ? signal.activity
+          : "idle");
+      const expressionTargets = HSIN_STATE_EXPRESSIONS[expressionState];
+      stateWeights.happy = THREE.MathUtils.damp(
+        stateWeights.happy,
+        expressionTargets.happy ?? 0,
+        7,
+        d,
+      );
+      stateWeights.puzzled = THREE.MathUtils.damp(
+        stateWeights.puzzled,
+        expressionTargets.puzzled ?? 0,
+        7,
+        d,
+      );
+      expressionManager?.setValue("happy", stateWeights.happy);
+      expressionManager?.setValue("puzzled", stateWeights.puzzled);
+    }
     expressionManager?.update();
 
     if (poseMode === "relaxed") {
@@ -1600,7 +1696,23 @@ function HsinAvatar({
     }
     }
 
-    if (handInspectionView) {
+    if (expressionInspectEnabled) {
+      rig.current.updateMatrixWorld(true);
+      const rawHead = vrm.humanoid.getRawBoneNode("head");
+      if (rawHead) {
+        rawHead.updateWorldMatrix(true, false);
+        const faceTarget = rawHead
+          .getWorldPosition(new THREE.Vector3())
+          .add(new THREE.Vector3(0, 0.035, 0));
+        camera.position.copy(faceTarget).add(new THREE.Vector3(0, 0, 0.55));
+        camera.lookAt(faceTarget);
+        camera.updateProjectionMatrix();
+      }
+    } else if (previousExpressionInspectEnabled.current) {
+      camera.position.set(0, 0, 4.25);
+      camera.lookAt(new THREE.Vector3());
+      camera.updateProjectionMatrix();
+    } else if (handInspectionView) {
       rig.current.updateMatrixWorld(true);
       const isLeft = handInspectionView.startsWith("left");
       const isSide = handInspectionView.endsWith("Side");
@@ -1645,6 +1757,7 @@ function HsinAvatar({
     } else {
       loggedHandView.current = null;
     }
+    previousExpressionInspectEnabled.current = expressionInspectEnabled;
 
     if (inspectPose && armOverlay.current) {
       vrm.scene.updateMatrixWorld(true);
@@ -1827,6 +1940,10 @@ export function AvatarScene({
   headAttentionEnabled = true,
   headAttentionStrength = 1,
   centerHeadSequence = 0,
+  forcedExpressionState = null,
+  expressionInspectEnabled = false,
+  expressionInspectName = "happy",
+  expressionInspectWeight = 0.5,
   handInspectionView = null,
   revealHands = false,
   handOverrideEnabled = false,
@@ -1853,6 +1970,10 @@ export function AvatarScene({
   headAttentionEnabled?: boolean;
   headAttentionStrength?: number;
   centerHeadSequence?: number;
+  forcedExpressionState?: FaceExpressionState | null;
+  expressionInspectEnabled?: boolean;
+  expressionInspectName?: ExpressionInspectName;
+  expressionInspectWeight?: number;
   handInspectionView?: HandInspectionView | null;
   revealHands?: boolean;
   handOverrideEnabled?: boolean;
@@ -1901,6 +2022,10 @@ export function AvatarScene({
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
         centerHeadSequence={centerHeadSequence}
+        forcedExpressionState={forcedExpressionState}
+        expressionInspectEnabled={expressionInspectEnabled}
+        expressionInspectName={expressionInspectName}
+        expressionInspectWeight={expressionInspectWeight}
         handInspectionView={handInspectionView}
         revealHands={revealHands}
         handOverrideEnabled={handOverrideEnabled}
