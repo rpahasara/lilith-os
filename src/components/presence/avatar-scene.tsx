@@ -26,6 +26,12 @@ import {
   type AmbientVariationName,
   type AmbientIdleState,
 } from "@/lib/hsin-ambient-idle";
+import {
+  HsinSpeakingMotion,
+  type SpeakingMicroBone,
+  type SpeakingGestureBone,
+  type SpeakingGestureVariant,
+} from "@/lib/hsin-speaking-motion";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -806,6 +812,9 @@ function HsinAvatar({
   ambientTriggerSequence,
   ambientTriggerVariation,
   onAmbientStateChange,
+  speakingMotionEnabled,
+  speakingGestureTrigger,
+  speakingGestureVariant,
   armPoseMode,
   armCalibration,
   onArmCandidateChange,
@@ -853,6 +862,9 @@ function HsinAvatar({
   ambientTriggerSequence: number;
   ambientTriggerVariation: AmbientVariationName | null;
   onAmbientStateChange?: (state: AmbientIdleState) => void;
+  speakingMotionEnabled: boolean;
+  speakingGestureTrigger: number;
+  speakingGestureVariant: SpeakingGestureVariant;
   armPoseMode: ArmPoseMode;
   armCalibration: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -1186,6 +1198,12 @@ function HsinAvatar({
   const lastAmbientPhase = useRef<AmbientPhase>("idle");
   const lastAmbientVariation = useRef<AmbientVariationName | null>(null);
   const lastAmbientTrigger = useRef(ambientTriggerSequence);
+  // Speaking Motion Phase 1 POC: restrained conversational body engagement + one
+  // occasional right-arm beat while SPEAKING (dev-gated; default OFF). Pure;
+  // additive via the same seam. Owns chest/upperChest/neck/head + right arm only
+  // while enabled AND speaking.
+  const speakingMotion = useMemo(() => new HsinSpeakingMotion(), []);
+  const lastSpeakingGestureTrigger = useRef(speakingGestureTrigger);
   // Arm neutral-pose polish POC (dev-only A/B): reused temporaries + a signature
   // so the resulting candidate quaternions are reported to the dev UI only when
   // they actually change (not every frame).
@@ -2106,8 +2124,14 @@ function HsinAvatar({
       // variations, layered additively on the micro-motion above via the same
       // seam. Suppressed during expression/viseme inspect so diagnostics stay
       // clean. Touches only torso/neck/head — never arms/hands/springs.
+      // Ambient is suppressed by the speaking layer ONLY when that dev POC is
+      // itself enabled AND Hsin is actually speaking — so with Speaking Motion
+      // OFF (production default) ambient behaves exactly as before, regardless
+      // of timed speech / lip-sync being active.
+      const isSpeaking = speechPlayback.status !== "idle";
+      const speakingLayerActive = speakingMotionEnabled && isSpeaking;
       const ambientSuppressed =
-        expressionInspectEnabled || visemeInspectEnabled;
+        expressionInspectEnabled || visemeInspectEnabled || speakingLayerActive;
       if (ambientIdleEnabled && !ambientSuppressed) {
         if (ambientTriggerSequence !== lastAmbientTrigger.current) {
           lastAmbientTrigger.current = ambientTriggerSequence;
@@ -2154,6 +2178,50 @@ function HsinAvatar({
           lastAmbientVariation.current = null;
           onAmbientStateChange?.(ambientIdle.getState());
         }
+      }
+
+      // Speaking Motion Phase 1 (dev-gated, default OFF). Highest-priority body
+      // layer: while enabled it owns chest/upperChest/neck/head (micro-motion)
+      // and the right upper/lower arm + hand (one occasional beat), applied via
+      // the same additive seam. Ambient is already suppressed above while this
+      // layer is active, so the two never write the same bones concurrently.
+      // When disabled it resets to neutral so nothing lingers.
+      if (speakingMotionEnabled && !expressionInspectEnabled && !visemeInspectEnabled) {
+        speakingMotion.setVariant(speakingGestureVariant);
+        if (speakingGestureTrigger !== lastSpeakingGestureTrigger.current) {
+          lastSpeakingGestureTrigger.current = speakingGestureTrigger;
+          speakingMotion.triggerGesture();
+        }
+        const speakingFrame = speakingMotion.update(d, isSpeaking);
+        (Object.keys(speakingFrame.micro) as SpeakingMicroBone[]).forEach(
+          (bone) => {
+            const offset = speakingFrame.micro[bone];
+            if (offset) {
+              addMicroMotion(
+                bone as VRMHumanBoneName,
+                offset.x,
+                offset.y,
+                offset.z,
+              );
+            }
+          },
+        );
+        (Object.keys(speakingFrame.gesture) as SpeakingGestureBone[]).forEach(
+          (bone) => {
+            const offset = speakingFrame.gesture[bone];
+            if (offset) {
+              addMicroMotion(
+                bone as VRMHumanBoneName,
+                offset.x,
+                offset.y,
+                offset.z,
+              );
+            }
+          },
+        );
+      } else {
+        lastSpeakingGestureTrigger.current = speakingGestureTrigger;
+        speakingMotion.reset();
       }
 
       vrm.humanoid.update();
@@ -2891,6 +2959,9 @@ export function AvatarScene({
   ambientTriggerSequence = 0,
   ambientTriggerVariation = null,
   onAmbientStateChange,
+  speakingMotionEnabled = false,
+  speakingGestureTrigger = 0,
+  speakingGestureVariant = "v2",
   armPoseMode = "current",
   armCalibration = HSIN_ARM_CALIBRATION_ZERO,
   onArmCandidateChange,
@@ -2940,6 +3011,9 @@ export function AvatarScene({
   ambientTriggerSequence?: number;
   ambientTriggerVariation?: AmbientVariationName | null;
   onAmbientStateChange?: (state: AmbientIdleState) => void;
+  speakingMotionEnabled?: boolean;
+  speakingGestureTrigger?: number;
+  speakingGestureVariant?: SpeakingGestureVariant;
   armPoseMode?: ArmPoseMode;
   armCalibration?: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -3022,6 +3096,9 @@ export function AvatarScene({
         ambientTriggerSequence={ambientTriggerSequence}
         ambientTriggerVariation={ambientTriggerVariation}
         onAmbientStateChange={onAmbientStateChange}
+        speakingMotionEnabled={speakingMotionEnabled}
+        speakingGestureTrigger={speakingGestureTrigger}
+        speakingGestureVariant={speakingGestureVariant}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={onArmCandidateChange}

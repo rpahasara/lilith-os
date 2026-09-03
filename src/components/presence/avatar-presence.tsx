@@ -10,6 +10,7 @@ import {
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
+import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type {
   AmbientVariationName,
   AmbientIdleState,
@@ -240,6 +241,12 @@ export function AvatarPresence({
     },
     [],
   );
+  // Speaking Motion Phase 1 POC — dev-gated, default OFF.
+  const [speakingMotionEnabled, setSpeakingMotionEnabled] = useState(false);
+  const [speakingGestureTrigger, setSpeakingGestureTrigger] = useState(0);
+  // Dev A/B: V2 = visibility-tuned beat (default), V1 = original subtle beat.
+  const [speakingGestureVariant, setSpeakingGestureVariant] =
+    useState<SpeakingGestureVariant>("v2");
   // Arm / shoulder neutral-pose polish POC (dev-only A/B). Default CURRENT so
   // production arms are unchanged. Calibration deltas start at zero, so the
   // reference candidate is identical to current until tuned.
@@ -438,6 +445,9 @@ export function AvatarPresence({
         ambientTriggerSequence={ambientTriggerSequence}
         ambientTriggerVariation={ambientTriggerVariation}
         onAmbientStateChange={setAmbientState}
+        speakingMotionEnabled={speakingMotionEnabled}
+        speakingGestureTrigger={speakingGestureTrigger}
+        speakingGestureVariant={speakingGestureVariant}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={setArmCandidateQuats}
@@ -921,6 +931,47 @@ export function AvatarPresence({
           >
             Stop Speech
           </button>
+        </div>
+        <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2">
+          <button
+            type="button"
+            onClick={() => setSpeakingMotionEnabled((current) => !current)}
+            className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${speakingMotionEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Speaking Motion (POC) {speakingMotionEnabled ? "On" : "Off"}
+          </button>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              disabled={!speakingMotionEnabled}
+              onClick={() => setSpeakingGestureVariant("v1")}
+              className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider disabled:opacity-30 ${speakingGestureVariant === "v1" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              Gesture V1
+            </button>
+            <button
+              type="button"
+              disabled={!speakingMotionEnabled}
+              onClick={() => setSpeakingGestureVariant("v2")}
+              className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider disabled:opacity-30 ${speakingGestureVariant === "v2" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              Gesture V2
+            </button>
+          </div>
+          <button
+            type="button"
+            disabled={!speakingMotionEnabled}
+            onClick={() =>
+              setSpeakingGestureTrigger((current) => current + 1)
+            }
+            className="w-full rounded bg-emerald-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-emerald-100 disabled:opacity-30"
+          >
+            Trigger Speaking Gesture ({speakingGestureVariant.toUpperCase()})
+          </button>
+          <p className="text-[9px] leading-tight text-white/40">
+            Enable, then Play Timed Speech for micro-motion. Gesture also fires
+            occasionally on longer speech.
+          </p>
         </div>
       </div>
       <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
