@@ -24,6 +24,80 @@ const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
 
+export type AvatarPresentationFraming = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  cameraDistance: number;
+  fov: number;
+  targetY: number;
+};
+
+export type ForwardGazeCalibration = {
+  eyeYaw: number;
+  eyePitch: number;
+  headYaw: number;
+  headPitch: number;
+};
+export type FrontFacingCalibration = {
+  enabled: boolean;
+  hipsYaw: number;
+  spineYaw: number;
+  chestYaw: number;
+  upperChestYaw: number;
+  leftShoulderYaw: number;
+  leftShoulderRoll: number;
+  rightShoulderYaw: number;
+  rightShoulderRoll: number;
+};
+export const FRONT_FACING_CANDIDATE: FrontFacingCalibration = {
+  enabled: true,
+  hipsYaw: -2.5,
+  spineYaw: -2.5,
+  chestYaw: -3.5,
+  upperChestYaw: -1.5,
+  leftShoulderYaw: 0,
+  leftShoulderRoll: 0,
+  rightShoulderYaw: 0,
+  rightShoulderRoll: 0,
+};
+export const STRONG_FRONT_FACING_CANDIDATE: FrontFacingCalibration = {
+  enabled: true,
+  hipsYaw: -5,
+  spineYaw: -4.5,
+  chestYaw: -6.5,
+  upperChestYaw: -3,
+  leftShoulderYaw: 0,
+  leftShoulderRoll: 0,
+  rightShoulderYaw: 0,
+  rightShoulderRoll: 0,
+};
+
+export const PROPOSED_FORWARD_GAZE: ForwardGazeCalibration = {
+  eyeYaw: -1.6,
+  eyePitch: 0.15,
+  headYaw: -0.7,
+  headPitch: 0.1,
+};
+
+export const CURRENT_AVATAR_FRAMING: AvatarPresentationFraming = {
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  cameraDistance: 4.25,
+  fov: 36,
+  targetY: 0,
+};
+
+export const PROPOSED_AVATAR_FRAMING: AvatarPresentationFraming = {
+  scale: 1.15,
+  offsetX: -0.03,
+  offsetY: -0.06,
+  cameraDistance: 4.05,
+  fov: 34,
+  targetY: 0.32,
+};
+
 export type FaceExpressionState =
   | "idle"
   | "listening"
@@ -443,6 +517,9 @@ function createBasicMaterialFallback(source: THREE.Material) {
  */
 function HsinAvatar({
   signal,
+  presentationFraming,
+  forwardGaze,
+  frontFacingCalibration,
   poseMode,
   poseTuning,
   inspectPose,
@@ -476,6 +553,9 @@ function HsinAvatar({
   handOrientationTargets,
 }: {
   signal: PresenceSignal;
+  presentationFraming: AvatarPresentationFraming;
+  forwardGaze: ForwardGazeCalibration;
+  frontFacingCalibration: FrontFacingCalibration;
   poseMode: PoseTestMode;
   poseTuning: RelaxedPoseTuning;
   inspectPose: boolean;
@@ -1452,6 +1532,30 @@ function HsinAvatar({
       const headDrift = Math.sin(t * 0.14 + 2.1);
       const headTilt = Math.sin(t * 0.23 + 0.55);
 
+      if (frontFacingCalibration.enabled) {
+        addMicroMotion("hips", 0, frontFacingCalibration.hipsYaw, 0);
+        addMicroMotion("spine", 0, frontFacingCalibration.spineYaw, 0);
+        addMicroMotion("chest", 0, frontFacingCalibration.chestYaw, 0);
+        addMicroMotion(
+          "upperChest",
+          0,
+          frontFacingCalibration.upperChestYaw,
+          0,
+        );
+        addMicroMotion(
+          "leftShoulder",
+          0,
+          frontFacingCalibration.leftShoulderYaw,
+          frontFacingCalibration.leftShoulderRoll,
+        );
+        addMicroMotion(
+          "rightShoulder",
+          0,
+          frontFacingCalibration.rightShoulderYaw,
+          frontFacingCalibration.rightShoulderRoll,
+        );
+      }
+
       addMicroMotion("hips", 0, 0, weightShift);
       addMicroMotion("spine", breath * 0.48, 0, slowSway * 0.52);
       addMicroMotion("chest", breath * 0.68, slowSway * 0.16, 0);
@@ -1497,11 +1601,16 @@ function HsinAvatar({
         -smoothedHeadAttention.current.x * 0.65 * headAttentionStrength;
       addMicroMotion(
         "neck",
-        attentionPitch * 0.35,
-        attentionYaw * 0.35,
+        forwardGaze.headPitch * 0.35 + attentionPitch * 0.35,
+        forwardGaze.headYaw * 0.35 + attentionYaw * 0.35,
         attentionRoll * 0.25,
       );
-      addMicroMotion("head", attentionPitch, attentionYaw, attentionRoll);
+      addMicroMotion(
+        "head",
+        forwardGaze.headPitch + attentionPitch,
+        forwardGaze.headYaw + attentionYaw,
+        attentionRoll,
+      );
 
       vrm.humanoid.update();
       vrm.nodeConstraintManager?.update();
@@ -1640,8 +1749,12 @@ function HsinAvatar({
           d,
         ),
       );
-      lookAt.yaw = smoothedLookAtPointer.current.x * 12 * lookAtStrength;
-      lookAt.pitch = -smoothedLookAtPointer.current.y * 8 * lookAtStrength;
+      lookAt.yaw =
+        forwardGaze.eyeYaw +
+        smoothedLookAtPointer.current.x * 12 * lookAtStrength;
+      lookAt.pitch =
+        forwardGaze.eyePitch -
+        smoothedLookAtPointer.current.y * 8 * lookAtStrength;
       lookAt.update(d);
     }
     const stateWeights = stateExpressionWeights.current;
@@ -1870,8 +1983,11 @@ function HsinAvatar({
         camera.updateProjectionMatrix();
       }
     } else if (previousFaceInspectEnabled.current) {
-      camera.position.set(0, 0, 4.25);
-      camera.lookAt(new THREE.Vector3());
+      camera.position.set(0, presentationFraming.targetY, presentationFraming.cameraDistance);
+      camera.lookAt(new THREE.Vector3(0, presentationFraming.targetY, 0));
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = presentationFraming.fov;
+      }
       camera.updateProjectionMatrix();
     } else if (handInspectionView) {
       rig.current.updateMatrixWorld(true);
@@ -1995,7 +2111,15 @@ function HsinAvatar({
   return (
     <>
       <group ref={rig}>
-        <group ref={avatarFrame} scale={framing.scale} position={framing.position}>
+        <group
+          ref={avatarFrame}
+          scale={framing.scale * presentationFraming.scale}
+          position={[
+            framing.position.x * presentationFraming.scale + presentationFraming.offsetX,
+            framing.position.y * presentationFraming.scale + presentationFraming.offsetY,
+            framing.position.z * presentationFraming.scale,
+          ]}
+        >
           <primitive object={vrm.scene} />
         </group>
         {SHOW_CALIBRATION_DEBUG && inspectPose && (
@@ -2085,8 +2209,31 @@ function InspectionCamera({
   return null;
 }
 
+function PresentationCamera({
+  enabled,
+  framing,
+}: {
+  enabled: boolean;
+  framing: AvatarPresentationFraming;
+}) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (!enabled) return;
+    camera.position.set(0, framing.targetY, framing.cameraDistance);
+    camera.lookAt(new THREE.Vector3(0, framing.targetY, 0));
+    if (camera instanceof THREE.PerspectiveCamera) camera.fov = framing.fov;
+    camera.updateProjectionMatrix();
+  }, [camera, enabled, framing]);
+
+  return null;
+}
+
 export function AvatarScene({
   signal,
+  presentationFraming = CURRENT_AVATAR_FRAMING,
+  forwardGaze = PROPOSED_FORWARD_GAZE,
+  frontFacingCalibration = STRONG_FRONT_FACING_CANDIDATE,
   paused = false,
   poseMode = "authored",
   poseTuning,
@@ -2122,6 +2269,9 @@ export function AvatarScene({
   handOrientationTargets,
 }: {
   signal: PresenceSignal;
+  presentationFraming?: AvatarPresentationFraming;
+  forwardGaze?: ForwardGazeCalibration;
+  frontFacingCalibration?: FrontFacingCalibration;
   paused?: boolean;
   poseMode?: PoseTestMode;
   poseTuning: RelaxedPoseTuning;
@@ -2179,8 +2329,20 @@ export function AvatarScene({
       <directionalLight position={[-3, 4, 3]} intensity={2.2} color="#ffffff" />
       <directionalLight position={[3, 1, 2]} intensity={1.2} color="#bdefff" />
       <InspectionCamera enabled={inspectPose && !handInspectionView} view={inspectionView} />
+      <PresentationCamera
+        enabled={
+          !inspectPose &&
+          !handInspectionView &&
+          !expressionInspectEnabled &&
+          !visemeInspectEnabled
+        }
+        framing={presentationFraming}
+      />
       <HsinAvatar
         signal={signal}
+        presentationFraming={presentationFraming}
+        forwardGaze={forwardGaze}
+        frontFacingCalibration={frontFacingCalibration}
         poseMode={poseMode}
         poseTuning={poseTuning}
         inspectPose={inspectPose}

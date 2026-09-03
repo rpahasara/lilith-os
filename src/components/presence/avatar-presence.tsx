@@ -10,19 +10,27 @@ import {
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
-import type {
-  FaceExpressionState,
-  ExpressionInspectName,
-  VisemeInspectName,
-  HandInspectionView,
-  ArmIkTargets,
-  HandOrientationTargets,
-  ForearmCorrection,
-  CanonicalNeutralQuaternions,
-  NeutralCalibrationTargets,
-  PoseInspectionView,
-  PoseTestMode,
-  RelaxedPoseTuning,
+import {
+  CURRENT_AVATAR_FRAMING,
+  PROPOSED_AVATAR_FRAMING,
+  PROPOSED_FORWARD_GAZE,
+  FRONT_FACING_CANDIDATE,
+  STRONG_FRONT_FACING_CANDIDATE,
+  type AvatarPresentationFraming,
+  type ForwardGazeCalibration,
+  type FrontFacingCalibration,
+  type FaceExpressionState,
+  type ExpressionInspectName,
+  type VisemeInspectName,
+  type HandInspectionView,
+  type ArmIkTargets,
+  type HandOrientationTargets,
+  type ForearmCorrection,
+  type CanonicalNeutralQuaternions,
+  type NeutralCalibrationTargets,
+  type PoseInspectionView,
+  type PoseTestMode,
+  type RelaxedPoseTuning,
 } from "./avatar-scene";
 
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
@@ -211,6 +219,17 @@ export function AvatarPresence({
     hsinLipSync.getSnapshot,
     hsinLipSync.getServerSnapshot,
   );
+  const [presentationMode, setPresentationMode] = useState<"current" | "proposed">(
+    "proposed",
+  );
+  const [proposedFraming, setProposedFraming] =
+    useState<AvatarPresentationFraming>(PROPOSED_AVATAR_FRAMING);
+  const [forwardGaze, setForwardGaze] =
+    useState<ForwardGazeCalibration>(PROPOSED_FORWARD_GAZE);
+  const [frontFacingCalibration, setFrontFacingCalibration] =
+    useState<FrontFacingCalibration>(STRONG_FRONT_FACING_CANDIDATE);
+  const [frontFacingMode, setFrontFacingMode] =
+    useState<"current" | "candidate" | "strong">("strong");
   const [handInspectionView, setHandInspectionView] =
     useState<HandInspectionView | null>(null);
   const [revealHands, setRevealHands] = useState(true);
@@ -265,6 +284,13 @@ export function AvatarPresence({
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-[70%] w-[55%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.22),rgba(34,211,238,0.08)_50%,transparent_72%)] blur-2xl" />
       <AvatarScene
         signal={signal}
+        presentationFraming={
+          presentationMode === "proposed"
+            ? proposedFraming
+            : CURRENT_AVATAR_FRAMING
+        }
+        forwardGaze={forwardGaze}
+        frontFacingCalibration={frontFacingCalibration}
         paused={paused}
         poseMode={poseMode}
         poseTuning={poseTuning}
@@ -347,6 +373,50 @@ export function AvatarPresence({
           </button>
         ))}
       </div>
+      <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-2">
+        <div className="grid grid-cols-2 gap-1">
+          {(["current", "proposed"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setPresentationMode(mode)}
+              className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${presentationMode === mode ? "bg-cyan-400/25 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+        {presentationMode === "proposed" &&
+          ([
+            ["scale", "Scale", 0.8, 1.4, 0.01],
+            ["offsetY", "Y offset", -0.5, 0.5, 0.01],
+            ["offsetX", "X offset", -0.3, 0.3, 0.01],
+            ["cameraDistance", "Camera distance", 3, 5, 0.05],
+            ["fov", "FOV", 25, 50, 1],
+            ["targetY", "Target Y", -0.3, 0.6, 0.01],
+          ] as const).map(([key, label, min, max, step]) => (
+            <label
+              key={key}
+              className="block text-[10px] uppercase tracking-wider text-white/60"
+            >
+              {label} {proposedFraming[key].toFixed(2)}
+              <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={proposedFraming[key]}
+                onChange={(event) =>
+                  setProposedFraming((current) => ({
+                    ...current,
+                    [key]: Number(event.target.value),
+                  }))
+                }
+                className="mt-1 block w-full"
+              />
+            </label>
+          ))}
+      </div>
       <button
         type="button"
         onClick={() => setSpringsEnabled((current) => !current)}
@@ -399,6 +469,122 @@ export function AvatarPresence({
             className="mt-1 block w-full"
           />
         </label>
+      </div>
+      <div className="space-y-2 rounded-lg border border-sky-300/20 bg-sky-950/20 p-2">
+        <div className="text-[10px] uppercase tracking-wider text-sky-100/70">
+          Forward Gaze Calibration
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCenterEyesSequence((current) => current + 1);
+            setCenterHeadSequence((current) => current + 1);
+          }}
+          className="w-full rounded bg-sky-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-sky-100"
+        >
+          Direct Eye Contact Test
+        </button>
+        {([
+          ["eyeYaw", "Eye yaw", -4, 4, 0.1],
+          ["eyePitch", "Eye pitch", -2, 2, 0.05],
+          ["headYaw", "Head yaw", -3, 3, 0.1],
+          ["headPitch", "Head pitch", -2, 2, 0.05],
+        ] as const).map(([key, label, min, max, step]) => (
+          <label
+            key={key}
+            className="block text-[10px] uppercase tracking-wider text-white/60"
+          >
+            {label} {forwardGaze[key].toFixed(2)}°
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={forwardGaze[key]}
+              onChange={(event) =>
+                setForwardGaze((current) => ({
+                  ...current,
+                  [key]: Number(event.target.value),
+                }))
+              }
+              className="mt-1 block w-full"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+        <div className="text-[10px] uppercase tracking-wider text-fuchsia-100/70">
+          Front-Facing Stance
+        </div>
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setFrontFacingMode("current");
+              setFrontFacingCalibration((current) => ({
+                ...current,
+                enabled: false,
+              }));
+            }}
+            className={`rounded px-1 py-1.5 text-[9px] uppercase tracking-wider ${frontFacingMode === "current" ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+          >
+            Current
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFrontFacingMode("candidate");
+              setFrontFacingCalibration(FRONT_FACING_CANDIDATE);
+            }}
+            className={`rounded px-1 py-1.5 text-[9px] uppercase tracking-wider ${frontFacingMode === "candidate" ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+          >
+            Front
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFrontFacingMode("strong");
+              setFrontFacingCalibration(STRONG_FRONT_FACING_CANDIDATE);
+            }}
+            className={`rounded px-1 py-1.5 text-[9px] uppercase tracking-wider ${frontFacingMode === "strong" ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/55"}`}
+          >
+            Strong Front
+          </button>
+        </div>
+        {frontFacingCalibration.enabled &&
+          ([
+            ["hipsYaw", "Hips yaw", -8, 8, 0.1],
+            ["spineYaw", "Spine yaw", -8, 8, 0.1],
+            ["chestYaw", "Chest yaw", -8, 8, 0.1],
+            ["upperChestYaw", "Upper chest yaw", -8, 8, 0.1],
+            ["leftShoulderYaw", "Left shoulder yaw", -5, 5, 0.1],
+            ["leftShoulderRoll", "Left shoulder roll", -5, 5, 0.1],
+            ["rightShoulderYaw", "Right shoulder yaw", -5, 5, 0.1],
+            ["rightShoulderRoll", "Right shoulder roll", -5, 5, 0.1],
+          ] as const).map(([key, label, min, max, step]) => (
+            <label
+              key={key}
+              className="block text-[10px] uppercase tracking-wider text-white/60"
+            >
+              {label} {frontFacingCalibration[key].toFixed(1)}°
+              <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={frontFacingCalibration[key]}
+                onChange={(event) => {
+                  setFrontFacingMode("strong");
+                  setFrontFacingCalibration((current) => ({
+                    ...current,
+                    enabled: true,
+                    [key]: Number(event.target.value),
+                  }));
+                }}
+                className="mt-1 block w-full"
+              />
+            </label>
+          ))}
       </div>
       <div className="space-y-1 rounded-lg border border-white/10 bg-black/35 p-2">
         <div className="text-[10px] uppercase tracking-wider text-white/50">
