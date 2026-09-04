@@ -23,20 +23,13 @@ import {
   WebAudioPlayback,
 } from "./audio-playback";
 import { MockTTSProvider } from "./tts-provider";
+import { generateFallbackVisemes } from "./cue-fallback";
 import type {
   SpeechControllerSnapshot,
   SpeechStatus,
   TTSProvider,
   TTSRequest,
-  VisemeCue,
 } from "./types";
-
-function resolveCues(cues: VisemeCue[] | undefined): VisemeCue[] {
-  // (A) provider cues preferred. (B) word-derived and (C) phoneme alignment are
-  // future seams; for now, absent cues => empty (audio still plays, mouth stays
-  // closed) rather than a bad guess.
-  return cues && cues.length > 0 ? cues : [];
-}
 
 class LilithSpeechController {
   private provider: TTSProvider = new MockTTSProvider();
@@ -113,10 +106,21 @@ class LilithSpeechController {
       this.handleNaturalEnd();
     });
     this.playback = playback;
-    this.durationSec = result.durationSec ?? playback.durationSec;
+    // The decoded buffer is the exact duration authority (providers may omit it).
+    const durationSec = result.durationSec ?? playback.durationSec;
+    this.durationSec = durationSec;
+
+    // Cue resolution priority: (A) provider-supplied alignment; else the
+    // provider-neutral fallback generated NOW that the exact decoded duration is
+    // known (never from an estimate). Phoneme/word→cue conversion (B/C) slots in
+    // here later.
+    const cues =
+      result.cues && result.cues.length > 0
+        ? result.cues
+        : generateFallbackVisemes({ text: req.text, durationSec });
 
     // Start audio and visemes together; audio is the completion authority.
-    hsinLipSync.startSpeech(resolveCues(result.cues), { externalClock: true });
+    hsinLipSync.startSpeech(cues, { externalClock: true });
     playback.play();
     this.setState("playing", result.meta?.provider ?? this.provider.name, this.durationSec);
   }

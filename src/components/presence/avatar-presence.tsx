@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -11,6 +12,9 @@ import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
 import { lilithSpeech } from "@/lib/voice/speech-controller";
+import { MockTTSProvider } from "@/lib/voice/tts-provider";
+import { OpenAITTSProvider } from "@/lib/voice/openai-tts-provider";
+import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
 import type { OrchestratorReadout } from "@/lib/hsin-motion-orchestrator";
@@ -385,6 +389,28 @@ export function AvatarPresence({
     lilithSpeech.subscribe,
     lilithSpeech.getSnapshot,
     lilithSpeech.getServerSnapshot,
+  );
+  const mockProvider = useMemo(() => new MockTTSProvider(), []);
+  const openaiProvider = useMemo(() => new OpenAITTSProvider(), []);
+  const elevenLabsProvider = useMemo(() => new ElevenLabsTTSProvider(), []);
+  const [voiceProvider, setVoiceProvider] = useState<
+    "mock" | "openai" | "elevenlabs"
+  >("mock");
+  const [voiceText, setVoiceText] = useState(
+    "Hey Ravindu. Lilith is online. Looks like you finally gave me a real voice. Took you long enough, didn't it?",
+  );
+  const selectVoiceProvider = useCallback(
+    (which: "mock" | "openai" | "elevenlabs") => {
+      setVoiceProvider(which);
+      lilithSpeech.setProvider(
+        which === "openai"
+          ? openaiProvider
+          : which === "elevenlabs"
+            ? elevenLabsProvider
+            : mockProvider,
+      );
+    },
+    [mockProvider, openaiProvider, elevenLabsProvider],
   );
   const [presentationMode, setPresentationMode] = useState<"current" | "proposed">(
     "proposed",
@@ -976,20 +1002,52 @@ export function AvatarPresence({
         </div>
         <div className="space-y-1 rounded-lg border border-rose-300/20 bg-rose-950/20 p-2">
           <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-rose-100/70">
-            <span>Voice (POC · mock)</span>
+            <span>Voice (POC)</span>
             <span className="normal-case text-cyan-100">{voiceState.status}</span>
           </div>
+          <div className="grid grid-cols-3 gap-1">
+            <button
+              type="button"
+              onClick={() => selectVoiceProvider("mock")}
+              className={`rounded px-1 py-1.5 text-[10px] uppercase tracking-wider ${voiceProvider === "mock" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              Mock
+            </button>
+            <button
+              type="button"
+              onClick={() => selectVoiceProvider("openai")}
+              className={`rounded px-1 py-1.5 text-[10px] uppercase tracking-wider ${voiceProvider === "openai" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              OpenAI
+            </button>
+            <button
+              type="button"
+              onClick={() => selectVoiceProvider("elevenlabs")}
+              className={`rounded px-1 py-1.5 text-[10px] uppercase tracking-wider ${voiceProvider === "elevenlabs" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+            >
+              11Labs
+            </button>
+          </div>
+          <input
+            type="text"
+            value={voiceText}
+            onChange={(event) => setVoiceText(event.target.value)}
+            placeholder="Test sentence…"
+            className="w-full rounded bg-black/40 px-2 py-1 text-[10px] text-white/80 outline-none placeholder:text-white/30"
+          />
           <div className="grid grid-cols-2 gap-1">
             <button
               type="button"
               onClick={() =>
                 void lilithSpeech.speak({
-                  text: "Hello, I am Lilith. This is a voice pipeline test.",
+                  text:
+                    voiceText.trim() ||
+                    "Hey Ravindu. Lilith is online, and yes, I can finally talk.",
                 })
               }
               className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${voiceState.status === "playing" ? "bg-cyan-400/20 text-cyan-100" : "bg-rose-400/20 text-rose-100"}`}
             >
-              Play Test Voice
+              {voiceProvider === "mock" ? "Play Test Voice" : "Play Real TTS"}
             </button>
             <button
               type="button"
