@@ -25,6 +25,7 @@ import type {
 import {
   CURRENT_AVATAR_FRAMING,
   PROPOSED_AVATAR_FRAMING,
+  DASHBOARD_CLOSE_FRAMING,
   PROPOSED_FORWARD_GAZE,
   FRONT_FACING_CANDIDATE,
   STRONG_FRONT_FACING_CANDIDATE,
@@ -412,11 +413,14 @@ export function AvatarPresence({
     },
     [mockProvider, openaiProvider, elevenLabsProvider],
   );
-  const [presentationMode, setPresentationMode] = useState<"current" | "proposed">(
-    "proposed",
-  );
+  const [presentationMode, setPresentationMode] = useState<
+    "current" | "proposed" | "dashboard"
+  >("dashboard");
   const [proposedFraming, setProposedFraming] =
     useState<AvatarPresentationFraming>(PROPOSED_AVATAR_FRAMING);
+  // Default main-dashboard close upper-body framing (pass-1, tunable, not frozen).
+  const [dashboardFraming, setDashboardFraming] =
+    useState<AvatarPresentationFraming>(DASHBOARD_CLOSE_FRAMING);
   const [forwardGaze, setForwardGaze] =
     useState<ForwardGazeCalibration>(PROPOSED_FORWARD_GAZE);
   const [frontFacingCalibration, setFrontFacingCalibration] =
@@ -473,14 +477,46 @@ export function AvatarPresence({
 
   return (
     <div ref={ref} className="relative h-full w-full">
-      {/* soft backlight for depth — dimmer than the orb bloom */}
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[70%] w-[55%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.22),rgba(34,211,238,0.08)_50%,transparent_72%)] blur-2xl" />
+      {/* Widened, non-interactive presence viewport. It overshoots the square
+          stage so long hair has horizontal breathing room, while the camera's
+          vertical framing (her size + crop) is unchanged — only the canvas
+          aspect widens. Transparent + pointer-events-none so the surrounding
+          dashboard cards stay fully interactive. The debug <aside> is kept a
+          sibling below so it is neither masked nor made non-interactive. */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 h-full -translate-x-1/2"
+        style={{
+          width: "170%",
+          maxWidth: "780px",
+          // Soft left/right dissolve so the hair fades out instead of meeting a
+          // hard viewport edge (and never hard-overlaps a neighbouring card).
+          WebkitMaskImage:
+            "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%)",
+          maskImage:
+            "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%)",
+        }}
+      >
+        <div
+          className="relative h-full w-full"
+          // Keep the previous bottom dissolve; nested so both fades compose
+          // without CSS mask-composite.
+          style={{
+            WebkitMaskImage:
+              "linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%)",
+            maskImage:
+              "linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%)",
+          }}
+        >
+          {/* soft backlight for depth — dimmer than the orb bloom */}
+          <div className="pointer-events-none absolute left-1/2 top-[46%] h-[76%] w-[48%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.20),rgba(34,211,238,0.07)_52%,transparent_74%)] blur-3xl" />
       <AvatarScene
         signal={signal}
         presentationFraming={
-          presentationMode === "proposed"
-            ? proposedFraming
-            : CURRENT_AVATAR_FRAMING
+          presentationMode === "dashboard"
+            ? dashboardFraming
+            : presentationMode === "proposed"
+              ? proposedFraming
+              : CURRENT_AVATAR_FRAMING
         }
         forwardGaze={forwardGaze}
         frontFacingCalibration={frontFacingCalibration}
@@ -547,6 +583,8 @@ export function AvatarPresence({
         armIkTargets={armIkTargets}
         handOrientationTargets={handOrientationTargets}
       />
+        </div>
+      </div>
       {SHOW_CALIBRATION_DEBUG && <aside className={`fixed right-4 top-[120px] z-[100] max-h-[calc(100vh-160px)] overflow-y-auto rounded-xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-md ${debugPanelCollapsed ? "w-11" : "w-[300px] p-2"} max-[900px]:w-11 max-[900px]:p-0`}>
         <button
           type="button"
@@ -589,8 +627,8 @@ export function AvatarPresence({
         ))}
       </div>
       <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-2">
-        <div className="grid grid-cols-2 gap-1">
-          {(["current", "proposed"] as const).map((mode) => (
+        <div className="grid grid-cols-3 gap-1">
+          {(["current", "proposed", "dashboard"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -601,36 +639,46 @@ export function AvatarPresence({
             </button>
           ))}
         </div>
-        {presentationMode === "proposed" &&
-          ([
-            ["scale", "Scale", 0.8, 1.4, 0.01],
-            ["offsetY", "Y offset", -0.5, 0.5, 0.01],
-            ["offsetX", "X offset", -0.3, 0.3, 0.01],
-            ["cameraDistance", "Camera distance", 3, 5, 0.05],
-            ["fov", "FOV", 25, 50, 1],
-            ["targetY", "Target Y", -0.3, 0.6, 0.01],
-          ] as const).map(([key, label, min, max, step]) => (
-            <label
-              key={key}
-              className="block text-[10px] uppercase tracking-wider text-white/60"
-            >
-              {label} {proposedFraming[key].toFixed(2)}
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={proposedFraming[key]}
-                onChange={(event) =>
-                  setProposedFraming((current) => ({
-                    ...current,
-                    [key]: Number(event.target.value),
-                  }))
-                }
-                className="mt-1 block w-full"
-              />
-            </label>
-          ))}
+        {(presentationMode === "proposed" || presentationMode === "dashboard") &&
+          (() => {
+            const activeFraming =
+              presentationMode === "dashboard" ? dashboardFraming : proposedFraming;
+            const setActiveFraming =
+              presentationMode === "dashboard"
+                ? setDashboardFraming
+                : setProposedFraming;
+            return (
+              [
+                ["scale", "Scale", 0.8, 1.4, 0.01],
+                ["offsetY", "Y offset", -0.5, 0.5, 0.01],
+                ["offsetX", "X offset", -0.3, 0.3, 0.01],
+                ["cameraDistance", "Camera distance", 2.8, 5, 0.05],
+                ["fov", "FOV", 18, 50, 1],
+                ["targetY", "Target Y", -0.3, 1.4, 0.01],
+              ] as const
+            ).map(([key, label, min, max, step]) => (
+              <label
+                key={key}
+                className="block text-[10px] uppercase tracking-wider text-white/60"
+              >
+                {label} {activeFraming[key].toFixed(2)}
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={activeFraming[key]}
+                  onChange={(event) =>
+                    setActiveFraming((current) => ({
+                      ...current,
+                      [key]: Number(event.target.value),
+                    }))
+                  }
+                  className="mt-1 block w-full"
+                />
+              </label>
+            ));
+          })()}
       </div>
       <button
         type="button"

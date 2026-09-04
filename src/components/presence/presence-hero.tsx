@@ -13,7 +13,7 @@ import { StatusDot } from "@/components/ui/primitives";
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
-  const { messages, status, error, send } = useConversation();
+  const { messages, status, error, send, reset } = useConversation();
   const [greeting, setGreeting] = useState("Good evening");
 
   const hasConversation = messages.length > 0 || !!error;
@@ -74,17 +74,25 @@ export function PresenceHero() {
         </h1>
       </motion.div>
 
-      {/* presence stage — pluggable renderer (orb today, avatar later) */}
-      <div className="relative my-2 aspect-square w-full max-w-[420px] flex-1">
+      {/* presence stage — pluggable renderer (orb today, avatar later). No
+          grounded reflection: the bust-up should read as an integrated presence,
+          not a figure standing on a stage floor. */}
+      <div className="relative my-2 aspect-square w-full max-w-[460px] flex-1">
         <PresenceStage />
-        {/* reflection floor */}
-        <div className="pointer-events-none absolute bottom-6 left-1/2 h-8 w-40 -translate-x-1/2 rounded-[100%] bg-violet-bright/20 blur-2xl" />
       </div>
 
       {/* conversation region: live transcript once talking, else the idle hint + state chips */}
       <div className="mb-4 flex w-full flex-col items-center gap-3">
         {hasConversation ? (
-          <ConversationView />
+          <div className="flex w-full flex-col items-center gap-1.5">
+            <button
+              onClick={reset}
+              className="self-end rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+            >
+              Clear
+            </button>
+            <ConversationView />
+          </div>
         ) : (
           <div className="flex flex-col items-center gap-3 text-center">
             <AnimatePresence mode="wait">

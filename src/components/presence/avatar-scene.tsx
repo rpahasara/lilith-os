@@ -58,6 +58,12 @@ export type AvatarPresentationFraming = {
   cameraDistance: number;
   fov: number;
   targetY: number;
+  // When true, center horizontally on the HEAD bone instead of the full
+  // bounding box (which the asymmetric tail/hair skew off-axis). Puts the face
+  // on the camera's optical axis — fixes both the off-center drift and the
+  // off-axis perspective skew that reads as "not straight-on". Presentation
+  // only; never touches the pose. Omitted/false = legacy bounding-box centering.
+  centerOnFace?: boolean;
 };
 
 export type ForwardGazeCalibration = {
@@ -123,6 +129,23 @@ export const PROPOSED_AVATAR_FRAMING: AvatarPresentationFraming = {
   cameraDistance: 4.05,
   fov: 34,
   targetY: 0.32,
+};
+
+// Default main-dashboard presence: close, straight-on upper-body (bust-up)
+// portrait. Presentation/camera framing ONLY — the pose, torso yaw calibration,
+// and model normalization are untouched. Pass-1 visual calibration values;
+// tune via the debug framing sliders, not yet frozen. Full-body framings above
+// remain available for future edge-peek / top-peek / alternate presence states.
+export const DASHBOARD_CLOSE_FRAMING: AvatarPresentationFraming = {
+  scale: 1.19,
+  // offsetX 0: horizontal centering is now handled by centerOnFace (head-axis),
+  // which replaces the earlier manual -0.30 nudge. Left as a fine-tune lever.
+  offsetX: 0,
+  offsetY: -0.05,
+  cameraDistance: 3.15,
+  fov: 25,
+  targetY: 0.97,
+  centerOnFace: true,
 };
 
 export type FaceExpressionState =
@@ -1829,16 +1852,28 @@ function HsinAvatar({
     const center = bounds.getCenter(new THREE.Vector3());
     const scale = size.y > 0 ? 2.75 / size.y : 1;
 
+    // Extra horizontal shift (in framed/scaled units) that moves the HEAD —
+    // rather than the tail/hair-skewed bounding box — onto the optical axis.
+    // Consumed only when a framing profile sets `centerOnFace`.
+    const rawHead = vrm.humanoid?.getRawBoneNode("head");
+    const headWorldX = rawHead
+      ? rawHead.getWorldPosition(new THREE.Vector3()).x
+      : center.x;
+    const faceOffsetX = (center.x - headWorldX) * scale;
+
     console.info(
       `[Hsin pose diagnostic] framing=${JSON.stringify({
         size: size.toArray(),
         center: center.toArray(),
         scale,
+        headWorldX,
+        faceOffsetX,
       })}`,
     );
 
     return {
       scale,
+      faceOffsetX,
       position: new THREE.Vector3(
         -center.x * scale,
         -center.y * scale,
@@ -2978,7 +3013,11 @@ function HsinAvatar({
           ref={avatarFrame}
           scale={framing.scale * presentationFraming.scale}
           position={[
-            framing.position.x * presentationFraming.scale + presentationFraming.offsetX,
+            framing.position.x * presentationFraming.scale +
+              presentationFraming.offsetX +
+              (presentationFraming.centerOnFace
+                ? framing.faceOffsetX * presentationFraming.scale
+                : 0),
             framing.position.y * presentationFraming.scale + presentationFraming.offsetY,
             framing.position.z * presentationFraming.scale,
           ]}
