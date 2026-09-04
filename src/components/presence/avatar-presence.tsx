@@ -15,6 +15,7 @@ import { lilithSpeech } from "@/lib/voice/speech-controller";
 import { MockTTSProvider } from "@/lib/voice/tts-provider";
 import { OpenAITTSProvider } from "@/lib/voice/openai-tts-provider";
 import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
+import { voiceSettings } from "@/lib/voice/voice-settings";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
 import type { OrchestratorReadout } from "@/lib/hsin-motion-orchestrator";
@@ -390,6 +391,11 @@ export function AvatarPresence({
     lilithSpeech.subscribe,
     lilithSpeech.getSnapshot,
     lilithSpeech.getServerSnapshot,
+  );
+  const voiceSettingsState = useSyncExternalStore(
+    voiceSettings.subscribe,
+    voiceSettings.getSnapshot,
+    voiceSettings.getServerSnapshot,
   );
   const mockProvider = useMemo(() => new MockTTSProvider(), []);
   const openaiProvider = useMemo(() => new OpenAITTSProvider(), []);
@@ -1053,6 +1059,19 @@ export function AvatarPresence({
             <span>Voice (POC)</span>
             <span className="normal-case text-cyan-100">{voiceState.status}</span>
           </div>
+          <button
+            type="button"
+            onClick={() =>
+              voiceSettings.setAutoSpeak(!voiceSettingsState.autoSpeak)
+            }
+            className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${voiceSettingsState.autoSpeak ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Auto Speak Replies {voiceSettingsState.autoSpeak ? "On" : "Off"}
+          </button>
+          <p className="text-[9px] leading-tight text-white/40">
+            On: finished LILITH replies auto-speak via ElevenLabs (production
+            provider), independent of the manual provider below. Default off.
+          </p>
           <div className="grid grid-cols-3 gap-1">
             <button
               type="button"

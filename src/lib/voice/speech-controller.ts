@@ -70,24 +70,29 @@ class LilithSpeechController {
   }
 
   /**
-   * Speak the given text. Cleanly replaces any current speech. Returns when
-   * playback has started (or been superseded/failed).
+   * Speak the given text. Cleanly replaces any current speech. Resolves to
+   * `true` only when real audio playback actually started, `false` on any
+   * failure or supersession — callers use this to fall back safely.
+   *
+   * `providerOverride` lets production auto-speech pick a specific provider
+   * (ElevenLabs) without disturbing the dev-selected default provider.
    */
-  async speak(req: TTSRequest): Promise<void> {
+  async speak(req: TTSRequest, providerOverride?: TTSProvider): Promise<boolean> {
+    const provider = providerOverride ?? this.provider;
     // New request owns everything from here; invalidates prior async work.
     const myId = ++this.requestId;
     this.teardownPlayback();
     hsinLipSync.stopSpeech();
-    this.setState("loading", this.provider.name, 0);
+    this.setState("loading", provider.name, 0);
 
     let result;
     try {
-      result = await this.provider.synthesize(req);
+      result = await provider.synthesize(req);
     } catch {
       if (myId === this.requestId) this.hardReset();
-      return;
+      return false;
     }
-    if (myId !== this.requestId) return; // superseded during synthesis
+    if (myId !== this.requestId) return false; // superseded during synthesis
 
     let ctx: AudioContext;
     let buffer: AudioBuffer;
@@ -96,9 +101,9 @@ class LilithSpeechController {
       buffer = await decodeAudio(ctx, result.audio);
     } catch {
       if (myId === this.requestId) this.hardReset();
-      return;
+      return false;
     }
-    if (myId !== this.requestId) return; // superseded during decode
+    if (myId !== this.requestId) return false; // superseded during decode
 
     const playback = new WebAudioPlayback(ctx, buffer);
     playback.setOnEnded(() => {
@@ -122,7 +127,8 @@ class LilithSpeechController {
     // Start audio and visemes together; audio is the completion authority.
     hsinLipSync.startSpeech(cues, { externalClock: true });
     playback.play();
-    this.setState("playing", result.meta?.provider ?? this.provider.name, this.durationSec);
+    this.setState("playing", result.meta?.provider ?? provider.name, this.durationSec);
+    return true;
   }
 
   stop(): void {

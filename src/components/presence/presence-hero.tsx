@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
@@ -10,6 +10,13 @@ import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/primitives";
+import { lilithSpeech } from "@/lib/voice/speech-controller";
+import { voiceSettings } from "@/lib/voice/voice-settings";
+import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
+
+// Stable module-level production auto-speech provider (never re-created on
+// render). Independent of the manual dev POC provider selection.
+const productionVoiceProvider = new ElevenLabsTTSProvider();
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
@@ -27,18 +34,83 @@ export function PresenceHero() {
   // Drive the presence from the real conversation lifecycle — via semantic
   // events, not by poking the renderer. The engine maps these to signals.
   const lastLilith = [...messages].reverse().find((m) => m.role === "lilith");
-  const seenReply = useRef<string | null>(null);
+  const handledReplyId = useRef<string | null>(null);
+  // Tracks whether we've asserted a real-speaking presence override for the
+  // current audio, so we only settle back to idle after having spoken.
+  const spokePresence = useRef(false);
+
+  // Live production-voice playback status (audio lifecycle authority).
+  const voiceStatus = useSyncExternalStore(
+    lilithSpeech.subscribe,
+    () => lilithSpeech.getSnapshot().status,
+    () => lilithSpeech.getServerSnapshot().status,
+  );
 
   useEffect(() => {
     if (isSending) emit({ type: "conversation.response_started" });
   }, [isSending, emit]);
 
+  // Handle each finalized LILITH reply exactly once (dedupe by stable UUID id,
+  // marked BEFORE any async so StrictMode/effect re-entry can't double-speak).
   useEffect(() => {
-    if (lastLilith && lastLilith.id !== seenReply.current) {
-      seenReply.current = lastLilith.id;
+    if (!lastLilith || lastLilith.id === handledReplyId.current) return;
+    const id = lastLilith.id;
+    const text = lastLilith.text;
+    handledReplyId.current = id;
+
+    // AUTO SPEAK OFF (default): unchanged — the canned 2.6s speaking transient.
+    if (!voiceSettings.getSnapshot().autoSpeak) {
       emit({ type: "conversation.response_complete" });
+      return;
     }
+
+    // AUTO SPEAK ON: real audio owns the speaking lifecycle. On failure (or an
+    // unconfigured provider) fall back ONCE to the canned transient so the
+    // avatar still reacts and never sticks. No automatic retry of the same id.
+    let cancelled = false;
+    void lilithSpeech.speak({ text }, productionVoiceProvider).then((ok) => {
+      if (cancelled) return;
+      if (!ok && handledReplyId.current === id) {
+        emit({ type: "conversation.response_complete" });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [lastLilith, emit]);
+
+  // Real-audio presence ownership (only while AUTO SPEAK is on): the audio
+  // lifecycle is the sole authority for real speaking. Loading = thinking (not
+  // speaking); playing/paused = speaking; return to idle settles once.
+  useEffect(() => {
+    if (!voiceSettings.getSnapshot().autoSpeak) return;
+    if (voiceStatus === "loading") {
+      override({ activity: "thinking", emotion: "focused", attention: "locked" });
+    } else if (voiceStatus === "playing" || voiceStatus === "paused") {
+      spokePresence.current = true;
+      override({
+        activity: "speaking",
+        emotion: "pleased",
+        attention: "engaged",
+        speaking: true,
+      });
+    } else if (voiceStatus === "idle" && spokePresence.current) {
+      spokePresence.current = false;
+      override({
+        activity: "idle",
+        emotion: "neutral",
+        attention: "ambient",
+        speaking: false,
+      });
+    }
+  }, [voiceStatus, override]);
+
+  // Stop any speech cleanly when this surface unmounts / route changes.
+  useEffect(() => {
+    return () => {
+      lilithSpeech.stop();
+    };
+  }, []);
 
   useEffect(() => {
     if (error) emit({ type: "conversation.error" });
@@ -53,6 +125,11 @@ export function PresenceHero() {
   }
 
   function handleSubmit(text: string) {
+    // User's new turn interrupts any in-progress speech immediately: stop audio
+    // and clear visemes. Suppress the settle-to-idle override so response_started
+    // / sending can move presence cleanly into thinking.
+    spokePresence.current = false;
+    lilithSpeech.stop();
     emit({ type: "conversation.user_message" });
     send(text);
   }
