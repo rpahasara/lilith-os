@@ -40,6 +40,11 @@ import {
   type RareMotionState,
   type RareTurnSide,
 } from "@/lib/hsin-rare-motion";
+import {
+  HsinMotionOrchestrator,
+  type OrchestratorMode,
+  type OrchestratorReadout,
+} from "@/lib/hsin-motion-orchestrator";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -827,6 +832,9 @@ function HsinAvatar({
   rareTriggerSequence,
   rareTurnSide,
   onRareStateChange,
+  orchestratorEnabled,
+  orchestratorFastTest,
+  onOrchestratorStateChange,
   armPoseMode,
   armCalibration,
   onArmCandidateChange,
@@ -881,6 +889,9 @@ function HsinAvatar({
   rareTriggerSequence: number;
   rareTurnSide: RareTurnSide;
   onRareStateChange?: (state: RareMotionState) => void;
+  orchestratorEnabled: boolean;
+  orchestratorFastTest: boolean;
+  onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode: ArmPoseMode;
   armCalibration: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -1211,6 +1222,15 @@ function HsinAvatar({
   // Ambient Idle Phase 1 POC: deterministic scheduler layered additively on
   // Natural Idle V2 (dev-gated; default OFF). Pure, torso/neck/head only.
   const ambientIdle = useMemo(() => new HsinAmbientIdle(), []);
+  // Dev-only FAST TEST: a second instance of the SAME scheduler with only a
+  // shorter cooldown (3-6s vs 25-45s). All variation offsets and enter/hold/exit
+  // animation timing are the module's own constants, so they are identical to
+  // the production instance — only the between-variation wait is accelerated.
+  const ambientIdleFast = useMemo(
+    () => new HsinAmbientIdle({ cooldownMin: 3, cooldownMax: 6 }),
+    [],
+  );
+  const activeAmbientWasFast = useRef(false);
   const lastAmbientPhase = useRef<AmbientPhase>("idle");
   const lastAmbientVariation = useRef<AmbientVariationName | null>(null);
   const lastAmbientTrigger = useRef(ambientTriggerSequence);
@@ -1227,6 +1247,13 @@ function HsinAvatar({
   const lastRareTrigger = useRef(rareTriggerSequence);
   const lastRarePhase = useRef<RareMotionPhase>("idle");
   const rareSpeechWasActive = useRef(false);
+  // Motion Orchestrator Phase 1 POC: decides WHEN the existing schedulers may
+  // run (dev-gated; default OFF). Pure controller — adds no animation and never
+  // mutates the schedulers' data. start()/reset() on the enable-toggle edges.
+  const orchestrator = useMemo(() => new HsinMotionOrchestrator(), []);
+  const prevOrchestratorEnabled = useRef(orchestratorEnabled);
+  const lastOrchMode = useRef<OrchestratorMode | null>(null);
+  const lastOrchSecond = useRef(-1);
   // Arm neutral-pose polish POC (dev-only A/B): reused temporaries + a signature
   // so the resulting candidate quaternions are reported to the dev UI only when
   // they actually change (not every frame).
@@ -2154,6 +2181,72 @@ function HsinAvatar({
       const isSpeaking = speechPlayback.status !== "idle";
       const speakingLayerActive = speakingMotionEnabled && isSpeaking;
 
+      // Motion Orchestrator (dev-gated, default OFF). Decides — this same frame —
+      // whether ambient may run and whether to auto-fire a rare turn, reading the
+      // schedulers' previous-frame phases. When OFF, the effective gates collapse
+      // to exactly the committed props so manual/default behavior is unchanged.
+      const inspectActive = expressionInspectEnabled || visemeInspectEnabled;
+
+      // FAST TEST: with the orchestrator on and fast-test on, ambient uses the
+      // accelerated-cooldown instance; otherwise the production instance. On a
+      // switch, reset the instance left behind so no stale offset lingers.
+      const ambientFast = orchestratorEnabled && orchestratorFastTest;
+      const activeAmbient = ambientFast ? ambientIdleFast : ambientIdle;
+      if (ambientFast !== activeAmbientWasFast.current) {
+        activeAmbientWasFast.current = ambientFast;
+        (ambientFast ? ambientIdle : ambientIdleFast).reset();
+        lastAmbientPhase.current = "idle";
+        lastAmbientVariation.current = null;
+      }
+
+      if (orchestratorEnabled !== prevOrchestratorEnabled.current) {
+        prevOrchestratorEnabled.current = orchestratorEnabled;
+        if (orchestratorEnabled) {
+          orchestrator.setFast(orchestratorFastTest);
+          orchestrator.start();
+        } else {
+          orchestrator.reset();
+          lastOrchMode.current = null;
+          lastOrchSecond.current = -1;
+          onOrchestratorStateChange?.(orchestrator.getState());
+        }
+      }
+      let ambientRun = ambientIdleEnabled;
+      let rareEnabled = rareMotionEnabled;
+      let orchestratorRareTrigger = false;
+      let orchestratorRareSide: RareTurnSide = "right";
+      if (orchestratorEnabled) {
+        // Keep fast-test cadence in sync (no-op unless it actually changed).
+        orchestrator.setFast(orchestratorFastTest);
+        const decision = orchestrator.update({
+          dt: d,
+          speaking: speakingLayerActive,
+          rareActive: rareMotion.getState().phase !== "idle",
+          ambientActive: activeAmbient.getState().phase !== "idle",
+          inspectActive,
+        });
+        ambientRun = decision.ambientAllowed;
+        rareEnabled = true;
+        orchestratorRareTrigger = decision.rareTrigger;
+        orchestratorRareSide = decision.rareSide;
+        // Throttled readout: emit on mode change or once per whole second.
+        const sec = Math.ceil(decision.nextRareIn);
+        if (
+          decision.mode !== lastOrchMode.current ||
+          sec !== lastOrchSecond.current
+        ) {
+          lastOrchMode.current = decision.mode;
+          lastOrchSecond.current = sec;
+          onOrchestratorStateChange?.({
+            mode: decision.mode,
+            nextRareIn: decision.nextRareIn,
+            graceRemaining: decision.graceRemaining,
+            ambientAllowed: decision.ambientAllowed,
+            lastTransition: decision.lastTransition,
+          });
+        }
+      }
+
       // Rare Larger Motion (dev-gated, default OFF). Updated BEFORE ambient so
       // its active state can suppress ambient this same frame. Priority:
       // speaking > rare > ambient. Speech owns the pose — it cannot be started
@@ -2162,18 +2255,20 @@ function HsinAvatar({
       // offsets are applied further down (after ambient, before speaking).
       let rareOffsets: RareMotionOffsets = {};
       let rareActive = false;
-      if (
-        rareMotionEnabled &&
-        !expressionInspectEnabled &&
-        !visemeInspectEnabled
-      ) {
+      if (rareEnabled && !expressionInspectEnabled && !visemeInspectEnabled) {
         if (speakingLayerActive) {
           if (!rareSpeechWasActive.current) rareMotion.beginExit();
           // Ignore any trigger requested while speaking owns the pose.
           lastRareTrigger.current = rareTriggerSequence;
-        } else if (rareTriggerSequence !== lastRareTrigger.current) {
-          lastRareTrigger.current = rareTriggerSequence;
-          rareMotion.trigger(rareTurnSide);
+        } else {
+          // Manual dev trigger (still works when orchestrator is OFF or ON).
+          if (rareTriggerSequence !== lastRareTrigger.current) {
+            lastRareTrigger.current = rareTriggerSequence;
+            rareMotion.trigger(rareTurnSide);
+          }
+          // Orchestrator auto-trigger (trigger() is a no-op unless idle, so this
+          // never fights a manual/in-flight turn).
+          if (orchestratorRareTrigger) rareMotion.trigger(orchestratorRareSide);
         }
         rareSpeechWasActive.current = speakingLayerActive;
         rareOffsets = rareMotion.update(d);
@@ -2205,14 +2300,14 @@ function HsinAvatar({
         visemeInspectEnabled ||
         speakingLayerActive ||
         rareActive;
-      if (ambientIdleEnabled && !ambientSuppressed) {
+      if (ambientRun && !ambientSuppressed) {
         if (ambientTriggerSequence !== lastAmbientTrigger.current) {
           lastAmbientTrigger.current = ambientTriggerSequence;
           // null variation = alternate (scheduler picks, avoiding repeat);
           // a named variation = dev "trigger this one" button.
-          ambientIdle.trigger(ambientTriggerVariation ?? undefined);
+          activeAmbient.trigger(ambientTriggerVariation ?? undefined);
         }
-        const ambientOffsets = ambientIdle.update(d);
+        const ambientOffsets = activeAmbient.update(d);
         (Object.keys(ambientOffsets) as AmbientBone[]).forEach((bone) => {
           const offset = ambientOffsets[bone];
           if (offset) {
@@ -2224,7 +2319,7 @@ function HsinAvatar({
             );
           }
         });
-        const ambientState = ambientIdle.getState();
+        const ambientState = activeAmbient.getState();
         if (
           ambientState.phase !== lastAmbientPhase.current ||
           ambientState.variation !== lastAmbientVariation.current
@@ -2246,10 +2341,10 @@ function HsinAvatar({
           lastAmbientPhase.current !== "idle" ||
           lastAmbientVariation.current !== null
         ) {
-          ambientIdle.reset();
+          activeAmbient.reset();
           lastAmbientPhase.current = "idle";
           lastAmbientVariation.current = null;
-          onAmbientStateChange?.(ambientIdle.getState());
+          onAmbientStateChange?.(activeAmbient.getState());
         }
       }
 
@@ -3049,6 +3144,9 @@ export function AvatarScene({
   rareTriggerSequence = 0,
   rareTurnSide = "right",
   onRareStateChange,
+  orchestratorEnabled = false,
+  orchestratorFastTest = false,
+  onOrchestratorStateChange,
   armPoseMode = "current",
   armCalibration = HSIN_ARM_CALIBRATION_ZERO,
   onArmCandidateChange,
@@ -3105,6 +3203,9 @@ export function AvatarScene({
   rareTriggerSequence?: number;
   rareTurnSide?: RareTurnSide;
   onRareStateChange?: (state: RareMotionState) => void;
+  orchestratorEnabled?: boolean;
+  orchestratorFastTest?: boolean;
+  onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode?: ArmPoseMode;
   armCalibration?: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -3194,6 +3295,9 @@ export function AvatarScene({
         rareTriggerSequence={rareTriggerSequence}
         rareTurnSide={rareTurnSide}
         onRareStateChange={onRareStateChange}
+        orchestratorEnabled={orchestratorEnabled}
+        orchestratorFastTest={orchestratorFastTest}
+        onOrchestratorStateChange={onOrchestratorStateChange}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={onArmCandidateChange}

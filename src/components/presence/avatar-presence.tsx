@@ -12,6 +12,7 @@ import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
+import type { OrchestratorReadout } from "@/lib/hsin-motion-orchestrator";
 import type {
   AmbientVariationName,
   AmbientIdleState,
@@ -258,6 +259,18 @@ export function AvatarPresence({
     side: "right",
     weight: 0,
   });
+  // Motion Orchestrator Phase 1 POC — dev-gated, default OFF.
+  const [orchestratorEnabled, setOrchestratorEnabled] = useState(false);
+  const [orchestratorFastTest, setOrchestratorFastTest] = useState(false);
+  const [orchestratorState, setOrchestratorState] = useState<OrchestratorReadout>(
+    {
+      mode: "idle",
+      nextRareIn: 0,
+      graceRemaining: 0,
+      ambientAllowed: false,
+      lastTransition: "",
+    },
+  );
   // Arm / shoulder neutral-pose polish POC (dev-only A/B). Default CURRENT so
   // production arms are unchanged. Calibration deltas start at zero, so the
   // reference candidate is identical to current until tuned.
@@ -463,6 +476,9 @@ export function AvatarPresence({
         rareTriggerSequence={rareTriggerSequence}
         rareTurnSide={rareTurnSide}
         onRareStateChange={setRareState}
+        orchestratorEnabled={orchestratorEnabled}
+        orchestratorFastTest={orchestratorFastTest}
+        onOrchestratorStateChange={setOrchestratorState}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={setArmCandidateQuats}
@@ -1138,6 +1154,70 @@ export function AvatarPresence({
             <div className="text-cyan-100 capitalize">{rareState.phase}</div>
           </div>
         </div>
+      </div>
+      <div className="space-y-1 rounded-lg border border-teal-300/20 bg-teal-950/20 p-2">
+        <button
+          type="button"
+          onClick={() => setOrchestratorEnabled((current) => !current)}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${orchestratorEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+        >
+          Auto Motion Orchestrator {orchestratorEnabled ? "On" : "Off"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOrchestratorFastTest((current) => !current)}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${orchestratorFastTest ? "bg-amber-400/20 text-amber-100" : "bg-black/40 text-white/55"}`}
+        >
+          Fast Test Mode {orchestratorFastTest ? "On" : "Off"}
+        </button>
+        <div className="grid grid-cols-3 gap-1 pt-0.5 text-[10px] uppercase tracking-wider text-white/60">
+          <div>
+            Mode
+            <div className="text-cyan-100 capitalize">
+              {orchestratorEnabled ? orchestratorState.mode : "off"}
+            </div>
+          </div>
+          <div>
+            Next Rare
+            <div className="text-cyan-100 normal-case">
+              {orchestratorEnabled
+                ? `${Math.ceil(orchestratorState.nextRareIn)}s`
+                : "—"}
+            </div>
+          </div>
+          <div>
+            Grace
+            <div className="text-cyan-100 normal-case">
+              {orchestratorEnabled
+                ? `${Math.ceil(orchestratorState.graceRemaining)}s`
+                : "—"}
+            </div>
+          </div>
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-white/60">
+          Ambient
+          <span
+            className={`ml-1 normal-case ${orchestratorEnabled && orchestratorState.ambientAllowed ? "text-emerald-200" : "text-white/45"}`}
+          >
+            {orchestratorEnabled
+              ? orchestratorState.ambientAllowed
+                ? "allowed"
+                : "blocked"
+              : "—"}
+          </span>
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-white/60">
+          Last Transition
+          <span className="ml-1 normal-case text-cyan-100">
+            {orchestratorEnabled && orchestratorState.lastTransition
+              ? orchestratorState.lastTransition
+              : "—"}
+          </span>
+        </div>
+        <p className="text-[9px] leading-tight text-white/40">
+          When On: ambient auto-allowed, rare auto-fires ~90-180s, speaking wins.
+          Manual triggers still work. Default OFF.
+        </p>
       </div>
       {SHOW_CALIBRATION_DEBUG && (
         <div className="space-y-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-2 text-[10px] text-white/70">
