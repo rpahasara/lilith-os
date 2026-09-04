@@ -14,6 +14,20 @@ export type SpeechPlaybackSnapshot = {
   startedAtMs: number;
   pausedAtMs: number;
   endMs: number;
+  /**
+   * When true, this playback is driven by an external owner (lilithSpeech /
+   * real audio): the controller does NOT run its own completion timer or own
+   * the elapsed clock — the audio layer is the sole completion authority, and
+   * viseme sampling uses the audio-derived elapsed time instead of
+   * performance.now(). Default false = legacy internal-clock behavior.
+   */
+  externalClock: boolean;
+};
+
+/** Options for {@link HsinLipSyncController.startSpeech}. */
+export type StartSpeechOptions = {
+  /** Drive completion/elapsed externally (audio-authoritative). Default false. */
+  externalClock?: boolean;
 };
 
 const EMPTY_SNAPSHOT: SpeechPlaybackSnapshot = {
@@ -23,6 +37,7 @@ const EMPTY_SNAPSHOT: SpeechPlaybackSnapshot = {
   startedAtMs: 0,
   pausedAtMs: 0,
   endMs: 0,
+  externalClock: false,
 };
 
 class HsinLipSyncController {
@@ -38,7 +53,8 @@ class HsinLipSyncController {
     return () => this.listeners.delete(listener);
   };
 
-  startSpeech(cues: readonly VisemeCue[]) {
+  startSpeech(cues: readonly VisemeCue[], opts: StartSpeechOptions = {}) {
+    const externalClock = opts.externalClock ?? false;
     const normalizedCues = cues
       .map((cue) => ({
         ...cue,
@@ -64,9 +80,11 @@ class HsinLipSyncController {
       startedAtMs: performance.now(),
       pausedAtMs: 0,
       endMs,
+      externalClock,
     };
     this.emit();
-    this.scheduleEnd(endMs);
+    // In external-clock mode the audio layer owns completion — no internal timer.
+    if (!externalClock) this.scheduleEnd(endMs);
   }
 
   stopSpeech() {
@@ -81,19 +99,29 @@ class HsinLipSyncController {
   pauseSpeech() {
     if (this.snapshot.status !== "playing") return;
     this.clearEndTimer();
+    // External-clock mode: lilithSpeech owns the elapsed clock, so we only flip
+    // status; pausedAtMs is irrelevant to sampling here.
     this.snapshot = {
       ...this.snapshot,
       status: "paused",
-      pausedAtMs: Math.min(
-        this.snapshot.endMs,
-        performance.now() - this.snapshot.startedAtMs,
-      ),
+      pausedAtMs: this.snapshot.externalClock
+        ? this.snapshot.pausedAtMs
+        : Math.min(
+            this.snapshot.endMs,
+            performance.now() - this.snapshot.startedAtMs,
+          ),
     };
     this.emit();
   }
 
   resumeSpeech() {
     if (this.snapshot.status !== "paused") return;
+    if (this.snapshot.externalClock) {
+      // No internal timer/clock to rebase — just resume status.
+      this.snapshot = { ...this.snapshot, status: "playing" };
+      this.emit();
+      return;
+    }
     const remainingMs = Math.max(0, this.snapshot.endMs - this.snapshot.pausedAtMs);
     this.snapshot = {
       ...this.snapshot,

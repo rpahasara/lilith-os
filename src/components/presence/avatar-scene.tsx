@@ -19,6 +19,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
 import type { SpeechPlaybackSnapshot, VisemeCue } from "@/lib/hsin-lip-sync";
+import { lilithSpeech } from "@/lib/voice/speech-controller";
 import {
   HsinAmbientIdle,
   type AmbientBone,
@@ -184,6 +185,7 @@ function getCueWeight(cue: VisemeCue | undefined) {
 function sampleTimedSpeech(
   playback: SpeechPlaybackSnapshot,
   nowMs: number,
+  externalElapsedMs?: number,
 ): Record<VisemeInspectName, number> {
   const weights: Record<VisemeInspectName, number> = {
     aa: 0,
@@ -194,10 +196,14 @@ function sampleTimedSpeech(
   };
   if (playback.status === "idle" || playback.cues.length === 0) return weights;
 
+  // External-clock (voice-driven) playback samples against the audio-derived
+  // elapsed time; legacy timed-speech uses the internal performance.now() clock.
   const elapsedMs =
-    playback.status === "paused"
-      ? playback.pausedAtMs
-      : Math.max(0, nowMs - playback.startedAtMs);
+    playback.externalClock && externalElapsedMs != null
+      ? externalElapsedMs
+      : playback.status === "paused"
+        ? playback.pausedAtMs
+        : Math.max(0, nowMs - playback.startedAtMs);
   const nextIndex = playback.cues.findIndex((cue) => cue.startMs > elapsedMs);
   const currentIndex = nextIndex === -1 ? playback.cues.length - 1 : nextIndex - 1;
   if (currentIndex < 0) return weights;
@@ -2603,7 +2609,14 @@ function HsinAvatar({
     if (visemeInspectEnabled) {
       visemeWeights[visemeInspectName] = visemeInspectWeight;
     } else if (speechPlayback.status !== "idle") {
-      Object.assign(visemeWeights, sampleTimedSpeech(speechPlayback, performance.now()));
+      Object.assign(
+        visemeWeights,
+        sampleTimedSpeech(
+          speechPlayback,
+          performance.now(),
+          speechPlayback.externalClock ? lilithSpeech.elapsedMs() : undefined,
+        ),
+      );
     } else if (fakeSpeechEnabled) {
       const segmentDuration = 0.14;
       const sequencePosition = renderState.clock.elapsedTime / segmentDuration;

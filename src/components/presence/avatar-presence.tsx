@@ -10,6 +10,7 @@ import {
 import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
+import { lilithSpeech } from "@/lib/voice/speech-controller";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
 import type { OrchestratorReadout } from "@/lib/hsin-motion-orchestrator";
@@ -379,6 +380,11 @@ export function AvatarPresence({
     hsinLipSync.subscribe,
     hsinLipSync.getSnapshot,
     hsinLipSync.getServerSnapshot,
+  );
+  const voiceState = useSyncExternalStore(
+    lilithSpeech.subscribe,
+    lilithSpeech.getSnapshot,
+    lilithSpeech.getServerSnapshot,
   );
   const [presentationMode, setPresentationMode] = useState<"current" | "proposed">(
     "proposed",
@@ -967,6 +973,48 @@ export function AvatarPresence({
           >
             Stop Speech
           </button>
+        </div>
+        <div className="space-y-1 rounded-lg border border-rose-300/20 bg-rose-950/20 p-2">
+          <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-rose-100/70">
+            <span>Voice (POC · mock)</span>
+            <span className="normal-case text-cyan-100">{voiceState.status}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() =>
+                void lilithSpeech.speak({
+                  text: "Hello, I am Lilith. This is a voice pipeline test.",
+                })
+              }
+              className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${voiceState.status === "playing" ? "bg-cyan-400/20 text-cyan-100" : "bg-rose-400/20 text-rose-100"}`}
+            >
+              Play Test Voice
+            </button>
+            <button
+              type="button"
+              onClick={() => lilithSpeech.stop()}
+              className="rounded bg-black/40 px-2 py-1.5 text-[10px] uppercase tracking-wider text-white/55"
+            >
+              Stop Test Voice
+            </button>
+            <button
+              type="button"
+              disabled={voiceState.status !== "playing"}
+              onClick={() => lilithSpeech.pause()}
+              className="rounded bg-black/40 px-2 py-1.5 text-[10px] uppercase tracking-wider text-white/55 disabled:opacity-30"
+            >
+              Pause Test Voice
+            </button>
+            <button
+              type="button"
+              disabled={voiceState.status !== "paused"}
+              onClick={() => lilithSpeech.resume()}
+              className="rounded bg-black/40 px-2 py-1.5 text-[10px] uppercase tracking-wider text-white/55 disabled:opacity-30"
+            >
+              Resume Test Voice
+            </button>
+          </div>
         </div>
         <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2">
           <button
