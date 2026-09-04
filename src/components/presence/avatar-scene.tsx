@@ -32,6 +32,14 @@ import {
   type SpeakingGestureBone,
   type SpeakingGestureVariant,
 } from "@/lib/hsin-speaking-motion";
+import {
+  HsinRareMotion,
+  type RareMotionBone,
+  type RareMotionOffsets,
+  type RareMotionPhase,
+  type RareMotionState,
+  type RareTurnSide,
+} from "@/lib/hsin-rare-motion";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -815,6 +823,10 @@ function HsinAvatar({
   speakingMotionEnabled,
   speakingGestureTrigger,
   speakingGestureVariant,
+  rareMotionEnabled,
+  rareTriggerSequence,
+  rareTurnSide,
+  onRareStateChange,
   armPoseMode,
   armCalibration,
   onArmCandidateChange,
@@ -865,6 +877,10 @@ function HsinAvatar({
   speakingMotionEnabled: boolean;
   speakingGestureTrigger: number;
   speakingGestureVariant: SpeakingGestureVariant;
+  rareMotionEnabled: boolean;
+  rareTriggerSequence: number;
+  rareTurnSide: RareTurnSide;
+  onRareStateChange?: (state: RareMotionState) => void;
   armPoseMode: ArmPoseMode;
   armCalibration: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -1204,6 +1220,13 @@ function HsinAvatar({
   // while enabled AND speaking.
   const speakingMotion = useMemo(() => new HsinSpeakingMotion(), []);
   const lastSpeakingGestureTrigger = useRef(speakingGestureTrigger);
+  // Rare Larger Motion Phase 1 POC: isolated scheduler for one look-aside body
+  // turn (dev-gated; default OFF). Pure; additive via the same seam. Suppresses
+  // ambient while active; yields to speaking motion via a fast interrupt exit.
+  const rareMotion = useMemo(() => new HsinRareMotion(), []);
+  const lastRareTrigger = useRef(rareTriggerSequence);
+  const lastRarePhase = useRef<RareMotionPhase>("idle");
+  const rareSpeechWasActive = useRef(false);
   // Arm neutral-pose polish POC (dev-only A/B): reused temporaries + a signature
   // so the resulting candidate quaternions are reported to the dev UI only when
   // they actually change (not every frame).
@@ -2130,8 +2153,58 @@ function HsinAvatar({
       // of timed speech / lip-sync being active.
       const isSpeaking = speechPlayback.status !== "idle";
       const speakingLayerActive = speakingMotionEnabled && isSpeaking;
+
+      // Rare Larger Motion (dev-gated, default OFF). Updated BEFORE ambient so
+      // its active state can suppress ambient this same frame. Priority:
+      // speaking > rare > ambient. Speech owns the pose — it cannot be started
+      // while speaking, and if speech begins mid-turn we kick off a fast
+      // interrupt exit so Hsin returns promptly (but smoothly) to neutral. The
+      // offsets are applied further down (after ambient, before speaking).
+      let rareOffsets: RareMotionOffsets = {};
+      let rareActive = false;
+      if (
+        rareMotionEnabled &&
+        !expressionInspectEnabled &&
+        !visemeInspectEnabled
+      ) {
+        if (speakingLayerActive) {
+          if (!rareSpeechWasActive.current) rareMotion.beginExit();
+          // Ignore any trigger requested while speaking owns the pose.
+          lastRareTrigger.current = rareTriggerSequence;
+        } else if (rareTriggerSequence !== lastRareTrigger.current) {
+          lastRareTrigger.current = rareTriggerSequence;
+          rareMotion.trigger(rareTurnSide);
+        }
+        rareSpeechWasActive.current = speakingLayerActive;
+        rareOffsets = rareMotion.update(d);
+        const rareState = rareMotion.getState();
+        rareActive = rareState.phase !== "idle";
+        if (rareState.phase !== lastRarePhase.current) {
+          lastRarePhase.current = rareState.phase;
+          onRareStateChange?.(rareState);
+          console.info(
+            `[Hsin rare motion] ${JSON.stringify({
+              phase: rareState.phase,
+              variation: rareState.variation,
+              side: rareState.side,
+            })}`,
+          );
+        }
+      } else {
+        lastRareTrigger.current = rareTriggerSequence;
+        rareSpeechWasActive.current = false;
+        if (lastRarePhase.current !== "idle") {
+          rareMotion.reset();
+          lastRarePhase.current = "idle";
+          onRareStateChange?.(rareMotion.getState());
+        }
+      }
+
       const ambientSuppressed =
-        expressionInspectEnabled || visemeInspectEnabled || speakingLayerActive;
+        expressionInspectEnabled ||
+        visemeInspectEnabled ||
+        speakingLayerActive ||
+        rareActive;
       if (ambientIdleEnabled && !ambientSuppressed) {
         if (ambientTriggerSequence !== lastAmbientTrigger.current) {
           lastAmbientTrigger.current = ambientTriggerSequence;
@@ -2179,6 +2252,16 @@ function HsinAvatar({
           onAmbientStateChange?.(ambientIdle.getState());
         }
       }
+
+      // Rare Larger Motion: apply the offsets computed above, layered after
+      // ambient and before speaking so Speaking Motion composes on top (higher
+      // priority). Torso/neck/head only — arms/hands/legs ride the hierarchy.
+      (Object.keys(rareOffsets) as RareMotionBone[]).forEach((bone) => {
+        const offset = rareOffsets[bone];
+        if (offset) {
+          addMicroMotion(bone as VRMHumanBoneName, offset.x, offset.y, offset.z);
+        }
+      });
 
       // Speaking Motion Phase 1 (dev-gated, default OFF). Highest-priority body
       // layer: while enabled it owns chest/upperChest/neck/head (micro-motion)
@@ -2962,6 +3045,10 @@ export function AvatarScene({
   speakingMotionEnabled = false,
   speakingGestureTrigger = 0,
   speakingGestureVariant = "v2",
+  rareMotionEnabled = false,
+  rareTriggerSequence = 0,
+  rareTurnSide = "right",
+  onRareStateChange,
   armPoseMode = "current",
   armCalibration = HSIN_ARM_CALIBRATION_ZERO,
   onArmCandidateChange,
@@ -3014,6 +3101,10 @@ export function AvatarScene({
   speakingMotionEnabled?: boolean;
   speakingGestureTrigger?: number;
   speakingGestureVariant?: SpeakingGestureVariant;
+  rareMotionEnabled?: boolean;
+  rareTriggerSequence?: number;
+  rareTurnSide?: RareTurnSide;
+  onRareStateChange?: (state: RareMotionState) => void;
   armPoseMode?: ArmPoseMode;
   armCalibration?: ArmCalibrationOffsets;
   onArmCandidateChange?: (
@@ -3099,6 +3190,10 @@ export function AvatarScene({
         speakingMotionEnabled={speakingMotionEnabled}
         speakingGestureTrigger={speakingGestureTrigger}
         speakingGestureVariant={speakingGestureVariant}
+        rareMotionEnabled={rareMotionEnabled}
+        rareTriggerSequence={rareTriggerSequence}
+        rareTurnSide={rareTurnSide}
+        onRareStateChange={onRareStateChange}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={onArmCandidateChange}

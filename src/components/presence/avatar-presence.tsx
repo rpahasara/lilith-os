@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import type { PresenceSignal } from "@/lib/presence";
 import { hsinLipSync, type VisemeCue } from "@/lib/hsin-lip-sync";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
+import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
 import type {
   AmbientVariationName,
   AmbientIdleState,
@@ -247,6 +248,16 @@ export function AvatarPresence({
   // Dev A/B: V2 = visibility-tuned beat (default), V1 = original subtle beat.
   const [speakingGestureVariant, setSpeakingGestureVariant] =
     useState<SpeakingGestureVariant>("v2");
+  // Rare Larger Motion Phase 1 POC — dev-gated, default OFF.
+  const [rareMotionEnabled, setRareMotionEnabled] = useState(false);
+  const [rareTriggerSequence, setRareTriggerSequence] = useState(0);
+  const [rareTurnSide, setRareTurnSide] = useState<RareTurnSide>("right");
+  const [rareState, setRareState] = useState<RareMotionState>({
+    phase: "idle",
+    variation: null,
+    side: "right",
+    weight: 0,
+  });
   // Arm / shoulder neutral-pose polish POC (dev-only A/B). Default CURRENT so
   // production arms are unchanged. Calibration deltas start at zero, so the
   // reference candidate is identical to current until tuned.
@@ -448,6 +459,10 @@ export function AvatarPresence({
         speakingMotionEnabled={speakingMotionEnabled}
         speakingGestureTrigger={speakingGestureTrigger}
         speakingGestureVariant={speakingGestureVariant}
+        rareMotionEnabled={rareMotionEnabled}
+        rareTriggerSequence={rareTriggerSequence}
+        rareTurnSide={rareTurnSide}
+        onRareStateChange={setRareState}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         onArmCandidateChange={setArmCandidateQuats}
@@ -1074,6 +1089,53 @@ export function AvatarPresence({
               Phase
               <div className="text-cyan-100 capitalize">{ambientState.phase}</div>
             </div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1 rounded-lg border border-indigo-300/20 bg-indigo-950/20 p-2">
+        <button
+          type="button"
+          onClick={() => setRareMotionEnabled((current) => !current)}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${rareMotionEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+        >
+          Rare Motion (POC) {rareMotionEnabled ? "On" : "Off"}
+        </button>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            disabled={!rareMotionEnabled}
+            onClick={() => setRareTurnSide("left")}
+            className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider disabled:opacity-30 ${rareTurnSide === "left" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Turn Left
+          </button>
+          <button
+            type="button"
+            disabled={!rareMotionEnabled}
+            onClick={() => setRareTurnSide("right")}
+            className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider disabled:opacity-30 ${rareTurnSide === "right" ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          >
+            Turn Right
+          </button>
+        </div>
+        <button
+          type="button"
+          disabled={!rareMotionEnabled}
+          onClick={() => setRareTriggerSequence((current) => current + 1)}
+          className="w-full rounded bg-indigo-400/20 px-2 py-1.5 text-[10px] uppercase tracking-wider text-indigo-100 disabled:opacity-30"
+        >
+          Trigger Look-Aside Turn ({rareTurnSide === "left" ? "L" : "R"})
+        </button>
+        <div className="grid grid-cols-2 gap-1 pt-0.5 text-[10px] uppercase tracking-wider text-white/60">
+          <div>
+            Current
+            <div className="text-cyan-100 normal-case">
+              {rareState.variation ?? "idle"}
+            </div>
+          </div>
+          <div>
+            Phase
+            <div className="text-cyan-100 capitalize">{rareState.phase}</div>
           </div>
         </div>
       </div>
