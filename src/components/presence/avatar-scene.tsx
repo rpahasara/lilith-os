@@ -834,6 +834,7 @@ function HsinAvatar({
   onRareStateChange,
   orchestratorEnabled,
   orchestratorFastTest,
+  orchestratorRareAuto,
   onOrchestratorStateChange,
   armPoseMode,
   armCalibration,
@@ -891,6 +892,7 @@ function HsinAvatar({
   onRareStateChange?: (state: RareMotionState) => void;
   orchestratorEnabled: boolean;
   orchestratorFastTest: boolean;
+  orchestratorRareAuto: boolean;
   onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode: ArmPoseMode;
   armCalibration: ArmCalibrationOffsets;
@@ -2203,6 +2205,7 @@ function HsinAvatar({
         prevOrchestratorEnabled.current = orchestratorEnabled;
         if (orchestratorEnabled) {
           orchestrator.setFast(orchestratorFastTest);
+          orchestrator.setAllowRareAuto(orchestratorRareAuto);
           orchestrator.start();
         } else {
           orchestrator.reset();
@@ -2216,8 +2219,9 @@ function HsinAvatar({
       let orchestratorRareTrigger = false;
       let orchestratorRareSide: RareTurnSide = "right";
       if (orchestratorEnabled) {
-        // Keep fast-test cadence in sync (no-op unless it actually changed).
+        // Keep fast-test cadence + rare-auto gate in sync (no-op unless changed).
         orchestrator.setFast(orchestratorFastTest);
+        orchestrator.setAllowRareAuto(orchestratorRareAuto);
         const decision = orchestrator.update({
           dt: d,
           speaking: speakingLayerActive,
@@ -3146,6 +3150,7 @@ export function AvatarScene({
   onRareStateChange,
   orchestratorEnabled = false,
   orchestratorFastTest = false,
+  orchestratorRareAuto = false,
   onOrchestratorStateChange,
   armPoseMode = "current",
   armCalibration = HSIN_ARM_CALIBRATION_ZERO,
@@ -3205,6 +3210,7 @@ export function AvatarScene({
   onRareStateChange?: (state: RareMotionState) => void;
   orchestratorEnabled?: boolean;
   orchestratorFastTest?: boolean;
+  orchestratorRareAuto?: boolean;
   onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode?: ArmPoseMode;
   armCalibration?: ArmCalibrationOffsets;
@@ -3297,6 +3303,7 @@ export function AvatarScene({
         onRareStateChange={onRareStateChange}
         orchestratorEnabled={orchestratorEnabled}
         orchestratorFastTest={orchestratorFastTest}
+        orchestratorRareAuto={orchestratorRareAuto}
         onOrchestratorStateChange={onOrchestratorStateChange}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}

@@ -141,6 +141,13 @@ export class HsinMotionOrchestrator {
   private readonly config: OrchestratorConfig;
   private readonly fastConfig: OrchestratorConfig;
   private fast = false;
+  /**
+   * Whether automatic rare triggering is permitted. Default false: the rare
+   * cooldown is still tracked (readout stays meaningful) but the orchestrator
+   * never emits an automatic rareTrigger. Manual/dev rare triggering is
+   * unaffected (it goes through the renderer, not this flag).
+   */
+  private allowRareAuto = false;
   private rng: () => number;
 
   private mode: OrchestratorMode = "idle";
@@ -181,6 +188,16 @@ export class HsinMotionOrchestrator {
     this.graceTimer = 0;
     this.idleAccum = 0;
     this.rarePending = false;
+  }
+
+  /**
+   * Enable/disable automatic rare triggering. When switched on with the cooldown
+   * already elapsed, re-arm it so rare does not fire instantly on the toggle.
+   */
+  setAllowRareAuto(on: boolean): void {
+    if (on === this.allowRareAuto) return;
+    this.allowRareAuto = on;
+    if (on && this.rareCooldown <= 0) this.rareCooldown = this.randomRareCooldown();
   }
 
   private randRange(min: number, max: number): number {
@@ -308,10 +325,11 @@ export class HsinMotionOrchestrator {
         this.idleAccum += dt;
         ambientAllowed = this.idleAccum >= this.cfg().initialIdleGrace;
         this.rareCooldown = Math.max(0, this.rareCooldown - dt);
-        if (this.rareCooldown <= 0) {
+        if (this.rareCooldown <= 0 && this.allowRareAuto) {
           // Fire one rare trigger and take same-frame ownership: block ambient
           // now, mode is rare now. Cooldown is NOT randomized here — that
-          // happens once on the rare completion edge.
+          // happens once on the rare completion edge. Gated by allowRareAuto:
+          // while off, the cooldown simply rests at 0 and never fires.
           rareTrigger = true;
           rareSide = this.pickRareSide();
           this.lastRareSide = rareSide;

@@ -259,9 +259,13 @@ export function AvatarPresence({
     side: "right",
     weight: 0,
   });
-  // Motion Orchestrator Phase 1 POC — dev-gated, default OFF.
-  const [orchestratorEnabled, setOrchestratorEnabled] = useState(false);
+  // Motion Orchestrator — production default ON (automatic ambient motion).
+  // Rare auto-triggering stays OFF; Fast Test stays OFF. The debug panel that
+  // exposes these toggles is itself dev-only, so production simply runs with
+  // orchestrator ON + ambient auto + rare-auto OFF + fast-test OFF.
+  const [orchestratorEnabled, setOrchestratorEnabled] = useState(true);
   const [orchestratorFastTest, setOrchestratorFastTest] = useState(false);
+  const [orchestratorRareAuto, setOrchestratorRareAuto] = useState(false);
   const [orchestratorState, setOrchestratorState] = useState<OrchestratorReadout>(
     {
       mode: "idle",
@@ -478,6 +482,7 @@ export function AvatarPresence({
         onRareStateChange={setRareState}
         orchestratorEnabled={orchestratorEnabled}
         orchestratorFastTest={orchestratorFastTest}
+        orchestratorRareAuto={orchestratorRareAuto}
         onOrchestratorStateChange={setOrchestratorState}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
@@ -1169,6 +1174,13 @@ export function AvatarPresence({
           className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${orchestratorFastTest ? "bg-amber-400/20 text-amber-100" : "bg-black/40 text-white/55"}`}
         >
           Fast Test Mode {orchestratorFastTest ? "On" : "Off"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOrchestratorRareAuto((current) => !current)}
+          className={`w-full rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${orchestratorRareAuto ? "bg-amber-400/20 text-amber-100" : "bg-black/40 text-white/55"}`}
+        >
+          Rare Auto {orchestratorRareAuto ? "On" : "Off"}
         </button>
         <div className="grid grid-cols-3 gap-1 pt-0.5 text-[10px] uppercase tracking-wider text-white/60">
           <div>
