@@ -12,11 +12,11 @@ export function SidebarRail() {
   const pathname = usePathname();
 
   return (
-    <aside className="z-20 flex h-full w-[84px] flex-col items-center justify-between py-5">
+    <aside className="z-20 flex h-full w-[84px] flex-col items-center justify-between bg-gradient-to-r from-black/35 via-black/[0.1] to-transparent py-5">
       {/* mark */}
       <Link href="/" className="group flex flex-col items-center gap-2">
-        <div className="relative grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-violet-bright/25 to-cyan-bright/15 hairline">
-          <div className="h-5 w-5 rounded-full bg-gradient-to-br from-violet-bright to-cyan-bright shadow-[0_0_16px_2px_rgba(139,92,246,0.6)] transition-transform group-hover:scale-110" />
+        <div className="relative grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-wine/25 to-wine-deep/15 hairline">
+          <div className="h-5 w-5 rounded-full bg-gradient-to-br from-pearl via-wine to-wine-deep shadow-[0_0_16px_2px_rgba(201,79,109,0.5)] transition-transform group-hover:scale-110" />
         </div>
         <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-ink-faint">
           Lilith
@@ -40,7 +40,7 @@ export function SidebarRail() {
               {active && (
                 <motion.span
                   layoutId="nav-active"
-                  className="absolute inset-0 rounded-2xl bg-white/[0.06] hairline"
+                  className="absolute inset-0 rounded-2xl bg-wine/[0.12] shadow-[0_0_20px_-6px_rgba(201,79,109,0.5)] ring-1 ring-wine/18"
                   transition={{ type: "spring", stiffness: 400, damping: 32 }}
                 />
               )}
@@ -48,7 +48,7 @@ export function SidebarRail() {
                 className={cn(
                   "relative grid h-10 w-10 place-items-center rounded-xl transition-colors",
                   active
-                    ? "text-violet-bright"
+                    ? "text-pearl"
                     : "text-ink-faint group-hover:text-ink-muted",
                 )}
               >
@@ -77,7 +77,7 @@ export function SidebarRail() {
         </button>
         <button
           aria-label="Account"
-          className="relative h-9 w-9 overflow-hidden rounded-full bg-gradient-to-br from-violet-deep to-cyan-deep ring-1 ring-white/15"
+          className="relative h-9 w-9 overflow-hidden rounded-full bg-gradient-to-br from-wine-deep to-wine-bright ring-1 ring-white/15"
         >
           <span className="grid h-full w-full place-items-center text-xs font-semibold text-white">
             {user.name.charAt(0)}

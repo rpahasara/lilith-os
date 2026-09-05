@@ -51,6 +51,14 @@ const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
 
+// Cached model-normalization result (intrinsic scale/centering), stored on the
+// VRM scene so it is computed once and reused deterministically across mounts.
+type FramingResult = {
+  scale: number;
+  faceOffsetX: number;
+  position: THREE.Vector3;
+};
+
 export type AvatarPresentationFraming = {
   scale: number;
   offsetX: number;
@@ -1874,35 +1882,48 @@ function HsinAvatar({
 
   const framing = useMemo(() => {
     const scene = vrm.scene;
-    scene.updateMatrixWorld(true);
 
-    // Normalize the imported model to a predictable full-body frame without
-    // modifying the source VRM or its skeleton hierarchy.
-    const bounds = new THREE.Box3().setFromObject(scene);
+    // Deterministic normalization. `useLoader` caches and REUSES `vrm.scene`
+    // across route remounts, so on a return the scene is already parented under
+    // the presentation <group scale=…> from the prior mount. Measuring it in
+    // world space (setFromObject / getWorldPosition) would then fold that group
+    // scale into the bounds and compound the normalization (→ tiny/full-body
+    // composition, intermittently). Two guards make it identical every time:
+    //   1) measure in the scene's OWN local frame (strip any ancestor transform)
+    //   2) compute once and cache the result on the scene, reused on remount.
+    const CACHE_KEY = "__lilithFraming";
+    const store = scene.userData as Record<string, FramingResult | undefined>;
+    const cached = store[CACHE_KEY];
+    if (cached) return cached;
+
+    scene.updateMatrixWorld(true);
+    const toLocal = scene.matrixWorld.clone().invert();
+    const bounds = new THREE.Box3().setFromObject(scene).applyMatrix4(toLocal);
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const scale = size.y > 0 ? 2.75 / size.y : 1;
 
     // Extra horizontal shift (in framed/scaled units) that moves the HEAD —
     // rather than the tail/hair-skewed bounding box — onto the optical axis.
-    // Consumed only when a framing profile sets `centerOnFace`.
+    // Consumed only when a framing profile sets `centerOnFace`. Measured in the
+    // same local frame so it never picks up the parent transform.
     const rawHead = vrm.humanoid?.getRawBoneNode("head");
-    const headWorldX = rawHead
-      ? rawHead.getWorldPosition(new THREE.Vector3()).x
+    const headLocalX = rawHead
+      ? rawHead.getWorldPosition(new THREE.Vector3()).applyMatrix4(toLocal).x
       : center.x;
-    const faceOffsetX = (center.x - headWorldX) * scale;
+    const faceOffsetX = (center.x - headLocalX) * scale;
 
     console.info(
       `[Hsin pose diagnostic] framing=${JSON.stringify({
         size: size.toArray(),
         center: center.toArray(),
         scale,
-        headWorldX,
+        headLocalX,
         faceOffsetX,
       })}`,
     );
 
-    return {
+    const result: FramingResult = {
       scale,
       faceOffsetX,
       position: new THREE.Vector3(
@@ -1911,7 +1932,48 @@ function HsinAvatar({
         -center.z * scale,
       ),
     };
+    store[CACHE_KEY] = result;
+    return result;
   }, [vrm]);
+
+  // TEMP dev diagnostic: snapshot the actual presentation state one frame after
+  // mount (refs set, primitive attached, useLayoutEffect camera applied), to
+  // trace a missing-avatar case directly. Remove before commit.
+  useEffect(() => {
+    if (!SHOW_CALIBRATION_DEBUG) return;
+    const id = requestAnimationFrame(() => {
+      const g = avatarFrame.current;
+      const cam = camera as THREE.PerspectiveCamera;
+      let meshCount = 0;
+      let hiddenMats = 0;
+      vrm.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        meshCount += 1;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        if (mats.every((m) => m && m.visible === false)) hiddenMats += 1;
+      });
+      console.info(
+        `[Hsin presentation state] ${JSON.stringify({
+          vrmLoaded: !!vrm.scene,
+          sceneParentType: vrm.scene.parent?.type ?? null,
+          sceneVisible: vrm.scene.visible,
+          rigVisible: rig.current?.visible ?? null,
+          avatarFrameVisible: g?.visible ?? null,
+          meshCount,
+          fullyHiddenMeshes: hiddenMats,
+          groupScale: g ? Number(g.scale.x.toFixed(4)) : null,
+          groupPos: g
+            ? g.position.toArray().map((n) => Number(n.toFixed(3)))
+            : null,
+          cameraZ: Number(camera.position.z.toFixed(3)),
+          cameraY: Number(camera.position.y.toFixed(3)),
+          fov: cam.isPerspectiveCamera ? cam.fov : null,
+        })}`,
+      );
+    });
+    return () => cancelAnimationFrame(id);
+  }, [camera, vrm]);
 
   useFrame((renderState, delta) => {
     if (!rig.current) return;
@@ -3182,14 +3244,22 @@ function InspectionCamera({
   const { camera } = useThree();
 
   useEffect(() => {
+    // Only drive the camera while actively inspecting (dev). When disabled it
+    // must NOT touch the camera — PresentationCamera is the single authoritative
+    // owner of the default framing. (Previously the disabled branch reset the
+    // camera to a hardcoded full-body pose, which raced PresentationCamera on
+    // mount and made Home intermittently return in full-body after navigation.)
+    // Leaving inspection restores the dashboard framing because PresentationCamera's
+    // `enabled` flips back to true and its effect re-applies the framing.
+    if (!enabled) return;
     const positions: Record<PoseInspectionView, THREE.Vector3> = {
       front: new THREE.Vector3(1.8, 0.35, 1.8),
       leftThreeQuarter: new THREE.Vector3(0.65, 0.35, 2.45),
       rightThreeQuarter: new THREE.Vector3(2.45, 0.35, 0.65),
       side: new THREE.Vector3(0, 0.35, 2.55),
     };
-    camera.position.copy(enabled ? positions[view] : new THREE.Vector3(0, 0, 4.25));
-    camera.lookAt(enabled ? new THREE.Vector3(0, 0.3, 0) : new THREE.Vector3());
+    camera.position.copy(positions[view]);
+    camera.lookAt(new THREE.Vector3(0, 0.3, 0));
     camera.updateProjectionMatrix();
   }, [camera, enabled, view]);
 
@@ -3205,7 +3275,11 @@ function PresentationCamera({
 }) {
   const { camera } = useThree();
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect): the presentation camera must be committed
+  // BEFORE the first paint so the model's first rendered frame is already at the
+  // approved framing — never the Canvas's full-body default. This runs before
+  // HsinAvatar's first useFrame, so the readiness gate reveals into it cleanly.
+  useLayoutEffect(() => {
     if (!enabled) return;
     camera.position.set(0, framing.targetY, framing.cameraDistance);
     camera.lookAt(new THREE.Vector3(0, framing.targetY, 0));

@@ -1,6 +1,5 @@
 import { ShieldCheck, Cloud, Cpu, Zap } from "lucide-react";
 import { StatusDot } from "@/components/ui/primitives";
-import { Clock } from "./clock";
 
 const items = [
   { icon: Cloud, label: "Cloud sync", value: "Live" },
@@ -9,27 +8,30 @@ const items = [
   { icon: Cpu, label: "Latency", value: "48ms" },
 ];
 
+/**
+ * Home status is a quiet floating capsule — not a full-width architectural bar.
+ * It keeps the essential system-state glanceable without completing a box
+ * around Lilith.
+ */
 export function StatusBar() {
   return (
-    <footer className="flex h-9 shrink-0 items-center justify-between px-6 font-mono text-[11px] text-ink-faint">
-      <div className="flex items-center gap-2">
-        <StatusDot accent="green" />
-        <span className="text-ink-muted">Lilith OS</span>
-        <span>v1.0.0</span>
-        <span className="text-green">Online</span>
+    <footer className="flex shrink-0 items-center justify-center px-6 pb-4 pt-0.5">
+      <div className="glass flex items-center gap-3 rounded-full px-3.5 py-1.5 font-mono text-[10px] text-ink-faint">
+        <span className="flex items-center gap-1.5">
+          <StatusDot accent="green" />
+          <span className="text-ink-muted">Lilith OS</span>
+          <span className="text-green">Online</span>
+        </span>
+        <span className="hidden h-3 w-px bg-white/10 sm:block" />
+        <span className="hidden items-center gap-4 sm:flex">
+          {items.map(({ icon: Icon, label, value }) => (
+            <span key={label} className="flex items-center gap-1.5">
+              <Icon className="h-3 w-3" />
+              <span className="text-ink-muted">{value}</span>
+            </span>
+          ))}
+        </span>
       </div>
-
-      <div className="hidden items-center gap-6 lg:flex">
-        {items.map(({ icon: Icon, label, value }) => (
-          <span key={label} className="flex items-center gap-1.5">
-            <Icon className="h-3 w-3" />
-            <span>{label}</span>
-            <span className="text-ink-muted">{value}</span>
-          </span>
-        ))}
-      </div>
-
-      <Clock />
     </footer>
   );
 }

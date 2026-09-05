@@ -135,7 +135,7 @@ export function PresenceHero() {
   }
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between py-2">
+    <div className="relative flex h-full flex-col items-center justify-between pt-2 pb-1">
       {/* greeting */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -144,22 +144,22 @@ export function PresenceHero() {
         className="text-center"
       >
         <p className="eyebrow mb-2 flex items-center justify-center gap-2">
-          <StatusDot accent="violet" /> Lilith · online
+          <StatusDot accent="wine" /> Lilith · online
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-ink sm:text-[2.5rem]">
-          {greeting}, <span className="text-violet-bright">{user.name}</span>.
+        <h1 className="text-3xl font-semibold tracking-tight text-ink [text-shadow:0_2px_24px_rgba(0,0,0,0.6)] sm:text-[2.5rem]">
+          {greeting}, <span className="text-wine-bright">{user.name}</span>.
         </h1>
       </motion.div>
 
       {/* presence stage — pluggable renderer (orb today, avatar later). No
           grounded reflection: the bust-up should read as an integrated presence,
           not a figure standing on a stage floor. */}
-      <div className="relative my-2 aspect-square w-full max-w-[460px] flex-1">
+      <div className="relative my-1 aspect-square w-full min-h-0 max-w-[460px] flex-1">
         <PresenceStage />
       </div>
 
       {/* conversation region: live transcript once talking, else the idle hint + state chips */}
-      <div className="mb-4 flex w-full flex-col items-center gap-3">
+      <div className="mb-3 flex w-full flex-col items-center gap-2">
         {hasConversation ? (
           <div className="flex w-full flex-col items-center gap-1.5">
             <button

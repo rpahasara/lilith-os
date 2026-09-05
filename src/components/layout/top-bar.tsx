@@ -46,7 +46,7 @@ export function TopBar() {
           <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-rose" />
         </IconBtn>
         <button className="flex items-center gap-2 rounded-full glass py-1.5 pl-1.5 pr-3 transition-colors hover:border-white/15">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-violet-deep to-cyan-deep text-xs font-semibold text-white">
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-wine-deep to-wine-bright text-xs font-semibold text-white">
             {user.name.charAt(0)}
           </span>
           <span className="hidden text-left sm:block">

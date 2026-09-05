@@ -10,12 +10,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Conversation lives above the routed pages so the transcript + session
           survive navigation between workspaces. */}
       <ConversationProvider>
-        <div className="lilith-bg" />
+        {/* Environmental wallpaper is its own layer so the filter (blur/dim)
+            affects ONLY the artwork — never Lilith, glass, text, or grain. */}
+        <div className="lilith-bg" aria-hidden>
+          <div className="lilith-bg-image" />
+          <div className="lilith-bg-scrim" />
+        </div>
         <div className="flex h-dvh w-full overflow-hidden">
           <SidebarRail />
-          <div className="flex min-w-0 flex-1 flex-col border-l border-white/[0.06]">
+          <div className="flex min-w-0 flex-1 flex-col">
             <TopBar />
-            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 lg:overflow-hidden">
+            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 lg:overflow-hidden lg:px-8">
               {children}
             </main>
             <StatusBar />

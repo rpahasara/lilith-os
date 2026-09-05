@@ -33,6 +33,9 @@ export function PanelHeader({
 /* --------------------------------------------------------------- Accent map */
 export const accentText = {
   violet: "text-violet-bright",
+  orchid: "text-orchid-bright",
+  wine: "text-wine-bright",
+  gold: "text-gold",
   cyan: "text-cyan-bright",
   green: "text-green",
   amber: "text-amber",
@@ -41,6 +44,9 @@ export const accentText = {
 
 export const accentBg = {
   violet: "bg-violet-bright",
+  orchid: "bg-orchid-bright",
+  wine: "bg-wine-bright",
+  gold: "bg-gold",
   cyan: "bg-cyan-bright",
   green: "bg-green",
   amber: "bg-amber",

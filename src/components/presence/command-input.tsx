@@ -34,18 +34,18 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
       <motion.div
         animate={{
           borderColor: focused
-            ? "rgba(167,139,250,0.5)"
+            ? "rgba(219,111,138,0.5)"
             : "rgba(255,255,255,0.1)",
           boxShadow: focused
-            ? "0 0 0 1px rgba(167,139,250,0.25), 0 20px 60px -30px rgba(139,92,246,0.8)"
-            : "0 20px 50px -30px rgba(0,0,0,0.9)",
+            ? "0 0 0 1px rgba(243,238,244,0.22), 0 26px 66px -28px rgba(201,79,109,0.6), 0 16px 54px -30px rgba(168,134,217,0.3)"
+            : "0 26px 64px -34px rgba(0,0,0,0.9), 0 18px 52px -38px rgba(201,79,109,0.16)",
         }}
         className="glass-strong flex items-center gap-3 rounded-full px-2 py-2 pl-5"
       >
         {loading ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-violet-bright" />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-wine-bright" />
         ) : (
-          <Sparkles className="h-4 w-4 shrink-0 text-violet-bright" />
+          <Sparkles className="h-4 w-4 shrink-0 text-wine-bright" />
         )}
         <input
           value={value}
@@ -89,7 +89,7 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
           className={cn(
             "grid h-9 w-9 place-items-center rounded-full transition-all",
             value.trim() && !loading
-              ? "bg-gradient-to-b from-violet-bright to-violet-deep text-white shadow-[0_8px_20px_-6px_rgba(139,92,246,0.8)]"
+              ? "bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[0_8px_22px_-6px_rgba(201,79,109,0.85)]"
               : "bg-white/5 text-ink-faint",
           )}
         >
