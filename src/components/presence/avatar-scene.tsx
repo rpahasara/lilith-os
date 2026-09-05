@@ -517,6 +517,34 @@ export const HSIN_ARM_CALIBRATION_ZERO: ArmCalibrationOffsets =
     HSIN_ARM_BONES.map((bone) => [bone, [0, 0, 0] as [number, number, number]]),
   );
 
+// --- Dashboard-only upper-body arm presentation offset -------------------
+// Additive local-space Euler deltas (degrees, XYZ = pitch/yaw/roll) layered on
+// top of the frozen canonical arm pose, applied ONLY in the dashboard close-up
+// (presentationMode === "dashboard"). Non-destructive: HSIN_CANONICAL_NEUTRAL is
+// never modified, and full-body CURRENT/PROPOSED modes never receive this. Six
+// shoulder->lower-arm bones only — hands and fingers are deliberately excluded
+// (they sit below the bust-up crop). Default all-zero => a strict visual no-op.
+export const HSIN_DASHBOARD_ARM_BONES: VRMHumanBoneName[] = [
+  "leftShoulder",
+  "leftUpperArm",
+  "leftLowerArm",
+  "rightShoulder",
+  "rightUpperArm",
+  "rightLowerArm",
+];
+
+// Approved pass-1 dashboard arm polish (degrees, [pitch, yaw, roll]), authored
+// live against the frozen close-up framing. Additive over canonical; hands and
+// fingers excluded; applied only in dashboard mode.
+export const DASHBOARD_UPPER_BODY_ARM_OFFSET: ArmCalibrationOffsets = {
+  leftShoulder: [0, 0, 0],
+  leftUpperArm: [0, 10, 20],
+  leftLowerArm: [0, 20, -7.5],
+  rightShoulder: [-6.5, 0, -8],
+  rightUpperArm: [-1, 0, -3.5],
+  rightLowerArm: [0, 0, 0],
+};
+
 // Reference Candidate V1 — conservative local-space Euler deltas (degrees,
 // XYZ = pitch/yaw/roll) authored from the two Hsin reference stills toward a
 // more relaxed neutral: elbows lowered, forearms more vertical, less forearm
@@ -867,6 +895,7 @@ function HsinAvatar({
   onOrchestratorStateChange,
   armPoseMode,
   armCalibration,
+  dashboardArmOffset,
   onArmCandidateChange,
   showArmSkeleton,
   armAnatomyView,
@@ -925,6 +954,8 @@ function HsinAvatar({
   onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode: ArmPoseMode;
   armCalibration: ArmCalibrationOffsets;
+  // Dashboard-only additive arm offset; null/undefined in full-body modes.
+  dashboardArmOffset?: ArmCalibrationOffsets | null;
   onArmCandidateChange?: (
     quaternions: Record<string, [number, number, number, number]>,
   ) => void;
@@ -2127,6 +2158,20 @@ function HsinAvatar({
         );
       };
 
+      // Dashboard-only upper-body arm polish: additive Euler deltas post-
+      // multiplied onto the canonical arm bones via the same seam, ONLY when a
+      // dashboard offset is supplied (null in full-body modes => no-op). Applied
+      // here — after canonical, before Speaking Motion — so a right-arm speaking
+      // beat composes on top of the shifted rest pose. Hands/fingers untouched.
+      if (dashboardArmOffset) {
+        HSIN_DASHBOARD_ARM_BONES.forEach((boneName) => {
+          const d = dashboardArmOffset[boneName];
+          if (d && (d[0] || d[1] || d[2])) {
+            addMicroMotion(boneName, d[0], d[1], d[2]);
+          }
+        });
+      }
+
       const weightShift = Math.sin(t * 0.27 + 0.35) * 0.75;
       const breath = Math.sin(t * 0.61 + 0.8);
       const slowSway = Math.sin(t * 0.19 + 1.4);
@@ -3206,6 +3251,7 @@ export function AvatarScene({
   onOrchestratorStateChange,
   armPoseMode = "current",
   armCalibration = HSIN_ARM_CALIBRATION_ZERO,
+  dashboardArmOffset = null,
   onArmCandidateChange,
   showArmSkeleton = false,
   armAnatomyView = false,
@@ -3266,6 +3312,7 @@ export function AvatarScene({
   onOrchestratorStateChange?: (state: OrchestratorReadout) => void;
   armPoseMode?: ArmPoseMode;
   armCalibration?: ArmCalibrationOffsets;
+  dashboardArmOffset?: ArmCalibrationOffsets | null;
   onArmCandidateChange?: (
     quaternions: Record<string, [number, number, number, number]>,
   ) => void;
@@ -3359,6 +3406,7 @@ export function AvatarScene({
         onOrchestratorStateChange={onOrchestratorStateChange}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
+        dashboardArmOffset={dashboardArmOffset}
         onArmCandidateChange={onArmCandidateChange}
         showArmSkeleton={showArmSkeleton}
         armAnatomyView={armAnatomyView}

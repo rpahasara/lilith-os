@@ -31,6 +31,8 @@ import {
   FRONT_FACING_CANDIDATE,
   STRONG_FRONT_FACING_CANDIDATE,
   HSIN_ARM_BONES,
+  HSIN_DASHBOARD_ARM_BONES,
+  DASHBOARD_UPPER_BODY_ARM_OFFSET,
   HSIN_ARM_REFERENCE_V1_DELTAS,
   HSIN_ARM_REFERENCE_V2_DELTAS,
   HSIN_ARM_REFERENCE_V3_DELTAS,
@@ -427,6 +429,10 @@ export function AvatarPresence({
   // Default main-dashboard close upper-body framing (pass-1, tunable, not frozen).
   const [dashboardFraming, setDashboardFraming] =
     useState<AvatarPresentationFraming>(DASHBOARD_CLOSE_FRAMING);
+  // Dashboard-only additive upper-body arm offset (pass-1: all-zero no-op,
+  // authored live via the DASHBOARD ARM POLISH sliders). Not persisted yet.
+  const [dashboardArmOffset, setDashboardArmOffset] =
+    useState<ArmCalibrationOffsets>(DASHBOARD_UPPER_BODY_ARM_OFFSET);
   const [forwardGaze, setForwardGaze] =
     useState<ForwardGazeCalibration>(PROPOSED_FORWARD_GAZE);
   const [frontFacingCalibration, setFrontFacingCalibration] =
@@ -560,6 +566,9 @@ export function AvatarPresence({
         onOrchestratorStateChange={setOrchestratorState}
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
+        dashboardArmOffset={
+          presentationMode === "dashboard" ? dashboardArmOffset : null
+        }
         onArmCandidateChange={setArmCandidateQuats}
         showArmSkeleton={showArmSkeleton}
         armAnatomyView={armAnatomyView}
@@ -686,6 +695,95 @@ export function AvatarPresence({
             ));
           })()}
       </div>
+      {presentationMode === "dashboard" && (
+        <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-fuchsia-100">
+              Dashboard Arm Polish
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setDashboardArmOffset(
+                    Object.fromEntries(
+                      HSIN_DASHBOARD_ARM_BONES.map((b) => [
+                        b,
+                        [...(DASHBOARD_UPPER_BODY_ARM_OFFSET[b] ?? [0, 0, 0])],
+                      ]),
+                    ) as ArmCalibrationOffsets,
+                  )
+                }
+                className="rounded bg-black/40 px-2 py-1 text-[9px] uppercase tracking-wider text-white/70 hover:text-white"
+              >
+                Reset Arms
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setDashboardArmOffset(
+                    Object.fromEntries(
+                      HSIN_DASHBOARD_ARM_BONES.map((b) => [b, [0, 0, 0]]),
+                    ) as ArmCalibrationOffsets,
+                  )
+                }
+                className="rounded bg-black/40 px-2 py-1 text-[9px] uppercase tracking-wider text-white/50 hover:text-white"
+              >
+                Zero
+              </button>
+            </div>
+          </div>
+          {(
+            [
+              ["leftShoulder", "L Shoulder"],
+              ["leftUpperArm", "L UpperArm"],
+              ["leftLowerArm", "L LowerArm"],
+              ["rightShoulder", "R Shoulder"],
+              ["rightUpperArm", "R UpperArm"],
+              ["rightLowerArm", "R LowerArm"],
+            ] as const
+          ).map(([bone, label]) => (
+            <div key={bone} className="space-y-1 border-t border-white/5 pt-1">
+              <span className="text-[10px] uppercase tracking-wider text-fuchsia-200/80">
+                {label}
+              </span>
+              {(["Pitch", "Yaw", "Roll"] as const).map((axisLabel, axis) => {
+                const val = (dashboardArmOffset[bone] ?? [0, 0, 0])[axis];
+                return (
+                  <label
+                    key={axisLabel}
+                    className="block text-[10px] uppercase tracking-wider text-white/55"
+                  >
+                    {axisLabel} {val.toFixed(1)}°
+                    <input
+                      type="range"
+                      min={-20}
+                      max={20}
+                      step={0.5}
+                      value={val}
+                      onChange={(event) =>
+                        setDashboardArmOffset((current) => {
+                          const next = { ...current };
+                          const cur = (next[bone] ?? [0, 0, 0]) as [
+                            number,
+                            number,
+                            number,
+                          ];
+                          const updated = [...cur] as [number, number, number];
+                          updated[axis] = Number(event.target.value);
+                          next[bone] = updated;
+                          return next;
+                        })
+                      }
+                      className="mt-1 block w-full"
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setSpringsEnabled((current) => !current)}
