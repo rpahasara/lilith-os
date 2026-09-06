@@ -47,7 +47,7 @@ export function WorkspaceHeader({
   eyebrow: string;
   title: string;
   description: string;
-  isDemo: boolean;
+  isDemo?: boolean;
   diagnostics?: Diagnostics;
 }) {
   return (
@@ -63,7 +63,7 @@ export function WorkspaceHeader({
           <p className="mt-0.5 max-w-2xl text-[13px] leading-relaxed text-ink-muted">{description}</p>
         </div>
       </div>
-      <ConnectionStatus isDemo={isDemo} diagnostics={diagnostics} />
+      {typeof isDemo === "boolean" && <ConnectionStatus isDemo={isDemo} diagnostics={diagnostics} />}
     </div>
   );
 }
