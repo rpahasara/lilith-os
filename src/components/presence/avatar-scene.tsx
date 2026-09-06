@@ -18,6 +18,11 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
+import type {
+  NormalizedAttentionPoint,
+  PresenceFraming,
+  PresenceTransitionMode,
+} from "@/lib/presence/presence-types";
 import type { SpeechPlaybackSnapshot, VisemeCue } from "@/lib/hsin-lip-sync";
 import { lilithSpeech } from "@/lib/voice/speech-controller";
 import {
@@ -59,20 +64,7 @@ type FramingResult = {
   position: THREE.Vector3;
 };
 
-export type AvatarPresentationFraming = {
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-  cameraDistance: number;
-  fov: number;
-  targetY: number;
-  // When true, center horizontally on the HEAD bone instead of the full
-  // bounding box (which the asymmetric tail/hair skew off-axis). Puts the face
-  // on the camera's optical axis — fixes both the off-center drift and the
-  // off-axis perspective skew that reads as "not straight-on". Presentation
-  // only; never touches the pose. Omitted/false = legacy bounding-box centering.
-  centerOnFace?: boolean;
-};
+export type AvatarPresentationFraming = PresenceFraming;
 
 export type ForwardGazeCalibration = {
   eyeYaw: number;
@@ -883,6 +875,8 @@ function HsinAvatar({
   manualBlinkSequence,
   lookAtEnabled,
   lookAtStrength,
+  attentionPoint,
+  presentationTransition,
   centerEyesSequence,
   headAttentionEnabled,
   headAttentionStrength,
@@ -942,6 +936,8 @@ function HsinAvatar({
   manualBlinkSequence: number;
   lookAtEnabled: boolean;
   lookAtStrength: number;
+  attentionPoint: NormalizedAttentionPoint | null;
+  presentationTransition: PresenceTransitionMode;
   centerEyesSequence: number;
   headAttentionEnabled: boolean;
   headAttentionStrength: number;
@@ -1019,6 +1015,11 @@ function HsinAvatar({
   const lookAtPointer = useRef(new THREE.Vector2());
   const smoothedLookAtPointer = useRef(new THREE.Vector2());
   const centeredLookAtPointer = useRef(new THREE.Vector2());
+  const directedLookAtPointer = useRef(new THREE.Vector2());
+  directedLookAtPointer.current.set(attentionPoint?.x ?? 0, attentionPoint?.y ?? 0);
+  const renderedPresentation = useRef<AvatarPresentationFraming>({
+    ...presentationFraming,
+  });
   const lastCenterEyesSequence = useRef(centerEyesSequence);
   const smoothedHeadAttention = useRef(new THREE.Vector2());
   const lastCenterHeadSequence = useRef(centerHeadSequence);
@@ -1979,6 +1980,29 @@ function HsinAvatar({
     if (!rig.current) return;
 
     const d = Math.min(delta, 0.05);
+    const shown = renderedPresentation.current;
+    const damping = presentationTransition === "instant" ? Infinity : 8;
+    const approach = (current: number, target: number) =>
+      presentationTransition === "instant"
+        ? target
+        : THREE.MathUtils.damp(current, target, damping, d);
+    shown.scale = approach(shown.scale, presentationFraming.scale);
+    shown.offsetX = approach(shown.offsetX, presentationFraming.offsetX);
+    shown.offsetY = approach(shown.offsetY, presentationFraming.offsetY);
+    shown.cameraDistance = approach(shown.cameraDistance, presentationFraming.cameraDistance);
+    shown.fov = approach(shown.fov, presentationFraming.fov);
+    shown.targetY = approach(shown.targetY, presentationFraming.targetY);
+    shown.centerOnFace = presentationFraming.centerOnFace;
+    if (avatarFrame.current) {
+      avatarFrame.current.scale.setScalar(framing.scale * shown.scale);
+      avatarFrame.current.position.set(
+        framing.position.x * shown.scale +
+          shown.offsetX +
+          (shown.centerOnFace ? framing.faceOffsetX * shown.scale : 0),
+        framing.position.y * shown.scale + shown.offsetY,
+        framing.position.z * shown.scale,
+      );
+    }
     time.current += d;
     const t = time.current;
     const handOverrideChanged =
@@ -2280,7 +2304,9 @@ function HsinAvatar({
         visemeInspectEnabled ||
         !headAttentionEnabled ||
         centerHeadAtPointerVersion.current === pointerMovementVersion.current;
-      const headTarget = headTargetIsCentered
+      const headTarget = attentionPoint
+        ? directedLookAtPointer.current
+        : headTargetIsCentered
         ? centeredLookAtPointer.current
         : lookAtPointer.current;
       const applyHeadDeadzone = (value: number) =>
@@ -2669,7 +2695,9 @@ function HsinAvatar({
         lookAtPointer.current.set(0, 0);
       }
       const target = lookAtEnabled
-        ? lookAtPointer.current
+        ? attentionPoint
+          ? directedLookAtPointer.current
+          : lookAtPointer.current
         : centeredLookAtPointer.current;
       const applyDeadzone = (value: number) =>
         Math.abs(value) < 0.08
@@ -3118,15 +3146,15 @@ function HsinAvatar({
       <group ref={rig}>
         <group
           ref={avatarFrame}
-          scale={framing.scale * presentationFraming.scale}
+          scale={framing.scale * renderedPresentation.current.scale}
           position={[
-            framing.position.x * presentationFraming.scale +
-              presentationFraming.offsetX +
-              (presentationFraming.centerOnFace
-                ? framing.faceOffsetX * presentationFraming.scale
+            framing.position.x * renderedPresentation.current.scale +
+              renderedPresentation.current.offsetX +
+              (renderedPresentation.current.centerOnFace
+                ? framing.faceOffsetX * renderedPresentation.current.scale
                 : 0),
-            framing.position.y * presentationFraming.scale + presentationFraming.offsetY,
-            framing.position.z * presentationFraming.scale,
+            framing.position.y * renderedPresentation.current.scale + renderedPresentation.current.offsetY,
+            framing.position.z * renderedPresentation.current.scale,
           ]}
         >
           <primitive object={vrm.scene} />
@@ -3269,23 +3297,45 @@ function InspectionCamera({
 function PresentationCamera({
   enabled,
   framing,
+  transitionMode,
 }: {
   enabled: boolean;
   framing: AvatarPresentationFraming;
+  transitionMode: PresenceTransitionMode;
 }) {
   const { camera } = useThree();
+  const initialized = useRef(false);
 
   // useLayoutEffect (not useEffect): the presentation camera must be committed
   // BEFORE the first paint so the model's first rendered frame is already at the
   // approved framing — never the Canvas's full-body default. This runs before
   // HsinAvatar's first useFrame, so the readiness gate reveals into it cleanly.
   useLayoutEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      initialized.current = false;
+      return;
+    }
+    if (initialized.current) return;
+    initialized.current = true;
     camera.position.set(0, framing.targetY, framing.cameraDistance);
     camera.lookAt(new THREE.Vector3(0, framing.targetY, 0));
     if (camera instanceof THREE.PerspectiveCamera) camera.fov = framing.fov;
     camera.updateProjectionMatrix();
   }, [camera, enabled, framing]);
+
+  useFrame((_, delta) => {
+    if (!enabled || !initialized.current) return;
+    const d = Math.min(delta, 0.05);
+    const approach = (current: number, target: number) =>
+      transitionMode === "instant" ? target : THREE.MathUtils.damp(current, target, 8, d);
+    camera.position.y = approach(camera.position.y, framing.targetY);
+    camera.position.z = approach(camera.position.z, framing.cameraDistance);
+    camera.lookAt(new THREE.Vector3(0, camera.position.y, 0));
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = approach(camera.fov, framing.fov);
+    }
+    camera.updateProjectionMatrix();
+  });
 
   return null;
 }
@@ -3305,6 +3355,8 @@ export function AvatarScene({
   manualBlinkSequence = 0,
   lookAtEnabled = true,
   lookAtStrength = 0.45,
+  attentionPoint = null,
+  presentationTransition = "smooth",
   centerEyesSequence = 0,
   headAttentionEnabled = true,
   headAttentionStrength = 1,
@@ -3366,6 +3418,8 @@ export function AvatarScene({
   manualBlinkSequence?: number;
   lookAtEnabled?: boolean;
   lookAtStrength?: number;
+  attentionPoint?: NormalizedAttentionPoint | null;
+  presentationTransition?: PresenceTransitionMode;
   centerEyesSequence?: number;
   headAttentionEnabled?: boolean;
   headAttentionStrength?: number;
@@ -3446,6 +3500,7 @@ export function AvatarScene({
           !visemeInspectEnabled
         }
         framing={presentationFraming}
+        transitionMode={presentationTransition}
       />
       <HsinAvatar
         signal={signal}
@@ -3460,6 +3515,8 @@ export function AvatarScene({
         manualBlinkSequence={manualBlinkSequence}
         lookAtEnabled={lookAtEnabled}
         lookAtStrength={lookAtStrength}
+        attentionPoint={attentionPoint}
+        presentationTransition={presentationTransition}
         centerEyesSequence={centerEyesSequence}
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
