@@ -19,11 +19,11 @@ function Meta({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ApplicationRow({ app }: { app: Application }) {
+export function ApplicationRow({ app, selected, onSelect }: { app: Application; selected?: boolean; onSelect: (app: Application) => void }) {
   return (
-    <motion.article
+    <motion.button type="button" onClick={() => onSelect(app)} aria-pressed={selected}
       variants={riseIn}
-      className="group rounded-[var(--radius-md)] border border-white/[0.06] bg-white/[0.015] p-4 transition-colors hover:border-white/12 hover:bg-white/[0.03]"
+      className={`group w-full rounded-[var(--radius-md)] border p-4 text-left transition-colors ${selected ? "border-wine-bright/35 bg-wine/10" : "border-white/[0.06] bg-white/[0.015] hover:border-white/12 hover:bg-white/[0.03]"}`}
     >
       <div className="flex items-start gap-3">
         {/* company mark */}
@@ -94,13 +94,13 @@ export function ApplicationRow({ app }: { app: Application }) {
 
           {/* next action call-to-action */}
           {app.nextAction && (
-            <button className="mt-3 flex items-center gap-1.5 text-xs font-medium text-violet-bright transition-opacity hover:opacity-80">
+            <span className="mt-3 flex items-center gap-1.5 text-xs font-medium text-violet-bright transition-opacity group-hover:opacity-80">
               {app.nextAction.label}
               <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-            </button>
+            </span>
           )}
         </div>
       </div>
-    </motion.article>
+    </motion.button>
   );
 }

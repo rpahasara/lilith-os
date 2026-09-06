@@ -3,7 +3,8 @@
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
-import { STAGE_META, type PipelineStage } from "@/lib/career/types";
+import { STAGE_META, type PipelineStage, type Stage } from "@/lib/career/types";
+import { cn } from "@/lib/utils";
 
 const NODE_ACCENT: Record<string, string> = {
   violet: "var(--violet-bright)",
@@ -14,7 +15,7 @@ const NODE_ACCENT: Record<string, string> = {
   faint: "var(--ink-faint)",
 };
 
-export function PipelineOverview({ pipeline }: { pipeline: PipelineStage[] }) {
+export function PipelineOverview({ pipeline, selectedStage, onSelect }: { pipeline: PipelineStage[]; selectedStage?: Stage | null; onSelect?: (stage: Stage) => void }) {
   return (
     <GlassCard className="p-5" interactive>
       <PanelHeader
@@ -33,7 +34,7 @@ export function PipelineOverview({ pipeline }: { pipeline: PipelineStage[] }) {
             const color = NODE_ACCENT[meta.accent];
             const active = p.count > 0;
             return (
-              <div key={p.stage} className="relative flex flex-1 flex-col items-center">
+              <button type="button" key={p.stage} onClick={() => onSelect?.(p.stage)} aria-pressed={selectedStage === p.stage} className={cn("relative flex flex-1 flex-col items-center rounded-xl py-2 transition-colors hover:bg-white/[0.03]", selectedStage === p.stage && "bg-white/[0.05]")}>
                 {/* connector */}
                 {i < pipeline.length - 1 && (
                   <span className="absolute right-[-50%] top-[46px] h-px w-full bg-white/[0.08]" />
@@ -65,7 +66,7 @@ export function PipelineOverview({ pipeline }: { pipeline: PipelineStage[] }) {
                 <span className="mt-3 text-center text-[11px] leading-tight text-ink-muted">
                   {meta.label}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>

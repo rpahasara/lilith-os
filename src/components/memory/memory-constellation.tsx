@@ -218,6 +218,7 @@ export function MemoryConstellation({
           </defs>
         </svg>
       </div>
+      <p className="mt-1 text-center text-[10px] text-ink-faint">Select a node to focus the memory grid · select it again to clear</p>
     </GlassCard>
   );
 }
