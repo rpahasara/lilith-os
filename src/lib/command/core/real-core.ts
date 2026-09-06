@@ -1,12 +1,13 @@
 /**
- * RealCommandCore — Cognitive Core V2, Vertical Slice 1.
+ * RealCommandCore — the single generic Cognitive Core engine.
  *
- * Implements the frozen {@link CommandCore} seam with REAL read-only backend
- * work: context assembly → plan → capability check → bounded step execution →
- * verification → evidence → durable result. It is the authoritative owner of
- * each task record (React only mirrors the emitted events), supports genuine
- * cancellation and bounded retry, and never promotes a non-verified or
- * post-cancellation result to success.
+ * It implements the frozen {@link CommandCore} seam and owns everything that is
+ * task-agnostic: task records, submit/run/cancel/retry, capability health
+ * gating, one-step-at-a-time execution with bounded retry, genuine
+ * AbortController cancellation, verification → terminal mapping, durable
+ * persistence, and structured logging. Each task type is a {@link TaskPlaybook}
+ * (system health, career attention, …) that only supplies its plan, per-step
+ * behaviour, and verifier — so new real tasks reuse this engine wholesale.
  */
 import type {
   CommandAction,
@@ -15,39 +16,40 @@ import type {
   CommandEventListener,
 } from "../events";
 import type { CommandEvidence, CommandStep } from "../types";
-import {
-  getCapability,
-  isUnitUnhealthy,
-  type OsOverview,
-  type SystemStatus,
-} from "./capabilities";
-import { buildContextBundle } from "./context";
+import { getCapability } from "./capabilities";
 import { consoleCoreLogger, type CoreLogger } from "./logger";
 import { matchRealIntent, type RealIntent } from "./intents";
-import { planSystemHealth } from "./planner";
 import { realTransport } from "./transport";
 import { InMemoryTaskStore, LocalStorageTaskStore, type TaskStore } from "./task-store";
-import { verifySystemHealth } from "./verifier";
+import { systemHealthPlaybook } from "./playbooks/system-health";
+import { careerAttentionPlaybook } from "./playbooks/career-attention";
+import type { PlaybookContext, TaskPlaybook } from "./playbook";
 import type {
   Capability,
   CapabilityResult,
   CommandPlan,
-  ContextBundle,
   CoreTaskRecord,
   CoreTransport,
+  ProvenanceRef,
 } from "./types";
+
+/** Task-type registry, keyed by RealIntent id. */
+const PLAYBOOKS: Record<string, TaskPlaybook> = {
+  [systemHealthPlaybook.id]: systemHealthPlaybook,
+  [careerAttentionPlaybook.id]: careerAttentionPlaybook,
+};
 
 interface Runtime {
   record: CoreTaskRecord;
   intent: RealIntent;
+  playbook: TaskPlaybook;
   plan: CommandPlan;
-  context: ContextBundle;
   abort: AbortController;
   canceled: boolean;
   started: boolean;
-  overview: OsOverview | null;
-  status: SystemStatus | null;
-  statusExecId?: string;
+  data: Record<string, unknown>;
+  provenance: ProvenanceRef[];
+  extraEvidence: CommandEvidence[];
 }
 
 function makeId(): string {
@@ -74,7 +76,8 @@ export class RealCommandCore implements CommandCore {
 
   /** Which inputs this core can fulfil for real. */
   static matches(input: string): RealIntent | null {
-    return matchRealIntent(input);
+    const intent = matchRealIntent(input);
+    return intent && PLAYBOOKS[intent.id] ? intent : null;
   }
 
   subscribe(listener: CommandEventListener): () => void {
@@ -94,7 +97,6 @@ export class RealCommandCore implements CommandCore {
 
   /** Restore durable real-task history as terminal CommandTasks for the UI. */
   restore(): CommandEvent[] {
-    // Return synthesized events the provider can fold to rebuild history.
     const out: CommandEvent[] = [];
     for (const rec of this.store.loadAll()) {
       if (!rec.outcome) continue;
@@ -109,35 +111,16 @@ export class RealCommandCore implements CommandCore {
         source: "core",
         contextSummary: rec.scope,
       });
-      if (rec.plan) {
-        out.push({ type: "plan.available", taskId: rec.taskId, at: rec.createdAt, steps: recSteps(rec) });
-      }
+      if (rec.plan) out.push({ type: "plan.available", taskId: rec.taskId, at: rec.createdAt, steps: recSteps(rec) });
+      const at = rec.endedAt ?? rec.updatedAt;
       if (rec.outcome === "succeeded") {
-        out.push({
-          type: "result.available",
-          taskId: rec.taskId,
-          at: rec.endedAt ?? rec.updatedAt,
-          result: { outcome: "succeeded", summary: rec.resultSummary ?? "Done.", unresolved: rec.unresolved },
-          evidence: rec.evidence,
-        });
+        out.push({ type: "result.available", taskId: rec.taskId, at, result: { outcome: "succeeded", summary: rec.resultSummary ?? "Done.", unresolved: rec.unresolved }, evidence: rec.evidence });
       } else if (rec.outcome === "partial") {
-        out.push({
-          type: "partial.result",
-          taskId: rec.taskId,
-          at: rec.endedAt ?? rec.updatedAt,
-          result: { outcome: "partial", summary: rec.resultSummary ?? "Partial.", unresolved: rec.unresolved },
-          evidence: rec.evidence,
-        });
+        out.push({ type: "partial.result", taskId: rec.taskId, at, result: { outcome: "partial", summary: rec.resultSummary ?? "Partial.", unresolved: rec.unresolved }, evidence: rec.evidence });
       } else if (rec.outcome === "failed") {
-        out.push({
-          type: "failed",
-          taskId: rec.taskId,
-          at: rec.endedAt ?? rec.updatedAt,
-          error: rec.failure?.reason ?? "Failed.",
-          evidence: rec.evidence,
-        });
+        out.push({ type: "failed", taskId: rec.taskId, at, error: rec.failure?.reason ?? "Failed.", evidence: rec.evidence });
       } else if (rec.outcome === "cancelled") {
-        out.push({ type: "cancelled", taskId: rec.taskId, at: rec.endedAt ?? rec.updatedAt });
+        out.push({ type: "cancelled", taskId: rec.taskId, at });
       }
     }
     return out;
@@ -145,26 +128,14 @@ export class RealCommandCore implements CommandCore {
 
   dispatch(action: CommandAction): void {
     switch (action.type) {
-      case "submit":
-        this.onSubmit(action.taskId, action.input);
-        break;
-      case "run":
-        this.onRun(action.taskId);
-        break;
-      case "cancel":
-        this.onCancel(action.taskId);
-        break;
+      case "submit": this.onSubmit(action.taskId, action.input); break;
+      case "run": this.onRun(action.taskId); break;
+      case "cancel": this.onCancel(action.taskId); break;
       case "retry":
-      case "resume":
-        this.onRetry(action.taskId);
-        break;
-      case "discard":
-        this.runs.delete(action.taskId);
-        break;
-      // No approval gate in this read-only slice.
+      case "resume": this.onRetry(action.taskId); break;
+      case "discard": this.runs.delete(action.taskId); break;
       case "approve":
-      case "deny":
-        break;
+      case "deny": break; // no approval gate in these read-only slices
     }
   }
 
@@ -172,30 +143,15 @@ export class RealCommandCore implements CommandCore {
 
   private onSubmit(taskId: string, input: string) {
     const intent = matchRealIntent(input);
-    if (!intent) {
-      // Provider only routes real intents here; guard anyway.
-      this.emit({
-        type: "task.created",
-        taskId,
-        at: Date.now(),
-        userInput: input,
-        normalizedIntent: input,
-        title: input.slice(0, 40),
-        kind: "unsupported",
-        source: "core",
-      });
-      this.emit({
-        type: "capability.unsupported",
-        taskId,
-        at: Date.now(),
-        reason: "No real capability is wired for that request yet.",
-      });
+    const playbook = intent ? PLAYBOOKS[intent.id] : undefined;
+    if (!intent || !playbook) {
+      this.emit({ type: "task.created", taskId, at: Date.now(), userInput: input, normalizedIntent: input, title: input.slice(0, 40), kind: "unsupported", source: "core" });
+      this.emit({ type: "capability.unsupported", taskId, at: Date.now(), reason: "No real capability is wired for that request yet." });
       return;
     }
 
     const now = Date.now();
-    const plan = planSystemHealth(taskId, intent.normalized);
-    const context = buildContextBundle(taskId, input, intent);
+    const plan = playbook.plan(taskId, intent.normalized);
     const record: CoreTaskRecord = {
       taskId,
       source: "core",
@@ -217,38 +173,16 @@ export class RealCommandCore implements CommandCore {
     };
 
     this.runs.set(taskId, {
-      record,
-      intent,
-      plan,
-      context,
+      record, intent, playbook, plan,
       abort: new AbortController(),
-      canceled: false,
-      started: false,
-      overview: null,
-      status: null,
+      canceled: false, started: false,
+      data: {}, provenance: [], extraEvidence: [],
     });
 
     this.logger.log("task.created", taskId, { intent: intent.id });
-    this.emit({
-      type: "task.created",
-      taskId,
-      at: now,
-      userInput: input,
-      normalizedIntent: intent.normalized,
-      title: intent.title,
-      kind: "action",
-      source: "core",
-      contextSummary: "Live read-only · no changes made",
-    });
+    this.emit({ type: "task.created", taskId, at: now, userInput: input, normalizedIntent: intent.normalized, title: intent.title, kind: "action", source: "core", contextSummary: "Live read-only · no changes made" });
     this.logger.log("plan.created", taskId, { steps: plan.steps.length, version: plan.version });
-    this.emit({
-      type: "intent.proposed",
-      taskId,
-      at: Date.now(),
-      normalizedIntent: intent.normalized,
-      title: intent.title,
-      steps: recSteps(record),
-    });
+    this.emit({ type: "intent.proposed", taskId, at: Date.now(), normalizedIntent: intent.normalized, title: intent.title, steps: recSteps(record) });
   }
 
   private onRun(taskId: string) {
@@ -269,8 +203,9 @@ export class RealCommandCore implements CommandCore {
     run.record.outcome = undefined;
     run.record.failure = undefined;
     run.record.evidence = [];
-    run.overview = null;
-    run.status = null;
+    run.data = {};
+    run.provenance = [];
+    run.extraEvidence = [];
     run.started = false;
     this.emit({ type: "plan.available", taskId, at: Date.now(), steps: recSteps(run.record) });
     this.onRun(taskId);
@@ -283,8 +218,6 @@ export class RealCommandCore implements CommandCore {
     run.record.cancelRequested = true;
     run.abort.abort();
     this.logger.log("cancel", taskId, {});
-    // The execute loop will observe `canceled` and emit the terminal cancelled
-    // event after the current step settles. If nothing is running yet, finish now.
     if (!run.record.currentStepId) this.finishCancelled(run);
   }
 
@@ -307,169 +240,92 @@ export class RealCommandCore implements CommandCore {
 
   private async execute(run: Runtime) {
     const { taskId } = run.record;
+    const ctx: PlaybookContext = {
+      taskId,
+      now: Date.now(),
+      isCanceled: () => run.canceled,
+      runCapability: (cap, stepId) => this.runCapability(run, cap, stepId),
+      emitProgress: (stepId, detail) => this.emit({ type: "step.progress", taskId, at: Date.now(), stepId, detail }),
+      data: run.data,
+      provenance: run.provenance,
+      evidence: run.extraEvidence,
+    };
 
     this.emit({ type: "status", taskId, at: Date.now(), status: "planning" });
     this.emit({ type: "plan.available", taskId, at: Date.now(), steps: recSteps(run.record) });
 
-    // Capability check — the capability must exist and be healthy before work.
-    this.emit({ type: "status", taskId, at: Date.now(), status: "planning" });
+    // Capability check — every required capability must exist.
     for (const capId of run.plan.capabilitiesRequired) {
-      const cap = getCapability(capId);
-      if (!cap) {
+      if (!getCapability(capId)) {
         this.logger.log("capability.selected", taskId, { capId, present: false });
         return this.fail(run, `Capability ${capId} is not available.`, undefined, "capability_unsupported");
       }
     }
     // Health-gate on the backbone capability.
-    const backbone = getCapability("system.get_status")!;
+    const backbone = getCapability(run.playbook.backboneCapabilityId)!;
     this.logger.log("capability.selected", taskId, { capId: backbone.id });
     if (run.canceled) return this.finishCancelled(run);
     const health = await backbone.checkHealth(this.transport, run.abort.signal);
     this.logger.log("capability.health", taskId, { capId: backbone.id, healthy: health.healthy });
     if (run.canceled) return this.finishCancelled(run);
     if (!health.healthy) {
-      return this.fail(
-        run,
-        "The control backend is unreachable, so system status could not be read.",
-        "Retry when the backend tunnel is active.",
-      );
+      return this.fail(run, "The control backend is unreachable, so the task could not run.", "Retry when the backend is reachable.");
     }
 
-    // Step-by-step execution.
+    // Step-by-step execution via the playbook.
     for (const step of run.plan.steps) {
       if (run.canceled) return this.finishCancelled(run);
-
       this.setStep(run, step.id, { status: "running", startedAt: Date.now() });
       this.emit({ type: "step.started", taskId, at: Date.now(), stepId: step.id });
       this.logger.log("step.started", taskId, { stepId: step.id });
 
-      if (step.kind === "capability" && step.capabilityId) {
-        const cap = getCapability(step.capabilityId)!;
-        const result = await this.runCapability(run, cap, step.id);
-        if (run.canceled) return this.finishCancelled(run);
+      const r = await run.playbook.runStep(step, ctx);
+      if (run.canceled) return this.finishCancelled(run);
 
-        if (step.capabilityId === "os.get_overview") {
-          if (result.ok) {
-            run.overview = result.data as OsOverview;
-            run.context.retrieved["os.get_overview"] = run.overview;
-            run.context.provenance.push({
-              capabilityId: cap.id,
-              executionId: result.executionId,
-              source: result.source,
-              fetchedAt: result.endedAt,
-            });
-            this.setStep(run, step.id, {
-              status: "succeeded",
-              endedAt: Date.now(),
-              detail: `LILITH ${run.overview.lilithStatus}`,
-              executionId: result.executionId,
-            });
-            this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "succeeded", detail: `LILITH ${run.overview.lilithStatus}` });
-          } else {
-            // Overview is context, not the backbone — degrade to a warning and
-            // continue; the verifier downgrades the final verdict to PARTIAL.
-            this.setStep(run, step.id, { status: "skipped", endedAt: Date.now(), detail: "overview unavailable" });
-            this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "skipped", detail: "overview unavailable" });
-          }
-        } else if (step.capabilityId === "system.get_status") {
-          if (!result.ok) {
-            this.setStep(run, step.id, { status: "failed", endedAt: Date.now(), detail: result.error });
-            this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "failed", detail: result.error });
-            return this.fail(
-              run,
-              result.errorKind === "malformed"
-                ? "The backend returned a malformed system status response."
-                : "Could not retrieve system status from the control backend.",
-              "Retry when the backend is healthy.",
-            );
-          }
-          run.status = result.data as SystemStatus;
-          run.statusExecId = result.executionId;
-          run.context.retrieved["system.get_status"] = run.status;
-          run.context.backendTime = run.status.timeUtc;
-          run.context.provenance.push({
-            capabilityId: cap.id,
-            executionId: result.executionId,
-            source: result.source,
-            fetchedAt: result.endedAt,
-          });
-          const detail = `${run.status.units.length} units`;
-          this.setStep(run, step.id, { status: "succeeded", endedAt: Date.now(), detail, executionId: result.executionId });
-          this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "succeeded", detail });
-        }
-      } else {
-        // Internal analysis step over already-retrieved data.
-        let detail = "";
-        if (step.id === "s3" && run.status) {
-          const unhealthy = run.status.units.filter(isUnitUnhealthy).length;
-          detail = unhealthy === 0 ? "all healthy" : `${unhealthy} need attention`;
-        }
-        if (run.canceled) return this.finishCancelled(run);
-        this.setStep(run, step.id, { status: "succeeded", endedAt: Date.now(), detail: detail || undefined });
-        this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "succeeded", detail: detail || undefined });
+      if (r.fatal) {
+        this.setStep(run, step.id, { status: "failed", endedAt: Date.now(), detail: r.detail });
+        this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: "failed", detail: r.detail });
+        return this.fail(run, r.fatal.reason, r.fatal.recovery);
       }
+      this.setStep(run, step.id, { status: r.outcome, endedAt: Date.now(), detail: r.detail });
+      this.emit({ type: "step.finished", taskId, at: Date.now(), stepId: step.id, outcome: r.outcome, detail: r.detail });
     }
 
     if (run.canceled) return this.finishCancelled(run);
 
     // Verify.
     run.record.status = "verifying";
-    const verdict = verifySystemHealth({
-      status: run.status,
-      overview: run.overview,
-      statusExecutionId: run.statusExecId,
-    });
+    const verdict = run.playbook.verify(ctx);
     this.logger.log("verify.verdict", taskId, { verdict: verdict.verdict, unresolved: verdict.unresolved.length });
-
     if (run.canceled) return this.finishCancelled(run);
 
-    run.record.evidence = verdict.evidence;
+    const evidence = ctx.evidence.length ? [...ctx.evidence, ...verdict.evidence] : verdict.evidence;
+    run.record.evidence = evidence;
     run.record.resultSummary = verdict.summary;
     run.record.unresolved = verdict.unresolved;
 
-    if (verdict.verdict === "FAIL") {
-      return this.fail(run, verdict.summary, verdict.recovery);
-    }
+    if (verdict.verdict === "FAIL") return this.fail(run, verdict.summary, verdict.recovery);
+
     if (verdict.verdict === "PARTIAL") {
       run.record.outcome = "partial";
       run.record.status = "partial";
       run.record.endedAt = Date.now();
       this.persist(run.record);
       this.logger.log("terminal", taskId, { outcome: "partial" });
-      this.emit({
-        type: "partial.result",
-        taskId,
-        at: Date.now(),
-        result: { outcome: "partial", summary: verdict.summary, unresolved: verdict.unresolved },
-        evidence: verdict.evidence,
-      });
+      this.emit({ type: "partial.result", taskId, at: Date.now(), result: { outcome: "partial", summary: verdict.summary, unresolved: verdict.unresolved }, evidence });
       return;
     }
-    // PASS
+
     run.record.outcome = "succeeded";
     run.record.status = "succeeded";
     run.record.endedAt = Date.now();
     this.persist(run.record);
     this.logger.log("terminal", taskId, { outcome: "succeeded" });
-    this.emit({
-      type: "result.available",
-      taskId,
-      at: Date.now(),
-      result: {
-        outcome: "succeeded",
-        summary: verdict.summary,
-        unresolved: verdict.unresolved.length ? verdict.unresolved : undefined,
-      },
-      evidence: verdict.evidence,
-    });
+    this.emit({ type: "result.available", taskId, at: Date.now(), result: { outcome: "succeeded", summary: verdict.summary, unresolved: verdict.unresolved.length ? verdict.unresolved : undefined }, evidence });
   }
 
   /** Execute one capability with bounded retry on retryable errors. */
-  private async runCapability(
-    run: Runtime,
-    cap: Capability,
-    stepId: string,
-  ): Promise<CapabilityResult> {
+  private async runCapability(run: Runtime, cap: Capability, stepId: string): Promise<CapabilityResult> {
     const { taskId } = run.record;
     const policy = cap.retry;
     let last: CapabilityResult | null = null;
@@ -477,39 +333,18 @@ export class RealCommandCore implements CommandCore {
       if (run.canceled) break;
       this.bumpAttempt(run, stepId);
       last = await cap.execute(this.transport, run.abort.signal);
-      this.logger.log("capability.result", taskId, {
-        capId: cap.id,
-        ok: last.ok,
-        status: last.status,
-        attempt,
-        execId: last.executionId,
-      });
+      this.logger.log("capability.result", taskId, { capId: cap.id, ok: last.ok, status: last.status, attempt, execId: last.executionId });
       if (last.ok) return last;
-      const retryable =
-        !!last.errorKind &&
-        (policy.retryOn as string[]).includes(last.errorKind) &&
-        attempt < policy.maxAttempts &&
-        !run.canceled;
+      const retryable = !!last.errorKind && (policy.retryOn as string[]).includes(last.errorKind) && attempt < policy.maxAttempts && !run.canceled;
       if (!retryable) break;
       this.logger.log("retry", taskId, { capId: cap.id, nextAttempt: attempt + 1 });
-      this.emit({
-        type: "step.progress",
-        taskId,
-        at: Date.now(),
-        stepId,
-        detail: `retrying (attempt ${attempt + 1}/${policy.maxAttempts})`,
-      });
+      this.emit({ type: "step.progress", taskId, at: Date.now(), stepId, detail: `retrying (attempt ${attempt + 1}/${policy.maxAttempts})` });
       await sleep(250);
     }
     return last!;
   }
 
-  private fail(
-    run: Runtime,
-    reason: string,
-    recovery?: string,
-    mode: "failed" | "capability_unsupported" = "failed",
-  ) {
+  private fail(run: Runtime, reason: string, recovery?: string, mode: "failed" | "capability_unsupported" = "failed") {
     if (run.record.outcome) return;
     run.record.failure = { reason, recovery };
     run.record.endedAt = Date.now();
@@ -530,13 +365,7 @@ export class RealCommandCore implements CommandCore {
     run.record.status = "failed";
     this.persist(run.record);
     this.logger.log("terminal", run.record.taskId, { outcome: "failed" });
-    this.emit({
-      type: "failed",
-      taskId: run.record.taskId,
-      at: Date.now(),
-      error: recovery ? `${reason} ${recovery}` : reason,
-      evidence,
-    });
+    this.emit({ type: "failed", taskId: run.record.taskId, at: Date.now(), error: recovery ? `${reason} ${recovery}` : reason, evidence });
   }
 
   private setStep(run: Runtime, stepId: string, patch: Partial<CoreTaskRecord["steps"][number]>) {
@@ -549,21 +378,12 @@ export class RealCommandCore implements CommandCore {
   }
 
   private bumpAttempt(run: Runtime, stepId: string) {
-    run.record.steps = run.record.steps.map((s) =>
-      s.id === stepId ? { ...s, attempts: s.attempts + 1 } : s,
-    );
+    run.record.steps = run.record.steps.map((s) => (s.id === stepId ? { ...s, attempts: s.attempts + 1 } : s));
   }
 }
 
-/* --------------------------------------------------------------- helpers */
-
 function recSteps(record: CoreTaskRecord): CommandStep[] {
   return record.steps.map((s) => ({
-    id: s.id,
-    label: s.label,
-    status: s.status,
-    detail: s.detail,
-    startedAt: s.startedAt,
-    endedAt: s.endedAt,
+    id: s.id, label: s.label, status: s.status, detail: s.detail, startedAt: s.startedAt, endedAt: s.endedAt,
   }));
 }
