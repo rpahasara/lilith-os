@@ -12,7 +12,7 @@ export default function AutomationsPage() {
   const { data, loading } = useAutomations();
 
   return (
-    <div className="scroll-area h-full space-y-4 overflow-y-auto pb-6 pr-1">
+    <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
       {loading || !data ? (
         <AutomationsSkeleton />
       ) : (

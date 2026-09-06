@@ -20,7 +20,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SidebarRail />
           <div className="flex min-w-0 flex-1 flex-col">
             <TopBar />
-            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-7 lg:overflow-hidden lg:px-8">
+            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-7 lg:px-8 xl:overflow-hidden">
               {children}
             </main>
             <StatusBar />

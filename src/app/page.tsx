@@ -18,20 +18,20 @@ export default function CommandCenter() {
       variants={staggerContainer}
       initial="hidden"
       animate="show"
-      className="grid grid-cols-1 gap-6 py-1 lg:h-full lg:grid-cols-[260px_minmax(0,1fr)_260px] lg:gap-8 lg:py-0"
+      className="grid grid-cols-1 gap-6 py-1 xl:h-full xl:grid-cols-[260px_minmax(420px,1fr)_280px] xl:gap-10 xl:py-0"
     >
       {/* TODAY — floats near the top-left, clear of her face */}
-      <div className="order-2 flex justify-center lg:order-1 lg:justify-start lg:pt-10">
+      <div className="order-2 flex items-start justify-center xl:order-1 xl:justify-start xl:pt-12">
         <TodayCard />
       </div>
 
       {/* Centre — Lilith dominates */}
-      <div className="order-1 min-h-[62vh] lg:order-2 lg:min-h-0">
+      <div className="order-1 min-h-[62vh] xl:order-2 xl:min-h-0">
         <PresenceHero />
       </div>
 
       {/* NEXT — floats lower-right, staggered against TODAY */}
-      <div className="order-3 flex justify-center lg:justify-end lg:items-end lg:pb-20">
+      <div className="order-3 flex justify-center xl:items-end xl:justify-end xl:pb-20">
         <NextCard />
       </div>
     </motion.div>

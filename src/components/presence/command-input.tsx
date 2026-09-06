@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowUp, Command, Loader2, Mic, Sparkles } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CommandInputProps {
@@ -40,12 +40,13 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
             ? "0 0 0 1px rgba(243,238,244,0.22), 0 26px 66px -28px rgba(201,79,109,0.6), 0 16px 54px -30px rgba(168,134,217,0.3)"
             : "0 26px 64px -34px rgba(0,0,0,0.9), 0 18px 52px -38px rgba(201,79,109,0.16)",
         }}
-        className="glass-strong flex items-center gap-3 rounded-full px-2 py-2 pl-5"
+        className="glass-strong relative flex items-center gap-3 overflow-hidden rounded-full px-2 py-2 pl-5"
       >
+        <span className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-pearl/45 to-transparent" />
         {loading ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-wine-bright" />
         ) : (
-          <Sparkles className="h-4 w-4 shrink-0 text-wine-bright" />
+          <Sparkles className="h-4 w-4 shrink-0 text-wine-bright drop-shadow-[0_0_8px_rgba(225,132,157,0.45)]" />
         )}
         <input
           value={value}
@@ -72,8 +73,8 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
           placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
           className="min-w-0 flex-1 bg-transparent text-[15px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
         />
-        <kbd className="hidden items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint sm:flex">
-          <Command className="h-3 w-3" />K
+        <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint sm:flex">
+          Ctrl K
         </kbd>
         <button
           aria-label="Voice input"
@@ -87,10 +88,10 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
           onClick={submit}
           disabled={loading || !value.trim()}
           className={cn(
-            "grid h-9 w-9 place-items-center rounded-full transition-all",
+            "grid h-9 w-9 place-items-center rounded-full border transition-all",
             value.trim() && !loading
-              ? "bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[0_8px_22px_-6px_rgba(201,79,109,0.85)]"
-              : "bg-white/5 text-ink-faint",
+              ? "border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_8px_22px_-6px_rgba(201,79,109,0.85)]"
+              : "border-white/[0.06] bg-white/[0.045] text-ink-faint",
           )}
         >
           {loading ? (
@@ -106,7 +107,7 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
           <button
             key={s}
             onClick={() => setValue(s)}
-            className="rounded-full border border-white/[0.07] bg-white/[0.02] px-3 py-1 text-xs text-ink-muted transition-colors hover:border-white/15 hover:text-ink"
+            className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-[11px] text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink"
           >
             {s}
           </button>

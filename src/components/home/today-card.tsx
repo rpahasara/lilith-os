@@ -16,9 +16,10 @@ const ICONS: LucideIcon[] = [CalendarDays, Flag, Target];
  */
 export function TodayCard() {
   return (
-    <GlassCard panel interactive className="w-full max-w-[284px] px-4 py-3.5">
+    <GlassCard panel interactive className="w-full max-w-[284px] px-4 py-4">
+      <span className="pointer-events-none absolute inset-y-5 left-0 w-px bg-gradient-to-b from-transparent via-wine-bright/55 to-transparent" />
       <div className="flex items-center justify-between">
-        <span className="eyebrow">Today</span>
+        <span className="eyebrow text-ink">Today</span>
         <span className="font-mono text-[10px] text-gold/85">
           Focus {pipeline.focusScore}
         </span>
@@ -28,7 +29,7 @@ export function TodayCard() {
         variants={staggerContainer}
         initial="hidden"
         animate="show"
-        className="mt-2.5 space-y-1.5"
+        className="mt-3 space-y-2"
       >
         {brief.map((b, i) => {
           const Icon = ICONS[i] ?? CalendarDays;
@@ -38,7 +39,7 @@ export function TodayCard() {
               variants={riseIn}
               className="flex items-center gap-2.5"
             >
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-wine/[0.12] text-wine-bright">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-wine/15 bg-wine/[0.12] text-wine-bright shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
                 <Icon className="h-3 w-3" />
               </span>
               <div className="min-w-0 leading-tight">

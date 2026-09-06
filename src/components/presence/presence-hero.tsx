@@ -135,7 +135,7 @@ export function PresenceHero() {
   }
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between pt-2 pb-1">
+    <div className="relative flex h-full flex-col items-center justify-between pb-1 pt-2">
       {/* greeting */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -143,18 +143,18 @@ export function PresenceHero() {
         transition={{ delay: 0.2, duration: 0.7 }}
         className="text-center"
       >
-        <p className="eyebrow mb-2 flex items-center justify-center gap-2">
-          <StatusDot accent="wine" /> Lilith · online
+        <p className="eyebrow mb-2.5 flex items-center justify-center gap-2 text-wine-bright/85">
+          <StatusDot accent="wine" /> Presence online
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-ink [text-shadow:0_2px_24px_rgba(0,0,0,0.6)] sm:text-[2.5rem]">
-          {greeting}, <span className="text-wine-bright">{user.name}</span>.
+        <h1 className="text-3xl font-medium tracking-[-0.045em] text-ink [text-shadow:0_2px_28px_rgba(0,0,0,0.72)] sm:text-[2.6rem]">
+          {greeting}, <span className="bg-gradient-to-r from-pearl via-wine-bright to-orchid-bright bg-clip-text font-semibold text-transparent">{user.name}</span>.
         </h1>
       </motion.div>
 
       {/* presence stage — pluggable renderer (orb today, avatar later). No
           grounded reflection: the bust-up should read as an integrated presence,
           not a figure standing on a stage floor. */}
-      <div className="relative my-1 aspect-square w-full min-h-0 max-w-[460px] flex-1">
+      <div className="relative my-1 aspect-square w-full min-h-0 max-w-[460px] flex-1 lg:max-w-[360px] xl:max-w-[460px]">
         <PresenceStage />
       </div>
 
@@ -179,7 +179,7 @@ export function PresenceHero() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.4 }}
-                className="max-w-md text-[15px] text-ink-muted"
+                className="max-w-md text-[15px] leading-relaxed text-ink-muted [text-shadow:0_2px_18px_rgba(0,0,0,0.7)]"
               >
                 {ACTIVITY_META[activity].hint}
               </motion.p>
@@ -191,10 +191,10 @@ export function PresenceHero() {
                   key={a}
                   onClick={() => override({ activity: a })}
                   className={cn(
-                    "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-all",
+                    "rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.14em] transition-all",
                     activity === a
-                      ? "bg-white/10 text-ink"
-                      : "text-ink-faint hover:text-ink-muted",
+                      ? "border-wine/25 bg-wine/[0.12] text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
+                      : "border-transparent text-ink-faint hover:border-white/10 hover:bg-white/[0.035] hover:text-ink-muted",
                   )}
                 >
                   {ACTIVITY_META[a].label}

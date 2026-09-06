@@ -12,16 +12,17 @@ import { nextEvent } from "@/lib/data";
 export function NextCard() {
   return (
     <GlassCard panel interactive className="w-full max-w-[300px] p-5">
+      <span className="pointer-events-none absolute inset-y-5 right-0 w-px bg-gradient-to-b from-transparent via-gold/50 to-transparent" />
       <div className="flex items-center justify-between">
-        <span className="eyebrow">Next</span>
-        <span className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-ink">
+        <span className="eyebrow text-ink">Next</span>
+        <span className="rounded-full border border-gold/15 bg-gold/[0.08] px-2.5 py-1 font-mono text-[10px] text-gold">
           in {nextEvent.inMinutes}m
         </span>
       </div>
 
       <div className="mt-4">
         <div className="flex items-baseline gap-2 font-mono">
-          <span className="text-2xl font-semibold leading-none text-ink">
+          <span className="text-[1.7rem] font-semibold leading-none tracking-[-0.04em] text-ink">
             {nextEvent.start}
           </span>
           <span className="text-[11px] text-ink-faint">– {nextEvent.end}</span>
