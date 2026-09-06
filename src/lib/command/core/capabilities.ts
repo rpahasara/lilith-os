@@ -12,6 +12,7 @@ import type {
   TransportResult,
 } from "./types";
 import { executionId } from "./ids";
+import { CAREER_CAPABILITIES } from "./career-capabilities";
 
 function classify(res: TransportResult): "network" | "timeout" | "5xx" | "4xx" | undefined {
   if (res.ok) return undefined;
@@ -188,6 +189,7 @@ export const systemStatusCapability: Capability<SystemStatus> = {
 export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   [osOverviewCapability.id]: osOverviewCapability as Capability,
   [systemStatusCapability.id]: systemStatusCapability as Capability,
+  ...Object.fromEntries(CAREER_CAPABILITIES.map((c) => [c.id, c])),
 };
 
 export function getCapability(id: string): Capability | undefined {

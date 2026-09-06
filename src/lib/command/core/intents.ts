@@ -4,7 +4,7 @@
  * falls through to the demo core or plain conversation.
  */
 
-export type RealIntentId = "system.health_summary";
+export type RealIntentId = "system.health_summary" | "career.attention_summary";
 
 export interface RealIntent {
   id: RealIntentId;
@@ -26,6 +26,21 @@ export const REAL_INTENTS: RealIntent[] = [
       /are.*(services|systems).*(ok|healthy|up|running)/,
       /how.*(is|are).*(lilith|the system|services)/,
       /health\s+summary/,
+    ],
+  },
+  {
+    id: "career.attention_summary",
+    title: "Career attention summary",
+    normalized: "Summarise which job applications need attention",
+    scope: "career",
+    triggers: [
+      /application.*(attention|follow.?up|need)/,
+      /(need|needs).*(attention|follow.?up).*(application|job)/,
+      /(career|pipeline|application|job.?search).*(summary|status|update)/,
+      /what.*(happening|changed).*(application|job|career|search)/,
+      /which.*application.*(follow|attention)/,
+      /follow.?up.*candidate/,
+      /what.*applications?.*need/,
     ],
   },
 ];
