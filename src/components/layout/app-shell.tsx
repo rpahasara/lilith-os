@@ -16,11 +16,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="lilith-bg-image" />
           <div className="lilith-bg-scrim" />
         </div>
-        <div className="flex h-dvh w-full overflow-hidden">
+        <div className="relative flex h-dvh w-full overflow-hidden">
           <SidebarRail />
           <div className="flex min-w-0 flex-1 flex-col">
             <TopBar />
-            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-6 lg:overflow-hidden lg:px-8">
+            <main className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 sm:px-7 lg:overflow-hidden lg:px-8">
               {children}
             </main>
             <StatusBar />

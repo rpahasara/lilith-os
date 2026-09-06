@@ -7,24 +7,27 @@ import { Settings } from "lucide-react";
 import { nav } from "./nav";
 import { cn } from "@/lib/utils";
 import { user } from "@/lib/data";
+import { FoxMark } from "@/components/ui/fox-mark";
 
 export function SidebarRail() {
   const pathname = usePathname();
 
   return (
-    <aside className="z-20 flex h-full w-[84px] flex-col items-center justify-between bg-gradient-to-r from-black/35 via-black/[0.1] to-transparent py-5">
+    <aside className="relative z-20 flex h-full w-[88px] shrink-0 flex-col items-center justify-between bg-[linear-gradient(90deg,rgba(8,5,9,0.72),rgba(8,5,9,0.3)_76%,transparent)] py-5 backdrop-blur-[2px]">
+      <span className="shell-divider pointer-events-none absolute inset-y-5 right-0 w-px" />
       {/* mark */}
-      <Link href="/" className="group flex flex-col items-center gap-2">
-        <div className="relative grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-wine/25 to-wine-deep/15 hairline">
-          <div className="h-5 w-5 rounded-full bg-gradient-to-br from-pearl via-wine to-wine-deep shadow-[0_0_16px_2px_rgba(201,79,109,0.5)] transition-transform group-hover:scale-110" />
+      <Link href="/" aria-label="Lilith command center" className="group flex flex-col items-center gap-2">
+        <div className="glass relative grid h-12 w-12 place-items-center overflow-hidden rounded-2xl shadow-[0_12px_30px_-14px_rgba(201,84,115,0.8)] transition-transform duration-300 group-hover:-translate-y-0.5">
+          <span className="absolute inset-0 bg-[radial-gradient(circle_at_50%_12%,rgba(255,255,255,0.12),transparent_48%)]" />
+          <FoxMark className="relative h-8 w-8 drop-shadow-[0_0_10px_rgba(225,132,157,0.4)]" />
         </div>
-        <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-ink-faint">
+        <span className="font-mono text-[9px] uppercase tracking-[0.24em] text-ink-muted">
           Lilith
         </span>
       </Link>
 
       {/* nav */}
-      <nav className="flex flex-col items-center gap-1">
+      <nav aria-label="Primary workspaces" className="flex flex-col items-center gap-1.5">
         {nav.map((item) => {
           const active =
             item.href === "/"
@@ -35,12 +38,12 @@ export function SidebarRail() {
             <Link
               key={item.href}
               href={item.href}
-              className="group relative flex w-16 flex-col items-center gap-1 py-2"
+              className="group relative flex w-[68px] flex-col items-center gap-1 py-2.5"
             >
               {active && (
                 <motion.span
                   layoutId="nav-active"
-                  className="absolute inset-0 rounded-2xl bg-wine/[0.12] shadow-[0_0_20px_-6px_rgba(201,79,109,0.5)] ring-1 ring-wine/18"
+                  className="glass absolute inset-0 rounded-2xl shadow-[0_12px_28px_-18px_rgba(201,84,115,0.9)] ring-1 ring-wine/20"
                   transition={{ type: "spring", stiffness: 400, damping: 32 }}
                 />
               )}
@@ -48,8 +51,8 @@ export function SidebarRail() {
                 className={cn(
                   "relative grid h-10 w-10 place-items-center rounded-xl transition-colors",
                   active
-                    ? "text-pearl"
-                    : "text-ink-faint group-hover:text-ink-muted",
+                    ? "text-wine-bright"
+                    : "text-ink-faint group-hover:text-ink",
                 )}
               >
                 <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.2 : 1.8} />
@@ -57,7 +60,7 @@ export function SidebarRail() {
               <span
                 className={cn(
                   "relative text-[10px] transition-colors",
-                  active ? "text-ink" : "text-ink-faint group-hover:text-ink-muted",
+                  active ? "font-medium text-ink" : "text-ink-faint group-hover:text-ink-muted",
                 )}
               >
                 {item.label}
