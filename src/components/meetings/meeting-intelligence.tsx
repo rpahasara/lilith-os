@@ -1,11 +1,12 @@
 "use client";
 
 import { type ComponentType, type ReactNode } from "react";
-import { Sparkles, Mail, Users, MessageSquareText, Hash } from "lucide-react";
+import { Sparkles, Mail, Users, MessageSquareText, Hash, CalendarClock, Video } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { Eyebrow, PanelHeader } from "@/components/ui/primitives";
 import type { MeetingContext, MeetingEvent, PrepBrief } from "@/lib/meetings/types";
 import { PrepLifecycle, PrepBadge } from "./prep-lifecycle";
+import { formatClock } from "@/lib/utils";
 
 function Section({ icon: Icon, title, children }: { icon: ComponentType<{ className?: string }>; title: string; children: ReactNode }) {
   return (
@@ -51,6 +52,13 @@ export function MeetingIntelligence({
           <h3 className="mt-1 truncate text-base font-semibold text-ink">{event.title}</h3>
         </div>
         <PrepBadge status={event.prepStatus} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs text-ink-muted">
+        <span className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-cyan-bright"/>{event.start ? `${new Date(event.start).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${formatClock(new Date(event.start))}` : "Time unavailable"}</span>
+        <span>{event.durationMinutes != null ? `${event.durationMinutes} min` : "Duration unavailable"}</span>
+        {event.calendar && <span>{event.calendar}</span>}
+        {event.joinLink && <a href={event.joinLink} target="_blank" rel="noreferrer" className="ml-auto flex items-center gap-1.5 text-cyan-bright hover:text-ink"><Video className="h-3.5 w-3.5"/>Join</a>}
       </div>
 
       {/* prep lifecycle */}
