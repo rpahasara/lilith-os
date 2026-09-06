@@ -105,6 +105,15 @@ export type PresenceEventType =
   // ambient module events (wired in V1)
   | "meeting.starting_soon"
   | "automation.failed"
+  // command lifecycle (wired by the Command System) — semantic only; the
+  // Presence Director owns scenario choice, these never encode a pose/placement
+  | "command.planning"
+  | "command.running"
+  | "command.awaiting_approval"
+  | "command.partial"
+  | "command.succeeded"
+  | "command.failed"
+  | "command.blocked"
   // future — mapped for architecture, not yet emitted
   | "career.interview_detected"
   | "mail.urgent_received"
