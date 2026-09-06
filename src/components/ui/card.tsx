@@ -37,9 +37,9 @@ export function GlassCard({
       }
       className={cn(
         surface,
-        "relative rounded-[var(--radius-lg)]",
+        "relative isolate overflow-hidden rounded-[var(--radius-lg)]",
         interactive &&
-          "cursor-pointer transition-colors hover:border-orchid/30",
+          "cursor-pointer transition-[border-color,background-color,box-shadow] duration-300 hover:border-wine/30 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.24),0_24px_52px_-30px_rgba(0,0,0,0.9),0_12px_34px_-24px_rgba(201,84,115,0.35)]",
         className,
       )}
       {...props}

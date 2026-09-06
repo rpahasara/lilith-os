@@ -10,7 +10,7 @@ const button = cva(
     variants: {
       variant: {
         primary:
-          "border border-wine/55 bg-wine/[0.16] text-white backdrop-blur-md shadow-[inset_0_1px_0_0_rgba(243,238,244,0.32),0_10px_28px_-10px_rgba(0,0,0,0.6),0_8px_26px_-12px_rgba(201,79,109,0.6)] hover:bg-wine/[0.26] hover:border-wine/70 hover:shadow-[inset_0_1px_0_0_rgba(243,238,244,0.4),0_12px_32px_-8px_rgba(0,0,0,0.65),0_10px_32px_-8px_rgba(201,79,109,0.9)]",
+          "border border-wine/55 bg-gradient-to-b from-wine-bright/35 via-wine/25 to-wine-deep/35 text-white backdrop-blur-md shadow-[inset_0_1px_0_0_rgba(243,238,244,0.35),0_10px_28px_-10px_rgba(0,0,0,0.6),0_8px_26px_-12px_rgba(201,79,109,0.6)] hover:border-wine-bright/75 hover:brightness-110 hover:shadow-[inset_0_1px_0_0_rgba(243,238,244,0.45),0_12px_32px_-8px_rgba(0,0,0,0.65),0_10px_32px_-8px_rgba(201,79,109,0.9)]",
         ghost:
           "text-ink-muted hover:text-ink hover:bg-white/5",
         glass:

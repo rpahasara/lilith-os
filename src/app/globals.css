@@ -10,15 +10,15 @@
 :root {
   /* Surfaces — near-black wine night, straight from Hsin (black + crimson).
      Dominates the screen; the glass body stays neutral over this. */
-  --base: #070609;
-  --base-2: #0c0810;
+  --base: #080609;
+  --base-2: #100a10;
   --panel: 255 255 255; /* rgb channels for translucent glass highlights */
   --glass-tint: 201 79 109; /* crimson-rose rgb — the wine light the glass reflects */
 
   /* Ink — pearl, echoing her hair */
   --ink: #f3eef4;
-  --ink-muted: #a9a0b6;
-  --ink-faint: #6b6478;
+  --ink-muted: #bcb1c1;
+  --ink-faint: #817587;
 
   /* Lines */
   --line: 255 255 255; /* used at low alpha */
@@ -26,16 +26,16 @@
   /* Brand — mapped to Hsin herself. Wine/crimson owns the personality; orchid
      is a secondary complementary light; pearl owns highlights; gold is a rare
      luxury micro-detail. Never flood the UI red — sophisticated wine, not scarlet. */
-  --wine: #c94f6d; /* muted crimson-rose — primary personality accent */
-  --wine-bright: #db6f8a;
-  --wine-deep: #8f2f4d;
-  --orchid: #a886d9; /* secondary */
-  --orchid-bright: #c1a6e8;
+  --wine: #c95473; /* muted crimson-rose — primary personality accent */
+  --wine-bright: #e1849d;
+  --wine-deep: #812a49;
+  --orchid: #a985c4; /* secondary */
+  --orchid-bright: #cdb0dd;
   --pearl: #f3eef4; /* highlight / specular */
-  --gold: #c9ae73; /* luxury micro-accent — use very sparingly */
-  --violet: #8b5cf6; /* legacy alias — kept so old telemetry maps don't break */
-  --violet-bright: #a78bfa;
-  --violet-deep: #6d28d9;
+  --gold: #d4b77b; /* luxury micro-accent — use very sparingly */
+  --violet: #a985c4; /* legacy semantic alias, visually folded into orchid */
+  --violet-bright: #cdb0dd;
+  --violet-deep: #6f3b6e;
 
   /* System / telemetry — cyan, restrained (data / status only, never brand) */
   --cyan: #5bc7d8;
@@ -107,6 +107,7 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden; /* command-center: shell owns scroll regions */
+  letter-spacing: -0.006em;
 }
 
 /* Cinematic backdrop: deep space where the centre — the avatar — reads as the
@@ -130,8 +131,8 @@ body {
   inset: 0;
   background: url("/assets/backgrounds/lilith-home-environment.png") center /
     cover no-repeat;
-  filter: blur(6px) brightness(0.72) saturate(0.83) contrast(0.94);
-  transform: scale(1.04);
+  filter: blur(7px) brightness(0.68) saturate(0.78) contrast(1.02);
+  transform: scale(1.05);
   transform-origin: center;
 }
 
@@ -142,8 +143,9 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(122% 100% at 50% 44%, transparent 50%, rgba(6, 5, 8, 0.55) 100%),
-    radial-gradient(56% 44% at 50% 40%, rgba(6, 5, 8, 0.24), transparent 66%);
+    linear-gradient(90deg, rgba(7, 5, 8, 0.18), transparent 28%, transparent 72%, rgba(6, 7, 11, 0.22)),
+    radial-gradient(122% 100% at 50% 44%, transparent 42%, rgba(6, 5, 8, 0.6) 100%),
+    radial-gradient(54% 48% at 50% 42%, rgba(8, 6, 10, 0.38), rgba(8, 6, 10, 0.12) 58%, transparent 76%);
 }
 .lilith-bg::after {
   /* subtle film grain to kill banding on the gradients */
@@ -166,16 +168,16 @@ body {
    locally rather than becoming a dark card. */
 @utility glass-panel {
   background:
-    radial-gradient(112% 82% at 50% 44%, rgba(6, 5, 8, 0.2), rgba(6, 5, 8, 0.06) 60%, transparent 82%),
-    linear-gradient(180deg, rgb(var(--panel) / 0.016), transparent 58%);
-  border: 1px solid rgb(var(--line) / 0.075);
+    radial-gradient(112% 82% at 50% 44%, rgba(10, 7, 12, 0.48), rgba(10, 7, 12, 0.24) 62%, rgba(10, 7, 12, 0.14) 100%),
+    linear-gradient(180deg, rgb(var(--panel) / 0.055), rgb(var(--panel) / 0.015) 60%);
+  border: 1px solid rgb(var(--line) / 0.12);
   box-shadow:
-    0 1px 0 0 rgb(var(--panel) / 0.12) inset,
-    0 -12px 24px -20px rgb(0 0 0 / 0.35) inset,
-    0 20px 46px -30px rgba(0, 0, 0, 0.78),
-    0 8px 24px -24px rgb(var(--glass-tint) / 0.1);
-  backdrop-filter: blur(14px) saturate(120%) brightness(1.03);
-  -webkit-backdrop-filter: blur(14px) saturate(120%) brightness(1.03);
+    0 1px 0 0 rgb(var(--panel) / 0.2) inset,
+    0 -18px 32px -24px rgb(0 0 0 / 0.5) inset,
+    0 22px 52px -30px rgba(0, 0, 0, 0.82),
+    0 8px 28px -24px rgb(var(--glass-tint) / 0.18);
+  backdrop-filter: blur(18px) saturate(126%) brightness(0.96);
+  -webkit-backdrop-filter: blur(18px) saturate(126%) brightness(0.96);
 }
 
 /* Tier 2 — INTERACTIVE glass (chips, secondary buttons, sidebar active, top +
@@ -183,17 +185,17 @@ body {
    border/specular so it reads as touchable, hover lifts it further. */
 @utility glass {
   background:
-    radial-gradient(120% 90% at 50% 40%, rgba(6, 5, 8, 0.1), transparent 78%),
-    linear-gradient(180deg, rgb(var(--panel) / 0.03), rgb(var(--panel) / 0.006) 58%),
-    linear-gradient(178deg, rgb(var(--glass-tint) / 0.008), transparent 42%);
-  border: 1px solid rgb(var(--line) / 0.1);
+    radial-gradient(120% 96% at 50% 36%, rgba(10, 7, 12, 0.4), rgba(10, 7, 12, 0.22) 76%),
+    linear-gradient(180deg, rgb(var(--panel) / 0.07), rgb(var(--panel) / 0.018) 60%),
+    linear-gradient(145deg, rgb(var(--glass-tint) / 0.035), transparent 42%);
+  border: 1px solid rgb(var(--line) / 0.14);
   box-shadow:
-    0 1px 0 0 rgb(var(--panel) / 0.14) inset,
-    0 -14px 26px -18px rgb(0 0 0 / 0.4) inset,
-    0 16px 38px -26px rgba(0, 0, 0, 0.82),
-    0 6px 22px -20px rgb(var(--glass-tint) / 0.1);
-  backdrop-filter: blur(13px) saturate(122%) brightness(1.04) contrast(1.03);
-  -webkit-backdrop-filter: blur(13px) saturate(122%) brightness(1.04) contrast(1.03);
+    0 1px 0 0 rgb(var(--panel) / 0.22) inset,
+    0 -16px 30px -22px rgb(0 0 0 / 0.52) inset,
+    0 18px 42px -28px rgba(0, 0, 0, 0.86),
+    0 8px 28px -24px rgb(var(--glass-tint) / 0.18);
+  backdrop-filter: blur(20px) saturate(132%) brightness(0.97) contrast(1.04);
+  -webkit-backdrop-filter: blur(20px) saturate(132%) brightness(0.97) contrast(1.04);
 }
 
 /* Tier 3 — PRIMARY interactive glass (command input). Strongest readable
@@ -201,17 +203,17 @@ body {
    comes from the environment; crimson illumination is added per-component. */
 @utility glass-strong {
   background:
-    radial-gradient(120% 88% at 50% 42%, rgba(6, 5, 8, 0.16), transparent 80%),
-    linear-gradient(180deg, rgb(var(--panel) / 0.05), rgb(var(--panel) / 0.01) 58%),
-    linear-gradient(178deg, rgb(var(--glass-tint) / 0.012), transparent 42%);
-  border: 1px solid rgb(var(--line) / 0.12);
+    radial-gradient(120% 92% at 50% 40%, rgba(10, 7, 12, 0.54), rgba(10, 7, 12, 0.34) 78%),
+    linear-gradient(180deg, rgb(var(--panel) / 0.09), rgb(var(--panel) / 0.024) 58%),
+    linear-gradient(145deg, rgb(var(--glass-tint) / 0.055), transparent 44%);
+  border: 1px solid rgb(var(--line) / 0.18);
   box-shadow:
-    0 1px 0 0 rgb(var(--panel) / 0.16) inset,
+    0 1px 0 0 rgb(var(--panel) / 0.26) inset,
     0 -20px 36px -18px rgb(0 0 0 / 0.5) inset,
     0 26px 56px -30px rgba(0, 0, 0, 0.9),
     0 12px 34px -24px rgb(var(--glass-tint) / 0.16);
-  backdrop-filter: blur(18px) saturate(128%) brightness(1.05) contrast(1.04);
-  -webkit-backdrop-filter: blur(18px) saturate(128%) brightness(1.05) contrast(1.04);
+  backdrop-filter: blur(24px) saturate(136%) brightness(0.98) contrast(1.05);
+  -webkit-backdrop-filter: blur(24px) saturate(136%) brightness(0.98) contrast(1.05);
 }
 
 /* Inner illumination for premium glass objects (first child of a `relative`
@@ -224,14 +226,14 @@ body {
   border-radius: inherit;
   pointer-events: none;
   background:
-    radial-gradient(130% 54% at 50% -18%, rgb(var(--panel) / 0.12), transparent 52%),
+    radial-gradient(130% 54% at 50% -18%, rgb(var(--panel) / 0.2), transparent 52%),
     linear-gradient(122deg, transparent 34%, rgb(var(--panel) / 0.055) 45%, transparent 52%),
     radial-gradient(56% 42% at 4% 2%, rgba(201, 79, 109, 0.08), transparent 55%),
     radial-gradient(50% 38% at 98% 99%, rgba(243, 238, 244, 0.04), transparent 55%);
 }
 
 @utility hairline {
-  border: 1px solid rgb(var(--line) / 0.08);
+  border: 1px solid rgb(var(--line) / 0.12);
 }
 
 /* micro-label: uppercase mono eyebrow used across panels */
@@ -240,7 +242,34 @@ body {
   font-size: 0.6875rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink-muted);
+}
+
+@utility workspace-page {
+  padding-block: 0.25rem 1.5rem;
+}
+
+@utility workspace-header {
+  position: relative;
+  isolation: isolate;
+}
+
+@utility metric-tile {
+  position: relative;
+  overflow: hidden;
+  min-height: 4.75rem;
+}
+
+.metric-tile::after {
+  content: "";
+  position: absolute;
+  inset: auto 14px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--glass-tint) / 0.34), transparent);
+}
+
+.shell-divider {
+  background: linear-gradient(180deg, transparent, rgb(var(--line) / 0.12) 18%, rgb(var(--line) / 0.12) 82%, transparent);
 }
 
 /* ------------------------------------------------------------------ scroll */
@@ -302,7 +331,7 @@ body {
 
 /* focus ring — accessible + on-brand */
 :focus-visible {
-  outline: 2px solid var(--violet-bright);
+  outline: 2px solid var(--wine-bright);
   outline-offset: 2px;
   border-radius: 4px;
 }
