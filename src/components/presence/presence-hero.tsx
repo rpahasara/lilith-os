@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { History } from "lucide-react";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
 import { ConversationView } from "@/components/conversation/conversation-view";
 import { useConversation } from "@/components/conversation/conversation-provider";
+import { CommandConsole, CommandHistory, useCommand } from "@/components/command";
 import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
@@ -20,8 +22,10 @@ const productionVoiceProvider = new ElevenLabsTTSProvider();
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
-  const { messages, status, error, send, reset } = useConversation();
+  const { messages, status, error, reset } = useConversation();
+  const { submit, activeTask, history, historyOpen, setHistoryOpen, recentInputs } = useCommand();
   const [greeting, setGreeting] = useState("Good evening");
+  const [editFill, setEditFill] = useState<{ text: string; nonce: number } | undefined>();
 
   const hasConversation = messages.length > 0 || !!error;
   const isSending = status === "sending";
@@ -131,7 +135,9 @@ export function PresenceHero() {
     spokePresence.current = false;
     lilithSpeech.stop();
     emit({ type: "conversation.user_message" });
-    send(text);
+    // The Command System decides: recognised commands enter the lifecycle,
+    // plain conversation goes to the real backend (unchanged path).
+    submit(text, { context: { surface: "home" } });
   }
 
   return (
@@ -158,16 +164,25 @@ export function PresenceHero() {
         <PresenceStage />
       </div>
 
-      {/* conversation region: live transcript once talking, else the idle hint + state chips */}
+      {/* conversation / command region: an active command takes the surface,
+          else the live transcript, else the idle hint + state chips */}
       <div className="mb-3 flex w-full flex-col items-center gap-2">
-        {hasConversation ? (
+        {activeTask ? (
+          <div className="flex w-full max-w-xl flex-col items-center gap-1.5">
+            <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+            <CommandConsole onEditRequest={(text) => setEditFill({ text, nonce: Date.now() })} />
+          </div>
+        ) : hasConversation ? (
           <div className="flex w-full flex-col items-center gap-1.5">
-            <button
-              onClick={reset}
-              className="self-end rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
-            >
-              Clear
-            </button>
+            <div className="flex w-full items-center justify-end gap-1">
+              <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+              <button
+                onClick={reset}
+                className="rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+              >
+                Clear
+              </button>
+            </div>
             <ConversationView />
           </div>
         ) : (
@@ -201,19 +216,40 @@ export function PresenceHero() {
                 </button>
               ))}
             </div>
+
+            {history.length > 0 && (
+              <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+            )}
           </div>
         )}
       </div>
 
-      {/* command input — the primary conversation surface */}
+      {/* command input — the primary conversation + command surface */}
       <div className="w-full max-w-xl">
         <CommandInput
           onFocusChange={handleFocus}
           onSubmit={handleSubmit}
           onType={() => emit({ type: "conversation.typing" })}
           loading={isSending}
+          historyItems={recentInputs}
+          fill={editFill}
         />
       </div>
+
+      {/* command history drawer (fixed overlay) */}
+      <CommandHistory />
     </div>
+  );
+}
+
+function HistoryTrigger({ count, onOpen }: { count: number; onOpen: () => void }) {
+  if (count === 0) return null;
+  return (
+    <button
+      onClick={onOpen}
+      className="flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+    >
+      <History className="h-3 w-3" /> History · {count}
+    </button>
   );
 }

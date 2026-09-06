@@ -3,13 +3,17 @@ import { TopBar } from "./top-bar";
 import { StatusBar } from "./status-bar";
 import { PresenceProvider } from "@/components/presence/presence-engine";
 import { ConversationProvider } from "@/components/conversation/conversation-provider";
+import { CommandProvider } from "@/components/command";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <PresenceProvider defaultRenderer="avatar">
       {/* Conversation lives above the routed pages so the transcript + session
-          survive navigation between workspaces. */}
+          survive navigation between workspaces. The Command System sits inside
+          both so it can bridge plain chat to the backend and translate command
+          lifecycle into semantic presence. */}
       <ConversationProvider>
+        <CommandProvider>
         {/* Environmental wallpaper is its own layer so the filter (blur/dim)
             affects ONLY the artwork — never Lilith, glass, text, or grain. */}
         <div className="lilith-bg" aria-hidden>
@@ -26,6 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <StatusBar />
           </div>
         </div>
+        </CommandProvider>
       </ConversationProvider>
     </PresenceProvider>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowUp, Loader2, Mic, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,13 +13,52 @@ interface CommandInputProps {
   /** While true the input is locked and shows a working state (prevents
    *  duplicate sends). */
   loading?: boolean;
+  /** Suggested actions shown under the input. Falls back to defaults. */
+  suggestions?: string[];
+  /** Prior submitted commands (oldest→newest) for Ctrl/↑ recall. */
+  historyItems?: string[];
+  /** Bump `nonce` to load `text` into the field (e.g. "Edit" from review). */
+  fill?: { text: string; nonce: number };
 }
 
-const SUGGESTIONS = ["Plan my day", "Summarise inbox", "Draft a reply", "What did I miss?"];
+const DEFAULT_SUGGESTIONS = ["Plan my day", "Summarise inbox", "Compare AWS cost", "What did I miss?"];
 
-export function CommandInput({ onFocusChange, onSubmit, onType, loading = false }: CommandInputProps) {
+export function CommandInput({
+  onFocusChange,
+  onSubmit,
+  onType,
+  loading = false,
+  suggestions = DEFAULT_SUGGESTIONS,
+  historyItems = [],
+  fill,
+}: CommandInputProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // History recall cursor: -1 = live (not recalling), 0..n = index from newest.
+  const [recall, setRecall] = useState(-1);
+
+  // Ctrl+Space is the (in-app) global command entry point. Native desktop
+  // global hotkeys are intentionally out of scope for V1.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.code === "Space") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Load an "Edit"-refilled value and focus.
+  useEffect(() => {
+    if (!fill) return;
+    setValue(fill.text);
+    setRecall(-1);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [fill?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function submit() {
     if (loading) return;
@@ -27,6 +66,21 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
     if (!text) return;
     onSubmit?.(text);
     setValue("");
+    setRecall(-1);
+  }
+
+  function recallStep(dir: 1 | -1) {
+    if (historyItems.length === 0) return;
+    // newest-first index space
+    let next = recall + dir;
+    if (next < -1) next = -1;
+    if (next > historyItems.length - 1) next = historyItems.length - 1;
+    setRecall(next);
+    if (next === -1) {
+      setValue("");
+    } else {
+      setValue(historyItems[historyItems.length - 1 - next]);
+    }
   }
 
   return (
@@ -49,9 +103,11 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
           <Sparkles className="h-4 w-4 shrink-0 text-wine-bright drop-shadow-[0_0_8px_rgba(225,132,157,0.45)]" />
         )}
         <input
+          ref={inputRef}
           value={value}
           onChange={(e) => {
             setValue(e.target.value);
+            setRecall(-1);
             onType?.();
           }}
           disabled={loading}
@@ -68,13 +124,26 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
+              return;
+            }
+            // Shell-style command recall when the field is empty or already recalling.
+            if (e.key === "ArrowUp" && (value === "" || recall !== -1)) {
+              e.preventDefault();
+              recallStep(1);
+            } else if (e.key === "ArrowDown" && recall !== -1) {
+              e.preventDefault();
+              recallStep(-1);
+            } else if (e.key === "Escape" && recall !== -1) {
+              e.preventDefault();
+              setRecall(-1);
+              setValue("");
             }
           }}
           placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
           className="min-w-0 flex-1 bg-transparent text-[15px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
         />
         <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint sm:flex">
-          Ctrl K
+          Ctrl Space
         </kbd>
         <button
           aria-label="Voice input"
@@ -103,10 +172,14 @@ export function CommandInput({ onFocusChange, onSubmit, onType, loading = false 
       </motion.div>
 
       <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
+        {suggestions.map((s) => (
           <button
             key={s}
-            onClick={() => setValue(s)}
+            onClick={() => {
+              setValue(s);
+              setRecall(-1);
+              inputRef.current?.focus();
+            }}
             className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-[11px] text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink"
           >
             {s}
