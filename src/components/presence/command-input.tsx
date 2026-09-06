@@ -21,7 +21,7 @@ interface CommandInputProps {
   fill?: { text: string; nonce: number };
 }
 
-const DEFAULT_SUGGESTIONS = ["Plan my day", "Summarise inbox", "Compare AWS cost", "What did I miss?"];
+const DEFAULT_SUGGESTIONS = ["System health", "Summarise inbox", "Compare AWS cost", "Plan my day"];
 
 export function CommandInput({
   onFocusChange,

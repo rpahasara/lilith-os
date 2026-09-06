@@ -19,9 +19,11 @@ import {
   markCancelRequested,
   matchFixture,
   type CommandContext,
+  type CommandCore,
   type CommandPresenceIntent,
   type CommandTask,
 } from "@/lib/command";
+import { RealCommandCore, runCoreSelfTest } from "@/lib/command/core";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { usePresence } from "@/components/presence/presence-engine";
 
@@ -90,8 +92,14 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   const conversation = useConversation();
   const { emit } = usePresence();
 
-  const coreRef = useRef<DemoCommandCore | null>(null);
-  if (!coreRef.current) coreRef.current = new DemoCommandCore();
+  // Two cores behind the one frozen contract: the fixture-driven demo core and
+  // the REAL Cognitive Core. Each owns its own taskIds; an ownership map routes
+  // follow-up actions (run/cancel/…) back to the core that created the task.
+  const demoRef = useRef<DemoCommandCore | null>(null);
+  if (!demoRef.current) demoRef.current = new DemoCommandCore();
+  const realRef = useRef<RealCommandCore | null>(null);
+  if (!realRef.current) realRef.current = new RealCommandCore();
+  const ownerRef = useRef<Map<string, CommandCore>>(new Map());
 
   const [tasks, setTasks] = useState<Map<string, CommandTask>>(new Map());
   const [order, setOrder] = useState<string[]>([]);
@@ -99,28 +107,41 @@ export function CommandProvider({ children }: { children: ReactNode }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recentInputs, setRecentInputs] = useState<string[]>([]);
 
-  // Subscribe the store to the core's lifecycle events → reduce into tasks.
-  useEffect(() => {
-    const core = coreRef.current!;
-    const unsub = core.subscribe((event) => {
-      setTasks((prev) => {
-        const current = prev.get(event.taskId);
-        const nextTask = applyCommandEvent(current, event);
-        if (!nextTask || nextTask === current) return prev;
-        const next = new Map(prev);
-        next.set(event.taskId, nextTask);
-        return next;
-      });
-      if (event.type === "task.created") {
-        setOrder((prev) => (prev.includes(event.taskId) ? prev : [...prev, event.taskId]));
-      }
+  // Fold a lifecycle event into the reducer + ordering (shared by both cores).
+  const foldEvent = useCallback((event: Parameters<Parameters<CommandCore["subscribe"]>[0]>[0]) => {
+    setTasks((prev) => {
+      const current = prev.get(event.taskId);
+      const nextTask = applyCommandEvent(current, event);
+      if (!nextTask || nextTask === current) return prev;
+      const next = new Map(prev);
+      next.set(event.taskId, nextTask);
+      return next;
     });
-    return () => {
-      unsub();
-      core.dispose?.();
-      coreRef.current = null;
-    };
+    if (event.type === "task.created") {
+      setOrder((prev) => (prev.includes(event.taskId) ? prev : [...prev, event.taskId]));
+    }
   }, []);
+
+  // Subscribe the store to BOTH cores; restore durable real-task history once.
+  useEffect(() => {
+    const demo = demoRef.current!;
+    const real = realRef.current!;
+    const unsubDemo = demo.subscribe(foldEvent);
+    const unsubReal = real.subscribe(foldEvent);
+    // Rebuild persisted real tasks so history survives reload.
+    for (const event of real.restore()) {
+      ownerRef.current.set(event.taskId, real);
+      foldEvent(event);
+    }
+    return () => {
+      unsubDemo();
+      unsubReal();
+      demo.dispose?.();
+      real.dispose?.();
+      demoRef.current = null;
+      realRef.current = null;
+    };
+  }, [foldEvent]);
 
   const orderedTasks = useMemo(
     () => order.map((id) => tasks.get(id)).filter((t): t is CommandTask => !!t),
@@ -156,28 +177,44 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       const text = input.trim();
       if (!text) return false;
       setRecentInputs((prev) => (prev[prev.length - 1] === text ? prev : [...prev, text].slice(-40)));
-      const isCommand = opts?.forceCommand || matchFixture(text) !== null;
-      if (!isCommand) {
+
+      // Priority: a REAL Cognitive-Core intent wins; else a demo fixture; else
+      // plain conversation (unchanged, real backend). Real and simulated never
+      // mix — each task carries its source, surfaced in the UI.
+      const realIntent = RealCommandCore.matches(text);
+      const core: CommandCore | null = realIntent
+        ? realRef.current
+        : opts?.forceCommand || matchFixture(text) !== null
+          ? demoRef.current
+          : null;
+
+      if (!core) {
         conversation.send(text);
         return false;
       }
       const taskId = makeId();
+      ownerRef.current.set(taskId, core);
       setActiveId(taskId);
-      coreRef.current!.dispatch({ type: "submit", taskId, input: text, context: opts?.context });
+      core.dispatch({ type: "submit", taskId, input: text, context: opts?.context });
       return true;
     },
     [conversation],
   );
 
+  // Route a follow-up action back to the core that owns the task.
+  const ownerOf = useCallback((taskId: string): CommandCore | null => {
+    return ownerRef.current.get(taskId) ?? demoRef.current;
+  }, []);
+
   const run = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "run", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "run", taskId });
+  }, [ownerOf]);
   const approve = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "approve", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "approve", taskId });
+  }, [ownerOf]);
   const deny = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "deny", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "deny", taskId });
+  }, [ownerOf]);
   const cancel = useCallback((taskId: string) => {
     setTasks((prev) => {
       const t = prev.get(taskId);
@@ -186,16 +223,17 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       next.set(taskId, markCancelRequested(t));
       return next;
     });
-    coreRef.current!.dispatch({ type: "cancel", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "cancel", taskId });
+  }, [ownerOf]);
   const resume = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "resume", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "resume", taskId });
+  }, [ownerOf]);
   const retry = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "retry", taskId });
-  }, []);
+    ownerOf(taskId)?.dispatch({ type: "retry", taskId });
+  }, [ownerOf]);
   const discard = useCallback((taskId: string) => {
-    coreRef.current!.dispatch({ type: "discard", taskId });
+    ownerOf(taskId)?.dispatch({ type: "discard", taskId });
+    ownerRef.current.delete(taskId);
     setActiveId((cur) => (cur === taskId ? null : cur));
     setOrder((prev) => prev.filter((id) => id !== taskId));
     setTasks((prev) => {
@@ -204,7 +242,7 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       next.delete(taskId);
       return next;
     });
-  }, []);
+  }, [ownerOf]);
   const dismissActive = useCallback(() => setActiveId(null), []);
   const reopen = useCallback((taskId: string) => {
     setActiveId(taskId);
@@ -226,6 +264,12 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       launch: (fixtureId: keyof typeof samples) => submit(samples[fixtureId] ?? String(fixtureId), { forceCommand: true }),
       samples,
       list: () => orderedTasks,
+    };
+    (window as unknown as Record<string, unknown>).__lilithCore = {
+      // Real read-only task via the Cognitive Core.
+      run: () => submit("system health summary"),
+      // Deterministic lifecycle self-test (success/cancel/fail/malformed/partial/retry/restore).
+      selfTest: () => runCoreSelfTest(),
     };
   }, [submit, orderedTasks]);
 

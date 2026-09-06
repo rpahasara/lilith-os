@@ -7,6 +7,8 @@ import {
   ExternalLink,
   FileText,
   Fingerprint,
+  FlaskConical,
+  Radio,
   RotateCcw,
   Slash,
   XCircle,
@@ -94,6 +96,15 @@ export function CommandResult({
           <h3 className="mt-1 text-[14px] font-semibold tracking-tight text-ink">{task.title}</h3>
           <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-muted">{result.summary}</p>
         </div>
+        {task.source === "core" ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-green" title="Real read-only backend execution">
+            <Radio className="h-2.5 w-2.5" /> Live
+          </span>
+        ) : task.source === "demo" ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber" title="Preview — no real execution">
+            <FlaskConical className="h-2.5 w-2.5" /> Simulated
+          </span>
+        ) : null}
       </div>
 
       {result.unresolved && result.unresolved.length > 0 && (

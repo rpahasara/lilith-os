@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { FlaskConical, XCircle } from "lucide-react";
+import { FlaskConical, Radio, XCircle } from "lucide-react";
 import type { CommandTask } from "@/lib/command";
 import { CommandStep } from "./command-step";
 import { TaskStatusBadge } from "./task-status-badge";
@@ -37,14 +37,21 @@ export function CommandProgress({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {task.source === "demo" && (
+          {task.source === "demo" ? (
             <span
               className="flex items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber"
               title="Preview state — no real external execution"
             >
               <FlaskConical className="h-2.5 w-2.5" /> Simulated
             </span>
-          )}
+          ) : task.source === "core" ? (
+            <span
+              className="flex items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-green"
+              title="Real read-only backend execution"
+            >
+              <Radio className="h-2.5 w-2.5" /> Live
+            </span>
+          ) : null}
           <TaskStatusBadge status={task.status} />
         </div>
       </div>
