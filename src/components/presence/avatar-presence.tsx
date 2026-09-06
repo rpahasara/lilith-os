@@ -470,6 +470,9 @@ export function AvatarPresence({
     useState<CanonicalNeutralQuaternions>({});
   const [valuesCopied, setValuesCopied] = useState(false);
   const [debugPanelCollapsed, setDebugPanelCollapsed] = useState(false);
+  const [showPreviewControls, setShowPreviewControls] = useState(
+    SHOW_CALIBRATION_DEBUG,
+  );
   const [armIkTargets, setArmIkTargets] = useState<ArmIkTargets>(
     INITIAL_ARM_IK_TARGETS,
   );
@@ -509,6 +512,15 @@ export function AvatarPresence({
     if (PRESENCE_SCENARIOS.includes(requested as PresenceScenario)) {
       lilithPresenceDirector.setScenario(requested as PresenceScenario);
     }
+  }, []);
+
+  useEffect(() => {
+    const isLocalHost =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+    const requested =
+      new URLSearchParams(window.location.search).get("presencePreview") === "1";
+    setShowPreviewControls(SHOW_CALIBRATION_DEBUG || (isLocalHost && requested));
   }, []);
 
   return (
@@ -640,7 +652,7 @@ export function AvatarPresence({
       />
         </div>
       </div>
-      {SHOW_CALIBRATION_DEBUG && <aside className={`fixed right-4 top-[120px] z-[100] max-h-[calc(100vh-160px)] overflow-y-auto rounded-xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-md ${debugPanelCollapsed ? "w-11" : "w-[300px] p-2"} max-[900px]:w-11 max-[900px]:p-0`}>
+      {showPreviewControls && <aside className={`fixed right-4 top-[120px] z-[100] max-h-[calc(100vh-160px)] overflow-y-auto rounded-xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-md ${debugPanelCollapsed ? "w-11" : "w-[300px] p-2"} max-[900px]:w-11 max-[900px]:p-0`}>
         <button
           type="button"
           aria-label={debugPanelCollapsed ? "Expand debug controls" : "Collapse debug controls"}
