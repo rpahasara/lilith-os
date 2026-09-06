@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* Presence scenario switches reuse one Canvas. A brief optical reveal hides
+   the discrete viewport-anchor change while the 3D framing damps into place. */
+@keyframes lilith-presence-dashboard-close {
+  from { opacity: 0.28; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@keyframes lilith-presence-scenic-full-body {
+  from { opacity: 0.28; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@keyframes lilith-presence-peek-left {
+  from { opacity: 0.28; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@keyframes lilith-presence-peek-right {
+  from { opacity: 0.28; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+@keyframes lilith-presence-peek-top {
+  from { opacity: 0.28; filter: blur(3px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
 /* =========================================================================
    LILITH OS — Design tokens
    Base: deep space near-black (NASA color grading)

@@ -19,13 +19,14 @@ import { voiceSettings } from "@/lib/voice/voice-settings";
 import type { SpeakingGestureVariant } from "@/lib/hsin-speaking-motion";
 import type { RareMotionState, RareTurnSide } from "@/lib/hsin-rare-motion";
 import type { OrchestratorReadout } from "@/lib/hsin-motion-orchestrator";
+import { lilithPresenceDirector, expressionStateForRequest, resolveAttentionPoint } from "@/lib/presence/presence-director";
+import { createPresenceProfiles, PRESENCE_SCENARIOS } from "@/lib/presence/presence-profiles";
+import type { NamedAttentionTarget, PresenceExpression, PresenceScenario } from "@/lib/presence/presence-types";
 import type {
   AmbientVariationName,
   AmbientIdleState,
 } from "@/lib/hsin-ambient-idle";
 import {
-  CURRENT_AVATAR_FRAMING,
-  PROPOSED_AVATAR_FRAMING,
   DASHBOARD_CLOSE_FRAMING,
   PROPOSED_FORWARD_GAZE,
   FRONT_FACING_CANDIDATE,
@@ -49,7 +50,6 @@ import {
   type ArmPoseMode,
   type ArmCalibrationOffsets,
   type ArmGeometryReport,
-  type AvatarPresentationFraming,
   type ForwardGazeCalibration,
   type FrontFacingCalibration,
   type FaceExpressionState,
@@ -67,6 +67,8 @@ import {
 } from "./avatar-scene";
 
 const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
+const ATTENTION_TARGETS: NamedAttentionTarget[] = ["auto", "center", "command", "today", "next"];
+const PRESENCE_EXPRESSIONS: PresenceExpression[] = ["neutral", "soft-smile", "attentive", "curious"];
 const POSE_MODES: PoseTestMode[] = [
   "authored",
   "vrmaIdle",
@@ -220,6 +222,26 @@ export function AvatarPresence({
   paused?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const directorState = useSyncExternalStore(
+    lilithPresenceDirector.subscribe,
+    lilithPresenceDirector.getSnapshot,
+    lilithPresenceDirector.getServerSnapshot,
+  );
+  const profiles = useMemo(
+    () => createPresenceProfiles(DASHBOARD_CLOSE_FRAMING),
+    [],
+  );
+  const presentationProfile = profiles[directorState.scenario];
+  const attentionPoint = resolveAttentionPoint(
+    directorState.attentionTarget,
+    directorState.scenario,
+  );
+  const directedExpression = expressionStateForRequest(directorState.expression);
+  const previousScenario = useRef(directorState.scenario);
+  const scenarioChanged = previousScenario.current !== directorState.scenario;
+  useEffect(() => {
+    previousScenario.current = directorState.scenario;
+  }, [directorState.scenario]);
   const [poseMode, setPoseMode] = useState<PoseTestMode>("naturalIdle");
   const [poseTuning, setPoseTuning] =
     useState<RelaxedPoseTuning>(INITIAL_RELAXED_POSE);
@@ -421,14 +443,6 @@ export function AvatarPresence({
     },
     [mockProvider, openaiProvider, elevenLabsProvider],
   );
-  const [presentationMode, setPresentationMode] = useState<
-    "current" | "proposed" | "dashboard"
-  >("dashboard");
-  const [proposedFraming, setProposedFraming] =
-    useState<AvatarPresentationFraming>(PROPOSED_AVATAR_FRAMING);
-  // Default main-dashboard close upper-body framing (pass-1, tunable, not frozen).
-  const [dashboardFraming, setDashboardFraming] =
-    useState<AvatarPresentationFraming>(DASHBOARD_CLOSE_FRAMING);
   // Dashboard-only additive upper-body arm offset (pass-1: all-zero no-op,
   // authored live via the DASHBOARD ARM POLISH sliders). Not persisted yet.
   const [dashboardArmOffset, setDashboardArmOffset] =
@@ -487,8 +501,23 @@ export function AvatarPresence({
     };
   }, []);
 
+  // Query-string preview is dev-only and deterministic, which makes scenario
+  // review possible without adding route behavior or production controls.
+  useEffect(() => {
+    if (!SHOW_CALIBRATION_DEBUG) return;
+    const requested = new URLSearchParams(window.location.search).get("presence");
+    if (PRESENCE_SCENARIOS.includes(requested as PresenceScenario)) {
+      lilithPresenceDirector.setScenario(requested as PresenceScenario);
+    }
+  }, []);
+
   return (
-    <div ref={ref} className="relative h-full w-full">
+    <div
+      ref={ref}
+      className="relative h-full w-full"
+      data-presence-scenario={directorState.scenario}
+      data-presence-anchor={presentationProfile.viewport.anchor}
+    >
       {/* Widened, non-interactive presence viewport. It overshoots the square
           stage so long hair has horizontal breathing room, while the camera's
           vertical framing (her size + crop) is unchanged — only the canvas
@@ -496,16 +525,31 @@ export function AvatarPresence({
           dashboard cards stay fully interactive. The debug <aside> is kept a
           sibling below so it is neither masked nor made non-interactive. */}
       <div
-        className="pointer-events-none absolute left-1/2 top-0 h-full -translate-x-1/2"
+        className={`pointer-events-none ${presentationProfile.viewport.className}`}
         style={{
-          width: "170%",
-          maxWidth: "780px",
+          width: presentationProfile.viewport.width,
+          maxWidth: presentationProfile.viewport.maxWidth,
+          height: presentationProfile.viewport.height,
+          opacity: directorState.visibility === "visible" ? 1 : 0,
+          transformOrigin: presentationProfile.viewport.transformOrigin,
+          transition:
+            directorState.transitionMode === "smooth"
+              ? "opacity 180ms ease, left 220ms ease, right 220ms ease, top 220ms ease"
+              : "none",
+          animationName:
+            scenarioChanged &&
+            directorState.transitionMode === "smooth" &&
+            directorState.visibility === "visible"
+              ? `lilith-presence-${directorState.scenario}`
+              : undefined,
+          animationDuration: "220ms",
+          animationTimingFunction: "ease-out",
           // Soft left/right dissolve so the hair fades out instead of meeting a
           // hard viewport edge (and never hard-overlaps a neighbouring card).
           WebkitMaskImage:
-            "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%)",
+            presentationProfile.viewport.horizontalMask,
           maskImage:
-            "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%)",
+            presentationProfile.viewport.horizontalMask,
         }}
       >
         <div
@@ -514,22 +558,17 @@ export function AvatarPresence({
           // without CSS mask-composite.
           style={{
             WebkitMaskImage:
-              "linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%)",
+              presentationProfile.viewport.verticalMask,
             maskImage:
-              "linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%)",
+              presentationProfile.viewport.verticalMask,
           }}
         >
           {/* soft backlight for depth — dimmer than the orb bloom */}
           <div className="pointer-events-none absolute left-1/2 top-[46%] h-[76%] w-[48%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.20),rgba(34,211,238,0.07)_52%,transparent_74%)] blur-3xl" />
       <AvatarScene
         signal={signal}
-        presentationFraming={
-          presentationMode === "dashboard"
-            ? dashboardFraming
-            : presentationMode === "proposed"
-              ? proposedFraming
-              : CURRENT_AVATAR_FRAMING
-        }
+        presentationFraming={presentationProfile.framing}
+        presentationTransition={directorState.transitionMode}
         forwardGaze={forwardGaze}
         frontFacingCalibration={frontFacingCalibration}
         paused={paused}
@@ -546,6 +585,7 @@ export function AvatarPresence({
         manualBlinkSequence={manualBlinkSequence}
         lookAtEnabled={lookAtEnabled}
         lookAtStrength={lookAtStrength}
+        attentionPoint={attentionPoint}
         centerEyesSequence={centerEyesSequence}
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}
@@ -567,7 +607,7 @@ export function AvatarPresence({
         armPoseMode={armPoseMode}
         armCalibration={armCalibration}
         dashboardArmOffset={
-          presentationMode === "dashboard" ? dashboardArmOffset : null
+          presentationProfile.poseLayer === "dashboard-arms" ? dashboardArmOffset : null
         }
         onArmCandidateChange={setArmCandidateQuats}
         showArmSkeleton={showArmSkeleton}
@@ -575,7 +615,7 @@ export function AvatarPresence({
         onArmGeometryChange={setArmGeometry}
         rightFingerDeltas={rightFingerDeltas}
         centerHeadSequence={centerHeadSequence}
-        forcedExpressionState={forcedExpressionState}
+        forcedExpressionState={forcedExpressionState ?? directedExpression}
         expressionInspectEnabled={expressionInspectEnabled}
         expressionInspectName={expressionInspectName}
         expressionInspectWeight={expressionInspectWeight}
@@ -642,60 +682,70 @@ export function AvatarPresence({
         ))}
       </div>
       <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-2">
-        <div className="grid grid-cols-3 gap-1">
-          {(["current", "proposed", "dashboard"] as const).map((mode) => (
+        <p className="text-[10px] uppercase tracking-wider text-cyan-100">
+          Presence Director · V1
+        </p>
+        <div className="grid grid-cols-2 gap-1">
+          {PRESENCE_SCENARIOS.map((scenario) => (
             <button
-              key={mode}
+              key={scenario}
               type="button"
-              onClick={() => setPresentationMode(mode)}
-              className={`rounded px-2 py-1.5 text-[10px] uppercase tracking-wider ${presentationMode === mode ? "bg-cyan-400/25 text-cyan-100" : "bg-black/40 text-white/55"}`}
+              onClick={() => lilithPresenceDirector.setScenario(scenario)}
+              className={`rounded px-2 py-1.5 text-[9px] uppercase tracking-wider ${directorState.scenario === scenario ? "bg-cyan-400/25 text-cyan-100" : "bg-black/40 text-white/55"}`}
             >
-              {mode}
+              {profiles[scenario].label}
             </button>
           ))}
         </div>
-        {(presentationMode === "proposed" || presentationMode === "dashboard") &&
-          (() => {
-            const activeFraming =
-              presentationMode === "dashboard" ? dashboardFraming : proposedFraming;
-            const setActiveFraming =
-              presentationMode === "dashboard"
-                ? setDashboardFraming
-                : setProposedFraming;
-            return (
-              [
-                ["scale", "Scale", 0.8, 1.4, 0.01],
-                ["offsetY", "Y offset", -0.5, 0.5, 0.01],
-                ["offsetX", "X offset", -0.3, 0.3, 0.01],
-                ["cameraDistance", "Camera distance", 2.8, 5, 0.05],
-                ["fov", "FOV", 18, 50, 1],
-                ["targetY", "Target Y", -0.3, 1.4, 0.01],
-              ] as const
-            ).map(([key, label, min, max, step]) => (
-              <label
-                key={key}
-                className="block text-[10px] uppercase tracking-wider text-white/60"
-              >
-                {label} {activeFraming[key].toFixed(2)}
-                <input
-                  type="range"
-                  min={min}
-                  max={max}
-                  step={step}
-                  value={activeFraming[key]}
-                  onChange={(event) =>
-                    setActiveFraming((current) => ({
-                      ...current,
-                      [key]: Number(event.target.value),
-                    }))
-                  }
-                  className="mt-1 block w-full"
-                />
-              </label>
-            ));
-          })()}
+        <p className="font-mono text-[9px] leading-relaxed text-white/45">
+          {Object.entries(presentationProfile.framing)
+            .map(([key, value]) => `${key}=${String(value)}`)
+            .join(" · ")}
+        </p>
+        <p className="text-[9px] uppercase tracking-wider text-white/45">Attention target</p>
+        <div className="grid grid-cols-5 gap-1">
+          {ATTENTION_TARGETS.map((target) => (
+            <button
+              key={target}
+              type="button"
+              onClick={() => lilithPresenceDirector.setAttentionTarget(target)}
+              className={`rounded px-1 py-1 text-[8px] uppercase ${directorState.attentionTarget === target ? "bg-violet-400/25 text-violet-100" : "bg-black/40 text-white/50"}`}
+            >
+              {target}
+            </button>
+          ))}
+        </div>
+        <p className="text-[9px] uppercase tracking-wider text-white/45">Expression request</p>
+        <div className="grid grid-cols-2 gap-1">
+          {PRESENCE_EXPRESSIONS.map((expression) => (
+            <button
+              key={expression}
+              type="button"
+              onClick={() => lilithPresenceDirector.setExpression(expression)}
+              className={`rounded px-1 py-1 text-[8px] uppercase ${directorState.expression === expression ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/40 text-white/50"}`}
+            >
+              {expression}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => lilithPresenceDirector.setVisibility(directorState.visibility === "visible" ? "hidden" : "visible")}
+            className="rounded bg-black/40 px-2 py-1 text-[8px] uppercase text-white/60"
+          >
+            {directorState.visibility}
+          </button>
+          <button
+            type="button"
+            onClick={() => lilithPresenceDirector.setTransitionMode(directorState.transitionMode === "smooth" ? "instant" : "smooth")}
+            className="rounded bg-black/40 px-2 py-1 text-[8px] uppercase text-white/60"
+          >
+            {directorState.transitionMode} transition
+          </button>
+        </div>
       </div>
-      {presentationMode === "dashboard" && (
+      {directorState.scenario === "dashboard-close" && (
         <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-wider text-fuchsia-100">
