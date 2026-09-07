@@ -15,6 +15,7 @@ import { executionId } from "./ids";
 import { CAREER_CAPABILITIES } from "./career-capabilities";
 import { CAREER_WRITE_CAPABILITIES } from "./career-write";
 import { PROHIBITED_CAPABILITIES } from "./prohibited-capabilities";
+import { PROBE_CAPABILITIES } from "./probe-capabilities";
 
 function classify(res: TransportResult): "network" | "timeout" | "5xx" | "4xx" | undefined {
   if (res.ok) return undefined;
@@ -194,6 +195,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   ...Object.fromEntries(CAREER_CAPABILITIES.map((c) => [c.id, c])),
   ...Object.fromEntries(CAREER_WRITE_CAPABILITIES.map((c) => [c.id, c])),
   ...Object.fromEntries(PROHIBITED_CAPABILITIES.map((c) => [c.id, c])),
+  ...Object.fromEntries(PROBE_CAPABILITIES.map((c) => [c.id, c])),
 };
 
 export function getCapability(id: string): Capability | undefined {

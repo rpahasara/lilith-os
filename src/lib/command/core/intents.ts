@@ -9,7 +9,8 @@ export type RealIntentId =
   | "career.attention_summary"
   | "career.create_followup_draft"
   | "career.add_note"
-  | "policy.probe_prohibited";
+  | "policy.probe_prohibited"
+  | "connector.probe_unsupported";
 
 export interface RealIntent {
   id: RealIntentId;
@@ -51,6 +52,14 @@ export const REAL_INTENTS: RealIntent[] = [
     normalized: "Policy conformance probe — prohibited action",
     scope: "system",
     triggers: [/^__policy_probe__$/],
+  },
+  {
+    // Slice 6 connector conformance probe — sentinel only.
+    id: "connector.probe_unsupported",
+    title: "Connector probe (unsupported op)",
+    normalized: "Connector conformance probe — unsupported operation",
+    scope: "system",
+    triggers: [/^__connector_probe__$/],
   },
   {
     id: "system.health_summary",

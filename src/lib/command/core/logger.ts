@@ -18,6 +18,8 @@ export type CoreLogEvent =
   | "retry"
   | "cancel"
   | "policy.blocked"
+  | "connector.health"
+  | "connector.unsupported"
   | "approval.requested"
   | "approval.approved"
   | "approval.denied"

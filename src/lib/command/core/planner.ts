@@ -98,3 +98,16 @@ export function planPolicyProbe(taskId: string, intent: string, version = 1): Co
     expectedResult: "Blocked — this action is prohibited by policy.",
   };
 }
+
+// Slice 6 connector conformance probe: requires a capability whose connector
+// operation is unsupported. Blocked at connector discovery before execution.
+export function planConnectorProbe(taskId: string, intent: string, version = 1): CommandPlan {
+  return {
+    taskId,
+    version,
+    intent,
+    steps: [{ id: "s1", label: "Attempt unsupported connector op", capabilityId: "probe.unsupported_op", kind: "capability" }],
+    capabilitiesRequired: ["probe.unsupported_op"],
+    expectedResult: "Blocked — the connector does not support this operation.",
+  };
+}

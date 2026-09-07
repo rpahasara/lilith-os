@@ -27,6 +27,7 @@ export const mailSendProhibitedCapability: Capability = {
   title: "Send email",
   policyClass: "PROHIBITED",
   classification: "write",
+  connector: { id: "google-workspace", operation: "send_email" },
   timeoutMs: 1,
   retry: { maxAttempts: 1, retryOn: [] },
   sideEffects: "external_write",

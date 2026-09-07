@@ -40,7 +40,9 @@ import { careerAttentionPlaybook } from "./playbooks/career-attention";
 import { careerFollowupPlaybook } from "./playbooks/career-followup";
 import { careerNotePlaybook } from "./playbooks/career-note";
 import { policyProbePlaybook } from "./playbooks/policy-probe";
+import { connectorProbePlaybook } from "./playbooks/connector-probe";
 import { evaluateCapabilityPolicy, type PolicyDecision } from "./policy";
+import { resolveConnectorBinding } from "./connectors";
 import { fingerprintDraft, type DraftContent } from "./career-write";
 import type { PlaybookContext, TaskPlaybook } from "./playbook";
 import type {
@@ -60,6 +62,7 @@ const PLAYBOOKS: Record<string, TaskPlaybook> = {
   [careerFollowupPlaybook.id]: careerFollowupPlaybook,
   [careerNotePlaybook.id]: careerNotePlaybook,
   [policyProbePlaybook.id]: policyProbePlaybook,
+  [connectorProbePlaybook.id]: connectorProbePlaybook,
 };
 
 /** Fallback approval window when a capability's policy declares none. */
@@ -102,6 +105,8 @@ interface Runtime {
   awaitingApproval?: boolean;
   /** Maintenance timer that expires an unused approval (§6). */
   expiryTimer?: ReturnType<typeof setTimeout>;
+  /** Connector ids already discovery+health gated this run (dedupe). */
+  gatedConnectors?: Set<string>;
 }
 
 function makeId(): string {
@@ -594,6 +599,12 @@ export class RealCommandCore implements CommandCore {
     if (!data.draft && run.record.pendingWrite) data.draft = draftFromPending(run.record.pendingWrite);
     run.started = true;
     const idx = run.resumeIndex ?? this.writeStepIndex(run);
+    // Re-verify the connector at execution time (esp. after a reload, where the
+    // pre-step gate in execute() did not run) — availability may have changed,
+    // and this records connector evidence on the resumed run.
+    const step = run.plan.steps[idx];
+    const cap = step?.capabilityId ? getCapability(step.capabilityId) : null;
+    if (cap && !(await this.gateConnector(run, cap))) return;
     this.emit({ type: "status", taskId: run.record.taskId, at: Date.now(), status: "running" });
     await this.runSteps(run, idx);
   }
@@ -679,6 +690,34 @@ export class RealCommandCore implements CommandCore {
       : { kind: "observed_state", label: "Persistence", value: "durable — saved to the LILITH task store" };
   }
 
+  /**
+   * Discovery + health gate for one connector-backed capability (Slice 6).
+   * Returns false (and emits a terminal failure) when the binding is unsupported
+   * or the connector is unavailable — the caller must stop. Records connector
+   * identity + state as durable evidence. Deduped per run.
+   */
+  private async gateConnector(run: Runtime, cap: Capability): Promise<boolean> {
+    if (!cap.connector) return true;
+    const resolution = resolveConnectorBinding(cap.connector);
+    if (!resolution.ok) {
+      this.logger.log("connector.unsupported", run.record.taskId, { capId: cap.id, reason: resolution.reason });
+      await this.fail(run, `The connector for "${cap.title}" cannot perform the requested operation.`, resolution.reason, "capability_unsupported");
+      return false;
+    }
+    const connector = resolution.connector;
+    if (!run.gatedConnectors) run.gatedConnectors = new Set();
+    if (run.gatedConnectors.has(connector.id)) return true;
+    const chealth = await connector.checkHealth(this.transport, run.abort.signal);
+    run.gatedConnectors.add(connector.id);
+    run.extraEvidence.push({ kind: "observed_state", label: "Connector", value: `${connector.title} (${connector.id}) · ${chealth.state}` });
+    this.logger.log("connector.health", run.record.taskId, { connector: connector.id, state: chealth.state });
+    if (chealth.state === "unavailable") {
+      await this.fail(run, `The "${connector.title}" connector is unavailable, so the action was not performed.`, chealth.detail ?? "Retry when the connector is reachable.");
+      return false;
+    }
+    return true;
+  }
+
   /* -------------------------------------------------------------- executor */
 
   private buildCtx(run: Runtime): PlaybookContext {
@@ -733,6 +772,16 @@ export class RealCommandCore implements CommandCore {
     if (!health.healthy) {
       return this.fail(run, "The control backend is unreachable, so the task could not run.", "Retry when the backend is reachable.");
     }
+
+    // Connector discovery + health gate (Slice 6): resolve + health-check every
+    // connector-backed required capability before execution.
+    for (const capId of run.plan.capabilitiesRequired) {
+      const cap = getCapability(capId);
+      if (!cap?.connector) continue;
+      if (run.canceled) return this.finishCancelled(run);
+      if (!(await this.gateConnector(run, cap))) return; // fail already emitted
+    }
+    if (run.canceled) return this.finishCancelled(run);
 
     // Durable non-terminal checkpoint: a crash from here is recoverable.
     run.record.status = "running";
@@ -867,11 +916,14 @@ export class RealCommandCore implements CommandCore {
     if (run.record.outcome) return;
     run.record.failure = { reason, recovery };
     run.record.endedAt = Date.now();
+    // Carry any accumulated evidence (e.g. connector identity/health) onto the
+    // failure so an unavailable/blocked connector is reported honestly.
     const baseEvidence: CommandEvidence[] = run.record.evidence.length
       ? run.record.evidence
-      : recovery
-        ? [{ kind: "observed_state", label: "Action taken", value: "None — safe to retry" }]
-        : [];
+      : [
+          ...run.extraEvidence,
+          ...(recovery ? [{ kind: "observed_state" as const, label: "Action taken", value: "None — safe to retry" }] : []),
+        ];
     if (mode === "capability_unsupported") {
       run.record.outcome = "failed";
       run.record.status = "blocked";
