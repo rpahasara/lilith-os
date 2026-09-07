@@ -22,6 +22,9 @@ const ALLOWED = [
   "os/overview",
   "system/status",
   "audit/recent",
+  // World Model (Slice 7). Read-only belief store; single prefix covers
+  // /os/world and /os/world/{key}. Live on the backend (Slice 7 Phase B).
+  "os/world",
   // Memory (endpoints not live yet — the client falls back to demo until the
   // backend ships these; allow-listing now keeps the frontend live-ready).
   "memory/overview",

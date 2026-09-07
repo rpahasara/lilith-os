@@ -124,8 +124,10 @@ export function CommandProvider({ children }: { children: ReactNode }) {
 
   // Subscribe the store to BOTH cores; restore durable real-task history once.
   useEffect(() => {
-    const demo = demoRef.current!;
-    const real = realRef.current!;
+    // Effect setup can run again after cleanup in React Strict Mode.
+    // Recreate disposed cores before subscribing on every setup.
+    const demo = (demoRef.current ??= new DemoCommandCore());
+    const real = (realRef.current ??= new RealCommandCore());
     const unsubDemo = demo.subscribe(foldEvent);
     const unsubReal = real.subscribe(foldEvent);
     // Rebuild persisted real tasks from the authoritative backend so history
