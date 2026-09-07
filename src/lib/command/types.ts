@@ -103,6 +103,22 @@ export interface CommandApproval {
   reason?: string;
   /** Epoch ms after which a `required` approval should be treated as stale. */
   expiresAt?: number;
+  /**
+   * Structured detail for an approval-gated write (Slice 4). All optional so the
+   * existing demo approval — which only sets summary/reason — is unaffected.
+   */
+  /** The exact action/capability verb, e.g. "Create follow-up draft". */
+  action?: string;
+  /** The concrete object the action acts on, e.g. "NEXT · Senior DevOps Engineer". */
+  target?: string;
+  /** The exact content that will be written/sent, shown verbatim before approval. */
+  contentPreview?: string;
+  /** One-line description of the side effect. */
+  sideEffect?: string;
+  /** Whether the side effect can be undone. */
+  reversible?: boolean;
+  /** The capability id behind the write (provenance). */
+  capabilityId?: string;
 }
 
 /** A pointer to something a finished command produced or observed. */

@@ -137,6 +137,9 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       for (const event of events) {
         ownerRef.current.set(event.taskId, real);
         foldEvent(event);
+        // Surface a task restored still waiting for approval so the user can
+        // act on it (approve/deny) after a reload, rather than it being buried.
+        if (event.type === "approval.requested") setActiveId(event.taskId);
       }
     });
     return () => {

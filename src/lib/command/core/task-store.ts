@@ -76,8 +76,8 @@ const TERMINAL: ReadonlySet<CoreTaskStatus> = new Set([
 ]);
 const STATUSES: ReadonlySet<string> = new Set<CoreTaskStatus>([
   "created", "assembling_context", "planning", "capability_check", "running",
-  "verifying", "cancel_requested", "succeeded", "partial", "failed",
-  "cancelled", "blocked",
+  "verifying", "cancel_requested", "waiting_for_approval", "succeeded", "partial",
+  "failed", "cancelled", "blocked",
 ]);
 const APPROVALS = new Set(["not_required", "required", "approved", "denied", "expired"]);
 const TASK_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;

@@ -23,7 +23,7 @@ import type {
   CommandEvent,
   CommandEventListener,
 } from "../events";
-import type { CommandEvidence, CommandStep } from "../types";
+import type { CommandApproval, CommandEvidence, CommandStep } from "../types";
 import { getCapability } from "./capabilities";
 import { consoleCoreLogger, type CoreLogger } from "./logger";
 import { matchRealIntent, type RealIntent } from "./intents";
@@ -37,6 +37,8 @@ import {
 } from "./task-store";
 import { systemHealthPlaybook } from "./playbooks/system-health";
 import { careerAttentionPlaybook } from "./playbooks/career-attention";
+import { careerFollowupPlaybook } from "./playbooks/career-followup";
+import { fingerprintDraft, type DraftContent } from "./career-write";
 import type { PlaybookContext, TaskPlaybook } from "./playbook";
 import type {
   Capability,
@@ -44,6 +46,7 @@ import type {
   CommandPlan,
   CoreTaskRecord,
   CoreTransport,
+  PlanStep,
   ProvenanceRef,
 } from "./types";
 
@@ -51,7 +54,23 @@ import type {
 const PLAYBOOKS: Record<string, TaskPlaybook> = {
   [systemHealthPlaybook.id]: systemHealthPlaybook,
   [careerAttentionPlaybook.id]: careerAttentionPlaybook,
+  [careerFollowupPlaybook.id]: careerFollowupPlaybook,
 };
+
+/** How long a `required` approval stays valid before it must be re-requested. */
+const APPROVAL_TTL_MS = 15 * 60 * 1000;
+
+/** Reconstruct the frozen draft content from a persisted pendingWrite. */
+function draftFromPending(pw: NonNullable<CoreTaskRecord["pendingWrite"]>): DraftContent {
+  return {
+    target: pw.target,
+    subject: pw.subject ?? "",
+    body: pw.body,
+    idempotencyKey: pw.idempotencyKey,
+    draftId: pw.draftId,
+    fingerprint: pw.fingerprint,
+  };
+}
 
 interface Runtime {
   record: CoreTaskRecord;
@@ -70,6 +89,12 @@ interface Runtime {
   created: boolean;
   /** True once any persistence write could not be durably confirmed. */
   persistenceDegraded: boolean;
+  /** The playbook context, reused across an approval suspend/resume. */
+  ctx?: PlaybookContext;
+  /** Step index to resume from once approval is granted. */
+  resumeIndex?: number;
+  /** True while the executor is suspended at an approval gate. */
+  awaitingApproval?: boolean;
 }
 
 function makeId(): string {
@@ -174,9 +199,15 @@ export class RealCommandCore implements CommandCore {
         continue;
       }
 
-      // Non-terminal after a restart → interrupted, not resumed. Honest recovery
-      // classification mapped onto the frozen UI contract (failed + recovery
-      // evidence): it did not complete, and no executor is driving it.
+      // Approval-gated recovery (Slice 4): a task persisted while waiting for —
+      // or having just been granted — approval is NOT an interrupted run. Its
+      // durable approval state deterministically decides what happens next.
+      if (this.restoreApproval(rec, out)) continue;
+
+      // Otherwise: non-terminal after a restart → interrupted, not resumed.
+      // Honest recovery classification mapped onto the frozen UI contract
+      // (failed + recovery evidence): it did not complete, and no executor is
+      // driving it.
       out.push({
         type: "failed",
         taskId: rec.taskId,
@@ -191,6 +222,67 @@ export class RealCommandCore implements CommandCore {
     return out;
   }
 
+  /**
+   * Rebuild an executable Runtime for a task restored mid-approval, and drive
+   * the correct recovery:
+   *  - approvalState "required"/"expired" → re-show the approval card and wait
+   *    for an explicit decision; an expired window is surfaced, never auto-run.
+   *  - approvalState "approved" but no terminal outcome → resume the ONE write.
+   *    It is idempotent (stable key) and read-back verified, so it can never
+   *    create a duplicate even if it had partially committed before the restart.
+   * Returns true if it handled the record (caller should not mark interrupted).
+   */
+  private restoreApproval(rec: CoreTaskRecord, out: CommandEvent[]): boolean {
+    const waiting = rec.status === "waiting_for_approval";
+    const stillWaiting = waiting && (rec.approvalState === "required" || rec.approvalState === "expired");
+    const approvedNotRun = rec.approvalState === "approved" && !rec.outcome;
+    if (!stillWaiting && !approvedNotRun) return false;
+
+    const intent = matchRealIntent(rec.rawIntent);
+    const playbook = intent ? PLAYBOOKS[intent.id] : undefined;
+    if (!intent || !playbook || !rec.plan) return false;
+
+    const run: Runtime = {
+      record: cloneRecord(rec),
+      intent,
+      playbook,
+      plan: rec.plan,
+      abort: new AbortController(),
+      canceled: false,
+      started: true,
+      data: {},
+      provenance: [],
+      extraEvidence: [],
+      revision: rec.revision ?? 0,
+      created: rec.revision != null,
+      persistenceDegraded: false,
+      awaitingApproval: stillWaiting,
+    };
+    run.resumeIndex = this.writeStepIndex(run);
+    this.runs.set(rec.taskId, run);
+
+    if (approvedNotRun) {
+      run.record.status = "running";
+      // Defer to a macrotask so the provider folds task.created/plan.available
+      // before the resumed run emits its own events.
+      setTimeout(() => { void this.resumeAfterApproval(run); }, 0);
+      return true;
+    }
+
+    // Still waiting — normalise back to "required" so an explicit Approve works,
+    // and re-show the card (flagged expired when the window has lapsed).
+    run.record.approvalState = "required";
+    const now = Date.now();
+    const expired = !!rec.approval?.expiresAt && now > rec.approval.expiresAt;
+    out.push({
+      type: "approval.requested",
+      taskId: rec.taskId,
+      at: rec.updatedAt,
+      approval: this.approvalPayloadFor(rec, expired ? "expired" : "required"),
+    });
+    return true;
+  }
+
   dispatch(action: CommandAction): void {
     switch (action.type) {
       case "submit": this.onSubmit(action.taskId, action.input); break;
@@ -199,8 +291,8 @@ export class RealCommandCore implements CommandCore {
       case "retry":
       case "resume": this.onRetry(action.taskId); break;
       case "discard": this.runs.delete(action.taskId); break;
-      case "approve":
-      case "deny": break; // no approval gate in these read-only slices
+      case "approve": this.onApprove(action.taskId); break;
+      case "deny": this.onDeny(action.taskId); break;
     }
   }
 
@@ -246,8 +338,9 @@ export class RealCommandCore implements CommandCore {
       revision: 0, created: false, persistenceDegraded: false,
     });
 
-    this.logger.log("task.created", taskId, { intent: intent.id });
-    this.emit({ type: "task.created", taskId, at: now, userInput: input, normalizedIntent: intent.normalized, title: intent.title, kind: "action", source: "core", contextSummary: "Live read-only · no changes made" });
+    const writes = plan.capabilitiesRequired.some((id) => getCapability(id)?.classification === "write");
+    this.logger.log("task.created", taskId, { intent: intent.id, writes });
+    this.emit({ type: "task.created", taskId, at: now, userInput: input, normalizedIntent: intent.normalized, title: intent.title, kind: "action", source: "core", contextSummary: writes ? "Live · will request approval before any change" : "Live read-only · no changes made" });
     this.logger.log("plan.created", taskId, { steps: plan.steps.length, version: plan.version });
     this.emit({ type: "intent.proposed", taskId, at: Date.now(), normalizedIntent: intent.normalized, title: intent.title, steps: recSteps(record) });
   }
@@ -285,17 +378,166 @@ export class RealCommandCore implements CommandCore {
     run.record.cancelRequested = true;
     run.abort.abort();
     this.logger.log("cancel", taskId, {});
-    if (!run.record.currentStepId) void this.finishCancelled(run);
+    // Cancelling while suspended at the approval gate (or before any step is
+    // running) resolves to cancelled with ZERO side effect — no write occurs.
+    if (run.awaitingApproval || !run.record.currentStepId) void this.finishCancelled(run);
   }
 
   private async finishCancelled(run: Runtime) {
     if (run.record.outcome) return;
+    run.awaitingApproval = false;
     run.record.outcome = "cancelled";
     run.record.status = "cancelled";
     run.record.endedAt = Date.now();
     await this.persistUpdate(run, "terminal");
     this.logger.log("terminal", run.record.taskId, { outcome: "cancelled" });
     this.emit({ type: "cancelled", taskId: run.record.taskId, at: Date.now() });
+  }
+
+  /* -------------------------------------------------------- approval gate */
+
+  /** User granted approval — verify the freeze, then run the single write. */
+  private async onApprove(taskId: string) {
+    const run = this.runs.get(taskId);
+    if (!run) return;
+    // Idempotent: a duplicate Approve after the first never runs a second write.
+    if (run.record.approvalState === "approved") return;
+    if (run.record.approvalState !== "required") return;
+
+    const now = Date.now();
+    // Expiry: an expired approval must NOT execute — re-request a fresh one.
+    if (run.record.approval?.expiresAt && now > run.record.approval.expiresAt) {
+      this.logger.log("approval.expired", taskId, {});
+      this.reRequestApproval(run, "This approval had expired, so it was requested again.");
+      return;
+    }
+    // Mutation freeze: the recomputed fingerprint must still match what was
+    // approved. If the content changed, invalidate and request approval again.
+    const pw = run.record.pendingWrite;
+    const fp = pw
+      ? fingerprintDraft({ capabilityId: pw.capabilityId, targetId: pw.target.id, subject: pw.subject ?? "", body: pw.body })
+      : undefined;
+    if (!pw || fp !== run.record.approval?.fingerprint) {
+      this.logger.log("approval.fingerprint_mismatch", taskId, {});
+      this.reRequestApproval(run, "The draft changed since it was shown, so approval was requested again.");
+      return;
+    }
+
+    run.record.approvalState = "approved";
+    run.record.approval = { ...run.record.approval, approvedAt: now };
+    run.record.status = "running";
+    run.awaitingApproval = false;
+    await this.persistUpdate(run, "approval_approved");
+    this.logger.log("approval.approved", taskId, {});
+    this.emit({ type: "approval.resolved", taskId, at: now, approved: true });
+    void this.resumeAfterApproval(run);
+  }
+
+  /** User denied — terminal cancelled, provably zero side effect. */
+  private async onDeny(taskId: string) {
+    const run = this.runs.get(taskId);
+    if (!run) return;
+    if (run.record.approvalState !== "required") return;
+    const now = Date.now();
+    run.record.approvalState = "denied";
+    run.record.approval = { ...run.record.approval, deniedAt: now };
+    run.awaitingApproval = false;
+    run.record.outcome = "cancelled";
+    run.record.status = "cancelled";
+    run.record.endedAt = now;
+    run.record.resultSummary = "Denied — no draft was created.";
+    run.record.evidence = [
+      ...run.record.evidence,
+      { kind: "observed_state", label: "Action taken", value: "None — approval denied, nothing was written" },
+    ];
+    await this.persistUpdate(run, "terminal");
+    this.logger.log("approval.denied", taskId, {});
+    this.emit({ type: "approval.resolved", taskId, at: now, approved: false });
+  }
+
+  /** Suspend the executor at a write step and ask the user to approve. */
+  private async requestApproval(run: Runtime, step: PlanStep, index: number) {
+    const data = run.data as { draft?: DraftContent };
+    const draft = data.draft ?? (run.record.pendingWrite ? draftFromPending(run.record.pendingWrite) : undefined);
+    if (!draft || !step.capabilityId) {
+      return this.fail(run, "The draft to approve was not prepared.", "Re-run the request.");
+    }
+    // Freeze the exact action on the durable record.
+    run.record.pendingWrite = {
+      capabilityId: step.capabilityId,
+      stepId: step.id,
+      target: draft.target,
+      subject: draft.subject,
+      body: draft.body,
+      idempotencyKey: draft.idempotencyKey,
+      draftId: draft.draftId,
+      fingerprint: draft.fingerprint,
+    };
+    const now = Date.now();
+    run.record.approval = { requestedAt: now, expiresAt: now + APPROVAL_TTL_MS, fingerprint: draft.fingerprint };
+    run.record.approvalState = "required";
+    run.record.status = "waiting_for_approval";
+    run.record.steps = run.record.steps.map((s) =>
+      s.id === step.id ? { ...s, status: "waiting", startedAt: s.startedAt ?? now } : s,
+    );
+    run.record.currentStepId = step.id;
+    run.resumeIndex = index;
+    run.awaitingApproval = true;
+    await this.persistUpdate(run, "approval_required");
+    this.logger.log("approval.requested", run.record.taskId, { capId: step.capabilityId });
+    this.emit({ type: "approval.requested", taskId: run.record.taskId, at: now, approval: this.approvalPayloadFor(run.record, "required") });
+  }
+
+  /** Re-issue an approval request with a fresh window (expired / content drift). */
+  private reRequestApproval(run: Runtime, note: string) {
+    const now = Date.now();
+    const fp = run.record.pendingWrite?.fingerprint;
+    run.record.approval = { requestedAt: now, expiresAt: now + APPROVAL_TTL_MS, fingerprint: fp };
+    run.record.approvalState = "required";
+    run.record.status = "waiting_for_approval";
+    run.awaitingApproval = true;
+    void this.persistUpdate(run, "approval_rerequested");
+    this.emit({ type: "approval.resolved", taskId: run.record.taskId, at: now, approved: false });
+    this.emit({ type: "approval.requested", taskId: run.record.taskId, at: now, approval: { ...this.approvalPayloadFor(run.record, "required"), reason: note } });
+  }
+
+  /** Build the approval card payload from the frozen pendingWrite on a record. */
+  private approvalPayloadFor(record: CoreTaskRecord, status: CommandApproval["status"]): CommandApproval {
+    const pw = record.pendingWrite;
+    const cap = pw ? getCapability(pw.capabilityId) : undefined;
+    const targetLabel = pw?.target.label ?? (pw ? `application ${pw.target.id}` : "the target");
+    const preview = pw ? `${pw.subject ? `Subject: ${pw.subject}\n\n` : ""}${pw.body}` : undefined;
+    return {
+      status,
+      summary: `Create a follow-up draft for ${targetLabel}`,
+      reason: cap?.sideEffectLabel ?? "Creates an unsent internal draft only — nothing is sent.",
+      action: cap?.title ?? "Create follow-up draft",
+      target: targetLabel,
+      contentPreview: preview,
+      sideEffect: cap?.sideEffectLabel,
+      reversible: cap?.reversible,
+      capabilityId: pw?.capabilityId,
+      expiresAt: record.approval?.expiresAt,
+    };
+  }
+
+  /** Continue execution from the write step once approval is granted. */
+  private async resumeAfterApproval(run: Runtime) {
+    if (!run.ctx) run.ctx = this.buildCtx(run);
+    const data = run.data as { draft?: DraftContent };
+    if (!data.draft && run.record.pendingWrite) data.draft = draftFromPending(run.record.pendingWrite);
+    run.started = true;
+    const idx = run.resumeIndex ?? this.writeStepIndex(run);
+    this.emit({ type: "status", taskId: run.record.taskId, at: Date.now(), status: "running" });
+    await this.runSteps(run, idx);
+  }
+
+  private writeStepIndex(run: Runtime): number {
+    const i = run.plan.steps.findIndex((s) => {
+      const cap = s.capabilityId ? getCapability(s.capabilityId) : null;
+      return !!cap && cap.permission === "approval_required";
+    });
+    return i < 0 ? 0 : i;
   }
 
   /* ---------------------------------------------------------- persistence */
@@ -373,11 +615,12 @@ export class RealCommandCore implements CommandCore {
 
   /* -------------------------------------------------------------- executor */
 
-  private async execute(run: Runtime) {
-    const { taskId } = run.record;
-    const ctx: PlaybookContext = {
+  private buildCtx(run: Runtime): PlaybookContext {
+    const taskId = run.record.taskId;
+    return {
       taskId,
       now: Date.now(),
+      rawIntent: run.record.rawIntent,
       isCanceled: () => run.canceled,
       runCapability: (cap, stepId) => this.runCapability(run, cap, stepId),
       emitProgress: (stepId, detail) => this.emit({ type: "step.progress", taskId, at: Date.now(), stepId, detail }),
@@ -385,6 +628,11 @@ export class RealCommandCore implements CommandCore {
       provenance: run.provenance,
       evidence: run.extraEvidence,
     };
+  }
+
+  private async execute(run: Runtime) {
+    const { taskId } = run.record;
+    run.ctx = this.buildCtx(run);
 
     this.emit({ type: "status", taskId, at: Date.now(), status: "planning" });
     this.emit({ type: "plan.available", taskId, at: Date.now(), steps: recSteps(run.record) });
@@ -417,9 +665,30 @@ export class RealCommandCore implements CommandCore {
     await this.persistUpdate(run, "running");
     if (run.canceled) return this.finishCancelled(run);
 
-    // Step-by-step execution via the playbook.
-    for (const step of run.plan.steps) {
+    await this.runSteps(run, 0);
+  }
+
+  /**
+   * Run plan steps from `fromIndex`. A step whose capability is
+   * `approval_required` (and not yet approved) SUSPENDS the executor at the
+   * approval gate — no write happens until the user approves and execution
+   * resumes here from the same index.
+   */
+  private async runSteps(run: Runtime, fromIndex: number) {
+    const { taskId } = run.record;
+    const ctx = run.ctx ?? (run.ctx = this.buildCtx(run));
+    const steps = run.plan.steps;
+
+    for (let i = fromIndex; i < steps.length; i++) {
+      const step = steps[i];
       if (run.canceled) return this.finishCancelled(run);
+
+      const cap = step.capabilityId ? getCapability(step.capabilityId) : null;
+      if (cap && cap.permission === "approval_required" && run.record.approvalState !== "approved") {
+        // Suspend at the gate. NOTHING has been written; only task state is saved.
+        return this.requestApproval(run, step, i);
+      }
+
       this.setStep(run, step.id, { status: "running", startedAt: Date.now() });
       this.emit({ type: "step.started", taskId, at: Date.now(), stepId: step.id });
       this.logger.log("step.started", taskId, { stepId: step.id });
@@ -437,12 +706,30 @@ export class RealCommandCore implements CommandCore {
     }
 
     if (run.canceled) return this.finishCancelled(run);
+    return this.finalize(run);
+  }
 
-    // Verify.
+  private async finalize(run: Runtime) {
+    const { taskId } = run.record;
+    const ctx = run.ctx ?? (run.ctx = this.buildCtx(run));
+
     run.record.status = "verifying";
+    this.emit({ type: "status", taskId, at: Date.now(), status: "running" });
     const verdict = run.playbook.verify(ctx);
     this.logger.log("verify.verdict", taskId, { verdict: verdict.verdict, unresolved: verdict.unresolved.length });
     if (run.canceled) return this.finishCancelled(run);
+
+    // Record the committed write on the audit trail (if any).
+    const writeResult = (run.data as { writeResult?: { draft?: { draftId?: string; contentHash?: string; createdAt?: number } } }).writeResult;
+    if (writeResult?.draft?.draftId) {
+      run.record.writeResult = {
+        draftId: writeResult.draft.draftId,
+        operationId: run.record.pendingWrite?.idempotencyKey ?? writeResult.draft.draftId,
+        createdAt: writeResult.draft.createdAt,
+        contentHash: writeResult.draft.contentHash,
+        verified: verdict.verdict,
+      };
+    }
 
     const evidence = ctx.evidence.length ? [...ctx.evidence, ...verdict.evidence] : verdict.evidence;
     run.record.evidence = evidence;
