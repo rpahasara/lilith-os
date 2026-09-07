@@ -4,6 +4,7 @@
 > **Authority:** [Cognitive Architecture V1](./cognitive-architecture-v1.md) §5, §7a, §12–13.
 > **Prerequisite:** backend/VM source + tunnel access (absent from the frontend repo).
 > **Frontend Phase A** (contracts, client, proxy allow-list, Working-Memory selection, Context Builder, inspector) is already implemented in this repo under `src/lib/world/*`, `src/app/world/`, and the `/os/world` proxy allow-list entry. The wire shapes below are the contract that frontend already normalises.
+> **Reconciled to production (recon 2026-09-07):** verified against the live VM — single-file `app.py`, inline `CREATE TABLE IF NOT EXISTS` bootstrap (no migration framework, `user_version=0`), `journal_mode=delete`, real Career schema (`job_applications`/`companies`/`career_events`). Sections 1, 11, 12, 14 below reflect that reality.
 
 This document is written so a backend engineer with VM access can implement Slice 7 end-to-end without further design. Field names, DDL, endpoints and reconciliation rules are concrete. Where a detail must match an existing backend convention (migration runner, DI, auth middleware), it is flagged **[adapt]**.
 
@@ -26,13 +27,17 @@ Per architecture §7a: World-Model current-state persistence **is** allowed onli
 
 ---
 
-## 1. SQLite schema & migration
+## 1. SQLite schema (inline bootstrap — matches production)
 
-Additive, versioned migration consistent with prior slices **[adapt to the repo's migration runner]**. New tables only; no change to `tasks`, `drafts`, `os_audit_log`, `career_events`, or policy tables.
+**Production reality (recon 2026-09-07):** the backend has **no migration framework** — no migrations directory, `PRAGMA user_version = 0`, no startup hook. Tables `tasks`/`drafts` are created lazily inline via `CREATE TABLE IF NOT EXISTS` inside their write paths, using the shared `db()` helper, with per-row `schema_version` + module constants (`TASK_SCHEMA_VERSION = 1`). Slice 7 follows the **same** pattern: an idempotent `_ensure_world_schema(conn)` guarded by a module-level `WORLD_SCHEMA_VERSION = 1`, called at the top of every World-Model read/ingest path. **Do not add a migration file or runner.** The DDL below is unchanged in content — only its delivery is inline. New tables only; no change to `tasks`, `drafts`, `os_audit_log`, `career_events`, `job_applications`, `companies`, or any Slice 1–6 table.
+
+```python
+# _ensure_world_schema(conn) executes exactly the statements below, once per
+# connection, idempotently. NOT a migration file — production uses inline
+# bootstrap. Mirrors the existing inline tasks/drafts table creation.
+```
 
 ```sql
--- migration: 0007_world_model.sql  (additive; forward-only, matching prior slices)
-
 -- Current-state belief store. One row per canonical belief key (its latest
 -- reconciled state). Superseded history is preserved in belief_evidence + trace.
 CREATE TABLE IF NOT EXISTS world_belief (
@@ -130,7 +135,7 @@ CREATE TABLE IF NOT EXISTS world_working_seed (
 );
 ```
 
-**Migration safety:** `CREATE TABLE IF NOT EXISTS` + additive indexes only; re-runnable; no data backfill required. Register `0007` in the migration ledger the prior slices use **[adapt]**.
+**Bootstrap safety:** all statements are `CREATE TABLE/INDEX IF NOT EXISTS` — idempotent, re-runnable, no data backfill. Deliver them from a single `_ensure_world_schema(conn)` (mirroring the existing inline task/draft creation), gated by a module-level `WORLD_SCHEMA_VERSION = 1`. No migration ledger and **no `PRAGMA user_version` change** (production keeps it at 0). The schema write is the only mutation Slice 7 performs at bootstrap; it briefly locks the DB under `journal_mode=delete` (see §11), so run it once on first world-path access and guard with a process-level "already ensured" flag to avoid redundant writes.
 
 ---
 
@@ -338,6 +343,12 @@ Every rule application writes a `world_belief_trace` row and returns a `Reconcil
 
 Read-only. **[adapt]** to the backend's router/auth. Already allow-listed in the frontend proxy (`os/world`).
 
+**Concurrency & read-safety (production `journal_mode=delete`).** The production DB uses a rollback journal, not WAL, so a writer takes a brief exclusive lock. World-Model reads must therefore:
+- open the DB **read-only** — `sqlite3.connect("file:" + str(DB) + "?mode=ro", uri=True)` — so a read can never create/modify a journal or block a writer, and
+- set a bounded busy timeout — `PRAGMA busy_timeout = 2000` (or `connect(..., timeout=2.0)`) — so a read waits briefly under a concurrent write rather than erroring, then returns `503`/empty honestly if still locked.
+
+Reads must never fabricate a belief on `SQLITE_BUSY`; they surface an honest unavailable state (the frontend already renders it). Ingestion/reconciliation (write paths) use the normal read-write `db()` connection.
+
 ### `GET /os/world`
 Query params: `entity_type?`, `entity_id?`, `include_superseded?` (default `0`), `limit?` (default 200).
 
@@ -410,6 +421,8 @@ Every belief mutation emits one `world_belief_trace` row (§1). Read projection 
 ```
 Trace rows are observable metadata only — **no hidden chain-of-thought**, no full private payloads (refs/hashes/summaries only, mirroring §6/§13).
 
+**`world_belief_trace` is authoritative for cognitive belief changes.** It is a dedicated store, separate from `os_audit_log` (which stays authoritative for *actions/writes*, Slice 4). A `VERIFIED` delta (from `applyVerifiedDelta`) **may optionally** also write a mirror row into `os_audit_log` — using the existing columns: `app='world-model'`, `action='belief.verified'`, `entity_type`/`entity_id` from the belief, `actor` = the verification source, `confidence`, `reason` = `reconciliation_reason`, `before_json`/`after_json` = prior/new belief value, `reversible=0` — so belief-affecting verified outcomes appear in the current audit view. This mirror is convenience only; the world trace remains the source of truth for belief lifecycle/epistemic transitions. Non-verified reconciliations (`OBSERVED`/`INFERRED`/`USER_ASSERTED`) write **only** to `world_belief_trace`, never to `os_audit_log`, to keep the action audit clean.
+
 ---
 
 ## 13. Working Memory reconstruction semantics
@@ -427,17 +440,23 @@ After a reload/restart, the working set is **rebuilt** from durable beliefs — 
 
 ## 14. First live domain — Career/Application
 
-Map only fields that exist in real Career data (Slice 1 `career_events` / career pipeline). Do **not** fabricate absent fields.
+Map only fields that exist in the **real production schema** (recon 2026-09-07). `entity_id` is the stringified `job_applications.id` (INTEGER in the DB → e.g. `career.application:8:status`). Do **not** fabricate absent fields.
 
-| Career field | Belief key | epistemic | source_class |
-|---|---|---|---|
-| application status | `career.application:<id>:status` | OBSERVED | LIVE_CONNECTOR |
-| company | `career.application:<id>:company` | OBSERVED | LIVE_CONNECTOR |
-| role | `career.application:<id>:role` | OBSERVED | LIVE_CONNECTOR |
-| last activity | `career.application:<id>:last_activity` | OBSERVED | LIVE_CONNECTOR |
-| follow-up state | `career.application:<id>:follow_up_state` | OBSERVED | LIVE_CONNECTOR |
+**Production source columns:** `job_applications(id, company_id, role_title, stage DEFAULT 'discovered', status DEFAULT 'active', source, source_account, confidence, first_seen, last_activity, recruiter_id, notes)`; `companies(id, name)`; `career_events(event_type, entity_type, entity_id, source, confidence, payload_json, processed)`; `career_activities(application_id, activity_type, occurred_at, confidence, source)`.
 
-Ingestion path: the existing Career observation flow calls `submitObservation(...)` with `source_type='career.application'`, `origin_ref` pointing at the `career_events` row, and `observed_at` from the event. At least one real Career observation must become a durable `ACTIVE` belief and enter a reconstructed Working Set (acceptance §16).
+| Belief key | Value from | epistemic | source_class | note |
+|---|---|---|---|---|
+| `career.application:<id>:status` | `job_applications.stage` (the real status field) | OBSERVED | LIVE_CONNECTOR | e.g. `discovered`, `interviewing` |
+| `career.application:<id>:role` | `job_applications.role_title` | OBSERVED | LIVE_CONNECTOR | |
+| `career.application:<id>:company` | `companies.name` via `company_id` | OBSERVED | LIVE_CONNECTOR | join; skip if `company_id` NULL |
+| `career.application:<id>:last_activity` | `job_applications.last_activity` | OBSERVED | LIVE_CONNECTOR | ISO ts → also `observed_at` |
+| `career.application:<id>:lifecycle` | `job_applications.status` (active/…) | OBSERVED | LIVE_CONNECTOR | optional |
+
+- **`source_account`** (`job_applications.source_account`) is carried as evidence **provenance** (`provenance.source_id`/`note`), not its own belief.
+- **No `follow_up_state` column exists.** Do **not** emit a `follow_up_state` belief from `job_applications`. It may be **derived** only if a valid signal exists in `career_activities` (e.g. an `activity_type` denoting a follow-up sent/received) — and then it is an **`INFERRED`** belief (`career.application:<id>:follow_up`, `source_class=INFERENCE`, `basis='derived_from_career_activity'`), never `OBSERVED`. If no such activity exists, the belief stays **UNKNOWN** (absent).
+- **Evidence confidence:** use `career_events.confidence` / `career_activities.confidence` when the observation originates from an event/activity row; otherwise the epistemic base (§7).
+
+**Ingestion path:** a read-only projection reads `job_applications` (LEFT JOIN `companies`) and, where relevant, `career_events`/`career_activities`, and calls `submitObservation(entity={career.application, str(id)}, predicate, value, LIVE_CONNECTOR, {source_type='career.application', origin_ref='job_applications/<id>' or 'career_events/<id>', observed_at=<last_activity|occurred_at>})`. At least one real Career observation must become a durable `ACTIVE` belief and enter a reconstructed Working Set (acceptance §16).
 
 ---
 
