@@ -12,8 +12,9 @@ import type { CommandEvent } from "../events";
 import { silentCoreLogger } from "./logger";
 import { RealCommandCore } from "./real-core";
 import { getCapability } from "./capabilities";
-import { planCareerFollowup } from "./planner";
-import { buildFollowupDraft } from "./career-write";
+import { evaluatePolicy, evaluateCapabilityPolicy, POLICY_CLASS_DEFAULTS, type PolicyClass } from "./policy";
+import { planCareerFollowup, planCareerNote } from "./planner";
+import { buildFollowupDraft, buildNote } from "./career-write";
 import type { CareerApplication } from "./career-capabilities";
 import {
   createTaskBackend,
@@ -736,8 +737,106 @@ export async function runCoreSelfTest(): Promise<SelfTestResult[]> {
   {
     const routed = RealCommandCore.matches(WRITE_INTENT) !== null;
     const cap = getCapability("career.create_followup_draft");
-    const gated = cap?.permission === "approval_required" && cap?.classification === "write";
-    record("W-P demo never calls live write", routed && !!gated, `routed=${routed} gated=${!!gated}`);
+    const gated = !!cap && evaluateCapabilityPolicy(cap).approvalRequired && cap.classification === "write";
+    record("W-P demo never calls live write", routed && gated, `routed=${routed} gated=${gated}`);
+  }
+
+  /* ================= Slice 5: capability policy / integration fabric ======= */
+
+  // PE — policy engine class behaviour (§4/§5). Pure, exhaustive over the classes.
+  {
+    const probe = (cls: PolicyClass, over: { idempotent?: boolean; reversible?: boolean } = {}) =>
+      evaluatePolicy({ policyClass: cls, idempotent: over.idempotent, reversible: over.reversible });
+    const read = probe("READ");
+    const intw = probe("INTERNAL_WRITE", { idempotent: true });
+    const extw = probe("EXTERNAL_WRITE", { idempotent: true });
+    const dest = probe("DESTRUCTIVE", { idempotent: true });
+    const proh = probe("PROHIBITED");
+    record("PE-A read bypasses approval", read.allowed && !read.approvalRequired && !read.verificationRequired, `${JSON.stringify(read.approvalRequired)}`);
+    record("PE-B internal write gated+verified", intw.allowed && intw.approvalRequired && intw.verificationRequired && intw.requiresExactPreview, "");
+    record("PE-C external write gated+preview+verified", extw.approvalRequired && extw.verificationRequired && extw.requiresExactPreview, "");
+    record("PE-D destructive elevated+no-silent-retry", dest.approvalRequired && dest.elevatedWarning && dest.allowSilentRetry === false, `silent=${dest.allowSilentRetry}`);
+    record("PE-E prohibited never allowed", proh.prohibited && !proh.allowed && !proh.approvalRequired, `allowed=${proh.allowed}`);
+    // Non-idempotent write must not be silently retried even if class allows it.
+    const nonIdem = evaluatePolicy({ policyClass: "INTERNAL_WRITE", idempotent: false });
+    record("PE-F non-idempotent write no silent retry", nonIdem.allowSilentRetry === false, `silent=${nonIdem.allowSilentRetry}`);
+    // Class defaults table matches §5 expectations.
+    const d = POLICY_CLASS_DEFAULTS;
+    const tableOk = d.READ.approvalMode === "none" && d.INTERNAL_WRITE.approvalMode === "explicit" &&
+      d.EXTERNAL_WRITE.requiresExactPreview && d.DESTRUCTIVE.elevatedWarning && d.PROHIBITED.prohibited;
+    record("PE-G class table matches spec", tableOk, "");
+  }
+
+  // PB — prohibited capability is blocked by the core, end-to-end, zero execution.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "pb-1", input: "__policy_probe__" });
+    core.dispatch({ type: "run", taskId: "pb-1" });
+    const term = await waitFor(events, isTerminalEvt);
+    const blocked = term?.type === "capability.unsupported" || (term?.type === "failed");
+    const noApproval = !events.some((e) => e.type === "approval.requested" && e.taskId === "pb-1");
+    record("PB prohibited blocked (no execution)", blocked && noApproval && be.count() === 0, `${term?.type} approval=${!noApproval} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // PC — READ intent bypasses approval entirely (policy, not capability flag).
+  {
+    const t: CoreTransport = async (p) => (p.includes("overview") ? ok(healthyOverview()) : ok(statusPayload(false)));
+    const { events, terminal } = await drive(makeCore(t), SYSTEM_INTENT);
+    const noApproval = !events.some((e) => e.type === "approval.requested");
+    record("PC read bypasses approval (e2e)", terminal?.type === "result.available" && noApproval, `${terminal?.type} approval=${!noApproval}`);
+  }
+
+  // ND — the SECOND internal write (add_note) works end-to-end through the same gate.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "nd-1", input: "add a note to application #1: called the recruiter, awaiting reply" });
+    core.dispatch({ type: "run", taskId: "nd-1" });
+    const appr = await waitFor(events, (e) => e.type === "approval.requested");
+    const preApprove = be.count();
+    core.dispatch({ type: "approve", taskId: "nd-1" });
+    const term = await waitFor(events, isTerminalEvt);
+    record("ND add_note gated write e2e", !!appr && preApprove === 0 && term?.type === "result.available" && be.count() === 1, `appr=${!!appr} pre=${preApprove} ${term?.type} n=${be.count()}`);
+    unsub();
+  }
+
+  // NX — expired approval on restore cannot execute; approve re-requests (no write).
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    const noteDraft = buildNote(WRITE_APP as unknown as CareerApplication, "call back", "nx-1", "s3");
+    const pw = { capabilityId: "career.add_note", stepId: "s3", target: noteDraft.target, subject: "", body: noteDraft.body, idempotencyKey: noteDraft.idempotencyKey, draftId: noteDraft.draftId, fingerprint: noteDraft.fingerprint };
+    taskBe.seed(baseRec("nx-1", {
+      status: "waiting_for_approval", approvalState: "required", rawIntent: "add a note to application #1: call back", scope: "career",
+      plan: planCareerNote("nx-1", "x"), pendingWrite: pw,
+      approval: { requestedAt: 1000, expiresAt: Date.now() - 1000, fingerprint: noteDraft.fingerprint }, // already expired
+    }), 2);
+    const core = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const { events, unsub } = collect(core);
+    const restored = await core.restore();
+    const shownExpired = restored.some((e) => e.type === "approval.requested" && e.taskId === "nx-1" && (e as { approval?: { status?: string } }).approval?.status === "expired");
+    core.dispatch({ type: "approve", taskId: "nx-1" });
+    const reReq = await waitFor(events, (e) => e.type === "approval.requested");
+    record("NX expired approval cannot execute", shownExpired && !!reReq && be.count() === 0, `expired=${shownExpired} reReq=${!!reReq} n=${be.count()}`);
+    unsub();
+  }
+
+  // NS — sweepExpiredApprovals transitions a live waiting task to expired (§6).
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "ns-1", input: "add a note to application #1: ping" });
+    core.dispatch({ type: "run", taskId: "ns-1" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    const swept = core.sweepExpiredApprovals(Date.now() + 60 * 60 * 1000); // pretend an hour passed
+    const expiredCard = events.some((e) => e.type === "approval.requested" && (e as { approval?: { status?: string } }).approval?.status === "expired");
+    record("NS expiry sweep marks expired", swept === 1 && expiredCard && be.count() === 0, `swept=${swept} card=${expiredCard} n=${be.count()}`);
+    unsub();
   }
 
   return results;
