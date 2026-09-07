@@ -13,6 +13,7 @@ import { silentCoreLogger } from "./logger";
 import { RealCommandCore } from "./real-core";
 import { getCapability } from "./capabilities";
 import { evaluatePolicy, evaluateCapabilityPolicy, POLICY_CLASS_DEFAULTS, type PolicyClass } from "./policy";
+import { getConnector, connectorSupports, resolveConnectorBinding, INTERNAL_CAREER_STORE_ID } from "./connectors";
 import { planCareerFollowup, planCareerNote } from "./planner";
 import { buildFollowupDraft, buildNote } from "./career-write";
 import type { CareerApplication } from "./career-capabilities";
@@ -84,7 +85,7 @@ const WRITE_APP = {
   activities: 1, last_activity_summary: "…", recruiter: { name: "Alex Rivera", contact: "alex@x.com" },
 };
 
-interface DraftBackendOpts { failWritesTimes?: number; corruptReadback?: boolean; phantomTimeoutOnce?: boolean }
+interface DraftBackendOpts { failWritesTimes?: number; corruptReadback?: boolean; phantomTimeoutOnce?: boolean; storeUnavailable?: boolean }
 
 /** Faithful in-memory emulation of the /os/drafts store (idempotent create). */
 function makeDraftBackend(apps: unknown, opts: DraftBackendOpts = {}) {
@@ -94,6 +95,8 @@ function makeDraftBackend(apps: unknown, opts: DraftBackendOpts = {}) {
   let phantomUsed = false;
   const transport: CoreTransport = async (path, _signal, init) => {
     if (path.includes("/drafts")) {
+      // Whole store down → connector health probe + writes all fail (unavailable).
+      if (opts.storeUnavailable) return err(503, "store down");
       if (init?.method === "POST") {
         postCount += 1;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -837,6 +840,105 @@ export async function runCoreSelfTest(): Promise<SelfTestResult[]> {
     const expiredCard = events.some((e) => e.type === "approval.requested" && (e as { approval?: { status?: string } }).approval?.status === "expired");
     record("NS expiry sweep marks expired", swept === 1 && expiredCard && be.count() === 0, `swept=${swept} card=${expiredCard} n=${be.count()}`);
     unsub();
+  }
+
+  /* ================= Slice 6: integration fabric / connectors ============== */
+
+  // CN-A — capability resolves through the connector registry (discovery).
+  {
+    const cap = getCapability("career.create_followup_draft");
+    const bound = resolveConnectorBinding(cap?.connector);
+    const okBind = bound.ok && bound.connector.id === INTERNAL_CAREER_STORE_ID;
+    const supported = connectorSupports(INTERNAL_CAREER_STORE_ID, "create_draft");
+    const unsupported = !connectorSupports(INTERNAL_CAREER_STORE_ID, "bogus_op");
+    const missing = !resolveConnectorBinding({ id: "no-such-connector", operation: "x" }).ok;
+    record("CN-A capability resolves via registry", okBind && supported && unsupported && missing, `bound=${okBind} sup=${supported} unsup=${unsupported} miss=${missing}`);
+  }
+
+  // CN-B — healthy connector executes normally; connector evidence recorded.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "cn-b", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "cn-b" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "cn-b" });
+    const term = await waitFor(events, isTerminalEvt);
+    const ev = (term as { evidence?: { label: string; value?: string }[] }).evidence ?? [];
+    const conn = ev.find((e) => e.label === "Connector");
+    record("CN-B healthy connector executes", term?.type === "result.available" && be.count() === 1 && !!conn && /healthy/.test(conn.value ?? ""), `${term?.type} n=${be.count()} conn="${conn?.value}"`);
+    unsub();
+  }
+
+  // CN-C — unavailable connector prevents execution; honest failure, zero mutation.
+  {
+    const be = makeDraftBackend([WRITE_APP], { storeUnavailable: true });
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "cn-c", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "cn-c" });
+    const term = await waitFor(events, isTerminalEvt);
+    const noApproval = !events.some((e) => e.type === "approval.requested");
+    const ev = (term as { evidence?: { label: string; value?: string }[] }).evidence ?? [];
+    const conn = ev.find((e) => e.label === "Connector");
+    record("CN-C unavailable connector blocks", term?.type === "failed" && noApproval && be.count() === 0 && !!conn && /unavailable/.test(conn.value ?? ""), `${term?.type} approval=${!noApproval} n=${be.count()} conn="${conn?.value}"`);
+    unsub();
+  }
+
+  // CN-D — unsupported operation blocked before execution (connector-probe).
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "cn-d", input: "__connector_probe__" });
+    core.dispatch({ type: "run", taskId: "cn-d" });
+    const term = await waitFor(events, isTerminalEvt);
+    const blocked = term?.type === "capability.unsupported" || term?.type === "failed";
+    const noApproval = !events.some((e) => e.type === "approval.requested");
+    record("CN-D unsupported op blocked", blocked && noApproval && be.count() === 0, `${term?.type} approval=${!noApproval} n=${be.count()}`);
+    unsub();
+  }
+
+  // CN-E — connector availability never bypasses policy: a healthy connector
+  // still hits the approval gate (no auto-execute).
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "cn-e", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "cn-e" });
+    const appr = await waitFor(events, (e) => e.type === "approval.requested");
+    record("CN-E connector cannot bypass policy", !!appr && be.count() === 0, `appr=${!!appr} n=${be.count()}`);
+    unsub();
+  }
+
+  // CN-H — connector identity/health persists in audit and restores on reload.
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    const coreA = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const cA = collect(coreA);
+    coreA.dispatch({ type: "submit", taskId: "cn-h", input: WRITE_INTENT });
+    coreA.dispatch({ type: "run", taskId: "cn-h" });
+    await waitFor(cA.events, (e) => e.type === "approval.requested");
+    coreA.dispatch({ type: "approve", taskId: "cn-h" });
+    await waitFor(cA.events, isTerminalEvt, 5000);
+    cA.unsub();
+
+    const coreB = makeCore(async () => err(502), new InMemoryTaskStore(taskBe));
+    const restored = await coreB.restore();
+    const res = restored.find((e) => e.type === "result.available" && e.taskId === "cn-h") as { evidence?: { label: string; value?: string }[] } | undefined;
+    const conn = (res?.evidence ?? []).find((e) => e.label === "Connector");
+    record("CN-H connector evidence restores on reload", !!res && !!conn && /internal-career-store/.test(conn.value ?? ""), `res=${!!res} conn="${conn?.value}"`);
+  }
+
+  // CN-I — Google Workspace modelled as an unavailable connector (§8, no repair).
+  {
+    const g = getConnector("google-workspace");
+    const gh = g ? await g.checkHealth(async () => err(502)) : undefined;
+    const store = getConnector(INTERNAL_CAREER_STORE_ID);
+    record("CN-I google modelled unavailable", gh?.state === "unavailable" && !!store && store.supports("create_draft"), `google=${gh?.state}`);
   }
 
   return results;
