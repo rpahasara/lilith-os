@@ -3,6 +3,7 @@
  * `@/lib/command/core`.
  */
 export * from "./types";
+export * from "./policy";
 export * from "./intents";
 export * from "./planner";
 export * from "./verifier";

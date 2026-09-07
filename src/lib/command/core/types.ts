@@ -8,6 +8,7 @@
  */
 
 import type { CommandEvidence, CommandStep } from "../types";
+import type { CapabilityPolicyOverrides, PolicyClass } from "./policy";
 
 /* --------------------------------------------------------------- transport */
 
@@ -46,7 +47,6 @@ export type CoreTransport = (
 /* -------------------------------------------------------------- capability */
 
 export type CapabilityClass = "read-only" | "write";
-export type CapabilityPermission = "read" | "approval_required";
 
 export interface CapabilityHealth {
   healthy: boolean;
@@ -79,7 +79,13 @@ export interface Capability<T = unknown> {
   version: string;
   /** Human summary. */
   title: string;
-  permission: CapabilityPermission;
+  /**
+   * Governance class (Slice 5). The Policy Engine derives approval, retry, and
+   * verification rules from this — the core never inspects capability-specific
+   * approval flags. Optional `policy` tightens the class defaults.
+   */
+  policyClass: PolicyClass;
+  policy?: CapabilityPolicyOverrides;
   classification: CapabilityClass;
   timeoutMs: number;
   retry: CapabilityRetryPolicy;

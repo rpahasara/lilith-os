@@ -14,6 +14,7 @@ import type {
 import { executionId } from "./ids";
 import { CAREER_CAPABILITIES } from "./career-capabilities";
 import { CAREER_WRITE_CAPABILITIES } from "./career-write";
+import { PROHIBITED_CAPABILITIES } from "./prohibited-capabilities";
 
 function classify(res: TransportResult): "network" | "timeout" | "5xx" | "4xx" | undefined {
   if (res.ok) return undefined;
@@ -101,7 +102,7 @@ export const osOverviewCapability: Capability<OsOverview> = {
   id: "os.get_overview",
   version: "1.0.0",
   title: "LILITH OS overview",
-  permission: "read",
+  policyClass: "READ",
   classification: "read-only",
   timeoutMs: 10_000,
   retry: { maxAttempts: 2, retryOn: ["network", "timeout", "5xx"] },
@@ -171,7 +172,7 @@ export const systemStatusCapability: Capability<SystemStatus> = {
   id: "system.get_status",
   version: "1.0.0",
   title: "System & automation status",
-  permission: "read",
+  policyClass: "READ",
   classification: "read-only",
   timeoutMs: 10_000,
   retry: { maxAttempts: 2, retryOn: ["network", "timeout", "5xx"] },
@@ -192,6 +193,7 @@ export const CAPABILITY_REGISTRY: Record<string, Capability> = {
   [systemStatusCapability.id]: systemStatusCapability as Capability,
   ...Object.fromEntries(CAREER_CAPABILITIES.map((c) => [c.id, c])),
   ...Object.fromEntries(CAREER_WRITE_CAPABILITIES.map((c) => [c.id, c])),
+  ...Object.fromEntries(PROHIBITED_CAPABILITIES.map((c) => [c.id, c])),
 };
 
 export function getCapability(id: string): Capability | undefined {
