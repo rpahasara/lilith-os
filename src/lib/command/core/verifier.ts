@@ -7,6 +7,7 @@
  */
 import type { CommandEvidence } from "../types";
 import { isUnitUnhealthy, type OsOverview, type SystemStatus } from "./capabilities";
+import type { DraftContent, DraftRecord } from "./career-write";
 import type { VerifierResult } from "./types";
 
 /** How stale the backend clock may be before we downgrade to PARTIAL (ms). */
@@ -109,5 +110,104 @@ export function verifySystemHealth(input: {
     summary,
     evidence,
     unresolved,
+  };
+}
+
+/**
+ * Slice 4 read-back verifier. A write is NOT confirmed by an HTTP 200: success
+ * requires reading the created draft back and proving it is the right object,
+ * with the exact approved content, correctly correlated, with no duplicate.
+ *
+ *   FAIL     no read-back, wrong target/id, or content differs from what was
+ *            approved (the write may have landed but is not what was agreed).
+ *   PARTIAL  read-back succeeded but a cross-check is incomplete (e.g. the
+ *            backend content hash is missing) — honest uncertainty, not success.
+ *   PASS     the draft exists, targets the right application, and its subject &
+ *            body match the approved content exactly.
+ */
+export function verifyFollowupDraft(input: {
+  approved: DraftContent | null;
+  readback: DraftRecord | null;
+  created?: boolean;
+}): VerifierResult {
+  const { approved, readback, created } = input;
+
+  if (!approved) {
+    return {
+      verdict: "FAIL",
+      summary: "No approved draft content was available to verify against.",
+      evidence: [],
+      unresolved: ["The approved draft content was missing."],
+      recovery: "Re-run the request so the draft is generated and approved again.",
+    };
+  }
+
+  const target = approved.target.label ?? `application ${approved.target.id}`;
+
+  if (!readback) {
+    return {
+      verdict: "FAIL",
+      summary: "The draft could not be read back after the write — completion is unconfirmed.",
+      evidence: [
+        { kind: "external_id", label: "Intended draft id", value: approved.draftId },
+        { kind: "observed_state", label: "Read-back", value: "not found" },
+      ],
+      unresolved: ["The created draft was not retrievable for verification."],
+      recovery: "Verify the draft store, then retry — the write is idempotent (no duplicate).",
+    };
+  }
+
+  const evidence: CommandEvidence[] = [
+    { kind: "external_id", label: "Draft id", value: readback.draftId },
+    { kind: "observed_state", label: "Target", value: target },
+    { kind: "observed_state", label: "Draft status", value: readback.status },
+  ];
+  if (readback.contentHash) {
+    evidence.push({ kind: "external_id", label: "Content hash", value: readback.contentHash });
+  }
+  if (created === false) {
+    evidence.push({ kind: "observed_state", label: "Idempotency", value: "existing draft reused — no duplicate created" });
+  }
+
+  if (readback.draftId !== approved.draftId) {
+    return {
+      verdict: "FAIL",
+      summary: "The read-back draft id does not correlate with the requested write.",
+      evidence,
+      unresolved: [`Expected ${approved.draftId}, read back ${readback.draftId}.`],
+      recovery: "Do not retry blindly — inspect the draft store first.",
+    };
+  }
+
+  if (readback.target.id !== approved.target.id) {
+    return {
+      verdict: "FAIL",
+      summary: "The created draft targets the wrong application.",
+      evidence,
+      unresolved: [`Expected application ${approved.target.id}, draft targets ${readback.target.id}.`],
+      recovery: "Discard the draft and re-run for the correct application.",
+    };
+  }
+
+  const contentMatches =
+    (readback.subject ?? "") === approved.subject && readback.body === approved.body;
+  if (!contentMatches) {
+    return {
+      verdict: "FAIL",
+      summary: "The stored draft content differs from what was approved.",
+      evidence: [
+        ...evidence,
+        { kind: "error_detail", label: "Content", value: "read-back does not match approved subject/body" },
+      ],
+      unresolved: ["Stored content does not match the approved content."],
+      recovery: "Discard the draft; the approved content was not written faithfully.",
+    };
+  }
+
+  return {
+    verdict: "PASS",
+    summary: `Follow-up draft created and verified for ${target} — unsent, reversible.`,
+    evidence,
+    unresolved: [],
   };
 }

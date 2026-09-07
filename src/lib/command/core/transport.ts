@@ -6,8 +6,8 @@
 import { fetchEndpoint } from "@/lib/api";
 import type { CoreTransport } from "./types";
 
-export const realTransport: CoreTransport = async (path, signal) => {
-  const res = await fetchEndpoint(path, signal);
+export const realTransport: CoreTransport = async (path, signal, init) => {
+  const res = await fetchEndpoint(path, signal, init);
   return { ok: res.ok, status: res.status, data: res.data, error: res.error };
 };
 

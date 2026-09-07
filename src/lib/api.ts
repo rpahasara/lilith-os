@@ -24,16 +24,29 @@ export interface EndpointResult<T = unknown> {
   error?: string;
 }
 
+/** An optional non-GET request (approval-gated writes). Omit for reads. */
+export interface EndpointRequest {
+  method?: "GET" | "POST" | "DELETE" | "PATCH";
+  body?: unknown;
+}
+
 /** Fetch a single endpoint, never throwing — result carries ok/status/data. */
 export async function fetchEndpoint<T = unknown>(
   path: string,
   signal?: AbortSignal,
+  init?: EndpointRequest,
 ): Promise<EndpointResult<T>> {
   const url = `${API_BASE}${path}`;
+  const method = init?.method ?? "GET";
+  const hasBody = init?.body !== undefined && method !== "GET";
   try {
     const res = await fetch(url, {
       signal,
-      headers: { accept: "application/json" },
+      method,
+      headers: hasBody
+        ? { accept: "application/json", "content-type": "application/json" }
+        : { accept: "application/json" },
+      body: hasBody ? JSON.stringify(init!.body) : undefined,
       cache: "no-store",
     });
     let data: T | null = null;

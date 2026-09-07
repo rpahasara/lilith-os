@@ -4,7 +4,10 @@
  * falls through to the demo core or plain conversation.
  */
 
-export type RealIntentId = "system.health_summary" | "career.attention_summary";
+export type RealIntentId =
+  | "system.health_summary"
+  | "career.attention_summary"
+  | "career.create_followup_draft";
 
 export interface RealIntent {
   id: RealIntentId;
@@ -15,6 +18,19 @@ export interface RealIntent {
 }
 
 export const REAL_INTENTS: RealIntent[] = [
+  {
+    // WRITE intent (Slice 4). Listed before the read-only attention intent so a
+    // "draft/prepare a follow-up" phrasing is matched here, not as a summary.
+    id: "career.create_followup_draft",
+    title: "Draft an application follow-up",
+    normalized: "Draft an unsent follow-up for a job application (requires approval)",
+    scope: "career",
+    triggers: [
+      /(draft|prepare|write|compose|create).*(follow.?up|reply|response|message)/,
+      /(follow.?up|reply).*(draft|for|to|on).*(application|job|role|recruiter|#?\d+)/,
+      /draft.*(application|recruiter)/,
+    ],
+  },
   {
     id: "system.health_summary",
     title: "System health summary",

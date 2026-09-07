@@ -20,11 +20,28 @@ export interface TransportResult {
 }
 
 /**
- * The seam between the core and the real backend. The default implementation
- * wraps the same-origin read-only proxy (`@/lib/api`); tests inject a fake so
- * the whole lifecycle can be exercised deterministically.
+ * A backend request beyond a plain read. Absent/`GET` is the read-only default
+ * every Slice-1/2 capability uses; a WRITE capability (Slice 4) passes
+ * `{ method: "POST", body }`. Kept optional so the whole read surface — and
+ * every injected test fake — stays source-compatible.
  */
-export type CoreTransport = (path: string, signal?: AbortSignal) => Promise<TransportResult>;
+export interface TransportRequest {
+  method?: "GET" | "POST" | "DELETE" | "PATCH";
+  body?: unknown;
+}
+
+/**
+ * The seam between the core and the real backend. The default implementation
+ * wraps the same-origin proxy (`@/lib/api`); tests inject a fake so the whole
+ * lifecycle can be exercised deterministically. Reads pass `(path, signal)`;
+ * a bounded, approval-gated write passes a third `init` describing the method
+ * and body.
+ */
+export type CoreTransport = (
+  path: string,
+  signal?: AbortSignal,
+  init?: TransportRequest,
+) => Promise<TransportResult>;
 
 /* -------------------------------------------------------------- capability */
 
@@ -68,6 +85,17 @@ export interface Capability<T = unknown> {
   retry: CapabilityRetryPolicy;
   /** Declared side effects — read-only capabilities have "none". */
   sideEffects: "none" | "external_write";
+  /**
+   * WRITE metadata (Slice 4). Read-only capabilities omit these.
+   *  reversible       — the side effect can be undone (a draft can be discarded).
+   *  idempotent       — a stable idempotency key makes retry duplicate-safe.
+   *  sideEffectLabel  — human line shown in the approval card.
+   *  target           — the concrete object the write acts on (for the card).
+   */
+  reversible?: boolean;
+  idempotent?: boolean;
+  sideEffectLabel?: string;
+  target?: { type: string; id: string; label?: string };
   /** Probe availability without doing the full work. */
   checkHealth(transport: CoreTransport, signal?: AbortSignal): Promise<CapabilityHealth>;
   /** Execute the capability; validates the response shape into `data`. */
@@ -140,6 +168,7 @@ export type CoreTaskStatus =
   | "running"
   | "verifying"
   | "cancel_requested"
+  | "waiting_for_approval"
   | "succeeded"
   | "partial"
   | "failed"
@@ -178,6 +207,46 @@ export interface CoreTaskRecord {
   currentStepId: string | null;
   steps: CoreStepRecord[];
   approvalState: "not_required" | "required" | "approved" | "denied" | "expired";
+  /**
+   * Durable approval audit trail (Slice 4). Persisted on the record so the
+   * gate survives reload and every decision is attributable. `fingerprint` is
+   * the frozen action digest captured when approval was requested — the
+   * executor refuses to run a write whose recomputed fingerprint no longer
+   * matches (content changed → re-approval required).
+   */
+  approval?: {
+    requestedAt?: number;
+    approvedAt?: number;
+    deniedAt?: number;
+    /** Epoch ms after which a still-`required` approval is treated as expired. */
+    expiresAt?: number;
+    fingerprint?: string;
+  };
+  /**
+   * The exact, frozen mutation awaiting (or granted) approval. Generated BEFORE
+   * the approval gate so the user approves precisely what will be written; the
+   * executor uses this same content after approval — it is never regenerated.
+   */
+  pendingWrite?: {
+    capabilityId: string;
+    stepId: string;
+    target: { type: string; id: string; label?: string };
+    subject?: string;
+    body: string;
+    /** taskId:stepId — the idempotency key the backend dedupes on. */
+    idempotencyKey: string;
+    /** Deterministic id used for the create + read-back correlation. */
+    draftId: string;
+    fingerprint: string;
+  };
+  /** The committed write, captured for the audit trail + read-back verification. */
+  writeResult?: {
+    draftId: string;
+    operationId: string;
+    createdAt?: number;
+    contentHash?: string;
+    verified?: Verdict;
+  };
   attemptCount: number;
   cancelRequested: boolean;
   createdAt: number;

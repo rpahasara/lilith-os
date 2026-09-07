@@ -42,3 +42,24 @@ export function planCareerAttention(taskId: string, intent: string, version = 1)
     expectedResult: "A verified, evidence-backed summary of which applications need attention.",
   };
 }
+
+// Slice 4: the first approval-gated WRITE plan. Context + draft are prepared
+// BEFORE the approval gate (s3); the mutation only runs after approval, then a
+// read-back step verifies exactly what was written.
+const CAREER_FOLLOWUP_STEPS: PlanStep[] = [
+  { id: "s1", label: "Retrieve application context", capabilityId: "career.list_applications", kind: "capability" },
+  { id: "s2", label: "Draft the follow-up", capabilityId: null, kind: "analysis" },
+  { id: "s3", label: "Create draft (requires approval)", capabilityId: "career.create_followup_draft", kind: "capability" },
+  { id: "s4", label: "Read back & verify draft", capabilityId: "career.get_draft", kind: "capability" },
+];
+
+export function planCareerFollowup(taskId: string, intent: string, version = 1): CommandPlan {
+  return {
+    taskId,
+    version,
+    intent,
+    steps: CAREER_FOLLOWUP_STEPS.map((s) => ({ ...s })),
+    capabilitiesRequired: ["career.list_applications", "career.create_followup_draft", "career.get_draft"],
+    expectedResult: "An unsent follow-up draft created for the chosen application, verified by read-back.",
+  };
+}

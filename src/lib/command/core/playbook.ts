@@ -29,6 +29,8 @@ export interface StepResult {
 export interface PlaybookContext {
   taskId: string;
   now: number;
+  /** The verbatim user request — used by playbooks that resolve a target from it. */
+  rawIntent: string;
   isCanceled(): boolean;
   /** Cancel-aware, bounded-retry capability execution (emits retry progress). */
   runCapability(cap: Capability, stepId: string): Promise<CapabilityResult>;
