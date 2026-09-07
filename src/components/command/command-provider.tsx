@@ -128,12 +128,19 @@ export function CommandProvider({ children }: { children: ReactNode }) {
     const real = realRef.current!;
     const unsubDemo = demo.subscribe(foldEvent);
     const unsubReal = real.subscribe(foldEvent);
-    // Rebuild persisted real tasks so history survives reload.
-    for (const event of real.restore()) {
-      ownerRef.current.set(event.taskId, real);
-      foldEvent(event);
-    }
+    // Rebuild persisted real tasks from the authoritative backend so history
+    // survives reload without depending on localStorage. Async: the backend is
+    // the source of truth.
+    let cancelled = false;
+    void real.restore().then((events) => {
+      if (cancelled) return;
+      for (const event of events) {
+        ownerRef.current.set(event.taskId, real);
+        foldEvent(event);
+      }
+    });
     return () => {
+      cancelled = true;
       unsubDemo();
       unsubReal();
       demo.dispose?.();

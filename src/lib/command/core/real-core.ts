@@ -5,9 +5,17 @@
  * task-agnostic: task records, submit/run/cancel/retry, capability health
  * gating, one-step-at-a-time execution with bounded retry, genuine
  * AbortController cancellation, verification → terminal mapping, durable
- * persistence, and structured logging. Each task type is a {@link TaskPlaybook}
- * (system health, career attention, …) that only supplies its plan, per-step
- * behaviour, and verifier — so new real tasks reuse this engine wholesale.
+ * BACKEND persistence, and structured logging. Each task type is a
+ * {@link TaskPlaybook} (system health, career attention, …) that only supplies
+ * its plan, per-step behaviour, and verifier — so new real tasks reuse this
+ * engine wholesale.
+ *
+ * Persistence (Slice 3): the backend Task Store is authoritative. A real task
+ * is created backend-side BEFORE meaningful execution begins (atomicity); a
+ * running checkpoint and the terminal state are persisted with bounded retry
+ * and optimistic-concurrency revisions. If persistence is unavailable the
+ * read-only task may still run, but the result is honestly flagged as not
+ * durably saved — a failure to save is never presented as "saved".
  */
 import type {
   CommandAction,
@@ -20,7 +28,13 @@ import { getCapability } from "./capabilities";
 import { consoleCoreLogger, type CoreLogger } from "./logger";
 import { matchRealIntent, type RealIntent } from "./intents";
 import { realTransport } from "./transport";
-import { InMemoryTaskStore, LocalStorageTaskStore, type TaskStore } from "./task-store";
+import {
+  InMemoryTaskStore,
+  RemoteTaskStore,
+  TASK_SCHEMA_VERSION,
+  type PersistOutcome,
+  type TaskStore,
+} from "./task-store";
 import { systemHealthPlaybook } from "./playbooks/system-health";
 import { careerAttentionPlaybook } from "./playbooks/career-attention";
 import type { PlaybookContext, TaskPlaybook } from "./playbook";
@@ -50,6 +64,12 @@ interface Runtime {
   data: Record<string, unknown>;
   provenance: ProvenanceRef[];
   extraEvidence: CommandEvidence[];
+  /** Backend revision of the persisted record (0 until first confirmed write). */
+  revision: number;
+  /** Whether the record was durably created backend-side. */
+  created: boolean;
+  /** True once any persistence write could not be durably confirmed. */
+  persistenceDegraded: boolean;
 }
 
 function makeId(): string {
@@ -60,6 +80,14 @@ function makeId(): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function cloneRecord(record: CoreTaskRecord): CoreTaskRecord {
+  return {
+    ...record,
+    steps: record.steps.map((s) => ({ ...s })),
+    evidence: record.evidence.map((e) => ({ ...e })),
+  };
+}
+
 export class RealCommandCore implements CommandCore {
   readonly kind = "core" as const;
 
@@ -69,7 +97,7 @@ export class RealCommandCore implements CommandCore {
   constructor(
     private transport: CoreTransport = realTransport,
     private store: TaskStore = typeof window !== "undefined"
-      ? new LocalStorageTaskStore()
+      ? new RemoteTaskStore()
       : new InMemoryTaskStore(),
     private logger: CoreLogger = consoleCoreLogger,
   ) {}
@@ -95,11 +123,28 @@ export class RealCommandCore implements CommandCore {
     this.listeners.clear();
   }
 
-  /** Restore durable real-task history as terminal CommandTasks for the UI. */
-  restore(): CommandEvent[] {
+  /**
+   * Restore durable real-task history from the authoritative backend. Terminal
+   * tasks render as their outcome; a task found in a NON-terminal state after a
+   * restart (no live executor owns it) is classified as interrupted and shown
+   * honestly with recovery metadata — never as a fabricated success/failure.
+   */
+  async restore(): Promise<CommandEvent[]> {
     const out: CommandEvent[] = [];
-    for (const rec of this.store.loadAll()) {
-      if (!rec.outcome) continue;
+    try {
+      await this.store.init?.();
+    } catch {
+      /* migration is best-effort; never block restore */
+    }
+    let records: CoreTaskRecord[] = [];
+    try {
+      records = (await this.store.loadAll()).records;
+    } catch {
+      return out;
+    }
+    for (const rec of records) {
+      if (rec.source !== "core") continue;
+
       out.push({
         type: "task.created",
         taskId: rec.taskId,
@@ -111,17 +156,37 @@ export class RealCommandCore implements CommandCore {
         source: "core",
         contextSummary: rec.scope,
       });
-      if (rec.plan) out.push({ type: "plan.available", taskId: rec.taskId, at: rec.createdAt, steps: recSteps(rec) });
-      const at = rec.endedAt ?? rec.updatedAt;
-      if (rec.outcome === "succeeded") {
-        out.push({ type: "result.available", taskId: rec.taskId, at, result: { outcome: "succeeded", summary: rec.resultSummary ?? "Done.", unresolved: rec.unresolved }, evidence: rec.evidence });
-      } else if (rec.outcome === "partial") {
-        out.push({ type: "partial.result", taskId: rec.taskId, at, result: { outcome: "partial", summary: rec.resultSummary ?? "Partial.", unresolved: rec.unresolved }, evidence: rec.evidence });
-      } else if (rec.outcome === "failed") {
-        out.push({ type: "failed", taskId: rec.taskId, at, error: rec.failure?.reason ?? "Failed.", evidence: rec.evidence });
-      } else if (rec.outcome === "cancelled") {
-        out.push({ type: "cancelled", taskId: rec.taskId, at });
+      if (rec.plan) {
+        out.push({ type: "plan.available", taskId: rec.taskId, at: rec.createdAt, steps: recSteps(rec) });
       }
+
+      if (rec.outcome) {
+        const at = rec.endedAt ?? rec.updatedAt;
+        if (rec.outcome === "succeeded") {
+          out.push({ type: "result.available", taskId: rec.taskId, at, result: { outcome: "succeeded", summary: rec.resultSummary ?? "Done.", unresolved: rec.unresolved }, evidence: rec.evidence });
+        } else if (rec.outcome === "partial") {
+          out.push({ type: "partial.result", taskId: rec.taskId, at, result: { outcome: "partial", summary: rec.resultSummary ?? "Partial.", unresolved: rec.unresolved }, evidence: rec.evidence });
+        } else if (rec.outcome === "failed") {
+          out.push({ type: "failed", taskId: rec.taskId, at, error: rec.failure?.reason ?? "Failed.", evidence: rec.evidence });
+        } else if (rec.outcome === "cancelled") {
+          out.push({ type: "cancelled", taskId: rec.taskId, at });
+        }
+        continue;
+      }
+
+      // Non-terminal after a restart → interrupted, not resumed. Honest recovery
+      // classification mapped onto the frozen UI contract (failed + recovery
+      // evidence): it did not complete, and no executor is driving it.
+      out.push({
+        type: "failed",
+        taskId: rec.taskId,
+        at: rec.updatedAt,
+        error: "Interrupted before completion — the app restarted while this task was mid-run. It was not resumed; re-run to retry.",
+        evidence: [
+          ...rec.evidence,
+          { kind: "observed_state", label: "Recovery", value: "interrupted — not resumed" },
+        ],
+      });
     }
     return out;
   }
@@ -154,6 +219,7 @@ export class RealCommandCore implements CommandCore {
     const plan = playbook.plan(taskId, intent.normalized);
     const record: CoreTaskRecord = {
       taskId,
+      schemaVersion: TASK_SCHEMA_VERSION,
       source: "core",
       rawIntent: input,
       normalizedIntent: intent.normalized,
@@ -177,6 +243,7 @@ export class RealCommandCore implements CommandCore {
       abort: new AbortController(),
       canceled: false, started: false,
       data: {}, provenance: [], extraEvidence: [],
+      revision: 0, created: false, persistenceDegraded: false,
     });
 
     this.logger.log("task.created", taskId, { intent: intent.id });
@@ -218,22 +285,90 @@ export class RealCommandCore implements CommandCore {
     run.record.cancelRequested = true;
     run.abort.abort();
     this.logger.log("cancel", taskId, {});
-    if (!run.record.currentStepId) this.finishCancelled(run);
+    if (!run.record.currentStepId) void this.finishCancelled(run);
   }
 
-  private finishCancelled(run: Runtime) {
+  private async finishCancelled(run: Runtime) {
     if (run.record.outcome) return;
     run.record.outcome = "cancelled";
     run.record.status = "cancelled";
     run.record.endedAt = Date.now();
-    this.persist(run.record);
+    await this.persistUpdate(run, "terminal");
     this.logger.log("terminal", run.record.taskId, { outcome: "cancelled" });
     this.emit({ type: "cancelled", taskId: run.record.taskId, at: Date.now() });
   }
 
-  private persist(record: CoreTaskRecord) {
-    record.updatedAt = Date.now();
-    this.store.save({ ...record, steps: record.steps.map((s) => ({ ...s })) });
+  /* ---------------------------------------------------------- persistence */
+
+  /** Persist the initial record backend-side (atomicity gate). */
+  private async persistCreate(run: Runtime) {
+    run.record.updatedAt = Date.now();
+    const opId = makeId();
+    let outcome: PersistOutcome | undefined;
+    try {
+      outcome = await this.store.create(cloneRecord(run.record), opId);
+    } catch {
+      outcome = undefined;
+    }
+    if (outcome?.ok && outcome.persisted) {
+      run.revision = outcome.revision ?? 1;
+      run.record.revision = run.revision;
+      run.created = true;
+      this.logger.log("persist.create", run.record.taskId, { revision: run.revision });
+    } else {
+      run.persistenceDegraded = true;
+      this.logger.log("persist.degraded", run.record.taskId, { phase: "create", kind: outcome?.errorKind, error: outcome?.error });
+    }
+  }
+
+  /** Persist a lifecycle checkpoint with bounded retry + optimistic revision. */
+  private async persistUpdate(run: Runtime, phase: string) {
+    if (!run.created) {
+      run.persistenceDegraded = true;
+      return;
+    }
+    run.record.updatedAt = Date.now();
+    run.record.revision = run.revision;
+    const opId = makeId(); // one id for this logical update — reused across retries
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let outcome: PersistOutcome | undefined;
+      try {
+        outcome = await this.store.update(cloneRecord(run.record), run.revision, opId);
+      } catch {
+        outcome = undefined;
+      }
+      if (outcome?.ok && outcome.persisted) {
+        run.revision = outcome.revision ?? run.revision;
+        run.record.revision = run.revision;
+        this.logger.log("persist.update", run.record.taskId, { revision: run.revision, phase });
+        return;
+      }
+      if (outcome?.errorKind === "conflict") {
+        if (outcome.conflict) {
+          run.revision = outcome.conflict.revision;
+          run.record.revision = run.revision;
+        }
+        this.logger.log("persist.conflict", run.record.taskId, { phase, revision: run.revision });
+        return;
+      }
+      const retryable =
+        outcome === undefined ||
+        outcome.errorKind === "network" ||
+        outcome.errorKind === "timeout" ||
+        outcome.errorKind === "5xx";
+      if (!retryable || attempt === maxAttempts) break;
+      this.logger.log("persist.retry", run.record.taskId, { phase, nextAttempt: attempt + 1 });
+      await sleep(200 * attempt);
+    }
+    run.persistenceDegraded = true;
+    this.logger.log("persist.degraded", run.record.taskId, { phase });
+  }
+
+  private persistenceEvidence(run: Runtime): CommandEvidence {
+    return run.persistenceDegraded
+      ? { kind: "observed_state", label: "Persistence", value: "unavailable — this run was not durably saved" }
+      : { kind: "observed_state", label: "Persistence", value: "durable — saved to the LILITH task store" };
   }
 
   /* -------------------------------------------------------------- executor */
@@ -254,6 +389,11 @@ export class RealCommandCore implements CommandCore {
     this.emit({ type: "status", taskId, at: Date.now(), status: "planning" });
     this.emit({ type: "plan.available", taskId, at: Date.now(), steps: recSteps(run.record) });
 
+    // Atomicity: persist the task before any meaningful (backend) execution.
+    run.record.status = "planning";
+    await this.persistCreate(run);
+    if (run.canceled) return this.finishCancelled(run);
+
     // Capability check — every required capability must exist.
     for (const capId of run.plan.capabilitiesRequired) {
       if (!getCapability(capId)) {
@@ -271,6 +411,11 @@ export class RealCommandCore implements CommandCore {
     if (!health.healthy) {
       return this.fail(run, "The control backend is unreachable, so the task could not run.", "Retry when the backend is reachable.");
     }
+
+    // Durable non-terminal checkpoint: a crash from here is recoverable.
+    run.record.status = "running";
+    await this.persistUpdate(run, "running");
+    if (run.canceled) return this.finishCancelled(run);
 
     // Step-by-step execution via the playbook.
     for (const step of run.plan.steps) {
@@ -310,18 +455,22 @@ export class RealCommandCore implements CommandCore {
       run.record.outcome = "partial";
       run.record.status = "partial";
       run.record.endedAt = Date.now();
-      this.persist(run.record);
+      await this.persistUpdate(run, "terminal");
       this.logger.log("terminal", taskId, { outcome: "partial" });
-      this.emit({ type: "partial.result", taskId, at: Date.now(), result: { outcome: "partial", summary: verdict.summary, unresolved: verdict.unresolved }, evidence });
+      const ev = [...evidence, this.persistenceEvidence(run)];
+      run.record.evidence = ev;
+      this.emit({ type: "partial.result", taskId, at: Date.now(), result: { outcome: "partial", summary: verdict.summary, unresolved: verdict.unresolved }, evidence: ev });
       return;
     }
 
     run.record.outcome = "succeeded";
     run.record.status = "succeeded";
     run.record.endedAt = Date.now();
-    this.persist(run.record);
+    await this.persistUpdate(run, "terminal");
     this.logger.log("terminal", taskId, { outcome: "succeeded" });
-    this.emit({ type: "result.available", taskId, at: Date.now(), result: { outcome: "succeeded", summary: verdict.summary, unresolved: verdict.unresolved.length ? verdict.unresolved : undefined }, evidence });
+    const ev = [...evidence, this.persistenceEvidence(run)];
+    run.record.evidence = ev;
+    this.emit({ type: "result.available", taskId, at: Date.now(), result: { outcome: "succeeded", summary: verdict.summary, unresolved: verdict.unresolved.length ? verdict.unresolved : undefined }, evidence: ev });
   }
 
   /** Execute one capability with bounded retry on retryable errors. */
@@ -344,11 +493,11 @@ export class RealCommandCore implements CommandCore {
     return last!;
   }
 
-  private fail(run: Runtime, reason: string, recovery?: string, mode: "failed" | "capability_unsupported" = "failed") {
+  private async fail(run: Runtime, reason: string, recovery?: string, mode: "failed" | "capability_unsupported" = "failed") {
     if (run.record.outcome) return;
     run.record.failure = { reason, recovery };
     run.record.endedAt = Date.now();
-    const evidence: CommandEvidence[] = run.record.evidence.length
+    const baseEvidence: CommandEvidence[] = run.record.evidence.length
       ? run.record.evidence
       : recovery
         ? [{ kind: "observed_state", label: "Action taken", value: "None — safe to retry" }]
@@ -356,15 +505,17 @@ export class RealCommandCore implements CommandCore {
     if (mode === "capability_unsupported") {
       run.record.outcome = "failed";
       run.record.status = "blocked";
-      this.persist(run.record);
+      await this.persistUpdate(run, "terminal");
       this.logger.log("terminal", run.record.taskId, { outcome: "blocked" });
-      this.emit({ type: "capability.unsupported", taskId: run.record.taskId, at: Date.now(), reason });
+      this.emit({ type: "capability.unsupported", taskId: run.record.taskId, at: Date.now(), reason, evidence: [...baseEvidence, this.persistenceEvidence(run)] });
       return;
     }
     run.record.outcome = "failed";
     run.record.status = "failed";
-    this.persist(run.record);
+    await this.persistUpdate(run, "terminal");
     this.logger.log("terminal", run.record.taskId, { outcome: "failed" });
+    const evidence = [...baseEvidence, this.persistenceEvidence(run)];
+    run.record.evidence = evidence;
     this.emit({ type: "failed", taskId: run.record.taskId, at: Date.now(), error: recovery ? `${reason} ${recovery}` : reason, evidence });
   }
 
