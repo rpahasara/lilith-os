@@ -9,6 +9,7 @@
 
 import type { CommandEvidence, CommandStep } from "../types";
 import type { CapabilityPolicyOverrides, PolicyClass } from "./policy";
+import type { ConnectorBinding } from "./connectors";
 
 /* --------------------------------------------------------------- transport */
 
@@ -87,6 +88,13 @@ export interface Capability<T = unknown> {
   policyClass: PolicyClass;
   policy?: CapabilityPolicyOverrides;
   classification: CapabilityClass;
+  /**
+   * Declarative connector binding (Slice 6). A capability that performs
+   * system-specific I/O names the connector + operation it needs rather than
+   * knowing transport details. Read-only capabilities that call the backend
+   * directly may omit it. The executor resolves + health-gates the connector.
+   */
+  connector?: ConnectorBinding;
   timeoutMs: number;
   retry: CapabilityRetryPolicy;
   /** Declared side effects — read-only capabilities have "none". */

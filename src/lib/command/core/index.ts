@@ -4,6 +4,7 @@
  */
 export * from "./types";
 export * from "./policy";
+export * from "./connectors";
 export * from "./intents";
 export * from "./planner";
 export * from "./verifier";
