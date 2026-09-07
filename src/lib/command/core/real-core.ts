@@ -38,6 +38,9 @@ import {
 import { systemHealthPlaybook } from "./playbooks/system-health";
 import { careerAttentionPlaybook } from "./playbooks/career-attention";
 import { careerFollowupPlaybook } from "./playbooks/career-followup";
+import { careerNotePlaybook } from "./playbooks/career-note";
+import { policyProbePlaybook } from "./playbooks/policy-probe";
+import { evaluateCapabilityPolicy, type PolicyDecision } from "./policy";
 import { fingerprintDraft, type DraftContent } from "./career-write";
 import type { PlaybookContext, TaskPlaybook } from "./playbook";
 import type {
@@ -55,10 +58,12 @@ const PLAYBOOKS: Record<string, TaskPlaybook> = {
   [systemHealthPlaybook.id]: systemHealthPlaybook,
   [careerAttentionPlaybook.id]: careerAttentionPlaybook,
   [careerFollowupPlaybook.id]: careerFollowupPlaybook,
+  [careerNotePlaybook.id]: careerNotePlaybook,
+  [policyProbePlaybook.id]: policyProbePlaybook,
 };
 
-/** How long a `required` approval stays valid before it must be re-requested. */
-const APPROVAL_TTL_MS = 15 * 60 * 1000;
+/** Fallback approval window when a capability's policy declares none. */
+const DEFAULT_APPROVAL_TTL_MS = 15 * 60 * 1000;
 
 /** Reconstruct the frozen draft content from a persisted pendingWrite. */
 function draftFromPending(pw: NonNullable<CoreTaskRecord["pendingWrite"]>): DraftContent {
@@ -95,6 +100,8 @@ interface Runtime {
   resumeIndex?: number;
   /** True while the executor is suspended at an approval gate. */
   awaitingApproval?: boolean;
+  /** Maintenance timer that expires an unused approval (§6). */
+  expiryTimer?: ReturnType<typeof setTimeout>;
 }
 
 function makeId(): string {
@@ -143,7 +150,7 @@ export class RealCommandCore implements CommandCore {
   }
 
   dispose(): void {
-    for (const r of this.runs.values()) r.abort.abort();
+    for (const r of this.runs.values()) { r.abort.abort(); this.clearExpiry(r); }
     this.runs.clear();
     this.listeners.clear();
   }
@@ -269,17 +276,20 @@ export class RealCommandCore implements CommandCore {
       return true;
     }
 
-    // Still waiting — normalise back to "required" so an explicit Approve works,
-    // and re-show the card (flagged expired when the window has lapsed).
-    run.record.approvalState = "required";
+    // Still waiting. A window that has lapsed becomes an explicit expired state
+    // (§6) — it cannot be silently approved; a valid window re-arms its timer.
     const now = Date.now();
-    const expired = !!rec.approval?.expiresAt && now > rec.approval.expiresAt;
-    out.push({
-      type: "approval.requested",
-      taskId: rec.taskId,
-      at: rec.updatedAt,
-      approval: this.approvalPayloadFor(rec, expired ? "expired" : "required"),
-    });
+    const expired = !!rec.approval?.expiresAt && now >= rec.approval.expiresAt;
+    if (expired) {
+      run.record.approvalState = "expired";
+      void this.persistUpdate(run, "approval_expired");
+      out.push({ type: "approval.requested", taskId: rec.taskId, at: rec.updatedAt, approval: this.approvalPayloadFor(rec, "expired") });
+    } else {
+      run.record.approvalState = "required";
+      out.push({ type: "approval.requested", taskId: rec.taskId, at: rec.updatedAt, approval: this.approvalPayloadFor(rec, "required") });
+      const remaining = (rec.approval?.expiresAt ?? now) - now;
+      this.scheduleExpiry(run, remaining);
+    }
     return true;
   }
 
@@ -385,6 +395,7 @@ export class RealCommandCore implements CommandCore {
 
   private async finishCancelled(run: Runtime) {
     if (run.record.outcome) return;
+    this.clearExpiry(run);
     run.awaitingApproval = false;
     run.record.outcome = "cancelled";
     run.record.status = "cancelled";
@@ -402,7 +413,10 @@ export class RealCommandCore implements CommandCore {
     if (!run) return;
     // Idempotent: a duplicate Approve after the first never runs a second write.
     if (run.record.approvalState === "approved") return;
-    if (run.record.approvalState !== "required") return;
+    // Only a still-waiting (required) or expired approval is actionable; an
+    // expired one re-requests below rather than executing.
+    if (run.record.approvalState !== "required" && run.record.approvalState !== "expired") return;
+    this.clearExpiry(run);
 
     const now = Date.now();
     // Expiry: an expired approval must NOT execute — re-request a fresh one.
@@ -437,7 +451,8 @@ export class RealCommandCore implements CommandCore {
   private async onDeny(taskId: string) {
     const run = this.runs.get(taskId);
     if (!run) return;
-    if (run.record.approvalState !== "required") return;
+    if (run.record.approvalState !== "required" && run.record.approvalState !== "expired") return;
+    this.clearExpiry(run);
     const now = Date.now();
     run.record.approvalState = "denied";
     run.record.approval = { ...run.record.approval, deniedAt: now };
@@ -456,7 +471,7 @@ export class RealCommandCore implements CommandCore {
   }
 
   /** Suspend the executor at a write step and ask the user to approve. */
-  private async requestApproval(run: Runtime, step: PlanStep, index: number) {
+  private async requestApproval(run: Runtime, step: PlanStep, index: number, decision: PolicyDecision) {
     const data = run.data as { draft?: DraftContent };
     const draft = data.draft ?? (run.record.pendingWrite ? draftFromPending(run.record.pendingWrite) : undefined);
     if (!draft || !step.capabilityId) {
@@ -474,7 +489,8 @@ export class RealCommandCore implements CommandCore {
       fingerprint: draft.fingerprint,
     };
     const now = Date.now();
-    run.record.approval = { requestedAt: now, expiresAt: now + APPROVAL_TTL_MS, fingerprint: draft.fingerprint };
+    const ttl = decision.approvalTtlMs ?? DEFAULT_APPROVAL_TTL_MS;
+    run.record.approval = { requestedAt: now, expiresAt: now + ttl, fingerprint: draft.fingerprint };
     run.record.approvalState = "required";
     run.record.status = "waiting_for_approval";
     run.record.steps = run.record.steps.map((s) =>
@@ -484,40 +500,90 @@ export class RealCommandCore implements CommandCore {
     run.resumeIndex = index;
     run.awaitingApproval = true;
     await this.persistUpdate(run, "approval_required");
-    this.logger.log("approval.requested", run.record.taskId, { capId: step.capabilityId });
+    this.logger.log("approval.requested", run.record.taskId, { capId: step.capabilityId, policyClass: decision.policyClass });
     this.emit({ type: "approval.requested", taskId: run.record.taskId, at: now, approval: this.approvalPayloadFor(run.record, "required") });
+    this.scheduleExpiry(run, ttl);
+  }
+
+  /**
+   * Approval-expiry maintenance (§6): after the TTL, an unused waiting approval
+   * transitions to an explicit expired state and the card is re-shown as stale —
+   * it never stays silently valid. The timer is unref'd so it cannot keep a
+   * process alive (harmless in the browser).
+   */
+  private scheduleExpiry(run: Runtime, ttl: number) {
+    this.clearExpiry(run);
+    if (!Number.isFinite(ttl) || ttl <= 0) return;
+    const t = setTimeout(() => this.expireApproval(run.record.taskId), ttl);
+    (t as { unref?: () => void }).unref?.();
+    run.expiryTimer = t;
+  }
+
+  private clearExpiry(run: Runtime) {
+    if (run.expiryTimer) { clearTimeout(run.expiryTimer); run.expiryTimer = undefined; }
+  }
+
+  /** Fired by the maintenance timer (or a manual sweep) when a wait times out. */
+  private expireApproval(taskId: string, now = Date.now()) {
+    const run = this.runs.get(taskId);
+    if (!run || !run.awaitingApproval || run.record.approvalState !== "required") return;
+    if (run.record.approval?.expiresAt && now < run.record.approval.expiresAt) return;
+    this.clearExpiry(run);
+    run.record.approvalState = "expired";
+    this.logger.log("approval.expired", taskId, {});
+    void this.persistUpdate(run, "approval_expired");
+    // Re-show the card as expired; the user must re-approve, which re-requests.
+    this.emit({ type: "approval.requested", taskId, at: now, approval: this.approvalPayloadFor(run.record, "expired") });
+  }
+
+  /** Force-expire any waiting approvals already past their TTL (restore-time sweep). */
+  sweepExpiredApprovals(now = Date.now()): number {
+    let n = 0;
+    for (const run of this.runs.values()) {
+      if (run.awaitingApproval && run.record.approvalState === "required" && run.record.approval?.expiresAt && now >= run.record.approval.expiresAt) {
+        this.expireApproval(run.record.taskId, now);
+        n += 1;
+      }
+    }
+    return n;
   }
 
   /** Re-issue an approval request with a fresh window (expired / content drift). */
   private reRequestApproval(run: Runtime, note: string) {
     const now = Date.now();
     const fp = run.record.pendingWrite?.fingerprint;
-    run.record.approval = { requestedAt: now, expiresAt: now + APPROVAL_TTL_MS, fingerprint: fp };
+    const cap = run.record.pendingWrite ? getCapability(run.record.pendingWrite.capabilityId) : undefined;
+    const ttl = (cap ? evaluateCapabilityPolicy(cap).approvalTtlMs : null) ?? DEFAULT_APPROVAL_TTL_MS;
+    run.record.approval = { requestedAt: now, expiresAt: now + ttl, fingerprint: fp };
     run.record.approvalState = "required";
     run.record.status = "waiting_for_approval";
     run.awaitingApproval = true;
     void this.persistUpdate(run, "approval_rerequested");
     this.emit({ type: "approval.resolved", taskId: run.record.taskId, at: now, approved: false });
     this.emit({ type: "approval.requested", taskId: run.record.taskId, at: now, approval: { ...this.approvalPayloadFor(run.record, "required"), reason: note } });
+    this.scheduleExpiry(run, ttl);
   }
 
   /** Build the approval card payload from the frozen pendingWrite on a record. */
   private approvalPayloadFor(record: CoreTaskRecord, status: CommandApproval["status"]): CommandApproval {
     const pw = record.pendingWrite;
     const cap = pw ? getCapability(pw.capabilityId) : undefined;
+    const decision = cap ? evaluateCapabilityPolicy(cap) : undefined;
     const targetLabel = pw?.target.label ?? (pw ? `application ${pw.target.id}` : "the target");
     const preview = pw ? `${pw.subject ? `Subject: ${pw.subject}\n\n` : ""}${pw.body}` : undefined;
     return {
       status,
-      summary: `Create a follow-up draft for ${targetLabel}`,
-      reason: cap?.sideEffectLabel ?? "Creates an unsent internal draft only — nothing is sent.",
-      action: cap?.title ?? "Create follow-up draft",
+      summary: `${cap?.title ?? "Confirm this action"} — ${targetLabel}`,
+      reason: cap?.sideEffectLabel ?? "This action requires your approval.",
+      action: cap?.title,
       target: targetLabel,
       contentPreview: preview,
       sideEffect: cap?.sideEffectLabel,
       reversible: cap?.reversible,
       capabilityId: pw?.capabilityId,
       expiresAt: record.approval?.expiresAt,
+      elevatedWarning: decision?.elevatedWarning,
+      riskLevel: decision?.riskLevel,
     };
   }
 
@@ -535,7 +601,7 @@ export class RealCommandCore implements CommandCore {
   private writeStepIndex(run: Runtime): number {
     const i = run.plan.steps.findIndex((s) => {
       const cap = s.capabilityId ? getCapability(s.capabilityId) : null;
-      return !!cap && cap.permission === "approval_required";
+      return !!cap && evaluateCapabilityPolicy(cap).approvalRequired;
     });
     return i < 0 ? 0 : i;
   }
@@ -642,11 +708,19 @@ export class RealCommandCore implements CommandCore {
     await this.persistCreate(run);
     if (run.canceled) return this.finishCancelled(run);
 
-    // Capability check — every required capability must exist.
+    // Capability check — every required capability must exist AND be permitted
+    // by policy. A PROHIBITED capability blocks the whole task before any step
+    // runs, no matter what the planner emitted (§5).
     for (const capId of run.plan.capabilitiesRequired) {
-      if (!getCapability(capId)) {
+      const cap = getCapability(capId);
+      if (!cap) {
         this.logger.log("capability.selected", taskId, { capId, present: false });
         return this.fail(run, `Capability ${capId} is not available.`, undefined, "capability_unsupported");
+      }
+      const decision = evaluateCapabilityPolicy(cap);
+      if (decision.prohibited) {
+        this.logger.log("policy.blocked", taskId, { capId, policyClass: decision.policyClass });
+        return this.fail(run, `The action "${cap.title}" is prohibited by policy and cannot be run.`, undefined, "capability_unsupported");
       }
     }
     // Health-gate on the backbone capability.
@@ -684,9 +758,15 @@ export class RealCommandCore implements CommandCore {
       if (run.canceled) return this.finishCancelled(run);
 
       const cap = step.capabilityId ? getCapability(step.capabilityId) : null;
-      if (cap && cap.permission === "approval_required" && run.record.approvalState !== "approved") {
-        // Suspend at the gate. NOTHING has been written; only task state is saved.
-        return this.requestApproval(run, step, i);
+      if (cap) {
+        const decision = evaluateCapabilityPolicy(cap);
+        if (decision.prohibited) {
+          return this.fail(run, `The action "${cap.title}" is prohibited by policy and cannot be run.`, undefined, "capability_unsupported");
+        }
+        if (decision.approvalRequired && run.record.approvalState !== "approved") {
+          // Suspend at the gate. NOTHING has been written; only task state is saved.
+          return this.requestApproval(run, step, i, decision);
+        }
       }
 
       this.setStep(run, step.id, { status: "running", startedAt: Date.now() });
@@ -763,18 +843,21 @@ export class RealCommandCore implements CommandCore {
   /** Execute one capability with bounded retry on retryable errors. */
   private async runCapability(run: Runtime, cap: Capability, stepId: string): Promise<CapabilityResult> {
     const { taskId } = run.record;
-    const policy = cap.retry;
+    const retry = cap.retry;
+    // Policy decides whether a failed attempt may be retried without re-confirm:
+    // reads always may; a write only when it is idempotent (dedupe-safe).
+    const canSilentRetry = evaluateCapabilityPolicy(cap).allowSilentRetry;
     let last: CapabilityResult | null = null;
-    for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
       if (run.canceled) break;
       this.bumpAttempt(run, stepId);
       last = await cap.execute(this.transport, run.abort.signal);
       this.logger.log("capability.result", taskId, { capId: cap.id, ok: last.ok, status: last.status, attempt, execId: last.executionId });
       if (last.ok) return last;
-      const retryable = !!last.errorKind && (policy.retryOn as string[]).includes(last.errorKind) && attempt < policy.maxAttempts && !run.canceled;
+      const retryable = canSilentRetry && !!last.errorKind && (retry.retryOn as string[]).includes(last.errorKind) && attempt < retry.maxAttempts && !run.canceled;
       if (!retryable) break;
       this.logger.log("retry", taskId, { capId: cap.id, nextAttempt: attempt + 1 });
-      this.emit({ type: "step.progress", taskId, at: Date.now(), stepId, detail: `retrying (attempt ${attempt + 1}/${policy.maxAttempts})` });
+      this.emit({ type: "step.progress", taskId, at: Date.now(), stepId, detail: `retrying (attempt ${attempt + 1}/${retry.maxAttempts})` });
       await sleep(250);
     }
     return last!;

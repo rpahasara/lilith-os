@@ -129,8 +129,11 @@ export function verifyFollowupDraft(input: {
   approved: DraftContent | null;
   readback: DraftRecord | null;
   created?: boolean;
+  /** What the written object is called, for the summary (e.g. "Note"). */
+  noun?: string;
 }): VerifierResult {
   const { approved, readback, created } = input;
+  const noun = input.noun ?? "Follow-up draft";
 
   if (!approved) {
     return {
@@ -206,7 +209,7 @@ export function verifyFollowupDraft(input: {
 
   return {
     verdict: "PASS",
-    summary: `Follow-up draft created and verified for ${target} — unsent, reversible.`,
+    summary: `${noun} created and verified for ${target} — reversible, nothing sent.`,
     evidence,
     unresolved: [],
   };

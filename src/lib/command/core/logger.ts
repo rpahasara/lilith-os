@@ -17,6 +17,7 @@ export type CoreLogEvent =
   | "verify.verdict"
   | "retry"
   | "cancel"
+  | "policy.blocked"
   | "approval.requested"
   | "approval.approved"
   | "approval.denied"

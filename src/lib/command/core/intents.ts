@@ -7,7 +7,9 @@
 export type RealIntentId =
   | "system.health_summary"
   | "career.attention_summary"
-  | "career.create_followup_draft";
+  | "career.create_followup_draft"
+  | "career.add_note"
+  | "policy.probe_prohibited";
 
 export interface RealIntent {
   id: RealIntentId;
@@ -30,6 +32,25 @@ export const REAL_INTENTS: RealIntent[] = [
       /(follow.?up|reply).*(draft|for|to|on).*(application|job|role|recruiter|#?\d+)/,
       /draft.*(application|recruiter)/,
     ],
+  },
+  {
+    // Second INTERNAL_WRITE (Slice 5) — save an internal note on an application.
+    id: "career.add_note",
+    title: "Add an application note",
+    normalized: "Save an internal note on a job application (requires approval)",
+    scope: "career",
+    triggers: [
+      /(add|save|log|make|leave|take|write|record)\s+a?\s*note/,
+      /note\s+(on|to|for|about).*(application|job|role|recruiter|#?\d+)/,
+    ],
+  },
+  {
+    // Slice 5 policy conformance probe — sentinel only, never ordinary phrasing.
+    id: "policy.probe_prohibited",
+    title: "Policy probe (prohibited)",
+    normalized: "Policy conformance probe — prohibited action",
+    scope: "system",
+    triggers: [/^__policy_probe__$/],
   },
   {
     id: "system.health_summary",

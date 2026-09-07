@@ -63,3 +63,38 @@ export function planCareerFollowup(taskId: string, intent: string, version = 1):
     expectedResult: "An unsent follow-up draft created for the chosen application, verified by read-back.",
   };
 }
+
+// Slice 5: second INTERNAL_WRITE plan — save an internal note. Same shape as the
+// follow-up (context -> freeze -> gated write -> read-back) but a different
+// capability, proving the policy/gate is generic.
+const CAREER_NOTE_STEPS: PlanStep[] = [
+  { id: "s1", label: "Retrieve application context", capabilityId: "career.list_applications", kind: "capability" },
+  { id: "s2", label: "Compose the note", capabilityId: null, kind: "analysis" },
+  { id: "s3", label: "Save note (requires approval)", capabilityId: "career.add_note", kind: "capability" },
+  { id: "s4", label: "Read back & verify note", capabilityId: "career.get_draft", kind: "capability" },
+];
+
+export function planCareerNote(taskId: string, intent: string, version = 1): CommandPlan {
+  return {
+    taskId,
+    version,
+    intent,
+    steps: CAREER_NOTE_STEPS.map((s) => ({ ...s })),
+    capabilitiesRequired: ["career.list_applications", "career.add_note", "career.get_draft"],
+    expectedResult: "An internal note saved on the chosen application, verified by read-back.",
+  };
+}
+
+// Slice 5 conformance probe: a plan that requires a PROHIBITED capability. It
+// exists only to prove the Policy Engine blocks such a plan before execution —
+// it is never reachable from ordinary user phrasing.
+export function planPolicyProbe(taskId: string, intent: string, version = 1): CommandPlan {
+  return {
+    taskId,
+    version,
+    intent,
+    steps: [{ id: "s1", label: "Attempt prohibited action", capabilityId: "mail.send_email", kind: "capability" }],
+    capabilitiesRequired: ["mail.send_email"],
+    expectedResult: "Blocked — this action is prohibited by policy.",
+  };
+}

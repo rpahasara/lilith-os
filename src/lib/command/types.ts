@@ -119,6 +119,10 @@ export interface CommandApproval {
   reversible?: boolean;
   /** The capability id behind the write (provenance). */
   capabilityId?: string;
+  /** Policy risk level (Slice 5): none | low | medium | high | critical. */
+  riskLevel?: string;
+  /** Policy asks for an elevated warning (e.g. destructive actions). */
+  elevatedWarning?: boolean;
 }
 
 /** A pointer to something a finished command produced or observed. */

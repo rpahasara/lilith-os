@@ -21,6 +21,7 @@ import {
   buildFollowupDraft,
   createFollowupDraftCapability,
   getFollowupDraftCapability,
+  resolveApplicationTarget,
   type DraftContent,
   type DraftRecord,
 } from "../career-write";
@@ -38,31 +39,6 @@ interface FollowupData {
   draft?: DraftContent;
   writeResult?: { draft: DraftRecord; created?: boolean };
   readback?: DraftRecord | null;
-}
-
-function resolveTarget(
-  rawIntent: string,
-  apps: CareerApplication[],
-): CareerApplication | { error: string } {
-  const idMatch = rawIntent.match(
-    /#\s*(\d+)|(?:application|app|job|role|posting)\s*#?\s*(\d+)|\bid\s*(\d+)/i,
-  );
-  const idRaw = idMatch ? idMatch[1] ?? idMatch[2] ?? idMatch[3] : null;
-  if (idRaw != null) {
-    const id = Number(idRaw);
-    const found = apps.find((a) => a.id === id);
-    return found ?? { error: `No application #${id} was found.` };
-  }
-  const lower = rawIntent.toLowerCase();
-  const byCompany = apps.filter((a) => a.company && lower.includes(a.company.toLowerCase()));
-  if (byCompany.length === 1) return byCompany[0];
-  if (byCompany.length > 1) {
-    return { error: "Several applications match that company — name the application number." };
-  }
-  if (apps.length === 1) return apps[0];
-  return {
-    error: 'Which application? Name it, e.g. "draft a follow-up for application #17".',
-  };
 }
 
 export const careerFollowupPlaybook: TaskPlaybook = {
@@ -85,7 +61,7 @@ export const careerFollowupPlaybook: TaskPlaybook = {
       const apps = (res.data as CareerApplication[]) ?? [];
       data.__apps = apps;
       ctx.provenance.push({ capabilityId: careerListApplicationsCapability.id, executionId: res.executionId, source: res.source, fetchedAt: Date.now() });
-      const target = resolveTarget(ctx.rawIntent, apps);
+      const target = resolveApplicationTarget(ctx.rawIntent, apps);
       if ("error" in target) {
         return { outcome: "failed", detail: target.error, fatal: { reason: target.error } };
       }

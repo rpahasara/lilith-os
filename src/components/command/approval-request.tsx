@@ -98,6 +98,11 @@ export function ApprovalRequest({
             </div>
           )}
 
+          {approval.elevatedWarning && (
+            <p className="mt-2 rounded-lg border border-rose/30 bg-rose/10 px-2.5 py-1.5 text-[11px] font-medium text-rose">
+              Elevated risk{approval.riskLevel ? ` (${approval.riskLevel})` : ""} — review carefully before approving.
+            </p>
+          )}
           {expired && (
             <p className="mt-1.5 text-[11px] text-amber">
               This approval has gone stale — review it again before continuing.
