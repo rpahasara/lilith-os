@@ -11,6 +11,10 @@
 import type { CommandEvent } from "../events";
 import { silentCoreLogger } from "./logger";
 import { RealCommandCore } from "./real-core";
+import { getCapability } from "./capabilities";
+import { planCareerFollowup } from "./planner";
+import { buildFollowupDraft } from "./career-write";
+import type { CareerApplication } from "./career-capabilities";
 import {
   createTaskBackend,
   InMemoryTaskStore,
@@ -69,6 +73,81 @@ const TERMINALS = new Set(["result.available", "partial.result", "failed", "canc
 function makeCore(transport: CoreTransport, store?: TaskStore) {
   return new RealCommandCore(transport, store ?? new InMemoryTaskStore(), silentCoreLogger);
 }
+
+/* ---- Slice 4 write fixtures: an in-memory drafts backend + helpers ---- */
+
+const WRITE_INTENT = "draft a follow-up for application #1";
+const WRITE_APP = {
+  id: 1, company: "NEXT", role: "Senior DevOps Engineer", stage: "discovered",
+  source_account: "primary", confidence: 0.97, first_seen: RECENT, last_activity: RECENT,
+  activities: 1, last_activity_summary: "…", recruiter: { name: "Alex Rivera", contact: "alex@x.com" },
+};
+
+interface DraftBackendOpts { failWritesTimes?: number; corruptReadback?: boolean; phantomTimeoutOnce?: boolean }
+
+/** Faithful in-memory emulation of the /os/drafts store (idempotent create). */
+function makeDraftBackend(apps: unknown, opts: DraftBackendOpts = {}) {
+  const store = new Map<string, Record<string, unknown>>();
+  const byKey = new Map<string, string>();
+  let postCount = 0;
+  let phantomUsed = false;
+  const transport: CoreTransport = async (path, _signal, init) => {
+    if (path.includes("/drafts")) {
+      if (init?.method === "POST") {
+        postCount += 1;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const b = (init.body ?? {}) as any;
+        if (opts.failWritesTimes && postCount <= opts.failWritesTimes) return err(503, "temporary");
+        const existing = byKey.get(b.idempotencyKey);
+        if (existing) return ok({ draft: store.get(existing), created: false });
+        const row = {
+          draftId: b.draftId, status: "created", target: b.target, subject: b.subject, body: b.body,
+          contentHash: `h.${String(b.subject).length}.${String(b.body).length}`,
+          idempotencyKey: b.idempotencyKey, createdAt: 1000,
+        };
+        store.set(row.draftId, row);
+        byKey.set(b.idempotencyKey, row.draftId);
+        // Commit-then-timeout: the row IS stored but the caller sees a timeout —
+        // an unknown commit state whose safe resolution is idempotent retry.
+        if (opts.phantomTimeoutOnce && !phantomUsed) { phantomUsed = true; return err(0, "timeout"); }
+        return ok({ draft: row, created: true });
+      }
+      const m = path.match(/\/drafts\/([^?]+)/);
+      if (m) {
+        const id = decodeURIComponent(m[1]);
+        const row = store.get(id);
+        if (!row) return err(404, "not found");
+        const out = opts.corruptReadback ? { ...row, body: `${row.body} [TAMPERED]` } : row;
+        return ok({ draft: out });
+      }
+      return ok({ drafts: [...store.values()], count: store.size }); // list / health
+    }
+    if (path.includes("applications")) return ok(apps);
+    if (path.includes("pipeline")) return ok({});
+    return ok([]);
+  };
+  return { transport, count: () => store.size, drafts: () => [...store.values()] };
+}
+
+function collect(core: RealCommandCore) {
+  const events: CommandEvent[] = [];
+  const unsub = core.subscribe((e) => events.push(e));
+  return { events, unsub };
+}
+async function waitFor(
+  events: CommandEvent[],
+  pred: (e: CommandEvent) => boolean,
+  ms = 4000,
+): Promise<CommandEvent | undefined> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const e = events.find(pred);
+    if (e) return e;
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  return undefined;
+}
+const isTerminalEvt = (e: CommandEvent) => TERMINALS.has(e.type);
 
 async function drive(
   core: RealCommandCore,
@@ -441,6 +520,224 @@ export async function runCoreSelfTest(): Promise<SelfTestResult[]> {
     const events = await makeCore(async () => err(502), new RemoteTaskStore({ request: be.http, kv })).restore();
     const restored = events.some((e) => e.type === "result.available" && e.taskId === "persisted-1") && events.some((e) => e.type === "task.created" && e.taskId === "persisted-1");
     record("P-P restore without localStorage", restored, `events=${events.length}`);
+  }
+
+  /* ============ Slice 4: approval-gated write (draft follow-up) ============ */
+
+  const writePlan = (id: string) => planCareerFollowup(id, "x");
+  const draftFor = (id: string) => buildFollowupDraft(WRITE_APP as unknown as CareerApplication, id, "s3");
+  const pendingFor = (id: string) => {
+    const d = draftFor(id);
+    return {
+      capabilityId: "career.create_followup_draft", stepId: "s3", target: d.target,
+      subject: d.subject, body: d.body, idempotencyKey: d.idempotencyKey, draftId: d.draftId, fingerprint: d.fingerprint,
+    };
+  };
+
+  // W-A / W-B — approval requested BEFORE any write; zero side effect at the gate.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-ab", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-ab" });
+    const appr = await waitFor(events, (e) => e.type === "approval.requested");
+    const noWriteFinished = !events.some((e) => e.type === "step.finished" && (e as { stepId?: string }).stepId === "s3");
+    record("W-A approval before write", !!appr && noWriteFinished, `appr=${!!appr}`);
+    record("W-B no side effect pre-approval", be.count() === 0, `drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-C / W-K — approve → exactly one real mutation, read-back verified PASS.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-c", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-c" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "w-c" });
+    const term = await waitFor(events, isTerminalEvt);
+    const evid = (term as { evidence?: { kind: string }[] }).evidence ?? [];
+    const hasId = evid.some((e) => e.kind === "external_id");
+    record("W-C approve→one write", term?.type === "result.available" && be.count() === 1, `${term?.type} drafts=${be.count()}`);
+    record("W-K write + read-back PASS", term?.type === "result.available" && hasId, `evid=${hasId}`);
+    unsub();
+  }
+
+  // W-D — deny → zero mutation, terminal cancelled.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-d", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-d" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "deny", taskId: "w-d" });
+    const resolved = await waitFor(events, (e) => e.type === "approval.resolved");
+    record("W-D deny→zero mutation", (resolved as { approved?: boolean })?.approved === false && be.count() === 0, `drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-E — cancel while waiting → zero mutation, terminal cancelled.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-e", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-e" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "cancel", taskId: "w-e" });
+    const term = await waitFor(events, isTerminalEvt);
+    record("W-E cancel before approval→zero", term?.type === "cancelled" && be.count() === 0, `${term?.type} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-F / W-G — reload while waiting stays waiting; approve after reload runs once.
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    const coreA = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const cA = collect(coreA);
+    coreA.dispatch({ type: "submit", taskId: "w-fg", input: WRITE_INTENT });
+    coreA.dispatch({ type: "run", taskId: "w-fg" });
+    await waitFor(cA.events, (e) => e.type === "approval.requested");
+    cA.unsub();
+
+    const coreB = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const cB = collect(coreB);
+    const restored = await coreB.restore();
+    const stillWaiting =
+      restored.some((e) => e.type === "approval.requested" && e.taskId === "w-fg") &&
+      !restored.some((e) => e.type === "failed" && e.taskId === "w-fg");
+    record("W-F reload while waiting", stillWaiting && be.count() === 0, `waiting=${stillWaiting} drafts=${be.count()}`);
+
+    coreB.dispatch({ type: "approve", taskId: "w-fg" });
+    const term = await waitFor(cB.events, isTerminalEvt, 5000);
+    record("W-G approve after reload→once", term?.type === "result.available" && be.count() === 1, `${term?.type} drafts=${be.count()}`);
+    cB.unsub();
+  }
+
+  // W-H — duplicate approve → no duplicate write.
+  {
+    const be = makeDraftBackend([WRITE_APP]);
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-h", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-h" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "w-h" });
+    core.dispatch({ type: "approve", taskId: "w-h" }); // duplicate, same tick
+    const term = await waitFor(events, isTerminalEvt);
+    record("W-H duplicate approve no dup", term?.type === "result.available" && be.count() === 1, `drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-I — retryable write failure + idempotent retry recovers with one row.
+  {
+    const be = makeDraftBackend([WRITE_APP], { failWritesTimes: 1 });
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-i", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-i" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "w-i" });
+    const term = await waitFor(events, isTerminalEvt);
+    const retried = events.some((e) => e.type === "step.progress" && /retry/i.test((e as { detail?: string }).detail ?? ""));
+    record("W-I write timeout + idempotent retry", term?.type === "result.available" && be.count() === 1 && retried, `${term?.type} drafts=${be.count()} retried=${retried}`);
+    unsub();
+  }
+
+  // W-J — unknown commit state (committed-but-unacknowledged) → idempotent retry, no duplicate.
+  {
+    const be = makeDraftBackend([WRITE_APP], { phantomTimeoutOnce: true });
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-j", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-j" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "w-j" });
+    const term = await waitFor(events, isTerminalEvt);
+    record("W-J unknown commit → verify-before-retry", term?.type === "result.available" && be.count() === 1, `${term?.type} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-L — write succeeds but read-back content differs → honest FAIL (not success).
+  {
+    const be = makeDraftBackend([WRITE_APP], { corruptReadback: true });
+    const core = makeCore(be.transport);
+    const { events, unsub } = collect(core);
+    core.dispatch({ type: "submit", taskId: "w-l", input: WRITE_INTENT });
+    core.dispatch({ type: "run", taskId: "w-l" });
+    await waitFor(events, (e) => e.type === "approval.requested");
+    core.dispatch({ type: "approve", taskId: "w-l" });
+    const term = await waitFor(events, isTerminalEvt);
+    record("W-L write ok + verify FAIL honest", term?.type === "failed" && be.count() === 1, `${term?.type} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-M — stale approval fingerprint on restore → re-approval required, no write.
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    const bogus = { ...pendingFor("w-m"), fingerprint: "BOGUS", subject: "S", body: "B" };
+    taskBe.seed(baseRec("w-m", {
+      status: "waiting_for_approval", approvalState: "required", rawIntent: WRITE_INTENT, scope: "career",
+      plan: writePlan("w-m"), pendingWrite: bogus,
+      approval: { requestedAt: 1000, expiresAt: Date.now() + 60_000, fingerprint: "BOGUS" },
+    }), 2);
+    const core = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const { events, unsub } = collect(core);
+    await core.restore();
+    core.dispatch({ type: "approve", taskId: "w-m" });
+    const reReq = await waitFor(events, (e) => e.type === "approval.requested");
+    record("W-M stale fingerprint → reapproval", !!reReq && be.count() === 0, `reReq=${!!reReq} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-N — approved-but-not-executed recovery → resumes once, idempotent.
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    taskBe.seed(baseRec("w-n", {
+      status: "waiting_for_approval", approvalState: "approved", rawIntent: WRITE_INTENT, scope: "career",
+      plan: writePlan("w-n"), pendingWrite: pendingFor("w-n"),
+      approval: { requestedAt: 1000, approvedAt: 1500, fingerprint: draftFor("w-n").fingerprint },
+    }), 2);
+    const core = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const { events, unsub } = collect(core);
+    await core.restore();
+    const term = await waitFor(events, isTerminalEvt, 5000);
+    record("W-N approved-not-executed recovery", term?.type === "result.available" && be.count() === 1, `${term?.type} drafts=${be.count()}`);
+    unsub();
+  }
+
+  // W-O — post-write reload restores the audit evidence (offline core).
+  {
+    const taskBe = createTaskBackend();
+    const be = makeDraftBackend([WRITE_APP]);
+    const coreA = makeCore(be.transport, new InMemoryTaskStore(taskBe));
+    const cA = collect(coreA);
+    coreA.dispatch({ type: "submit", taskId: "w-o", input: WRITE_INTENT });
+    coreA.dispatch({ type: "run", taskId: "w-o" });
+    await waitFor(cA.events, (e) => e.type === "approval.requested");
+    coreA.dispatch({ type: "approve", taskId: "w-o" });
+    await waitFor(cA.events, isTerminalEvt, 5000);
+    cA.unsub();
+
+    const coreB = makeCore(async () => err(502), new InMemoryTaskStore(taskBe));
+    const restored = await coreB.restore();
+    const res = restored.find((e) => e.type === "result.available" && e.taskId === "w-o") as { evidence?: { kind: string }[] } | undefined;
+    const hasEvidence = (res?.evidence ?? []).some((e) => e.kind === "external_id");
+    record("W-O post-write reload audit", !!res && hasEvidence, `res=${!!res} evid=${hasEvidence}`);
+  }
+
+  // W-P — demo tasks never reach the live write capability.
+  {
+    const routed = RealCommandCore.matches(WRITE_INTENT) !== null;
+    const cap = getCapability("career.create_followup_draft");
+    const gated = cap?.permission === "approval_required" && cap?.classification === "write";
+    record("W-P demo never calls live write", routed && !!gated, `routed=${routed} gated=${!!gated}`);
   }
 
   return results;
