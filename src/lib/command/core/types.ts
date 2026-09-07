@@ -160,6 +160,13 @@ export interface CoreStepRecord {
 /** The durable, authoritative record of a real task. */
 export interface CoreTaskRecord {
   taskId: string;
+  /** Persisted schema version — every stored record carries this. */
+  schemaVersion: number;
+  /**
+   * Optimistic-concurrency revision assigned by the backend Task Store: 1 on
+   * create, +1 per confirmed update. Absent only before the first persist.
+   */
+  revision?: number;
   source: "core";
   rawIntent: string;
   normalizedIntent: string;
@@ -170,15 +177,21 @@ export interface CoreTaskRecord {
   status: CoreTaskStatus;
   currentStepId: string | null;
   steps: CoreStepRecord[];
-  approvalState: "not_required" | "required" | "approved" | "denied";
+  approvalState: "not_required" | "required" | "approved" | "denied" | "expired";
   attemptCount: number;
   cancelRequested: boolean;
   createdAt: number;
   updatedAt: number;
+  startedAt?: number;
   endedAt?: number;
   evidence: CommandEvidence[];
   outcome?: "succeeded" | "partial" | "failed" | "cancelled";
   resultSummary?: string;
   unresolved?: string[];
   failure?: { reason: string; recovery?: string };
+  /**
+   * Recovery classification for a task found in a non-terminal state after a
+   * restart with no live executor — set on restore, never a fake success.
+   */
+  recovery?: "interrupted";
 }

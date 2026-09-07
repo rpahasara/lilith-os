@@ -17,7 +17,12 @@ export type CoreLogEvent =
   | "verify.verdict"
   | "retry"
   | "cancel"
-  | "terminal";
+  | "terminal"
+  | "persist.create"
+  | "persist.update"
+  | "persist.retry"
+  | "persist.conflict"
+  | "persist.degraded";
 
 export interface CoreLogger {
   log(event: CoreLogEvent, taskId: string, fields?: Record<string, unknown>): void;
