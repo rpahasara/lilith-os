@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import {
   VRMLoaderPlugin,
@@ -54,7 +54,17 @@ import {
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
-const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
+// Calibration/diagnostic surfaces are OFF by default, including in `next dev`.
+// Opt in explicitly with NEXT_PUBLIC_PRESENCE_DEBUG=1 for the full tooling, or
+// (localhost only) with ?presencePreview=1 for just the control panel — see
+// `showPreviewControls` in avatar-presence.tsx. This keeps normal dev clean and
+// avoids the always-on giant calibration panel.
+const SHOW_CALIBRATION_DEBUG = process.env.NEXT_PUBLIC_PRESENCE_DEBUG === "1";
+// Dev-mode WebGL context churn (StrictMode double-mount, route remounts, HMR)
+// can make the browser evict a live context. Bounded remount recovery guards
+// against a permanently blank canvas without risking an infinite remount loop.
+const CONTEXT_RESTORE_GRACE_MS = 1500;
+const MAX_CONTEXT_REMOUNTS = 3;
 
 // Cached model-normalization result (intrinsic scale/centering), stored on the
 // VRM scene so it is computed once and reused deterministically across mounts.
@@ -3480,13 +3490,87 @@ export function AvatarScene({
     };
   }, []);
 
+  // WebGL context-loss recovery. A lost context (common under `next dev`'s
+  // StrictMode double-mount / route remount / HMR churn, rare in production on
+  // GPU reset) otherwise leaves Hsin as a blank canvas until a full route
+  // remount. We (1) preventDefault the loss so the browser will *attempt*
+  // automatic restoration, (2) log concise diagnostics, and (3) as a last
+  // resort force a single canvas remount if restoration doesn't arrive — all
+  // bounded so there is no infinite remount loop or resource leak. This is
+  // universally safe: it only ever acts on a genuinely lost context.
+  const [canvasGeneration, setCanvasGeneration] = useState(0);
+  const remountCountRef = useRef(0);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+      if (stabilityTimerRef.current) clearTimeout(stabilityTimerRef.current);
+    },
+    [],
+  );
+
+  const handleCanvasCreated = useCallback(
+    (state: { gl: THREE.WebGLRenderer }) => {
+      const canvasEl = state.gl.domElement;
+      // A freshly created context that survives a few seconds is healthy — give
+      // the bounded remount budget back so unrelated later losses can recover.
+      if (stabilityTimerRef.current) clearTimeout(stabilityTimerRef.current);
+      stabilityTimerRef.current = setTimeout(() => {
+        remountCountRef.current = 0;
+      }, 5000);
+
+      const onLost = (event: Event) => {
+        // Critical: without preventDefault the context is permanently dead and
+        // Hsin never comes back on her own.
+        event.preventDefault();
+        if (stabilityTimerRef.current) {
+          clearTimeout(stabilityTimerRef.current);
+          stabilityTimerRef.current = null;
+        }
+        console.warn("[Hsin] WebGL context lost — awaiting restoration");
+        if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+        restoreTimerRef.current = setTimeout(() => {
+          restoreTimerRef.current = null;
+          if (remountCountRef.current >= MAX_CONTEXT_REMOUNTS) {
+            console.warn(
+              "[Hsin] WebGL context still lost; remount budget exhausted — leaving static fallback",
+            );
+            return;
+          }
+          remountCountRef.current += 1;
+          console.warn(
+            `[Hsin] WebGL context not restored — remounting canvas (${remountCountRef.current}/${MAX_CONTEXT_REMOUNTS})`,
+          );
+          setCanvasGeneration((g) => g + 1);
+        }, CONTEXT_RESTORE_GRACE_MS);
+      };
+
+      const onRestored = () => {
+        if (restoreTimerRef.current) {
+          clearTimeout(restoreTimerRef.current);
+          restoreTimerRef.current = null;
+        }
+        remountCountRef.current = 0;
+        console.info("[Hsin] WebGL context restored");
+      };
+
+      canvasEl.addEventListener("webglcontextlost", onLost, false);
+      canvasEl.addEventListener("webglcontextrestored", onRestored, false);
+    },
+    [],
+  );
+
   return (
     <Canvas
+      key={canvasGeneration}
       camera={{ position: [0, 0, 4.25], fov: 36 }}
       dpr={[1, 2]}
       frameloop={paused ? "never" : "always"}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       style={{ background: "transparent" }}
+      onCreated={handleCanvasCreated}
     >
       <ambientLight intensity={1.1} />
       <directionalLight position={[-3, 4, 3]} intensity={2.2} color="#ffffff" />

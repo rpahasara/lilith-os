@@ -66,7 +66,11 @@ import {
   type RelaxedPoseTuning,
 } from "./avatar-scene";
 
-const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
+// Explicit opt-in (default OFF, even in `next dev`). NEXT_PUBLIC_PRESENCE_DEBUG=1
+// enables the full calibration/diagnostics surface; on localhost the control
+// panel alone can be summoned per-load with ?presencePreview=1 (handled by the
+// `showPreviewControls` effect below). Normal dev shows no calibration panel.
+const SHOW_CALIBRATION_DEBUG = process.env.NEXT_PUBLIC_PRESENCE_DEBUG === "1";
 const ATTENTION_TARGETS: NamedAttentionTarget[] = ["auto", "center", "command", "today", "next"];
 const PRESENCE_EXPRESSIONS: PresenceExpression[] = ["neutral", "soft-smile", "attentive", "curious"];
 const POSE_MODES: PoseTestMode[] = [
