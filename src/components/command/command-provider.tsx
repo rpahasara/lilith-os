@@ -190,13 +190,16 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       if (!text) return false;
       setRecentInputs((prev) => (prev[prev.length - 1] === text ? prev : [...prev, text].slice(-40)));
 
-      // Priority: a REAL Cognitive-Core intent wins; else a demo fixture; else
-      // plain conversation (unchanged, real backend). Real and simulated never
-      // mix — each task carries its source, surfaced in the UI.
+      // Normal product operation is live-only: a recognised real intent goes
+      // through RealCommandCore; everything else remains a real conversational
+      // turn. Fixture-driven commands are available only when explicitly enabled
+      // for development/demo use.
       const realIntent = RealCommandCore.matches(text);
+      const demoEnabled =
+        process.env.NEXT_PUBLIC_LILITH_ENABLE_DEMO_COMMANDS === "true";
       const core: CommandCore | null = realIntent
         ? realRef.current
-        : opts?.forceCommand || matchFixture(text) !== null
+        : demoEnabled && (opts?.forceCommand || matchFixture(text) !== null)
           ? demoRef.current
           : null;
 
