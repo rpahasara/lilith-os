@@ -1,15 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/card";
-import { PanelHeader } from "@/components/ui/primitives";
+import { EmptyState, FilterTabs, SectionHeader } from "@/components/ui/workspace";
+import { Button } from "@/components/ui/button";
+import { Plus, Workflow } from "lucide-react";
 import { UnitCard } from "./unit-card";
 import type { AutomationUnit, UnitKind } from "@/lib/automations/types";
-import { staggerContainer } from "@/lib/motion";
-import { cn } from "@/lib/utils";
 
-type Filter = "all" | UnitKind;
+type Filter = "all" | UnitKind | "failed" | "paused";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -17,6 +16,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "watcher", label: "Watchers" },
   { key: "timer", label: "Timers" },
   { key: "agent", label: "Agents" },
+  { key: "failed", label: "Failed" },
+  { key: "paused", label: "Paused" },
 ];
 
 // failed first (needs attention), then running, active, waiting, inactive
@@ -28,11 +29,11 @@ const STATUS_ORDER: Record<string, number> = {
   inactive: 4,
 };
 
-export function SystemsGrid({ units }: { units: AutomationUnit[] }) {
+export function SystemsGrid({ units, selectedId, onSelect }: { units: AutomationUnit[]; selectedId?: string; onSelect: (unit: AutomationUnit) => void }) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const shown = useMemo(() => {
-    const list = filter === "all" ? units : units.filter((u) => u.kind === filter);
+    const list = filter === "all" ? units : filter === "failed" ? units.filter((u) => u.status === "failed") : filter === "paused" ? units.filter((u) => !u.enabled || u.status === "inactive") : units.filter((u) => u.kind === filter);
     return [...list].sort(
       (a, b) =>
         (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) ||
@@ -42,48 +43,16 @@ export function SystemsGrid({ units }: { units: AutomationUnit[] }) {
 
   return (
     <GlassCard className="flex flex-col p-5" animated={false}>
-      <PanelHeader
-        title="Systems"
-        action={
-          <span className="font-mono text-[10px] text-ink-faint">
-            {shown.length} unit{shown.length === 1 ? "" : "s"}
-          </span>
-        }
-      />
+      <SectionHeader title="Automation systems" description={`${shown.length} unit${shown.length === 1 ? "" : "s"} in this view`} action={<Button size="sm" disabled title="Automation creation API is not connected"><Plus className="h-3.5 w-3.5" />Create automation</Button>} />
 
-      <div className="mt-4 flex flex-wrap gap-1 rounded-full border border-white/[0.06] bg-white/[0.02] p-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className={cn(
-              "relative rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-              filter === f.key ? "text-ink" : "text-ink-faint hover:text-ink-muted",
-            )}
-          >
-            {filter === f.key && (
-              <motion.span
-                layoutId="systems-filter"
-                className="absolute inset-0 rounded-full bg-white/10"
-                transition={{ type: "spring", stiffness: 400, damping: 32 }}
-              />
-            )}
-            <span className="relative">{f.label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="mt-4"><FilterTabs items={FILTERS} value={filter} onChange={setFilter} layoutId="systems-filter" /></div>
 
-      <motion.div
+      <div
         key={filter}
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
         className="mt-4 grid gap-3 sm:grid-cols-2"
       >
-        {shown.map((u) => (
-          <UnitCard key={u.id} unit={u} />
-        ))}
-      </motion.div>
+        {shown.length ? shown.map((u) => <UnitCard key={u.id} unit={u} selected={selectedId === u.id} onSelect={onSelect} />) : <div className="sm:col-span-2"><EmptyState icon={Workflow} title="No automation units here" description="Choose another filter to inspect the fleet." /></div>}
+      </div>
     </GlassCard>
   );
 }

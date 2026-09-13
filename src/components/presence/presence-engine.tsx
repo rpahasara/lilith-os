@@ -171,7 +171,20 @@ export function PresenceProvider({
   // adds no UI. Toggle with e.g. `__lilithPresence.setRendererKind("avatar")`.
   useEffect(() => {
     const rendererOverride = readRendererOverride();
-    if (rendererOverride) setRendererKind(rendererOverride);
+    const queryRenderer =
+      process.env.NODE_ENV !== "production" && typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("renderer")
+        : null;
+    if (
+      queryRenderer === "orb" ||
+      queryRenderer === "avatar" ||
+      queryRenderer === "edge" ||
+      queryRenderer === "voice"
+    ) {
+      setRendererKind(queryRenderer);
+    } else if (rendererOverride) {
+      setRendererKind(rendererOverride);
+    }
     if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
       (window as unknown as Record<string, unknown>).__lilithPresence = {
         setRendererKind,

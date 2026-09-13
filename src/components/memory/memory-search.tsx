@@ -6,7 +6,7 @@ import type { SearchScope } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
 
 const PLACEHOLDERS = [
-  "What does Lilith know about LILITH OS?",
+  "Ask what Lilith remembers…",
   "What have I said about Singapore?",
   "What do you remember about least privilege?",
   "Ask Lilith what she knows…",
@@ -107,7 +107,7 @@ export function MemorySearch({
 
       <p className="relative mt-3 flex items-center gap-1.5 text-[10px] text-ink-faint">
         <Sparkles className="h-3 w-3 text-violet-bright/70" />
-        Keyword recall today · semantic search and conversation recall arrive with the memory backend.
+        Search checks summaries, details, entities, tags, and provenance. Semantic recall arrives with the memory backend.
       </p>
     </div>
   );

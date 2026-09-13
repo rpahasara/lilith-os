@@ -96,6 +96,46 @@ export const EVENT_MAP: Record<PresenceEventType, EventMapping> = {
     steadyPatch: { activity: "idle", emotion: "neutral", attention: "ambient" },
   },
 
+  /* ---------------------------------------------------- command lifecycle */
+  // Semantic reactions to a command moving through its lifecycle. These are the
+  // user's own flow (not external/ambient), so they are never typing-suppressed.
+  "command.planning": {
+    patch: { activity: "thinking", emotion: "focused", attention: "locked" },
+    importance: "normal",
+  },
+  "command.running": {
+    patch: { activity: "working", emotion: "focused", attention: "engaged" },
+    importance: "notable",
+  },
+  "command.awaiting_approval": {
+    patch: { activity: "waiting", emotion: "attentive", attention: "locked" },
+    importance: "notable",
+  },
+  "command.partial": {
+    patch: { activity: "idle", emotion: "attentive", attention: "engaged" },
+    importance: "notable",
+    holdMs: 2600,
+    steadyPatch: { activity: "idle", emotion: "neutral", attention: "ambient" },
+  },
+  "command.succeeded": {
+    patch: { activity: "speaking", emotion: "pleased", attention: "engaged" },
+    importance: "normal",
+    holdMs: 2600,
+    steadyPatch: { activity: "idle", emotion: "neutral", attention: "ambient" },
+  },
+  "command.failed": {
+    patch: { activity: "waiting", emotion: "concerned", attention: "engaged" },
+    importance: "urgent",
+    holdMs: 3200,
+    steadyPatch: { activity: "idle", emotion: "neutral", attention: "ambient" },
+  },
+  "command.blocked": {
+    patch: { activity: "idle", emotion: "concerned", attention: "engaged" },
+    importance: "normal",
+    holdMs: 2600,
+    steadyPatch: { activity: "idle", emotion: "neutral", attention: "ambient" },
+  },
+
   /* -------------------------------------------------- ambient module events */
   "meeting.starting_soon": {
     patch: { activity: "waiting", emotion: "attentive", attention: "ambient" },

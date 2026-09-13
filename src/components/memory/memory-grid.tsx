@@ -5,6 +5,7 @@ import { SearchX } from "lucide-react";
 import type { MemoryRecord } from "@/lib/memory/types";
 import { staggerContainer } from "@/lib/motion";
 import { ShardCard } from "./shard-card";
+import { EmptyState } from "@/components/ui/workspace";
 
 export function MemoryGrid({
   records,
@@ -15,13 +16,7 @@ export function MemoryGrid({
 }) {
   if (records.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-        <SearchX className="h-6 w-6 text-ink-faint" />
-        <p className="text-sm text-ink-muted">No memories match here.</p>
-        <p className="text-xs text-ink-faint">
-          Try a different category or clear the search.
-        </p>
-      </div>
+      <EmptyState icon={SearchX} title="No memories match here" description="Try another category, select a constellation node, or clear the search." className="py-16" />
     );
   }
 

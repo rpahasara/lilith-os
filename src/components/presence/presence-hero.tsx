@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { History } from "lucide-react";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
 import { ConversationView } from "@/components/conversation/conversation-view";
 import { useConversation } from "@/components/conversation/conversation-provider";
+import { CommandConsole, CommandHistory, useCommand } from "@/components/command";
 import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
@@ -20,8 +22,10 @@ const productionVoiceProvider = new ElevenLabsTTSProvider();
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
-  const { messages, status, error, send, reset } = useConversation();
+  const { messages, status, error, reset } = useConversation();
+  const { submit, activeTask, history, historyOpen, setHistoryOpen, recentInputs } = useCommand();
   const [greeting, setGreeting] = useState("Good evening");
+  const [editFill, setEditFill] = useState<{ text: string; nonce: number } | undefined>();
 
   const hasConversation = messages.length > 0 || !!error;
   const isSending = status === "sending";
@@ -131,11 +135,13 @@ export function PresenceHero() {
     spokePresence.current = false;
     lilithSpeech.stop();
     emit({ type: "conversation.user_message" });
-    send(text);
+    // The Command System decides: recognised commands enter the lifecycle,
+    // plain conversation goes to the real backend (unchanged path).
+    submit(text, { context: { surface: "home" } });
   }
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between py-2">
+    <div className="relative flex h-full flex-col items-center justify-between pb-1 pt-2">
       {/* greeting */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -143,31 +149,40 @@ export function PresenceHero() {
         transition={{ delay: 0.2, duration: 0.7 }}
         className="text-center"
       >
-        <p className="eyebrow mb-2 flex items-center justify-center gap-2">
-          <StatusDot accent="violet" /> Lilith · online
+        <p className="eyebrow mb-2.5 flex items-center justify-center gap-2 text-wine-bright/85">
+          <StatusDot accent="wine" /> Presence online
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-ink sm:text-[2.5rem]">
-          {greeting}, <span className="text-violet-bright">{user.name}</span>.
+        <h1 className="text-3xl font-medium tracking-[-0.045em] text-ink [text-shadow:0_2px_28px_rgba(0,0,0,0.72)] sm:text-[2.6rem]">
+          {greeting}, <span className="bg-gradient-to-r from-pearl via-wine-bright to-orchid-bright bg-clip-text font-semibold text-transparent">{user.name}</span>.
         </h1>
       </motion.div>
 
       {/* presence stage — pluggable renderer (orb today, avatar later). No
           grounded reflection: the bust-up should read as an integrated presence,
           not a figure standing on a stage floor. */}
-      <div className="relative my-2 aspect-square w-full max-w-[460px] flex-1">
+      <div className="relative my-1 aspect-square w-full min-h-0 max-w-[460px] flex-1 lg:max-w-[360px] xl:max-w-[460px]">
         <PresenceStage />
       </div>
 
-      {/* conversation region: live transcript once talking, else the idle hint + state chips */}
-      <div className="mb-4 flex w-full flex-col items-center gap-3">
-        {hasConversation ? (
+      {/* conversation / command region: an active command takes the surface,
+          else the live transcript, else the idle hint + state chips */}
+      <div className="mb-3 flex w-full flex-col items-center gap-2">
+        {activeTask ? (
+          <div className="flex w-full max-w-xl flex-col items-center gap-1.5">
+            <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+            <CommandConsole onEditRequest={(text) => setEditFill({ text, nonce: Date.now() })} />
+          </div>
+        ) : hasConversation ? (
           <div className="flex w-full flex-col items-center gap-1.5">
-            <button
-              onClick={reset}
-              className="self-end rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
-            >
-              Clear
-            </button>
+            <div className="flex w-full items-center justify-end gap-1">
+              <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+              <button
+                onClick={reset}
+                className="rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+              >
+                Clear
+              </button>
+            </div>
             <ConversationView />
           </div>
         ) : (
@@ -179,7 +194,7 @@ export function PresenceHero() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.4 }}
-                className="max-w-md text-[15px] text-ink-muted"
+                className="max-w-md text-[15px] leading-relaxed text-ink-muted [text-shadow:0_2px_18px_rgba(0,0,0,0.7)]"
               >
                 {ACTIVITY_META[activity].hint}
               </motion.p>
@@ -191,29 +206,50 @@ export function PresenceHero() {
                   key={a}
                   onClick={() => override({ activity: a })}
                   className={cn(
-                    "rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-all",
+                    "rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.14em] transition-all",
                     activity === a
-                      ? "bg-white/10 text-ink"
-                      : "text-ink-faint hover:text-ink-muted",
+                      ? "border-wine/25 bg-wine/[0.12] text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
+                      : "border-transparent text-ink-faint hover:border-white/10 hover:bg-white/[0.035] hover:text-ink-muted",
                   )}
                 >
                   {ACTIVITY_META[a].label}
                 </button>
               ))}
             </div>
+
+            {history.length > 0 && (
+              <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
+            )}
           </div>
         )}
       </div>
 
-      {/* command input — the primary conversation surface */}
+      {/* command input — the primary conversation + command surface */}
       <div className="w-full max-w-xl">
         <CommandInput
           onFocusChange={handleFocus}
           onSubmit={handleSubmit}
           onType={() => emit({ type: "conversation.typing" })}
           loading={isSending}
+          historyItems={recentInputs}
+          fill={editFill}
         />
       </div>
+
+      {/* command history drawer (fixed overlay) */}
+      <CommandHistory />
     </div>
+  );
+}
+
+function HistoryTrigger({ count, onOpen }: { count: number; onOpen: () => void }) {
+  if (count === 0) return null;
+  return (
+    <button
+      onClick={onOpen}
+      className="flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+    >
+      <History className="h-3 w-3" /> History · {count}
+    </button>
   );
 }

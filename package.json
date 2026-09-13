@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:core": "node scripts/run-core-self-test.mjs"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19",
     "@types/three": "^0.185.4",
     "babel-plugin-react-compiler": "1.0.0",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

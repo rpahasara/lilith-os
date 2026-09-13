@@ -1,14 +1,15 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { motion } from "framer-motion";
-import { Video } from "lucide-react";
+import { CalendarClock, Video } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
 import type { MeetingEvent } from "@/lib/meetings/types";
 import { formatClock } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { PrepBadge } from "./prep-lifecycle";
+import { EmptyState, FilterTabs } from "@/components/ui/workspace";
 
 export function TimelineToday({
   events,
@@ -21,33 +22,35 @@ export function TimelineToday({
 }) {
   const now = Date.now();
   const today = new Date().toDateString();
+  const [scope, setScope] = useState<"today" | "upcoming">("today");
 
   const todays = events
     .filter((e) => e.start && new Date(e.start).toDateString() === today)
     .sort((a, b) => new Date(a.start!).getTime() - new Date(b.start!).getTime());
+  const upcoming = events.filter((event) => event.start && new Date(event.end || event.start).getTime() >= now).sort((a, b) => new Date(a.start!).getTime() - new Date(b.start!).getTime());
+  const visible = scope === "today" ? todays : upcoming;
 
   // index at which "now" falls
-  const nowIdx = todays.findIndex((e) => new Date(e.start!).getTime() > now);
-  const insertAt = nowIdx === -1 ? todays.length : nowIdx;
+  const nowIdx = visible.findIndex((e) => new Date(e.start!).getTime() > now);
+  const insertAt = nowIdx === -1 ? visible.length : nowIdx;
 
   return (
     <GlassCard className="p-5" animated={false}>
       <PanelHeader
-        title="Today"
+        title="Schedule"
         action={
           <span className="font-mono text-[10px] text-ink-faint">
-            {todays.length} {todays.length === 1 ? "event" : "events"}
+            {visible.length} {visible.length === 1 ? "event" : "events"}
           </span>
         }
       />
+      <div className="mt-4"><FilterTabs items={[{ key: "today", label: "Today", count: todays.length }, { key: "upcoming", label: "Upcoming", count: upcoming.length }]} value={scope} onChange={setScope} layoutId="meeting-scope" /></div>
 
-      {todays.length === 0 ? (
-        <p className="mt-6 py-6 text-center text-sm text-ink-faint">
-          Nothing on the calendar today — the day is yours.
-        </p>
+      {visible.length === 0 ? (
+        <EmptyState icon={CalendarClock} title={scope === "today" ? "No meetings today" : "No upcoming meetings"} description={scope === "today" && upcoming[0]?.start ? `Your next known event is ${new Date(upcoming[0].start).toLocaleString()}.` : "New calendar events will appear here when the connected source reports them."} />
       ) : (
         <ol className="mt-4 space-y-1">
-          {todays.map((e, i) => (
+          {visible.map((e, i) => (
             <Fragment key={e.id}>
               {i === insertAt && <NowMarker />}
               <TimelineRow
@@ -58,7 +61,7 @@ export function TimelineToday({
               />
             </Fragment>
           ))}
-          {insertAt === todays.length && <NowMarker />}
+          {scope === "today" && insertAt === visible.length && <NowMarker />}
         </ol>
       )}
     </GlassCard>

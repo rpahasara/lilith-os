@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import {
   VRMLoaderPlugin,
@@ -18,6 +18,11 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { PresenceSignal } from "@/lib/presence";
+import type {
+  NormalizedAttentionPoint,
+  PresenceFraming,
+  PresenceTransitionMode,
+} from "@/lib/presence/presence-types";
 import type { SpeechPlaybackSnapshot, VisemeCue } from "@/lib/hsin-lip-sync";
 import { lilithSpeech } from "@/lib/voice/speech-controller";
 import {
@@ -49,22 +54,27 @@ import {
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
-const SHOW_CALIBRATION_DEBUG = process.env.NODE_ENV !== "production";
+// Calibration/diagnostic surfaces are OFF by default, including in `next dev`.
+// Opt in explicitly with NEXT_PUBLIC_PRESENCE_DEBUG=1 for the full tooling, or
+// (localhost only) with ?presencePreview=1 for just the control panel — see
+// `showPreviewControls` in avatar-presence.tsx. This keeps normal dev clean and
+// avoids the always-on giant calibration panel.
+const SHOW_CALIBRATION_DEBUG = process.env.NEXT_PUBLIC_PRESENCE_DEBUG === "1";
+// Dev-mode WebGL context churn (StrictMode double-mount, route remounts, HMR)
+// can make the browser evict a live context. Bounded remount recovery guards
+// against a permanently blank canvas without risking an infinite remount loop.
+const CONTEXT_RESTORE_GRACE_MS = 1500;
+const MAX_CONTEXT_REMOUNTS = 3;
 
-export type AvatarPresentationFraming = {
+// Cached model-normalization result (intrinsic scale/centering), stored on the
+// VRM scene so it is computed once and reused deterministically across mounts.
+type FramingResult = {
   scale: number;
-  offsetX: number;
-  offsetY: number;
-  cameraDistance: number;
-  fov: number;
-  targetY: number;
-  // When true, center horizontally on the HEAD bone instead of the full
-  // bounding box (which the asymmetric tail/hair skew off-axis). Puts the face
-  // on the camera's optical axis — fixes both the off-center drift and the
-  // off-axis perspective skew that reads as "not straight-on". Presentation
-  // only; never touches the pose. Omitted/false = legacy bounding-box centering.
-  centerOnFace?: boolean;
+  faceOffsetX: number;
+  position: THREE.Vector3;
 };
+
+export type AvatarPresentationFraming = PresenceFraming;
 
 export type ForwardGazeCalibration = {
   eyeYaw: number;
@@ -875,6 +885,8 @@ function HsinAvatar({
   manualBlinkSequence,
   lookAtEnabled,
   lookAtStrength,
+  attentionPoint,
+  presentationTransition,
   centerEyesSequence,
   headAttentionEnabled,
   headAttentionStrength,
@@ -934,6 +946,8 @@ function HsinAvatar({
   manualBlinkSequence: number;
   lookAtEnabled: boolean;
   lookAtStrength: number;
+  attentionPoint: NormalizedAttentionPoint | null;
+  presentationTransition: PresenceTransitionMode;
   centerEyesSequence: number;
   headAttentionEnabled: boolean;
   headAttentionStrength: number;
@@ -1011,6 +1025,11 @@ function HsinAvatar({
   const lookAtPointer = useRef(new THREE.Vector2());
   const smoothedLookAtPointer = useRef(new THREE.Vector2());
   const centeredLookAtPointer = useRef(new THREE.Vector2());
+  const directedLookAtPointer = useRef(new THREE.Vector2());
+  directedLookAtPointer.current.set(attentionPoint?.x ?? 0, attentionPoint?.y ?? 0);
+  const renderedPresentation = useRef<AvatarPresentationFraming>({
+    ...presentationFraming,
+  });
   const lastCenterEyesSequence = useRef(centerEyesSequence);
   const smoothedHeadAttention = useRef(new THREE.Vector2());
   const lastCenterHeadSequence = useRef(centerHeadSequence);
@@ -1874,35 +1893,48 @@ function HsinAvatar({
 
   const framing = useMemo(() => {
     const scene = vrm.scene;
-    scene.updateMatrixWorld(true);
 
-    // Normalize the imported model to a predictable full-body frame without
-    // modifying the source VRM or its skeleton hierarchy.
-    const bounds = new THREE.Box3().setFromObject(scene);
+    // Deterministic normalization. `useLoader` caches and REUSES `vrm.scene`
+    // across route remounts, so on a return the scene is already parented under
+    // the presentation <group scale=…> from the prior mount. Measuring it in
+    // world space (setFromObject / getWorldPosition) would then fold that group
+    // scale into the bounds and compound the normalization (→ tiny/full-body
+    // composition, intermittently). Two guards make it identical every time:
+    //   1) measure in the scene's OWN local frame (strip any ancestor transform)
+    //   2) compute once and cache the result on the scene, reused on remount.
+    const CACHE_KEY = "__lilithFraming";
+    const store = scene.userData as Record<string, FramingResult | undefined>;
+    const cached = store[CACHE_KEY];
+    if (cached) return cached;
+
+    scene.updateMatrixWorld(true);
+    const toLocal = scene.matrixWorld.clone().invert();
+    const bounds = new THREE.Box3().setFromObject(scene).applyMatrix4(toLocal);
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const scale = size.y > 0 ? 2.75 / size.y : 1;
 
     // Extra horizontal shift (in framed/scaled units) that moves the HEAD —
     // rather than the tail/hair-skewed bounding box — onto the optical axis.
-    // Consumed only when a framing profile sets `centerOnFace`.
+    // Consumed only when a framing profile sets `centerOnFace`. Measured in the
+    // same local frame so it never picks up the parent transform.
     const rawHead = vrm.humanoid?.getRawBoneNode("head");
-    const headWorldX = rawHead
-      ? rawHead.getWorldPosition(new THREE.Vector3()).x
+    const headLocalX = rawHead
+      ? rawHead.getWorldPosition(new THREE.Vector3()).applyMatrix4(toLocal).x
       : center.x;
-    const faceOffsetX = (center.x - headWorldX) * scale;
+    const faceOffsetX = (center.x - headLocalX) * scale;
 
     console.info(
       `[Hsin pose diagnostic] framing=${JSON.stringify({
         size: size.toArray(),
         center: center.toArray(),
         scale,
-        headWorldX,
+        headLocalX,
         faceOffsetX,
       })}`,
     );
 
-    return {
+    const result: FramingResult = {
       scale,
       faceOffsetX,
       position: new THREE.Vector3(
@@ -1911,12 +1943,76 @@ function HsinAvatar({
         -center.z * scale,
       ),
     };
+    store[CACHE_KEY] = result;
+    return result;
   }, [vrm]);
+
+  // TEMP dev diagnostic: snapshot the actual presentation state one frame after
+  // mount (refs set, primitive attached, useLayoutEffect camera applied), to
+  // trace a missing-avatar case directly. Remove before commit.
+  useEffect(() => {
+    if (!SHOW_CALIBRATION_DEBUG) return;
+    const id = requestAnimationFrame(() => {
+      const g = avatarFrame.current;
+      const cam = camera as THREE.PerspectiveCamera;
+      let meshCount = 0;
+      let hiddenMats = 0;
+      vrm.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        meshCount += 1;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        if (mats.every((m) => m && m.visible === false)) hiddenMats += 1;
+      });
+      console.info(
+        `[Hsin presentation state] ${JSON.stringify({
+          vrmLoaded: !!vrm.scene,
+          sceneParentType: vrm.scene.parent?.type ?? null,
+          sceneVisible: vrm.scene.visible,
+          rigVisible: rig.current?.visible ?? null,
+          avatarFrameVisible: g?.visible ?? null,
+          meshCount,
+          fullyHiddenMeshes: hiddenMats,
+          groupScale: g ? Number(g.scale.x.toFixed(4)) : null,
+          groupPos: g
+            ? g.position.toArray().map((n) => Number(n.toFixed(3)))
+            : null,
+          cameraZ: Number(camera.position.z.toFixed(3)),
+          cameraY: Number(camera.position.y.toFixed(3)),
+          fov: cam.isPerspectiveCamera ? cam.fov : null,
+        })}`,
+      );
+    });
+    return () => cancelAnimationFrame(id);
+  }, [camera, vrm]);
 
   useFrame((renderState, delta) => {
     if (!rig.current) return;
 
     const d = Math.min(delta, 0.05);
+    const shown = renderedPresentation.current;
+    const damping = presentationTransition === "instant" ? Infinity : 8;
+    const approach = (current: number, target: number) =>
+      presentationTransition === "instant"
+        ? target
+        : THREE.MathUtils.damp(current, target, damping, d);
+    shown.scale = approach(shown.scale, presentationFraming.scale);
+    shown.offsetX = approach(shown.offsetX, presentationFraming.offsetX);
+    shown.offsetY = approach(shown.offsetY, presentationFraming.offsetY);
+    shown.cameraDistance = approach(shown.cameraDistance, presentationFraming.cameraDistance);
+    shown.fov = approach(shown.fov, presentationFraming.fov);
+    shown.targetY = approach(shown.targetY, presentationFraming.targetY);
+    shown.centerOnFace = presentationFraming.centerOnFace;
+    if (avatarFrame.current) {
+      avatarFrame.current.scale.setScalar(framing.scale * shown.scale);
+      avatarFrame.current.position.set(
+        framing.position.x * shown.scale +
+          shown.offsetX +
+          (shown.centerOnFace ? framing.faceOffsetX * shown.scale : 0),
+        framing.position.y * shown.scale + shown.offsetY,
+        framing.position.z * shown.scale,
+      );
+    }
     time.current += d;
     const t = time.current;
     const handOverrideChanged =
@@ -2218,7 +2314,9 @@ function HsinAvatar({
         visemeInspectEnabled ||
         !headAttentionEnabled ||
         centerHeadAtPointerVersion.current === pointerMovementVersion.current;
-      const headTarget = headTargetIsCentered
+      const headTarget = attentionPoint
+        ? directedLookAtPointer.current
+        : headTargetIsCentered
         ? centeredLookAtPointer.current
         : lookAtPointer.current;
       const applyHeadDeadzone = (value: number) =>
@@ -2607,7 +2705,9 @@ function HsinAvatar({
         lookAtPointer.current.set(0, 0);
       }
       const target = lookAtEnabled
-        ? lookAtPointer.current
+        ? attentionPoint
+          ? directedLookAtPointer.current
+          : lookAtPointer.current
         : centeredLookAtPointer.current;
       const applyDeadzone = (value: number) =>
         Math.abs(value) < 0.08
@@ -3056,15 +3156,15 @@ function HsinAvatar({
       <group ref={rig}>
         <group
           ref={avatarFrame}
-          scale={framing.scale * presentationFraming.scale}
+          scale={framing.scale * renderedPresentation.current.scale}
           position={[
-            framing.position.x * presentationFraming.scale +
-              presentationFraming.offsetX +
-              (presentationFraming.centerOnFace
-                ? framing.faceOffsetX * presentationFraming.scale
+            framing.position.x * renderedPresentation.current.scale +
+              renderedPresentation.current.offsetX +
+              (renderedPresentation.current.centerOnFace
+                ? framing.faceOffsetX * renderedPresentation.current.scale
                 : 0),
-            framing.position.y * presentationFraming.scale + presentationFraming.offsetY,
-            framing.position.z * presentationFraming.scale,
+            framing.position.y * renderedPresentation.current.scale + renderedPresentation.current.offsetY,
+            framing.position.z * renderedPresentation.current.scale,
           ]}
         >
           <primitive object={vrm.scene} />
@@ -3182,14 +3282,22 @@ function InspectionCamera({
   const { camera } = useThree();
 
   useEffect(() => {
+    // Only drive the camera while actively inspecting (dev). When disabled it
+    // must NOT touch the camera — PresentationCamera is the single authoritative
+    // owner of the default framing. (Previously the disabled branch reset the
+    // camera to a hardcoded full-body pose, which raced PresentationCamera on
+    // mount and made Home intermittently return in full-body after navigation.)
+    // Leaving inspection restores the dashboard framing because PresentationCamera's
+    // `enabled` flips back to true and its effect re-applies the framing.
+    if (!enabled) return;
     const positions: Record<PoseInspectionView, THREE.Vector3> = {
       front: new THREE.Vector3(1.8, 0.35, 1.8),
       leftThreeQuarter: new THREE.Vector3(0.65, 0.35, 2.45),
       rightThreeQuarter: new THREE.Vector3(2.45, 0.35, 0.65),
       side: new THREE.Vector3(0, 0.35, 2.55),
     };
-    camera.position.copy(enabled ? positions[view] : new THREE.Vector3(0, 0, 4.25));
-    camera.lookAt(enabled ? new THREE.Vector3(0, 0.3, 0) : new THREE.Vector3());
+    camera.position.copy(positions[view]);
+    camera.lookAt(new THREE.Vector3(0, 0.3, 0));
     camera.updateProjectionMatrix();
   }, [camera, enabled, view]);
 
@@ -3199,19 +3307,45 @@ function InspectionCamera({
 function PresentationCamera({
   enabled,
   framing,
+  transitionMode,
 }: {
   enabled: boolean;
   framing: AvatarPresentationFraming;
+  transitionMode: PresenceTransitionMode;
 }) {
   const { camera } = useThree();
+  const initialized = useRef(false);
 
-  useEffect(() => {
-    if (!enabled) return;
+  // useLayoutEffect (not useEffect): the presentation camera must be committed
+  // BEFORE the first paint so the model's first rendered frame is already at the
+  // approved framing — never the Canvas's full-body default. This runs before
+  // HsinAvatar's first useFrame, so the readiness gate reveals into it cleanly.
+  useLayoutEffect(() => {
+    if (!enabled) {
+      initialized.current = false;
+      return;
+    }
+    if (initialized.current) return;
+    initialized.current = true;
     camera.position.set(0, framing.targetY, framing.cameraDistance);
     camera.lookAt(new THREE.Vector3(0, framing.targetY, 0));
     if (camera instanceof THREE.PerspectiveCamera) camera.fov = framing.fov;
     camera.updateProjectionMatrix();
   }, [camera, enabled, framing]);
+
+  useFrame((_, delta) => {
+    if (!enabled || !initialized.current) return;
+    const d = Math.min(delta, 0.05);
+    const approach = (current: number, target: number) =>
+      transitionMode === "instant" ? target : THREE.MathUtils.damp(current, target, 8, d);
+    camera.position.y = approach(camera.position.y, framing.targetY);
+    camera.position.z = approach(camera.position.z, framing.cameraDistance);
+    camera.lookAt(new THREE.Vector3(0, camera.position.y, 0));
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.fov = approach(camera.fov, framing.fov);
+    }
+    camera.updateProjectionMatrix();
+  });
 
   return null;
 }
@@ -3231,6 +3365,8 @@ export function AvatarScene({
   manualBlinkSequence = 0,
   lookAtEnabled = true,
   lookAtStrength = 0.45,
+  attentionPoint = null,
+  presentationTransition = "smooth",
   centerEyesSequence = 0,
   headAttentionEnabled = true,
   headAttentionStrength = 1,
@@ -3292,6 +3428,8 @@ export function AvatarScene({
   manualBlinkSequence?: number;
   lookAtEnabled?: boolean;
   lookAtStrength?: number;
+  attentionPoint?: NormalizedAttentionPoint | null;
+  presentationTransition?: PresenceTransitionMode;
   centerEyesSequence?: number;
   headAttentionEnabled?: boolean;
   headAttentionStrength?: number;
@@ -3352,13 +3490,87 @@ export function AvatarScene({
     };
   }, []);
 
+  // WebGL context-loss recovery. A lost context (common under `next dev`'s
+  // StrictMode double-mount / route remount / HMR churn, rare in production on
+  // GPU reset) otherwise leaves Hsin as a blank canvas until a full route
+  // remount. We (1) preventDefault the loss so the browser will *attempt*
+  // automatic restoration, (2) log concise diagnostics, and (3) as a last
+  // resort force a single canvas remount if restoration doesn't arrive — all
+  // bounded so there is no infinite remount loop or resource leak. This is
+  // universally safe: it only ever acts on a genuinely lost context.
+  const [canvasGeneration, setCanvasGeneration] = useState(0);
+  const remountCountRef = useRef(0);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+      if (stabilityTimerRef.current) clearTimeout(stabilityTimerRef.current);
+    },
+    [],
+  );
+
+  const handleCanvasCreated = useCallback(
+    (state: { gl: THREE.WebGLRenderer }) => {
+      const canvasEl = state.gl.domElement;
+      // A freshly created context that survives a few seconds is healthy — give
+      // the bounded remount budget back so unrelated later losses can recover.
+      if (stabilityTimerRef.current) clearTimeout(stabilityTimerRef.current);
+      stabilityTimerRef.current = setTimeout(() => {
+        remountCountRef.current = 0;
+      }, 5000);
+
+      const onLost = (event: Event) => {
+        // Critical: without preventDefault the context is permanently dead and
+        // Hsin never comes back on her own.
+        event.preventDefault();
+        if (stabilityTimerRef.current) {
+          clearTimeout(stabilityTimerRef.current);
+          stabilityTimerRef.current = null;
+        }
+        console.warn("[Hsin] WebGL context lost — awaiting restoration");
+        if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+        restoreTimerRef.current = setTimeout(() => {
+          restoreTimerRef.current = null;
+          if (remountCountRef.current >= MAX_CONTEXT_REMOUNTS) {
+            console.warn(
+              "[Hsin] WebGL context still lost; remount budget exhausted — leaving static fallback",
+            );
+            return;
+          }
+          remountCountRef.current += 1;
+          console.warn(
+            `[Hsin] WebGL context not restored — remounting canvas (${remountCountRef.current}/${MAX_CONTEXT_REMOUNTS})`,
+          );
+          setCanvasGeneration((g) => g + 1);
+        }, CONTEXT_RESTORE_GRACE_MS);
+      };
+
+      const onRestored = () => {
+        if (restoreTimerRef.current) {
+          clearTimeout(restoreTimerRef.current);
+          restoreTimerRef.current = null;
+        }
+        remountCountRef.current = 0;
+        console.info("[Hsin] WebGL context restored");
+      };
+
+      canvasEl.addEventListener("webglcontextlost", onLost, false);
+      canvasEl.addEventListener("webglcontextrestored", onRestored, false);
+    },
+    [],
+  );
+
   return (
     <Canvas
+      key={canvasGeneration}
       camera={{ position: [0, 0, 4.25], fov: 36 }}
       dpr={[1, 2]}
       frameloop={paused ? "never" : "always"}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       style={{ background: "transparent" }}
+      onCreated={handleCanvasCreated}
     >
       <ambientLight intensity={1.1} />
       <directionalLight position={[-3, 4, 3]} intensity={2.2} color="#ffffff" />
@@ -3372,6 +3584,7 @@ export function AvatarScene({
           !visemeInspectEnabled
         }
         framing={presentationFraming}
+        transitionMode={presentationTransition}
       />
       <HsinAvatar
         signal={signal}
@@ -3386,6 +3599,8 @@ export function AvatarScene({
         manualBlinkSequence={manualBlinkSequence}
         lookAtEnabled={lookAtEnabled}
         lookAtStrength={lookAtStrength}
+        attentionPoint={attentionPoint}
+        presentationTransition={presentationTransition}
         centerEyesSequence={centerEyesSequence}
         headAttentionEnabled={headAttentionEnabled}
         headAttentionStrength={headAttentionStrength}

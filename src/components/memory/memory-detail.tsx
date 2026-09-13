@@ -224,6 +224,9 @@ export function MemoryDetail({
                   </li>
                 </ul>
               </Section>
+              <Section label="Memory classification">
+                <div className="grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-ink-faint">Current class</p><p className="mt-1 capitalize text-ink-muted">{record.kind}</p></div><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-ink-faint">Future memory type</p><p className="mt-1 text-ink-muted">Not classified yet</p></div></div>
+              </Section>
             </div>
 
             {/* read-only footer — write actions are deferred */}

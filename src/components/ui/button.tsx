@@ -5,18 +5,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const button = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-bright disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium transition-all duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wine-bright disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
   {
     variants: {
       variant: {
         primary:
-          "bg-gradient-to-b from-violet-bright to-violet-deep text-white shadow-[0_8px_24px_-8px_rgba(139,92,246,0.7)] hover:shadow-[0_10px_30px_-8px_rgba(139,92,246,0.9)] hover:brightness-110",
+          "border border-wine/55 bg-gradient-to-b from-wine-bright/35 via-wine/25 to-wine-deep/35 text-white backdrop-blur-md shadow-[inset_0_1px_0_0_rgba(243,238,244,0.35),0_10px_28px_-10px_rgba(0,0,0,0.6),0_8px_26px_-12px_rgba(201,79,109,0.6)] hover:border-wine-bright/75 hover:brightness-110 hover:shadow-[inset_0_1px_0_0_rgba(243,238,244,0.45),0_12px_32px_-8px_rgba(0,0,0,0.65),0_10px_32px_-8px_rgba(201,79,109,0.9)]",
         ghost:
           "text-ink-muted hover:text-ink hover:bg-white/5",
         glass:
           "glass text-ink hover:border-white/15 hover:text-ink",
         outline:
-          "border border-white/10 text-ink-muted hover:text-ink hover:border-white/20 hover:bg-white/[0.03]",
+          "border border-white/15 bg-white/[0.04] text-ink-muted backdrop-blur-md shadow-[inset_0_1px_0_0_rgba(243,238,244,0.14),0_8px_22px_-12px_rgba(0,0,0,0.55)] hover:text-ink hover:border-white/25 hover:bg-white/[0.07]",
       },
       size: {
         sm: "h-8 px-3 text-xs",

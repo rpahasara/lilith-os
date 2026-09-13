@@ -59,6 +59,13 @@ function usePerfGuard(enabled: boolean, graceMs = 0): boolean {
         if (!document.hidden && fps < 20) {
           lowStreak.current += 1;
           if (lowStreak.current >= 2) {
+            // TEMP dev diagnostic: the perf guard is degrading the live renderer
+            // to the static fallback — a candidate cause of "avatar disappears and
+            // doesn't come back" until a route remount resets the guard. Remove
+            // before commit.
+            console.warn(
+              `[Lilith perf guard] degraded to static — fps≈${fps.toFixed(1)} (< 20) for 2 windows`,
+            );
             setDegraded(true);
             stopped = true;
             return;

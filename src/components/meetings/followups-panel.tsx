@@ -40,7 +40,7 @@ export function FollowupsPanel({ followups }: { followups: Followup[] }) {
                     {f.title}
                   </p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-ink-faint">
-                    {f.source && <span className="uppercase tracking-wider">{f.source}</span>}
+                    {f.source && <span className="uppercase tracking-wider">source · {f.source}</span>}
                     {f.due && (
                       <>
                         <span>·</span>
@@ -54,6 +54,7 @@ export function FollowupsPanel({ followups }: { followups: Followup[] }) {
                       </>
                     )}
                   </p>
+                  {f.reason && !resolved && <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ink-faint">{f.reason}</p>}
                 </div>
               </li>
             );

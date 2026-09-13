@@ -25,17 +25,18 @@ export function ModuleStub({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="flex max-w-sm flex-col items-center text-center"
+        className="glass-panel relative flex max-w-md flex-col items-center rounded-[var(--radius-xl)] px-12 py-10 text-center"
       >
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/[0.04] hairline">
-          <Icon className="h-5 w-5 text-ink-muted" />
+        <span className="absolute inset-x-14 top-0 h-px bg-gradient-to-r from-transparent via-wine-bright/50 to-transparent" />
+        <div className="glass grid h-12 w-12 place-items-center rounded-2xl">
+          <Icon className="h-5 w-5 text-wine-bright" />
         </div>
         <h2 className="mt-4 text-lg font-medium tracking-tight text-ink">
           {title}
         </h2>
         <p className="mt-1.5 text-sm text-ink-muted">{note}</p>
         <Eyebrow className="mt-4 flex items-center gap-2">
-          <span className="h-1 w-1 rounded-full bg-cyan-bright" />
+          <span className="h-1 w-1 rounded-full bg-gold" />
           {order ?? "On the roadmap"}
         </Eyebrow>
       </motion.div>

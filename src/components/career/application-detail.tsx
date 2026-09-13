@@ -1,0 +1,18 @@
+"use client";
+
+import { Bell, FileText, Mail, PencilLine, Radio, UserRound } from "lucide-react";
+import { DetailDrawer, ContextAction, StatusBadge } from "@/components/ui/workspace";
+import { StageBadge } from "./stage-badge";
+import type { ActivityEvent, Application } from "@/lib/career/types";
+import { shortDate, timeAgo } from "@/lib/utils";
+
+export function ApplicationDetail({ application, activity, onClose }: { application: Application | null; activity: ActivityEvent[]; onClose: () => void }) {
+  const events = application ? activity.filter((item) => item.company?.toLowerCase() === application.company.toLowerCase()) : [];
+  return <DetailDrawer open={Boolean(application)} onClose={onClose} eyebrow="Opportunity workspace" title={application?.role ?? "Application"}>{application && <div className="space-y-6">
+    <div><div className="flex items-center justify-between gap-3"><p className="text-sm text-ink-muted">{application.company}{application.location ? ` · ${application.location}` : ""}</p><StageBadge stage={application.stage} /></div><div className="mt-4 grid grid-cols-2 gap-2">{[["Confidence", `${application.confidence}%`], ["Source", application.sourceAccount], ["Activity", `${application.activityCount} events`], ["Last signal", timeAgo(application.lastActivity)]].map(([label, value]) => <div key={label} className="rounded-xl bg-white/[0.03] p-3"><p className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">{label}</p><p className="mt-1 truncate text-xs text-ink-muted">{value}</p></div>)}</div></div>
+    <section><p className="eyebrow">Recommended next step</p><div className="mt-2 rounded-xl border border-violet-bright/15 bg-violet-bright/[0.04] p-4"><div className="flex items-center gap-2"><Bell className="h-3.5 w-3.5 text-violet-bright"/><p className="text-sm text-ink">{application.nextAction?.label ?? "Keep monitoring this opportunity"}</p></div><p className="mt-1.5 text-xs text-ink-faint">{application.nextAction?.due ? `Due ${shortDate(application.nextAction.due)}` : application.followUp ? "Lilith detected a follow-up signal." : "No deadline is exposed by the current source."}</p></div></section>
+    <section><p className="eyebrow">Contact</p><div className="mt-2 flex items-center gap-3 rounded-xl bg-white/[0.025] p-3"><UserRound className="h-4 w-4 text-cyan-bright"/><div><p className="text-xs text-ink-muted">{application.recruiter?.name ?? application.recruiter?.contact ?? "No linked contact"}</p><p className="text-[10px] text-ink-faint">{application.recruiter?.role ?? "Recruiter details have not been captured."}</p></div></div></section>
+    <section><div className="flex items-center justify-between"><p className="eyebrow">Activity timeline</p><StatusBadge label={`${events.length} linked`} tone="cyan" /></div>{events.length ? <ul className="mt-3 space-y-3">{events.map((event) => <li key={event.id} className="flex gap-3"><Radio className="mt-0.5 h-3 w-3 shrink-0 text-cyan-bright"/><div><p className="text-xs text-ink-muted">{event.text}</p><p className="mt-0.5 font-mono text-[10px] text-ink-faint">{timeAgo(event.time)}</p></div></li>)}</ul> : <p className="mt-2 text-xs text-ink-faint">No company-linked activity is exposed for this application.</p>}</section>
+    <section><p className="eyebrow">Workspace actions</p><div className="mt-2 grid gap-2"><ContextAction icon={Mail} title="Draft follow-up" description="Available when the career action API is connected." disabled/><ContextAction icon={PencilLine} title="Update stage" description="Stage changes remain read-only in this build." disabled/><ContextAction icon={FileText} title="Add note" description="Notes require persisted career records." disabled/></div></section>
+  </div>}</DetailDrawer>;
+}

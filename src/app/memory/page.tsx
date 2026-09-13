@@ -15,6 +15,7 @@ import { MemoryDetail } from "@/components/memory/memory-detail";
 import { MemorySkeleton } from "@/components/memory/memory-skeleton";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
+import { StatusBadge } from "@/components/ui/workspace";
 
 /** Client-side keyword match over a record. Semantic search arrives with the backend. */
 function matches(r: MemoryRecord, q: string): boolean {
@@ -54,7 +55,7 @@ export default function MemoryPage() {
   }, [data, category, query]);
 
   return (
-    <div className="scroll-area h-full space-y-4 overflow-y-auto pb-6 pr-1">
+    <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
       {loading || !data ? (
         <MemorySkeleton />
       ) : (
@@ -72,6 +73,15 @@ export default function MemoryPage() {
             onScope={setScope}
             resultCount={shown.length}
           />
+
+          <div className="flex flex-wrap items-center gap-2 px-1" aria-label="Planned memory architecture">
+            <span className="eyebrow mr-1">Memory model</span>
+            <StatusBadge label="Episodic · planned" tone="violet" />
+            <StatusBadge label="Semantic · planned" tone="cyan" />
+            <StatusBadge label="Preferences · mapped" tone="green" />
+            <StatusBadge label="Entities · mapped" tone="amber" />
+            <StatusBadge label="Procedural · planned" tone="faint" />
+          </div>
 
           <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
             {/* memory field */}
