@@ -687,4 +687,3 @@ def build_trace(
         "schema_version": SCHEMA_VERSION,
         "timestamp": round(time.time(), 3),
     }
-
