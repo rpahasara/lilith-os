@@ -1,0 +1,47 @@
+name: Architecture decision proposal
+description: Propose a consequential or difficult-to-reverse architectural choice.
+title: "[ADR proposal]: "
+labels: ["type: architecture", "status: proposed"]
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and decision drivers
+      description: What forces make a decision necessary now?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Proposed decision
+      description: State the choice precisely, including scope and exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include the status quo and meaningful tradeoffs.
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences and reversibility
+      description: List positive, negative, operational, migration, and lock-in effects.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and trust-boundary impact
+      description: Identify authority, data, runtime, and failure-boundary changes.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and revisit trigger
+      description: How will the decision be tested, and what evidence would cause reconsideration?
+    validations:
+      required: true

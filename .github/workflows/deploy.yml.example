@@ -1,0 +1,27 @@
+# This file is intentionally not an active GitHub Actions workflow.
+# Rename it to deploy.yml only after environments, artifacts, secret handling,
+# approvals, rollback, and post-deployment verification are defined in an ADR.
+name: Deployment placeholder
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_digest:
+        description: Immutable artifact digest to deploy
+        required: true
+      environment:
+        description: Protected GitHub environment
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-not-configured:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an unconfigured deployment
+        run: |
+          echo "Deployment is not configured."
+          echo "Complete docs/engineering/ci-cd.md and an accepted deployment ADR first."
+          exit 1
