@@ -72,6 +72,10 @@ The immediate focus is on:
 
 ## Architectural north star
 
+![LILITH High-Level Architecture](docs/architecture/diagrams/lilith-high-level-architecture.png)
+
+Presentation-grade view of the high-level LILITH system.
+
 ```mermaid
 flowchart TD
     U[User] --> C[Clients: Web / Voice / Future Native Apps]

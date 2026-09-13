@@ -1,6 +1,11 @@
 # Architecture Overview
 
-LILITH is designed as a persistent governed system above replaceable execution substrates. The architecture separates identity and authority from model execution so that changing Hermes, a model provider, a client, or a database does not silently create a different system or bypass policy.
+LILITH is designed as a persistent governed system above replaceable execution substrates. The architecture separates identity and authority from model execution so 
+that changing Hermes, a model provider, a client, or a database does not silently create a different system or bypass policy.
+
+## High-level architecture
+
+![LILITH High-Level Architecture](./diagrams/lilith-high-level-architecture.png)
 
 ## Architecture document hierarchy
 
