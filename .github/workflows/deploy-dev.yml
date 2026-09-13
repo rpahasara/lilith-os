@@ -1,0 +1,135 @@
+name: Deploy LILITH Core API to DEV
+
+on:
+  workflow_run:
+    workflows:
+      - Repository validation
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lilith-core-api-dev
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: lilith-agent-260823-27389
+  GCP_ZONE: asia-southeast1-b
+  GCP_INSTANCE: lilith-dev-01
+  GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+  GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+  HEALTH_URL: http://127.0.0.1:8765/health
+
+jobs:
+  deploy:
+    name: Deploy successful same-repository PR to DEV
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0] != null &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].base.ref == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out trusted deployment controls
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Check out the exact commit validated by CI
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Verify the checked-out revision
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Verify DEV deployment identity and target
+        shell: bash
+        run: |
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          gcloud compute instances describe "${GCP_INSTANCE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --format="value(name,status)"
+
+      - name: Upload DEV bootstrap and deployment candidates through IAP
+        shell: bash
+        env:
+          REMOTE_APP: /tmp/lilith-dev-app-${{ github.run_id }}-${{ github.run_attempt }}.py
+          REMOTE_REQUIREMENTS: /tmp/lilith-dev-requirements-${{ github.run_id }}-${{ github.run_attempt }}.txt
+          REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
+          REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
+        run: |
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            candidate/services/core-api/app.py \
+            "${GCP_INSTANCE}:${REMOTE_APP}"
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            candidate/services/core-api/requirements.txt \
+            "${GCP_INSTANCE}:${REMOTE_REQUIREMENTS}"
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            scripts/bootstrap_core_api_dev.sh \
+            "${GCP_INSTANCE}:${REMOTE_BOOTSTRAP}"
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            scripts/deploy_core_api_dev_remote.sh \
+            "${GCP_INSTANCE}:${REMOTE_DEPLOY}"
+
+      - name: Bootstrap and deploy the isolated DEV service
+        shell: bash
+        env:
+          REMOTE_APP: /tmp/lilith-dev-app-${{ github.run_id }}-${{ github.run_attempt }}.py
+          REMOTE_REQUIREMENTS: /tmp/lilith-dev-requirements-${{ github.run_id }}-${{ github.run_attempt }}.txt
+          REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
+          REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --command="set -e; trap 'rm -f ${REMOTE_APP} ${REMOTE_REQUIREMENTS} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_APP}' '${REMOTE_REQUIREMENTS}'"
+
+      - name: Verify DEV service health
+        shell: bash
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo"
