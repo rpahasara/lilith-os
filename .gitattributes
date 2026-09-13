@@ -1,1 +1,9 @@
+* text=auto eol=lf
+
 *.vrm filter=lfs diff=lfs merge=lfs -text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary

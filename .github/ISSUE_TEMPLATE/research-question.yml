@@ -1,0 +1,58 @@
+name: Research question
+description: Add a measurable question to the LILITH research program.
+title: "[RQ]: "
+labels: ["type: research", "status: proposed"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+      description: Phrase one bounded question that can drive a decision or experiment.
+    validations:
+      required: true
+  - type: dropdown
+    id: domain
+    attributes:
+      label: Domain
+      options:
+        - Identity and continuity
+        - Runtime independence and synchronization
+        - Memory and context
+        - Goals, planning, and delegation
+        - Governance, authority, and risk
+        - Execution, verification, and evidence
+        - Proactivity and attention
+        - Security, privacy, and abuse resistance
+        - Evaluation and observability
+        - Human factors and relationship
+        - Other cross-cutting concern
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and failure scenario
+      description: What becomes unsafe, unreliable, or incoherent if this remains unanswered?
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Current hypothesis
+      description: State a falsifiable candidate answer, or say UNKNOWN.
+    validations:
+      required: true
+  - type: textarea
+    id: experiment
+    attributes:
+      label: Proposed experiment and evidence
+      description: Define method, dataset/scenario, metrics, baseline, and success threshold.
+    validations:
+      required: true
+  - type: textarea
+    id: ethics
+    attributes:
+      label: Safety, privacy, and ethics
+      description: Identify human-subject, personal-data, security, or dual-use concerns.
+    validations:
+      required: true

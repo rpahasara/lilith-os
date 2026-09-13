@@ -148,4 +148,3 @@ class HsinLipSyncController {
 }
 
 export const hsinLipSync = new HsinLipSyncController();
-

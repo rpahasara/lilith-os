@@ -1,0 +1,61 @@
+name: Bug report
+description: Report reproducible behavior that conflicts with a documented contract.
+title: "[Bug]: "
+labels: ["type: bug", "status: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include secrets or security-sensitive details. Use private vulnerability reporting for security issues.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and why is it a problem?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest deterministic sequence that reproduces the behavior.
+      placeholder: |
+        1. Given ...
+        2. When ...
+        3. Then ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected contract
+      description: Link the architecture, ADR, policy, or requirement that defines the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Sanitized logs, traces, revisions, screenshots, or test output. Explain data freshness and provenance.
+    validations:
+      required: true
+  - type: dropdown
+    id: consequence
+    attributes:
+      label: Consequence class
+      options:
+        - R0 — observation only
+        - R1 — internal and reversible
+        - R2 — external but reversible
+        - R3 — consequential
+        - R4 — sensitive or destructive
+        - R5 — prohibited/nondelegable
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Revision, runtime, model, operating mode, and relevant connector versions.
+    validations:
+      required: true

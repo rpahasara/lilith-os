@@ -1,0 +1,45 @@
+name: Capability or feature proposal
+description: Propose a bounded improvement with explicit authority and verification needs.
+title: "[Proposal]: "
+labels: ["type: proposal", "status: triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user outcome is difficult today? Avoid prescribing the solution first.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Define observable success and important non-goals.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Ownership and boundaries
+      description: What belongs to LILITH, Hermes/runtime adapters, clients, or external systems?
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risk, authority, and privacy
+      description: Describe side effects, reversibility, approvals, data sensitivity, and worst credible failure.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: What independent evidence would demonstrate goal success?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: What simpler approaches or existing mechanisms were considered?
