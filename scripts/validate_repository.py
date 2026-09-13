@@ -134,9 +134,20 @@ def validate_repository_invariants(errors: list[str]) -> None:
         for path in (ROOT / ".github/workflows").glob("deploy.y*ml")
         if path.suffix in {".yml", ".yaml"}
     ]
-    if active_deployments:
+
+    deployment_adr = ROOT / "docs/adr/0005-git-driven-production-deployment.md"
+    deployment_accepted = False
+
+    if deployment_adr.exists():
+        deployment_adr_text = deployment_adr.read_text(encoding="utf-8")
+        deployment_accepted = "- **Status:** Accepted" in deployment_adr_text
+
+    if active_deployments and not deployment_accepted:
         names = ", ".join(path.name for path in active_deployments)
-        errors.append(f"deployment must remain inactive until its ADR is accepted: {names}")
+        errors.append(
+            "deployment must remain inactive until ADR-0005 is accepted: "
+            f"{names}"
+        )
 
 
 def main() -> int:

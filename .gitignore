@@ -73,3 +73,5 @@ next-env.d.ts
 *.tmp
 *.bak
 *.backup
+
+gha-creds-*.json

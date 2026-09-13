@@ -1,0 +1,85 @@
+name: Deploy LILITH Core API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/core-api/**"
+      - "scripts/deploy_core_api_remote.sh"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: lilith-core-api-production
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: lilith-agent-260823-27389
+  GCP_ZONE: asia-southeast1-b
+  GCP_INSTANCE: lilith-01
+  GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+  GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+  LOCAL_APP: services/core-api/app.py
+  LIVE_APP: /home/lilith/.hermes/lilith-os/api/app.py
+  SERVICE_NAME: lilith-os-api.service
+
+jobs:
+  deploy:
+    name: Deploy core API to GCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate backend locally
+        run: |
+          python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
+          python -m py_compile services/core-api/app.py
+          python -m unittest discover -s services/core-api/tests -p "test_*.py"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Verify deployment identity
+        run: |
+          gcloud auth list --filter=status:ACTIVE --format="value(account)"
+          gcloud compute instances describe "${GCP_INSTANCE}" --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --format="value(name,status)"
+
+      - name: Upload deployment candidate
+        env:
+          REMOTE_APP: /tmp/lilith-app-${{ github.sha }}.py
+          REMOTE_SCRIPT: /tmp/lilith-deploy-core-api-${{ github.sha }}.sh
+        run: |
+          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap "${LOCAL_APP}" "${GCP_INSTANCE}:${REMOTE_APP}"
+          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap scripts/deploy_core_api_remote.sh "${GCP_INSTANCE}:${REMOTE_SCRIPT}"
+
+      - name: Deploy with production validation, health check, and rollback
+        env:
+          REMOTE_APP: /tmp/lilith-app-${{ github.sha }}.py
+          REMOTE_SCRIPT: /tmp/lilith-deploy-core-api-${{ github.sha }}.sh
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap --command="sudo bash '${REMOTE_SCRIPT}' '${REMOTE_APP}' '${LIVE_APP}' '${SERVICE_NAME}'"
+
+      - name: Final production verification
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap --command="curl -fsS http://127.0.0.1:8765/health && echo"
