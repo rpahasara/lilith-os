@@ -1,4 +1,3 @@
-# CI/CD DEV deployment validation
 import html
 import json
 import re
