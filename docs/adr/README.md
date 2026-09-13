@@ -10,6 +10,7 @@ ADRs preserve consequential decisions, their alternatives, evidence, and tradeof
 | [0002](0002-canonical-durable-state.md) | Durable task and identity state has a canonical authority | Accepted | 2026-09-13 |
 | [0003](0003-separate-execution-from-verification.md) | Execution and verification are separate responsibilities | Accepted | 2026-09-13 |
 | [0004](0004-clients-cannot-directly-execute-capabilities.md) | Clients cannot directly execute governed capabilities | Accepted | 2026-09-13 |
+| [0005](0005-git-driven-production-deployment.md) | Production deployment is Git-driven through governed CI/CD | Accepted | 2026-09-13 |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 
