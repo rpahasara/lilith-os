@@ -36,8 +36,23 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      statuses: write
 
     steps:
+      - name: Publish pending DEV deployment status
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.workflow_run.head_sha,
+              state: 'pending',
+              context: 'LILITH DEV deployment',
+              description: 'Deploying the CI-validated commit to DEV',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
       - name: Check out trusted deployment controls
         uses: actions/checkout@v7
         with:
@@ -133,3 +148,33 @@ jobs:
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
             --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo"
+
+      - name: Publish successful DEV deployment status
+        if: ${{ success() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.workflow_run.head_sha,
+              state: 'success',
+              context: 'LILITH DEV deployment',
+              description: 'DEV deployment and health verification passed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
+      - name: Publish failed DEV deployment status
+        if: ${{ failure() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.workflow_run.head_sha,
+              state: 'failure',
+              context: 'LILITH DEV deployment',
+              description: 'DEV deployment or health verification failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
