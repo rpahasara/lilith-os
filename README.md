@@ -4,7 +4,7 @@
 
 LILITH is a long-term engineering and research project exploring what it takes to build a personal AI system that remains coherent, accountable, verifiable, and useful over time.
 
-It is not defined by a single language model, runtime, database, interface, or cloud provider.
+It is not defined by a single language model, runtime, database, interface, embodiment, or cloud provider.
 
 ## LILITH and Hermes
 
@@ -12,7 +12,7 @@ The central architectural distinction is:
 
 ```text
 LILITH                                         Hermes
-──────────────────────────────────────         ───────────────────────────
+--------------------------------------         ---------------------------
 Persistent identity and continuity             Runtime/execution substrate
 Memory and long-running goals                  Model and tool orchestration
 Governance and delegated authority             Replaceable capability host
@@ -26,139 +26,131 @@ Hermes provides execution and agency infrastructure. Hermes is not LILITH.
 
 LILITH owns the persistent identity, cognition, governance, memory, goals, evidence, continuity, and relationship with the user.
 
-> Hermes answers: “How can this execute?”
+> Hermes answers: "How can this execute?"
 >
-> LILITH answers: “Should it execute, under whose authority, with what context, how do we verify the result, and how does the same intelligence continue afterward?”
+> LILITH answers: "Should it execute, under whose authority, with what context, how do we verify the result, and how does the same intelligence continue afterward?"
 
 The runtime is replaceable. The identity is not.
 
----
+```text
+LILITH != model
+LILITH != Hermes
+LILITH != Hsin
+LILITH != UI
+LILITH != cloud
 
-## Current system
+LILITH = governed continuity across replaceable machinery.
+```
 
-LILITH already contains working foundations across several areas:
+## How to read project claims
 
-- Next.js-based LILITH OS interface
-- Command and task lifecycle
-- Persistent task state
-- Cognitive architecture developed through multiple implementation slices
-- World modelling
-- Reasoning and goal-executive foundations
-- Planning and replanning architecture
-- Social and ethical cognition foundations
-- Learning consolidation
-- Canonical long-term memory architecture
-- Backend services deployed on GCP
-- Hermes integration
-- Voice and text interaction
-- Embodied visual presence through Hsin
-- Hsin expression, gaze, blinking, lip-sync, speaking, and ambient motion systems
+LILITH separates present evidence from intended architecture and open research.
 
-The project is currently entering an architecture-review and engineering-foundation phase before expanding further autonomy.
+| Label | Meaning |
+| --- | --- |
+| **AS-IS** | Implemented or operationally evidenced in the current project record. A foundation is not necessarily mature end to end. |
+| **PARTIAL** | A real foundation exists, but activation, coverage, evaluation, or integration remains incomplete. |
+| **TARGET** | An intentional design direction. It is not a claim that the capability is live. |
+| **RESEARCH** | An unresolved question, hypothesis, or experiment requiring evidence. |
+| **HISTORICAL** | A preserved earlier architecture, roadmap, or implementation checkpoint that may have evolved or been superseded. |
 
-The immediate focus is on:
+These labels apply throughout the public documentation. Dates and diagrams do not promote a TARGET or RESEARCH item to AS-IS.
 
-- Consolidating source control
-- Formalizing architecture and component boundaries
-- CI/CD
-- Security and threat modelling
-- Memory and state governance
-- Evaluation
-- Observability
-- Safe autonomy
-- Deployment and rollback discipline
+## Current status
 
----
+### AS-IS
 
-## Architectural north star
+- A Next.js LILITH OS application and a backend Core API under `services/core-api`.
+- A persistent command and task lifecycle with backend task records, policy probes, connectors, verification paths, and tests.
+- Implemented foundations for the world model, goal/executive system, reasoning, global workspace, motivation, planning and replanning, ethical deliberation, social/presence behavior, and learning/consolidation. Maturity varies by slice.
+- Canonical-memory groundwork, including guarded authority, privacy, containment, and provenance boundaries. Production memory apply remains disabled.
+- Hermes integration for model and tool execution.
+- Voice and text interaction foundations.
+- Hsin assets and presence foundations, including gaze, ambient motion, expression, lip-sync, and semantic presence states.
+- GitHub source control, protected `main`, pull-request CI, exact-SHA deployment to isolated DEV, health verification, Core API deployment to private PROD, and tested source rollback behavior.
+
+### PARTIAL
+
+- The command, task, policy, connector, and verification loop is implemented in bounded paths, not as a universal autonomous executor.
+- Cognitive layers exist as implementation slices and responsibility boundaries; they are not all equally mature or independent services.
+- Canonical long-term memory has guarded foundations, but full autobiographical admission, retrieval, consolidation, contradiction handling, correction, deletion, and production activation are not complete.
+- Long-horizon goals, resumable work, replanning, and reconciliation have foundations but are not complete across all failure modes.
+- Voice and Hsin provide an embodied interaction layer, while mature turn-taking, cross-device presence, and broader embodiment remain incomplete.
+
+### TARGET
+
+- Governed autobiographical memory with lineage, correction, deletion, decay, consolidation, and privacy-aware retrieval.
+- Long-horizon autonomy earned through simulation, shadow mode, approval gating, evaluation, and measured release.
+- One-identity continuity across devices with conflict resolution and device-specific execution.
+- A broader ecosystem of least-privileged workers, runtime adapters, and connectors.
+- Richer Hsin embodiment and honest semantic expression across interfaces and devices.
+- Production-grade observability, revision reporting, restore-tested recovery, immutable artifact promotion, infrastructure as code, and frontend hosting.
+
+### RESEARCH
+
+- Functional affect and relationship continuity without manipulation, dependency shaping, or unsupported claims of subjective experience.
+- Memory economics, contradiction management, adversarial-memory defense, counterfactual reasoning, and safe offline consolidation.
+- Delegated authority, multi-worker disagreement, long-running task recovery, cross-device identity, and calibrated autonomy.
+- Evaluation methods for identity continuity, truthfulness, safety, usefulness, and trust over long time horizons.
+
+### HISTORICAL
+
+Earlier product and architecture work - including the app framework, universal timeline, event fabric, attention levels, Career CRM, privacy zones, local/cloud deployment concepts, visual shell, and prior roadmap checkpoints - remains valuable project history. Historical material should be read through its stated date and status, not as a claim about the current deployment.
+
+## Architecture at a glance
 
 ![LILITH High-Level Architecture](docs/architecture/diagrams/lilith-high-level-architecture.png)
 
-Presentation-grade view of the high-level LILITH system.
-
 ```mermaid
 flowchart TD
-    U[User] --> C[Clients: Web / Voice / Future Native Apps]
-    C --> L[LILITH Governed Control Plane]
-
-    L --> I[Identity / Goals / Memory]
-    L --> P[Policy / Approval]
-    L --> O[Observe / Interpret / Plan / Act / Verify]
-
-    O --> H[Hermes Runtime Adapter]
-    O --> R[Future Runtime Adapters]
-
-    H --> T[Capabilities / External Systems]
-    R --> T
-
-    T --> V[Evidence / Read-back / Verification]
-    V --> L
-
-    L --> HS[Presence / Hsin]
+    U[User and world] --> X[Interfaces: web / voice / future clients]
+    X --> S[Identity / relationship / memory / goals]
+    S --> C[Cognition]
+    C --> G[Governance: policy / risk / approval / authority]
+    G --> E[Execution: Hermes / workers / connectors]
+    E --> W[External systems]
+    W --> V[Verification / evidence / read-back]
+    V --> S
+    S --> P[Presence / Hsin]
 ```
 
-## Core principles
-
-- **Identity above infrastructure**
-  Models, runtimes, clients, databases, and cloud platforms are replaceable.
-
-- **Governance cannot be bypassed**
-  Capabilities must be explicit, scoped, risk-aware, and policy checked.
-
-- **Execution is not success**
-  A successful API call does not automatically mean the user's goal succeeded.
-
-- **Evidence before claims**
-  Important outcomes should be supported by verification and provenance.
-
-- **State has authority**
-  Live, cached, stale, inferred, simulated, and user-entered information must not be silently conflated.
-
-- **Autonomy is graduated**
-  New capabilities move through design, simulation, shadow mode, approval gating, testing, and measured release.
-
-- **Embodiment does not own cognition**
-  Hsin expresses semantic state but does not define LILITH's reasoning.
-
-- **Production is a deployment target, not a development environment**
-  Source control and CI/CD become the authority for production changes.
-
----
-
-## Repository structure
-
-The repository is evolving toward a full LILITH monorepo.
-
-Current and planned areas include:
+The governing lifecycle is:
 
 ```text
-lilith-os/
-├── src/                     Current LILITH web application
-├── public/                  Assets including embodiment resources
-├── docs/
-│   ├── architecture/        Architecture and cognitive slices
-│   ├── adr/                 Architecture Decision Records
-│   ├── engineering/         Development, testing, and CI/CD
-│   ├── journal/             Engineering-learning records
-│   ├── research/            Research questions and experiments
-│   ├── roadmap/             Delivery and maturity roadmap
-│   └── security/            Threat model and trust boundaries
-├── scripts/                 Repository and engineering utilities
-├── .github/                 GitHub workflows and contribution templates
-└── ...
+Cognition proposes
+  -> Governance authorizes
+  -> Runtime executes
+  -> Verification proves
+  -> Canonical owners update state
 ```
 
-As backend source is consolidated into the repository, the structure will expand toward dedicated application, service, infrastructure, database, and shared-contract boundaries.
+Execution is not proof of success. An API response, tool output, or model statement is evidence to evaluate, not permission to assert that the user's goal was achieved.
 
----
+### Ownership boundaries
+
+- **Identity, relationship, memory, and goals** carry durable continuity and authoritative personal state.
+- **Cognition** interprets, reasons, plans, replans, and proposes actions using bounded context.
+- **Governance** evaluates policy, risk, delegated authority, approval, expiry, and revocation.
+- **Hermes, workers, and connectors** execute scoped capabilities. They do not own identity, durable authority, or final truth.
+- **Verification** independently reads back consequential results, classifies outcomes, and records evidence.
+- **Presence and Hsin** translate semantic state into voice, expression, gaze, posture, and motion. Hsin does not own cognition, memory, policy, or action authority.
+
+## Architectural principles
+
+- **Identity above infrastructure.** Models, runtimes, clients, storage implementations, and cloud platforms are replaceable.
+- **One authoritative owner per invariant.** Projections, caches, and adapters do not gain authority by sharing storage or context.
+- **Governance cannot be bypassed.** Capabilities must be explicit, scoped, risk-aware, policy-checked, and bound to the authorized proposal.
+- **Execution is not success.** Consequential outcomes require evidence and, where justified, independent read-back.
+- **State has authority and provenance.** Live, cached, stale, inferred, simulated, and user-entered information must not be silently conflated.
+- **Autonomy is graduated.** Capabilities progress through design, simulation, shadow mode, approval gating, testing, and measured release.
+- **Embodiment does not own cognition.** Hsin expresses semantic state without becoming an alternate control plane.
+- **Production is a deployment target, not a development environment.** Git and the governed delivery pipeline are the authority for production changes. Production hosts receive reviewed and verified changes through the deployment pipeline and are not used for ad-hoc development or source editing.
 
 ## Hsin
 
-Hsin is the embodied visual presence of LILITH.
+Hsin is the embodied visual and voice presence of LILITH. It is not a separate AI.
 
-Hsin is not a separate AI and does not own cognition.
-
-The Cognitive Core emits semantic presence states such as:
+The cognitive core can emit semantic presence states such as:
 
 ```text
 LISTENING
@@ -176,11 +168,68 @@ PLAYFUL
 SERIOUS
 ```
 
-The Presence system translates these states into visual behaviour such as posture, gaze, expression, movement, breathing, ears, tail, orientation, and animation.
+The presence layer translates these states into presentation behavior such as voice, expression, posture, gaze, breathing, orientation, ears, tail, and motion. It must communicate uncertainty and limitations honestly and must not expose private reasoning or confer action authority.
 
-This keeps cognition independent from any particular embodiment renderer.
+## Repository structure
 
----
+The repository contains the current application, Core API, public architecture and research material, validation tools, and delivery workflows.
+
+```text
+lilith-os/
+|-- src/                     LILITH web application
+|-- public/                  Assets, including embodiment resources
+|-- services/
+|   `-- core-api/            Backend Core API
+|-- docs/
+|   |-- architecture/        Architecture and cognitive slices
+|   |-- adr/                 Architecture Decision Records
+|   |-- engineering/         Development, testing, and CI/CD
+|   |-- journal/             Engineering-learning records
+|   |-- research/            Research questions and experiments
+|   |-- roadmap/             Delivery and maturity roadmap
+|   `-- security/            Threat model and trust boundaries
+|-- scripts/                 Repository, validation, and deployment utilities
+|-- .github/                 Workflows and contribution templates
+`-- ...
+```
+
+## Development and delivery
+
+For local frontend development:
+
+```bash
+npm install
+npm run dev
+```
+
+The application is normally available at [http://localhost:3000](http://localhost:3000). Backend connectivity should use the environment variables documented in [`.env.example`](.env.example). Never commit credentials or local environment files.
+
+Production changes follow one enforced path:
+
+```text
+feature branch
+  -> pull request
+  -> repository CI
+  -> exact candidate SHA deployed to isolated DEV
+  -> service and /health verification
+  -> required DEV status
+  -> merge to protected main
+  -> Core API deployment to PROD when relevant paths change
+  -> production verification or rollback
+```
+
+The four required checks are:
+
+1. `Repository contracts`
+2. `Frontend build and command core`
+3. `Core API tests`
+4. `LILITH DEV deployment`
+
+The branch must be up to date before merge. Force pushes are blocked, and there is no supported path for direct edits on `main` or on DEV/PROD hosts.
+
+Current production deployment covers the backend/Core API only. The repository contains a substantial frontend, but a production frontend hosting target and production delivery pipeline have not yet been established.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [Development Notes](docs/engineering/development.md) for contribution and validation expectations.
 
 ## Documentation
 
@@ -197,90 +246,39 @@ Start here:
 - [Threat Model](docs/security/threat-model.md)
 - [Roadmap](docs/roadmap/roadmap.md)
 
----
+The public documentation is a curated entry point. The complete recovery register and canonical research record remain deeper references rather than being reproduced in this README.
 
-## Research direction
-
-The overarching research question is:
+## Research north star
 
 > **How can a persistent personal AI become increasingly capable and autonomous over years while preserving identity continuity, truthfulness, user authority, privacy, safety, explainability, and trust?**
 
-LILITH treats architecture questions as research problems where appropriate.
+LILITH treats architecture questions as research problems where evidence is incomplete. It does not claim novel scientific results, machine consciousness, subjective experience, or solved AI welfare. Functional internal state may be designed and evaluated by its causal behavior; stronger claims require independent scientific evidence.
 
 The project follows:
 
 ```text
 Learn
-  ↓
-Apply
-  ↓
-Experiment
-  ↓
-Verify
-  ↓
-Document
-  ↓
-Publish
+  -> Apply
+  -> Experiment
+  -> Verify
+  -> Document
+  -> Publish
 ```
-
----
-
-## Development
-
-The current frontend is based on Next.js.
-
-For local development:
-
-```bash
-npm install
-npm run dev
-```
-
-The application is normally available at [http://localhost:3000](http://localhost:3000).
-
-Backend connectivity should use the environment variables documented in [`.env.example`](.env.example).
-
-Real credentials and local environment files must never be committed.
-
----
 
 ## Security
 
-LILITH is experimental and increasingly capable.
+LILITH is experimental and increasingly capable. It is not a supported general-purpose production release and is not represented as safe for sensitive, irreversible, financial, or safety-critical actions.
 
-Security architecture is based on:
-
-- Least privilege
-- Explicit authority
-- Approval-bound consequential actions
-- Capability isolation
-- Evidence and read-back verification
-- Provenance
-- Credential isolation
-- Prompt-injection resistance
-- Memory-poisoning resistance
-- Auditable execution
+Security architecture emphasizes least privilege, explicit authority, approval-bound consequential actions, replay protection, idempotency, capability isolation, provenance, independent verification, credential isolation, prompt-injection resistance, memory-poisoning resistance, and auditable execution.
 
 See [SECURITY.md](SECURITY.md) and the [Threat Model](docs/security/threat-model.md).
 
----
-
-## Project status
-
-LILITH is under active development.
-
-The current phase focuses on consolidating the existing implementation into a stronger engineering foundation before continuing higher-autonomy development.
-
-That includes architecture review, source-control normalization, CI/CD, evaluation, security, observability, deployment discipline, and documentation.
-
----
-
 ## License
 
-No open-source license has been selected yet.
+No open-source license has been selected.
 
-Until a license is explicitly added, all rights are reserved.
+Unless and until a license is explicitly added, all rights are reserved.
 
 ---
 
-LILITH is not being built as another chatbot. It is being built as a persistent personal intelligence with one identity across time, devices, runtimes, capabilities, and embodiment.
+LILITH is not being built as another chatbot. It is being built as a persistent personal intelligence with one governed identity across time, devices, runtimes, capabilities, and embodiment.
