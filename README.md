@@ -144,7 +144,7 @@ Execution is not proof of success. An API response, tool output, or model statem
 - **State has authority and provenance.** Live, cached, stale, inferred, simulated, and user-entered information must not be silently conflated.
 - **Autonomy is graduated.** Capabilities progress through design, simulation, shadow mode, approval gating, testing, and measured release.
 - **Embodiment does not own cognition.** Hsin expresses semantic state without becoming an alternate control plane.
-- **Production is a deployment target.** Git and the governed delivery pipeline are the authority for production changes.
+- **Production is a deployment target, not a development environment.** Git and the governed delivery pipeline are the authority for production changes. Production hosts receive reviewed and verified changes through the deployment pipeline and are not used for ad-hoc development or source editing.
 
 ## Hsin
 
