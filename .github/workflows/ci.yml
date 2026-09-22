@@ -43,6 +43,9 @@ jobs:
       - name: Validate repository contracts
         run: python scripts/validate_repository.py
 
+      - name: Validate trusted DEV durability controls
+        run: python -m unittest scripts/test_core_api_dev_durability_probe.py
+
   frontend-quality:
     name: Frontend build and command core
     runs-on: ubuntu-latest

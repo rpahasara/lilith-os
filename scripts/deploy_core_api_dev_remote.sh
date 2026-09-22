@@ -5,6 +5,7 @@ CANDIDATE_BUNDLE="${1:?candidate bundle path required}"
 CANDIDATE_ATTESTATION="${2:?candidate attestation path required}"
 CANDIDATE_SHA="${3:?candidate SHA required}"
 TRUSTED_VERIFIER="${4:?trusted verifier path required}"
+TRUSTED_DURABILITY_PROBE="${5:?trusted durability probe path required}"
 
 APP_USER="lilith"
 APP_GROUP="lilith"
@@ -23,6 +24,7 @@ fi
 RELEASE_DIR="${RELEASES_DIR}/${CANDIDATE_SHA}"
 STAGING_DIR="${RELEASES_DIR}/.${CANDIDATE_SHA}.staging.$$"
 PREVIOUS_RELEASE=""
+PROBE_PREPARED=0
 if [[ -L "${CURRENT_LINK}" ]]; then
   PREVIOUS_RELEASE="$(readlink -f "${CURRENT_LINK}")"
 fi
@@ -43,7 +45,17 @@ rollback() {
 }
 
 cleanup() {
-  rm -f "${CANDIDATE_BUNDLE}" "${CANDIDATE_ATTESTATION}" "${TRUSTED_VERIFIER}" "$0" || true
+  if [[ "${PROBE_PREPARED}" == "1" && -f "${TRUSTED_DURABILITY_PROBE}" ]]; then
+    runuser -u "${APP_USER}" -- env PYTHONDONTWRITEBYTECODE=1 \
+      "${VENV_DIR}/bin/python" "${TRUSTED_DURABILITY_PROBE}" cleanup \
+      --candidate-sha "${CANDIDATE_SHA}" || true
+  fi
+  rm -f \
+    "${CANDIDATE_BUNDLE}" \
+    "${CANDIDATE_ATTESTATION}" \
+    "${TRUSTED_VERIFIER}" \
+    "${TRUSTED_DURABILITY_PROBE}" \
+    "$0" || true
   if [[ -d "${STAGING_DIR}" ]]; then
     rm -rf --one-file-system "${STAGING_DIR}" || true
   fi
@@ -56,6 +68,7 @@ test -d "${RELEASES_DIR}"
 test -f "${CANDIDATE_BUNDLE}"
 test -f "${CANDIDATE_ATTESTATION}"
 test -f "${TRUSTED_VERIFIER}"
+test -f "${TRUSTED_DURABILITY_PROBE}"
 
 echo "--- VERIFY AND EXTRACT EXACT-SHA BUNDLE ---"
 install -d -o "${APP_USER}" -g "${APP_GROUP}" -m 700 "${STAGING_DIR}"
@@ -99,6 +112,24 @@ ln -s "${RELEASE_DIR}" "${NEXT_LINK}"
 mv -Tf "${NEXT_LINK}" "${CURRENT_LINK}"
 chown -h "${APP_USER}:${APP_GROUP}" "${CURRENT_LINK}"
 
+echo "--- PREPARE PERSISTENT DEV CANONICAL DURABILITY PROBE ---"
+PRE_RESTART_PID="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
+if [[ ! "${PRE_RESTART_PID}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "DEV service has no pre-restart PID." >&2
+  rollback
+  exit 1
+fi
+systemctl show "${SERVICE_NAME}" \
+  --property=MainPID,NRestarts,ActiveState,SubState,ActiveEnterTimestamp \
+  --no-pager
+runuser -u "${APP_USER}" -- env \
+  LILITH_ENV=dev \
+  PYTHONDONTWRITEBYTECODE=1 \
+  "${VENV_DIR}/bin/python" "${TRUSTED_DURABILITY_PROBE}" prepare \
+  --candidate-sha "${CANDIDATE_SHA}" \
+  --pre-restart-pid "${PRE_RESTART_PID}"
+PROBE_PREPARED=1
+
 echo "--- ENABLE AND RESTART DEV SERVICE ---"
 systemctl enable "${SERVICE_NAME}"
 if ! systemctl restart "${SERVICE_NAME}"; then
@@ -122,6 +153,30 @@ if ! curl -fsS "${HEALTH_URL}"; then
   exit 1
 fi
 echo
+
+POST_RESTART_PID="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
+if [[ ! "${POST_RESTART_PID}" =~ ^[1-9][0-9]*$ || "${POST_RESTART_PID}" == "${PRE_RESTART_PID}" ]]; then
+  echo "DEV service restart did not establish a new process." >&2
+  rollback
+  exit 1
+fi
+systemctl show "${SERVICE_NAME}" \
+  --property=MainPID,NRestarts,ActiveState,SubState,ActiveEnterTimestamp \
+  --no-pager
+
+echo "--- VERIFY PERSISTENT DEV CANONICAL DURABILITY IN NEW PROCESS ---"
+runuser -u "${APP_USER}" -- env \
+  LILITH_ENV=dev \
+  PYTHONDONTWRITEBYTECODE=1 \
+  "${VENV_DIR}/bin/python" "${TRUSTED_DURABILITY_PROBE}" verify \
+  --candidate-sha "${CANDIDATE_SHA}" \
+  --post-restart-pid "${POST_RESTART_PID}"
+
+echo "--- CLEAN UP SYNTHETIC DEV DURABILITY ENVIRONMENT ---"
+runuser -u "${APP_USER}" -- env PYTHONDONTWRITEBYTECODE=1 \
+  "${VENV_DIR}/bin/python" "${TRUSTED_DURABILITY_PROBE}" cleanup \
+  --candidate-sha "${CANDIDATE_SHA}"
+PROBE_PREPARED=0
 
 echo "--- POST-INSTALL IDENTITY READBACK ---"
 test "$(readlink -f "${CURRENT_LINK}")" = "${RELEASE_DIR}"

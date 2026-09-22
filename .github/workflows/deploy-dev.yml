@@ -113,6 +113,7 @@ jobs:
           REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
+          REMOTE_DURABILITY_PROBE: /tmp/lilith-dev-durability-${{ github.run_id }}-${{ github.run_attempt }}.py
         run: |
           gcloud compute scp --quiet \
             --project="${GCP_PROJECT_ID}" \
@@ -144,6 +145,12 @@ jobs:
             --tunnel-through-iap \
             scripts/verify_core_api_bundle.py \
             "${GCP_INSTANCE}:${REMOTE_VERIFIER}"
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            scripts/run_core_api_dev_durability_probe.py \
+            "${GCP_INSTANCE}:${REMOTE_DURABILITY_PROBE}"
 
       - name: Bootstrap and deploy the isolated DEV service
         shell: bash
@@ -154,12 +161,13 @@ jobs:
           REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
+          REMOTE_DURABILITY_PROBE: /tmp/lilith-dev-durability-${{ github.run_id }}-${{ github.run_attempt }}.py
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            --command="set -e; trap 'rm -f ${REMOTE_BUNDLE} ${REMOTE_ATTESTATION} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY} ${REMOTE_VERIFIER}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_BUNDLE}' '${REMOTE_ATTESTATION}' '${VALIDATED_SHA}' '${REMOTE_VERIFIER}'"
+            --command="set -e; trap 'rm -f ${REMOTE_BUNDLE} ${REMOTE_ATTESTATION} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY} ${REMOTE_VERIFIER} ${REMOTE_DURABILITY_PROBE}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_BUNDLE}' '${REMOTE_ATTESTATION}' '${VALIDATED_SHA}' '${REMOTE_VERIFIER}' '${REMOTE_DURABILITY_PROBE}'"
 
       - name: Verify DEV service health
         shell: bash
