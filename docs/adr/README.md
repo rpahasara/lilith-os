@@ -11,6 +11,7 @@ ADRs preserve consequential decisions, their alternatives, evidence, and tradeof
 | [0003](0003-separate-execution-from-verification.md) | Execution and verification are separate responsibilities | Accepted | 2026-09-13 |
 | [0004](0004-clients-cannot-directly-execute-capabilities.md) | Clients cannot directly execute governed capabilities | Accepted | 2026-09-13 |
 | [0005](0005-git-driven-production-deployment.md) | Production deployment is Git-driven through governed CI/CD | Accepted | 2026-09-13 |
+| [0006](0006-family-neutral-canonical-memory-apply.md) | Canonical memory apply uses family-neutral proposal identity | Accepted | 2026-09-22 |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 

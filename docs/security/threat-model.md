@@ -46,6 +46,12 @@ The system processes untrusted natural language and may eventually receive sensi
 | T-12 | Urgent event pressures the system to bypass approval | Consequential unauthorized action | Urgency/authority separation, predelegation only, escalation policy | Emergency tabletop exercises |
 | T-13 | Observability stores excessive personal reasoning or content | Privacy loss and chilling effects | Minimal structured events, redaction, access/retention tiers | Trace privacy review |
 | T-14 | Backup restore revives revoked authority or old secrets | Unauthorized actions after recovery | Restore lineage, revocation reconciliation, key rotation, integrity checks | Disaster-recovery exercise |
+| T-15 | A V2 proposal ID is interpreted as a V1 proposal or collides across families | Wrong lineage, unauthorized canonical write, failed erasure | Immutable family-neutral proposal refs, closed family dispatch, fingerprint binding | V1 migration and cross-family tests |
+| T-16 | RESTORE consumes authorization for a fabricated item or unverified historical digest | Rollback of the wrong identity or value | Resolve exact canonical item/current/history, digest check, transactional one-time consumption | Cross-item, digest-drift, replay, and fault tests |
+| T-17 | Caller, browser, or model activates canonical memory or a Policy capability | Unauthorized durable personal memory | Server-only closed config, inactive defaults, independent registry/containment gates | Missing/malformed/inactive config tests and static scans |
+| T-18 | Migration runs on import, without a current backup, or against unknown schema | Data loss or unrecoverable state | Explicit CLI, online backup evidence, source identity/fingerprint/count checks, transactional migration | Import-side-effect, stale-backup, unknown-schema, and idempotency tests |
+| T-19 | Candidate bundle includes a secret, unrelated working-tree file, or path traversal | Secret disclosure or deployment compromise | Trusted allowlist builder, deterministic manifest, trusted extractor, exact member set, no links | Determinism, tamper, member, and traversal tests |
+| T-20 | Failed multi-file install leaves mixed source or reports the wrong SHA | Incoherent runtime or false deployment evidence | SHA-named releases, preflight tests, atomic symlink, health and identity read-back, prior-link rollback | DEV install, restart, health, identity, and rollback exercise |
 
 ## Security invariants
 
@@ -57,6 +63,8 @@ The system processes untrusted natural language and may eventually receive sensi
 6. Clients and runtimes cannot directly commit canonical consequential state.
 7. Sensitive data collection and retention are explicit and reviewable.
 8. Security-relevant state transitions produce durable, access-controlled evidence.
+9. Learning may propose canonical memory but only L04 may apply it.
+10. Cognitive recovery cannot outrank newer Privacy suppression state.
 
 ## Data-flow and privacy review placeholders
 
