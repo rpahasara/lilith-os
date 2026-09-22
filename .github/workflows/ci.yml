@@ -93,7 +93,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
 
       - name: Compile Core API
-        run: python -m py_compile services/core-api/app.py
+        run: python -m compileall -q services/core-api/app.py services/core-api/lilith_memory
 
       - name: Run Core API tests
         run: python -m unittest discover -s services/core-api/tests -p "test_*.py"
+
+      - name: Run Slice 8-15 architecture regressions
+        run: python scripts/run_cognitive_regressions.py
