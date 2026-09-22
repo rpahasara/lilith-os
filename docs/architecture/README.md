@@ -20,6 +20,7 @@ that changing Hermes, a model provider, a client, or a database does not silentl
 | [Runtime Boundary](runtime-boundary.md) | How do Hermes and future runtimes serve LILITH? |
 | [Trust Boundaries](../security/trust-boundaries.md) | Where does data or authority cross into a less-trusted context? |
 | [Slice 15B2b-A Canonical Runtime Foundation](slice-15b2b-a-canonical-runtime-foundation.md) | How are V2 proposals migrated, applied, packaged, and kept production-dark? |
+| [Slice 15B2b-A Acceptance Record](slice-15b2b-a-acceptance-record.md) | What was accepted in source, proven in isolated DEV, and observed dark in PROD? |
 
 ## Logical planes
 
