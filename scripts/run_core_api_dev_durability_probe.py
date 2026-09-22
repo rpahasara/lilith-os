@@ -48,9 +48,6 @@ PRODUCTION_COGNITIVE_DB = Path(
 PRODUCTION_PRIVACY_DB = Path(
     "/home/lilith/.hermes/lilith-os/data/privacy_governance.db"
 )
-PRODUCTION_CONFIG_PATH = Path(
-    "/home/lilith/.hermes/lilith-os/data/canonical-runtime.json"
-)
 PROBE_DIR = DATA_DIR / "canonical-durability-probe"
 MARKER_PATH = PROBE_DIR / "owned-probe.json"
 STATE_PATH = PROBE_DIR / "pre-restart-state.json"
@@ -89,42 +86,6 @@ CANONICAL_TABLES = (
     "policy_decision",
     "rollback_authorization",
     "rollback_consumption",
-)
-
-PRODUCTION_COGNITIVE_ZERO_TABLES = {
-    "registry": ("memory_registry_entry",),
-    "learningV2": (
-        "learning_memory_intent_v2",
-        "learning_candidate_v2",
-        "learning_project_codename_candidate_v1",
-        "learning_candidate_source_v2",
-        "learning_assessment_v2",
-        "learning_proposal_ref",
-        "learning_proposal_v2",
-    ),
-    "actor": ("actor_evidence_ref", "actor_evidence_consumption"),
-    "consent": ("consent_grant", "consent_revocation"),
-    "policy": ("policy_decision",),
-    "rollback": ("rollback_authorization", "rollback_consumption"),
-    "canonicalMemory": (
-        "memory_item",
-        "memory_revision",
-        "memory_revision_source",
-        "memory_active_revision",
-        "memory_admission",
-        "memory_apply_audit",
-    ),
-}
-
-PRODUCTION_PRIVACY_OPERATIONAL_TABLES = (
-    "privacy_forget_request",
-    "privacy_hold",
-    "privacy_erasure_authorization",
-    "privacy_erasure_authorization_owner",
-    "privacy_erasure_execution",
-    "privacy_restore_suppression_manifest",
-    "privacy_completion_receipt",
-    "privacy_completion_owner_result",
 )
 
 LEGACY_TARGETS = {
@@ -195,13 +156,17 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _reject_symlink_chain(root: Path, target: Path) -> None:
-    root_value = root.resolve(strict=False)
+    root_value = Path(os.path.abspath(root))
+    target_value = Path(os.path.abspath(target))
+    if not _is_relative_to(target_value, root_value):
+        raise ProbeError("probe path is outside the isolated DEV root")
+    for ancestor in (root_value, *root_value.parents):
+        if ancestor.is_symlink():
+            raise ProbeError(f"probe root traverses a symlink: {ancestor}")
     current = root_value
-    if root.exists() and stat.S_ISLNK(root.lstat().st_mode):
-        raise ProbeError(f"probe root may not be a symlink: {root}")
-    for part in target.resolve(strict=False).relative_to(root_value).parts:
+    for part in target_value.relative_to(root_value).parts:
         current = current / part
-        if current.exists() and stat.S_ISLNK(current.lstat().st_mode):
+        if current.is_symlink():
             raise ProbeError(f"probe path may not traverse a symlink: {current}")
 
 
@@ -219,6 +184,11 @@ def guard_probe_paths(
 ) -> ProbePaths:
     """Resolve and reject production, external, symlinked, or aliased paths."""
 
+    for candidate in (data_dir, cognitive_db, privacy_db):
+        if Path(candidate) in (Path(production_cognitive_db), Path(production_privacy_db)):
+            raise ProbeError("probe path resolves to a production database")
+    for candidate in (data_dir, cognitive_db, privacy_db):
+        _reject_symlink_chain(Path(app_root), Path(candidate))
     root = Path(app_root).resolve(strict=False)
     data = Path(data_dir).resolve(strict=False)
     cognitive = Path(cognitive_db).resolve(strict=False)
@@ -235,9 +205,6 @@ def guard_probe_paths(
         raise ProbeError("privacy DEV database is outside the isolated DEV root")
     if cognitive == privacy:
         raise ProbeError("cognitive and privacy databases must be physically separate")
-    _reject_symlink_chain(root, data)
-    _reject_symlink_chain(root, cognitive)
-    _reject_symlink_chain(root, privacy)
     if _same_file(data, production_cognitive.parent) or _same_file(
         data, production_privacy.parent
     ):
@@ -377,94 +344,6 @@ def _sqlite_evidence(path: Path, tables: Iterable[str]) -> dict:
         }
     finally:
         connection.close()
-
-
-def _read_only_zero_table_evidence(path: Path, tables: Iterable[str]) -> dict:
-    """Read an exact database in SQLite read-only mode and require empty tables."""
-
-    selected = tuple(tables)
-    if not path.is_file():
-        raise ProbeError(f"required production database is unavailable: {path}")
-    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
-    try:
-        connection.execute("PRAGMA query_only=ON")
-        existing = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        missing = sorted(set(selected) - existing)
-        if missing:
-            raise ProbeError(
-                "required production safety tables are unavailable: "
-                + ", ".join(missing)
-            )
-        counts = {
-            name: int(
-                connection.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
-            )
-            for name in selected
-        }
-        integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
-        foreign_keys = len(connection.execute("PRAGMA foreign_key_check").fetchall())
-        nonempty = {name: count for name, count in counts.items() if count != 0}
-        if integrity != "ok" or foreign_keys != 0 or nonempty:
-            raise ProbeError(
-                "production read-only safety check failed: "
-                f"integrity={integrity}, foreignKeys={foreign_keys}, rows={nonempty}"
-            )
-        return {
-            **_file_metadata(path),
-            "accessMode": "SQLITE_READ_ONLY",
-            "integrityCheck": integrity,
-            "foreignKeyViolations": foreign_keys,
-            "counts": counts,
-        }
-    finally:
-        connection.close()
-
-
-def production_read_only_safety(
-    config_path: Path = PRODUCTION_CONFIG_PATH,
-    cognitive_db: Path = PRODUCTION_COGNITIVE_DB,
-    privacy_db: Path = PRODUCTION_PRIVACY_DB,
-) -> dict:
-    """Prove canonical production remains dark and empty without mutating it."""
-
-    if not config_path.is_file() or config_path.is_symlink():
-        raise ProbeError("production canonical configuration is unavailable or unsafe")
-    config = _load_json(config_path)
-    if config != {
-        "schemaVersion": 1,
-        "canonicalLtmEnabled": False,
-        "activeCapabilities": [],
-    }:
-        raise ProbeError("production canonical configuration is not dark")
-    cognitive_tables = tuple(
-        table
-        for category in PRODUCTION_COGNITIVE_ZERO_TABLES.values()
-        for table in category
-    )
-    cognitive = _read_only_zero_table_evidence(cognitive_db, cognitive_tables)
-    privacy = _read_only_zero_table_evidence(
-        privacy_db, PRODUCTION_PRIVACY_OPERATIONAL_TABLES
-    )
-    grouped_counts = {
-        category: {table: cognitive["counts"][table] for table in tables}
-        for category, tables in PRODUCTION_COGNITIVE_ZERO_TABLES.items()
-    }
-    return {
-        "inspectionMode": "READ_ONLY",
-        "configuration": {
-            **_file_metadata(config_path),
-            "canonicalLtmEnabled": False,
-            "activeCapabilities": [],
-        },
-        "cognitiveDatabase": {**cognitive, "groupedCounts": grouped_counts},
-        "privacyDatabase": privacy,
-        "productionRowsRemainZero": True,
-    }
 
 
 def _checkpoint(path: Path) -> None:
@@ -947,34 +826,116 @@ def _marker(candidate_sha: str) -> dict:
 
 def validate_marker(candidate_sha: str, marker_path: Optional[Path] = None) -> dict:
     selected = Path(marker_path) if marker_path is not None else MARKER_PATH
+    if selected.is_symlink():
+        raise ProbeError("probe ownership marker may not be a symlink")
     marker = _load_json(selected)
     if marker != _marker(candidate_sha):
         raise ProbeError("probe ownership marker does not match this candidate")
     return marker
 
 
+def _mount_targets() -> set[Path]:
+    mountinfo = Path("/proc/self/mountinfo")
+    if not mountinfo.exists():
+        return set()
+    targets = set()
+    for line in mountinfo.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) >= 5:
+            mountpoint = fields[4]
+            for escaped, plain in (
+                ("\\040", " "),
+                ("\\011", "\t"),
+                ("\\012", "\n"),
+                ("\\134", "\\"),
+            ):
+                mountpoint = mountpoint.replace(escaped, plain)
+            targets.add(Path(mountpoint))
+    return targets
+
+
+def _cleanup_inventory(paths: ProbePaths) -> list[Path]:
+    """Inventory only the owned synthetic files before any deletion."""
+    targets = [
+        Path(str(database) + suffix)
+        for database in (paths.cognitive_db, paths.privacy_db)
+        for suffix in ("", "-wal", "-shm", "-journal")
+    ]
+    if PROBE_DIR.is_symlink():
+        raise ProbeError("probe directory may not be a symlink")
+    if PROBE_DIR.exists():
+        _ensure_owner_only(PROBE_DIR, directory=True)
+        allowed = {
+            MARKER_PATH.name,
+            STATE_PATH.name,
+            PROBE_CONFIG_PATH.name,
+            CONTAINMENT_PATH.name,
+            ACTOR_SECRET_PATH.name,
+            PRIVACY_SECRET_PATH.name,
+            CONTAINMENT_SECRET_PATH.name,
+            BACKUP_DIR.name,
+        }
+        if any(child.name not in allowed for child in PROBE_DIR.iterdir()):
+            raise ProbeError("probe directory contains an unrelated entry")
+        targets.append(PROBE_DIR)
+        targets.extend(PROBE_DIR.rglob("*"))
+    mounts = _mount_targets()
+    if any(
+        mount == paths.data_dir or _is_relative_to(mount, paths.data_dir)
+        for mount in mounts
+    ):
+        raise ProbeError("isolated DEV probe path is a mount or bind alias")
+    for target in targets:
+        if target.is_symlink():
+            raise ProbeError(f"synthetic cleanup target is a symlink: {target}")
+        if target.exists():
+            _reject_symlink_chain(paths.app_root, target)
+            details = target.lstat()
+            if not (stat.S_ISDIR(details.st_mode) or stat.S_ISREG(details.st_mode)):
+                raise ProbeError(f"synthetic cleanup target has an unsafe type: {target}")
+            if stat.S_ISREG(details.st_mode) and details.st_nlink != 1:
+                raise ProbeError(f"synthetic cleanup target has an external hardlink: {target}")
+            _ensure_owner_only(target, directory=stat.S_ISDIR(details.st_mode))
+    return targets
+
+
 def _cleanup_generated(candidate_sha: str, *, require_marker: bool) -> dict:
+    if not SHA_RE.fullmatch(candidate_sha):
+        raise ProbeError("candidate SHA is invalid")
     paths = default_probe_paths()
-    if require_marker:
-        validate_marker(candidate_sha)
-    elif MARKER_PATH.exists():
-        validate_marker(candidate_sha)
+    targets = _cleanup_inventory(paths)
+    existing = [target for target in targets if target.exists() or target.is_symlink()]
+    if not existing:
+        return {
+            "phase": "cleanup",
+            "status": "CLEANUP_ALREADY_COMPLETE",
+            "candidateSha": candidate_sha,
+            "teardownSemantics": "DEV_ENVIRONMENT_TEARDOWN_NOT_PRIVACY_ERASURE",
+            "cognitiveDatabaseAbsent": True,
+            "privacyDatabaseAbsent": True,
+            "probeDirectoryAbsent": True,
+            "unrelatedDevStateRemoved": False,
+        }
+    if not MARKER_PATH.is_file():
+        raise ProbeError("existing synthetic DEV state lacks its ownership marker")
+    _ensure_owner_only(MARKER_PATH)
+    validate_marker(candidate_sha)
     for database in (paths.cognitive_db, paths.privacy_db):
         for suffix in ("", "-wal", "-shm", "-journal"):
             target = Path(str(database) + suffix)
-            if target.exists() or target.is_symlink():
+            if target.exists():
                 target.unlink()
     if PROBE_DIR.exists():
         shutil.rmtree(PROBE_DIR)
-    production = production_read_only_safety()
     result = {
         "phase": "cleanup",
+        "status": "CLEANUP_COMPLETE",
         "candidateSha": candidate_sha,
         "teardownSemantics": "DEV_ENVIRONMENT_TEARDOWN_NOT_PRIVACY_ERASURE",
         "cognitiveDatabaseAbsent": not paths.cognitive_db.exists(),
         "privacyDatabaseAbsent": not paths.privacy_db.exists(),
         "probeDirectoryAbsent": not PROBE_DIR.exists(),
-        "productionReadOnlySafety": production,
+        "unrelatedDevStateRemoved": False,
     }
     if not all(
         result[key]
