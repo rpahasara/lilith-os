@@ -63,8 +63,9 @@ extra or duplicate entries fail readiness. Server-owned runtime configuration
 has only schema version, Boolean `canonical_ltm_enabled` and closed active
 capabilities. Missing or malformed configuration disables canonical use; a
 browser, proposal or model cannot enable it. The kill switch is checked on
-both mutation and exact reads. `CanonicalMemoryReadFacade` additionally
-requires actor authorization, registry read permission, no Privacy hold,
+mutation; the current read facade itself has no kill-switch check and is not
+wired into a production route. `CanonicalMemoryReadFacade` requires actor
+authorization, registry read permission, no Privacy hold,
 active revision and valid Consent. A canonical miss remains a miss: there is
 no fallback to legacy files, World, chat history or prompts.
 
@@ -81,6 +82,8 @@ replay and verification of Privacy state precede restore readiness.
 The accepted head `dd410b20ae2bbe08f9fda3eb5ed30baabf96bea6` passed
 [repository validation](https://github.com/rpahasara/lilith-os/actions/runs/35774918580):
 Repository contracts, Frontend build and command core, and Core API tests.
+Its stable effective patch ID against pre-merge main was
+`221d4e8f4c916022679dd50e187cf2290ba470fe`.
 Core API CI compiles the complete package, runs service tests, and reconstructs
 Slice 8–15 architecture regressions deterministically without a paid model
 call. The fourth required check, LILITH DEV deployment, passed in
@@ -116,6 +119,15 @@ blocked a new mutation, and did not fall back to legacy memory. The probe
 then reported `CLEANUP_COMPLETE`: its cognitive DB, Privacy DB and probe
 directory were absent. This was idempotent **DEV environment teardown**, not
 a production FORGET or Privacy erasure proof.
+
+The pre/post probe agreed on synthetic item
+`mitem.1e5bf34a4a834d45967b134e39166cb4`, active revision
+`mrev.0ded534e80704fe5be73b8f9ab0cdbf0`, proposal reference
+`proposal-ref.9c709f42677a447e83dc44d356d99be1`, source digest
+`90c59146bbf9ee26ba543bc25ae5a9375a9494d0ec5c12e505dd8157148d69f4`,
+and value digest
+`58ed74b3dc361a7c155626e49f1d3aa77c59725ce2fe3e2b8b6f4ca7f6102438`.
+These are synthetic DEV identifiers, not real owner memory or production rows.
 
 ## Production darkness and merge impact
 
