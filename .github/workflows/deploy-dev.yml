@@ -18,6 +18,8 @@ env:
   GCP_PROJECT_ID: lilith-agent-260823-27389
   GCP_ZONE: asia-southeast1-b
   GCP_INSTANCE: lilith-dev-01
+  GCP_PROD_INSTANCE: lilith-01
+  GCP_PROD_INSTANCE_ID: "1332996232081478576"
   GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
   GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
   HEALTH_URL: http://127.0.0.1:8765/health
@@ -179,6 +181,22 @@ jobs:
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
             --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && test \"\$(sudo -u lilith python3 -c 'import json; print(json.load(open(\"/home/lilith/.hermes/lilith-os-dev/current/deployment-manifest.json\"))[\"candidateSha\"])')\" = '${VALIDATED_SHA}' && sudo -u lilith cat /home/lilith/.hermes/lilith-os-dev/current/.bundle-sha256"
+
+      - name: Audit production darkness on the pinned production VM
+        shell: bash
+        run: |
+          test "${GCP_PROD_INSTANCE}" = "lilith-01"
+          test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"
+          test "$(gcloud compute instances describe "${GCP_PROD_INSTANCE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --format='value(id)')" = "${GCP_PROD_INSTANCE_ID}"
+          AUDIT_SOURCE="$(base64 -w0 scripts/audit_core_api_production_read_only.py)"
+          gcloud compute ssh "${GCP_PROD_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
 
       - name: Publish successful DEV deployment status
         if: ${{ success() }}

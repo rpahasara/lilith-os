@@ -6,8 +6,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sqlite3
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,6 +23,13 @@ if SPEC is None or SPEC.loader is None:
 probe = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = probe
 SPEC.loader.exec_module(probe)
+AUDIT_SCRIPT = Path(__file__).with_name("audit_core_api_production_read_only.py")
+AUDIT_SPEC = importlib.util.spec_from_file_location("production_durability_audit", AUDIT_SCRIPT)
+if AUDIT_SPEC is None or AUDIT_SPEC.loader is None:
+    raise RuntimeError("production durability audit could not be loaded")
+audit = importlib.util.module_from_spec(AUDIT_SPEC)
+sys.modules[AUDIT_SPEC.name] = audit
+AUDIT_SPEC.loader.exec_module(audit)
 
 
 class DurabilityProbePathSafetyTests(unittest.TestCase):
@@ -141,51 +150,6 @@ class DurabilityProbeEvidenceSafetyTests(unittest.TestCase):
     def test_invalid_candidate_sha_is_rejected_by_cli(self) -> None:
         self.assertIsNone(probe.SHA_RE.fullmatch("not-a-sha"))
 
-    def test_production_safety_check_is_read_only_and_requires_zero_rows(self) -> None:
-        config = self.root / "canonical-runtime.json"
-        cognitive = self.root / "cognitive.db"
-        privacy = self.root / "privacy.db"
-        config.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": 1,
-                    "canonicalLtmEnabled": False,
-                    "activeCapabilities": [],
-                }
-            ),
-            encoding="utf-8",
-        )
-        import sqlite3
-
-        cognitive_tables = {
-            table
-            for tables in probe.PRODUCTION_COGNITIVE_ZERO_TABLES.values()
-            for table in tables
-        }
-        for database, tables in (
-            (cognitive, cognitive_tables),
-            (privacy, probe.PRODUCTION_PRIVACY_OPERATIONAL_TABLES),
-        ):
-            connection = sqlite3.connect(database)
-            try:
-                for table in tables:
-                    connection.execute(f'CREATE TABLE "{table}" (id INTEGER)')
-                connection.commit()
-            finally:
-                connection.close()
-        result = probe.production_read_only_safety(config, cognitive, privacy)
-        self.assertEqual(result["inspectionMode"], "READ_ONLY")
-        self.assertTrue(result["productionRowsRemainZero"])
-        connection = sqlite3.connect(cognitive)
-        try:
-            connection.execute("INSERT INTO memory_item VALUES (1)")
-            connection.commit()
-        finally:
-            connection.close()
-        with self.assertRaisesRegex(probe.ProbeError, "production read-only"):
-            probe.production_read_only_safety(config, cognitive, privacy)
-
-
 class DurabilityProbeTrustedWiringTests(unittest.TestCase):
     def test_workflow_uploads_probe_through_iap_and_passes_exact_sha(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(
@@ -221,6 +185,223 @@ class DurabilityProbeTrustedWiringTests(unittest.TestCase):
         self.assertNotIn("systemctl restart lilith-os-api.service", source)
         self.assertNotIn("_atomic_json(DEFAULT_CONFIG_PATH", source)
         self.assertNotIn("_atomic_json(PRODUCTION_CONFIG_PATH", source)
+
+    def test_production_audit_uses_a_distinct_pinned_host(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(
+            encoding="utf-8"
+        )
+        audit = workflow.split("- name: Audit production darkness", 1)[1].split(
+            "- name: Publish successful DEV", 1
+        )[0]
+        self.assertIn("GCP_PROD_INSTANCE: lilith-01", workflow)
+        self.assertIn('test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"', audit)
+        self.assertIn("compute instances describe", audit)
+        self.assertIn('gcloud compute ssh "${GCP_PROD_INSTANCE}"', audit)
+        self.assertNotIn('gcloud compute ssh "${GCP_INSTANCE}"', audit)
+        self.assertNotIn("compute scp", audit)
+        self.assertNotIn("systemctl restart", audit)
+
+
+class DurabilityProbeCleanupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.app = self.root / "dev"
+        self.data = self.app / "data"
+        self.data.mkdir(parents=True)
+        self.prod = self.root / "prod"
+        self.prod.mkdir()
+        self.cognitive = self.data / "cognitive_memory.dev.db"
+        self.privacy = self.data / "privacy_governance.dev.db"
+        self.probe_dir = self.data / "canonical-durability-probe"
+        self.candidate = "a" * 40
+        self.paths = probe.guard_probe_paths(
+            self.app, self.data, self.cognitive, self.privacy,
+            self.prod / "cognitive_memory.db", self.prod / "privacy_governance.db",
+        )
+        patches = {
+            "default_probe_paths": mock.Mock(return_value=self.paths),
+            "PROBE_DIR": self.probe_dir,
+            "MARKER_PATH": self.probe_dir / "owned-probe.json",
+            "STATE_PATH": self.probe_dir / "pre-restart-state.json",
+            "PROBE_CONFIG_PATH": self.probe_dir / "canonical-runtime.probe.json",
+            "CONTAINMENT_PATH": self.probe_dir / "containment.json",
+            "ACTOR_SECRET_PATH": self.probe_dir / "actor.key",
+            "PRIVACY_SECRET_PATH": self.probe_dir / "privacy.key",
+            "CONTAINMENT_SECRET_PATH": self.probe_dir / "containment.key",
+            "BACKUP_DIR": self.probe_dir / "backups",
+            "COGNITIVE_DB": self.cognitive,
+            "PRIVACY_DB": self.privacy,
+        }
+        self.patchers = [mock.patch.object(probe, key, value) for key, value in patches.items()]
+        for patcher in self.patchers:
+            patcher.start()
+
+    def tearDown(self) -> None:
+        for patcher in reversed(self.patchers):
+            patcher.stop()
+        self.temporary.cleanup()
+
+    def owned(self) -> None:
+        self.probe_dir.mkdir(mode=0o700)
+        marker = self.probe_dir / "owned-probe.json"
+        marker.write_text(json.dumps(probe._marker(self.candidate)), encoding="utf-8")
+        os.chmod(marker, 0o600)
+        for path in (self.cognitive, self.privacy):
+            path.write_bytes(b"synthetic")
+            os.chmod(path, 0o600)
+
+    def test_first_cleanup_then_retry_preserves_unrelated_dev_file(self) -> None:
+        unrelated = self.data / "unrelated.txt"
+        unrelated.write_text("preserve", encoding="utf-8")
+        self.owned()
+        first = probe._cleanup_generated(self.candidate, require_marker=True)
+        self.assertEqual(first["status"], "CLEANUP_COMPLETE")
+        self.assertTrue(first["cognitiveDatabaseAbsent"])
+        self.assertTrue(first["privacyDatabaseAbsent"])
+        self.assertTrue(first["probeDirectoryAbsent"])
+        second = probe._cleanup_generated(self.candidate, require_marker=True)
+        self.assertEqual(second["status"], "CLEANUP_ALREADY_COMPLETE")
+        self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
+
+    def test_missing_marker_with_existing_database_fails_closed(self) -> None:
+        self.cognitive.write_bytes(b"synthetic")
+        os.chmod(self.cognitive, 0o600)
+        with self.assertRaisesRegex(probe.ProbeError, "lacks its ownership marker"):
+            probe._cleanup_generated(self.candidate, require_marker=True)
+        self.assertTrue(self.cognitive.exists())
+
+    def test_malformed_marker_fails_closed(self) -> None:
+        self.owned()
+        marker = self.probe_dir / "owned-probe.json"
+        marker.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(probe.ProbeError, "does not match"):
+            probe._cleanup_generated(self.candidate, require_marker=True)
+        self.assertTrue(self.cognitive.exists())
+
+    def test_external_hardlink_fails_closed(self) -> None:
+        self.owned()
+        external = self.root / "external.db"
+        os.link(self.cognitive, external)
+        with self.assertRaisesRegex(probe.ProbeError, "external hardlink"):
+            probe._cleanup_generated(self.candidate, require_marker=True)
+
+    def test_bind_mount_equivalent_fails_closed(self) -> None:
+        self.owned()
+        with mock.patch.object(probe, "_mount_targets", return_value={self.data}):
+            with self.assertRaisesRegex(probe.ProbeError, "mount or bind alias"):
+                probe._cleanup_generated(self.candidate, require_marker=True)
+
+    @unittest.skipIf(os.name == "nt", "unprivileged symlink creation is not portable")
+    def test_symlinked_probe_directory_fails_closed(self) -> None:
+        self.probe_dir.symlink_to(self.prod, target_is_directory=True)
+        with self.assertRaisesRegex(probe.ProbeError, "symlink"):
+            probe._cleanup_generated(self.candidate, require_marker=True)
+
+
+class ProductionReadOnlyAuditTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    @staticmethod
+    def metadata(key: str) -> str:
+        return {
+            "instance/name": audit.INSTANCE,
+            "instance/id": audit.INSTANCE_ID,
+            "project/project-id": audit.PROJECT,
+            "instance/zone": f"projects/763184673487/zones/{audit.ZONE}",
+        }[key]
+
+    @staticmethod
+    def service() -> dict[str, str]:
+        return {
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "SubState": "running",
+            "FragmentPath": audit.SERVICE_FRAGMENT,
+            "MainPID": "1234",
+        }
+
+    def test_pinned_host_accepts_exact_identity_and_rejects_dev_or_unknown(self) -> None:
+        with mock.patch.object(audit, "pwd", types.SimpleNamespace(
+            getpwnam=lambda _: types.SimpleNamespace(pw_uid=42)
+        )):
+            result = audit.validate_host(
+                metadata=self.metadata, hostname=lambda: audit.HOSTNAME,
+                service_state=self.service, effective_uid=42,
+            )
+            self.assertEqual(result["instanceId"], audit.INSTANCE_ID)
+            for wrong in ("lilith-dev-01", "unknown-host"):
+                with self.assertRaisesRegex(audit.AuditError, "identity mismatch"):
+                    audit.validate_host(
+                        metadata=lambda key, wrong=wrong: wrong if key == "instance/name" else self.metadata(key),
+                        hostname=lambda: audit.HOSTNAME,
+                        service_state=self.service, effective_uid=42,
+                    )
+            with self.assertRaisesRegex(audit.AuditError, "identity mismatch"):
+                audit.validate_host(
+                    metadata=self.metadata, hostname=lambda: "lilith-dev-01",
+                    service_state=self.service, effective_uid=42,
+                )
+
+    def test_wrong_service_identity_fails_closed(self) -> None:
+        with mock.patch.object(audit, "pwd", types.SimpleNamespace(
+            getpwnam=lambda _: types.SimpleNamespace(pw_uid=42)
+        )):
+            with self.assertRaisesRegex(audit.AuditError, "service identity"):
+                audit.validate_host(
+                    metadata=self.metadata, hostname=lambda: audit.HOSTNAME,
+                    service_state=lambda: {**self.service(), "FragmentPath": "/tmp/other.service"},
+                    effective_uid=42,
+                )
+
+    def test_sqlite_is_mode_ro_query_only_and_zero_rows(self) -> None:
+        database = self.root / "production.db"
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute('CREATE TABLE "memory_item" (id INTEGER)')
+            connection.commit()
+        finally:
+            connection.close()
+        calls = []
+        original_connect = sqlite3.connect
+
+        def observing_connect(*args, **kwargs):
+            calls.append((args, kwargs))
+            selected = original_connect(*args, **kwargs)
+            selected.set_trace_callback(lambda statement: calls.append(statement))
+            return selected
+
+        with mock.patch.object(audit, "PRODUCTION_ROOT", self.root), mock.patch.object(
+            audit, "_regular_file", return_value={"mode": "0600"}
+        ), mock.patch.object(audit.sqlite3, "connect", side_effect=observing_connect):
+            result = audit._database(database, ("memory_item",))
+        self.assertEqual(result["counts"], {"memory_item": 0})
+        self.assertEqual(result["integrityCheck"], "ok")
+        self.assertEqual(result["foreignKeyViolations"], 0)
+        self.assertIn("?mode=ro", calls[0][0][0])
+        self.assertTrue(calls[0][1]["uri"])
+        self.assertIn("PRAGMA query_only=ON", calls)
+        self.assertFalse(any(
+            isinstance(statement, str) and statement.upper().startswith(
+                ("INSERT ", "UPDATE ", "DELETE ", "CREATE ", "DROP ", "ALTER ", "VACUUM", "REPLACE ")
+            ) for statement in calls
+        ))
+
+    def test_audit_source_has_no_mutation_or_restart_operation(self) -> None:
+        source = AUDIT_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("mode=ro", source)
+        self.assertIn("PRAGMA query_only=ON", source)
+        for forbidden in (
+            "systemctl restart", "compute scp", "gcloud compute ssh", "sqlite3.connect(str(",
+            "INSERT INTO", "UPDATE ", "DELETE FROM", "CREATE TABLE", "DROP TABLE",
+            "VACUUM", "chmod(", "chown(", "write_text(", "write_bytes(",
+        ):
+            self.assertNotIn(forbidden, source)
 
 
 if __name__ == "__main__":
