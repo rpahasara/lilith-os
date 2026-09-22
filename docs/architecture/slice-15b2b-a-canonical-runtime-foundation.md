@@ -1,6 +1,9 @@
 # Slice 15B2b-A — Canonical Runtime Foundation
 
-**Status:** implemented on a feature branch; production activation remains dark.
+**Status:** accepted into governed `main` at
+`1e6419be90f9d85ec0fb798941224cf82e122db8`; production activation remains
+dark. See the [acceptance and deployment record](slice-15b2b-a-acceptance-record.md)
+for the separate source, DEV, and PROD evidence states.
 
 Slice 15B2b-A establishes deployable and CI-governed V2 canonical-memory apply
 foundations. Production canonical writes remain disabled and no real canonical
