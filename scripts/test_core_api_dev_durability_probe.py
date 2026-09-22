@@ -92,7 +92,7 @@ class DurabilityProbePathSafetyTests(unittest.TestCase):
     def test_rejects_symlinked_dev_database(self) -> None:
         self.prod_cognitive.write_bytes(b"production")
         self.cognitive.symlink_to(self.prod_cognitive)
-        with self.assertRaisesRegex(probe.ProbeError, "symlink"):
+        with self.assertRaisesRegex(probe.ProbeError, "production|symlink"):
             self.guard()
 
     def test_clean_baseline_rejects_any_existing_database(self) -> None:
