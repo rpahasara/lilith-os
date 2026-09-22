@@ -72,6 +72,18 @@ jobs:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"
 
+      - name: Build deterministic exact-SHA Core API bundle
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          mkdir -p deployment-output
+          python scripts/build_core_api_bundle.py \
+            --source-root candidate \
+            --archive deployment-output/lilith-core-api.tar.gz \
+            --attestation deployment-output/lilith-core-api.attestation.json \
+            --candidate-sha "${VALIDATED_SHA}"
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -93,26 +105,27 @@ jobs:
             --zone="${GCP_ZONE}" \
             --format="value(name,status)"
 
-      - name: Upload DEV bootstrap and deployment candidates through IAP
+      - name: Upload DEV bootstrap and exact-SHA bundle through IAP
         shell: bash
         env:
-          REMOTE_APP: /tmp/lilith-dev-app-${{ github.run_id }}-${{ github.run_attempt }}.py
-          REMOTE_REQUIREMENTS: /tmp/lilith-dev-requirements-${{ github.run_id }}-${{ github.run_attempt }}.txt
+          REMOTE_BUNDLE: /tmp/lilith-dev-bundle-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
+          REMOTE_ATTESTATION: /tmp/lilith-dev-attestation-${{ github.run_id }}-${{ github.run_attempt }}.json
           REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
+          REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
         run: |
           gcloud compute scp --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            candidate/services/core-api/app.py \
-            "${GCP_INSTANCE}:${REMOTE_APP}"
+            deployment-output/lilith-core-api.tar.gz \
+            "${GCP_INSTANCE}:${REMOTE_BUNDLE}"
           gcloud compute scp --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            candidate/services/core-api/requirements.txt \
-            "${GCP_INSTANCE}:${REMOTE_REQUIREMENTS}"
+            deployment-output/lilith-core-api.attestation.json \
+            "${GCP_INSTANCE}:${REMOTE_ATTESTATION}"
           gcloud compute scp --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
@@ -125,29 +138,39 @@ jobs:
             --tunnel-through-iap \
             scripts/deploy_core_api_dev_remote.sh \
             "${GCP_INSTANCE}:${REMOTE_DEPLOY}"
+          gcloud compute scp --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            scripts/verify_core_api_bundle.py \
+            "${GCP_INSTANCE}:${REMOTE_VERIFIER}"
 
       - name: Bootstrap and deploy the isolated DEV service
         shell: bash
         env:
-          REMOTE_APP: /tmp/lilith-dev-app-${{ github.run_id }}-${{ github.run_attempt }}.py
-          REMOTE_REQUIREMENTS: /tmp/lilith-dev-requirements-${{ github.run_id }}-${{ github.run_attempt }}.txt
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+          REMOTE_BUNDLE: /tmp/lilith-dev-bundle-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
+          REMOTE_ATTESTATION: /tmp/lilith-dev-attestation-${{ github.run_id }}-${{ github.run_attempt }}.json
           REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
           REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
+          REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            --command="set -e; trap 'rm -f ${REMOTE_APP} ${REMOTE_REQUIREMENTS} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_APP}' '${REMOTE_REQUIREMENTS}'"
+            --command="set -e; trap 'rm -f ${REMOTE_BUNDLE} ${REMOTE_ATTESTATION} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY} ${REMOTE_VERIFIER}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_BUNDLE}' '${REMOTE_ATTESTATION}' '${VALIDATED_SHA}' '${REMOTE_VERIFIER}'"
 
       - name: Verify DEV service health
         shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo"
+            --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && test \"\$(sudo -u lilith python3 -c 'import json; print(json.load(open(\"/home/lilith/.hermes/lilith-os-dev/current/deployment-manifest.json\"))[\"candidateSha\"])')\" = '${VALIDATED_SHA}' && sudo -u lilith cat /home/lilith/.hermes/lilith-os-dev/current/.bundle-sha256"
 
       - name: Publish successful DEV deployment status
         if: ${{ success() }}
