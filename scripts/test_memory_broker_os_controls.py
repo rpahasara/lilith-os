@@ -383,14 +383,11 @@ class TrustedInstallerCase(unittest.TestCase):
             with self.assertRaisesRegex(installer.InstallError, "IPC_GROUP_COLLISION"):
                 installer.inspect_accounts()
 
-    def test_activation_has_only_fixed_systemctl_commands(self):
-        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "assert_recorded_accounts"), patch.object(installer, "_current_target", return_value=f"releases/{self.sha}"), patch.object(installer, "_fixed_run") as run:
-            installer.activate_dev(self.paths, self.sha)
-        self.assertEqual([call.args for call in run.call_args_list], [
-            ("/usr/bin/systemd-tmpfiles", "--create", "--prefix=/run/lilith-memory"),
-            ("/usr/bin/systemctl", "daemon-reload"),
-            ("/usr/bin/systemctl", "enable", "--now", installer.SOCKET),
-        ])
+    def test_legacy_activation_entrypoint_is_disabled(self):
+        with patch.object(installer, "_fixed_run") as run:
+            with self.assertRaisesRegex(installer.InstallError, "DEDICATED_CONTROL"):
+                installer.activate_dev(self.paths, self.sha)
+            run.assert_not_called()
 
     def test_current_pointer_rejects_escape(self):
         self.paths.opt.mkdir()

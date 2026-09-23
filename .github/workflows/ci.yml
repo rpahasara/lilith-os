@@ -52,6 +52,9 @@ jobs:
       - name: Validate inert broker release and installer controls
         run: python -m unittest scripts/test_memory_broker_os_controls.py
 
+      - name: Validate Stage-II control-only and Linux isolation harness contracts
+        run: python -m unittest scripts/test_memory_broker_stage2_control.py
+
       - name: Validate protected-main DEV gate classification and bypass resistance
         run: python -m unittest scripts/test_classify_dev_deployment.py
 
