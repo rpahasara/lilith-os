@@ -204,7 +204,7 @@ class BrokerControlTests(unittest.TestCase):
         self.assertFalse(any("memory-broker" in name or "test_owner_proof" in name for name in names))
         self.assertIn("services/core-api/tests/test_owner_proof.py", broker.SHARED_FILES)
 
-    def test_dev_wiring_is_additive_and_proves_cleanup_and_absence(self) -> None:
+    def test_dev_wiring_is_additive_and_proves_cleanup_and_stage_i_state(self) -> None:
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/deploy-dev.yml").read_text()
         runner = (root / "scripts/run_memory_broker_dev_validation.sh").read_text()
@@ -221,8 +221,8 @@ class BrokerControlTests(unittest.TestCase):
         self.assertIn('"$SYSTEM_PYTHON" -m venv "$VENV_DIR"', runner)
         self.assertIn("'fido2==2.2.1' 'rfc8785==0.1.4'", runner)
         self.assertIn('rm -rf -- "$VENV_DIR"', runner)
-        self.assertIn('sudo test ! -e "${STATE_ROOT}/owner_control.db"', runner)
-        for marker in ("trap cleanup EXIT", "rmdir -- \"$WORKSPACE\"", "getent passwd lilith-memory-broker", "getent group lilith-memory-broker", "lilith-memory-broker.service", "lilith-memory-broker.socket", "owner_control.db", "cognitive_memory.dev.db", "privacy_governance.dev.db", 'test "$BEFORE" = "$AFTER"'):
+        self.assertIn('scripts/verify_broker_dev_lifecycle.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/lifecycle.py"', workflow)
+        for marker in ("trap cleanup EXIT", "rmdir -- \"$WORKSPACE\"", "lifecycle.py", "cognitive_memory.dev.db", "privacy_governance.dev.db", 'test "$BEFORE_LIFECYCLE" = "$AFTER_LIFECYCLE"', 'test "$BEFORE_CUSTODY" = "$AFTER_CUSTODY"'):
             self.assertIn(marker, runner)
 
     def test_ci_requires_broker_in_existing_context(self) -> None:

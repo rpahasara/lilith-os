@@ -19,8 +19,10 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 try:
+    import grp
     import pwd
 except ImportError:  # Windows local control tests.
+    grp = None
     pwd = None
 
 
@@ -40,6 +42,14 @@ CONTAINMENT_REGISTRY = DATA_DIR / "legacy_containment_registry.json"
 RUNTIME_CONFIG = DATA_DIR / "canonical-runtime.json"
 DEV_ROOT = Path("/home/lilith/.hermes/lilith-os-dev")
 METADATA_ROOT = "http://metadata.google.internal/computeMetadata/v1/"
+BROKER_PATHS = (
+    Path("/opt/lilith-memory-broker"), Path("/etc/lilith-memory-broker"),
+    Path("/var/lib/lilith-memory-broker"), Path("/run/lilith-memory"),
+    Path("/etc/systemd/system/lilith-memory-broker.service"),
+    Path("/etc/systemd/system/lilith-memory-broker.socket"),
+    Path("/etc/tmpfiles.d/lilith-memory-broker.conf"),
+    DATA_DIR / "owner_control.db", DATA_DIR / "synthetic_evidence.db",
+)
 CANONICAL_TABLES = {
     "registry": ("memory_registry_entry",),
     "learningV2": (
@@ -78,6 +88,52 @@ PRIVACY_TABLES = (
 
 class AuditError(RuntimeError):
     """A required production safety fact could not be established."""
+
+
+def validate_broker_absence(observed: dict) -> None:
+    """PRE_B1B2B remains mandatory on PROD, regardless of DEV lifecycle."""
+    if (observed.get("accounts") != {name: False for name in ("lilith-memory-broker", "lilith-memory-relay")}
+            or observed.get("groups") != {name: False for name in ("lilith-memory-broker", "lilith-memory-relay", "lilith-memory-ipc")}
+            or observed.get("paths") != {str(path): False for path in BROKER_PATHS}
+            or observed.get("processes") != []):
+        raise AuditError("production broker provisioning or process is present")
+    for name in ("lilith-memory-broker.service", "lilith-memory-broker.socket"):
+        if observed.get("units", {}).get(name) != {"LoadState": "not-found", "ActiveState": "inactive"}:
+            raise AuditError("production broker unit is present")
+
+
+def _broker_absence() -> dict:
+    accounts = {}
+    for name in ("lilith-memory-broker", "lilith-memory-relay"):
+        try:
+            pwd.getpwnam(name)
+            accounts[name] = True
+        except KeyError:
+            accounts[name] = False
+    groups = {}
+    for name in ("lilith-memory-broker", "lilith-memory-relay", "lilith-memory-ipc"):
+        try:
+            grp.getgrnam(name)
+            groups[name] = True
+        except KeyError:
+            groups[name] = False
+    units = {}
+    for name in ("lilith-memory-broker.service", "lilith-memory-broker.socket"):
+        result = subprocess.run(("systemctl", "show", name, "--property=LoadState,ActiveState", "--no-pager"),
+                                check=True, capture_output=True, text=True, timeout=10)
+        units[name] = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    probe = subprocess.run(("pgrep", "-af", "lilith_memory_broker.server"),
+                           capture_output=True, text=True, timeout=10)
+    if probe.returncode not in (0, 1):
+        raise AuditError("production broker process probe failed")
+    observed = {
+        "accounts": accounts, "groups": groups,
+        "paths": {str(path): path.exists() or path.is_symlink() for path in BROKER_PATHS},
+        "units": units,
+        "processes": probe.stdout.splitlines() if probe.returncode == 0 else [],
+    }
+    validate_broker_absence(observed)
+    return observed
 
 
 def _metadata(key: str) -> str:
@@ -218,6 +274,7 @@ def _database(path: Path, tables: tuple[str, ...]) -> dict:
 
 def audit() -> dict:
     identity = validate_host()
+    broker_before = _broker_absence()
     if PRODUCTION_ROOT.resolve(strict=True) == DEV_ROOT.resolve(strict=False):
         raise AuditError("production root aliases DEV root")
     if DATA_DIR.resolve(strict=True) == (DEV_ROOT / "data").resolve(strict=False):
@@ -244,6 +301,8 @@ def audit() -> dict:
     service_after = _service_state()
     if service_after != identity["service"]:
         raise AuditError("production service state changed during read-only audit")
+    if _broker_absence() != broker_before:
+        raise AuditError("production broker state changed during read-only audit")
     return {
         "phase": "production-read-only-audit",
         "host": identity,
@@ -259,6 +318,7 @@ def audit() -> dict:
         "runtimeActivationFile": {"path": str(RUNTIME_CONFIG), "absent": True},
         "registryAndContainmentActive": False,
         "productionRowsRemainZero": True,
+        "brokerProvisioningAbsent": True,
     }
 
 
