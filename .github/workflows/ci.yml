@@ -59,9 +59,18 @@ jobs:
         shell: bash
         run: |
           if test -f services/memory-broker/deploy/lilith-memory-broker.service; then
+            service=services/memory-broker/deploy/lilith-memory-broker.service
+            grep -Fxq 'ExecStart=/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server' "$service"
+            test "$(grep -c '^ExecStart=' "$service")" -eq 1
+            unit_dir="$(mktemp -d)"
+            trap 'rm -rf -- "$unit_dir"' EXIT
+            # The future /opt release is intentionally absent on CI. Verify
+            # the unit syntax using an executable stand-in in a temporary copy.
+            sed 's#^ExecStart=.*#ExecStart=/usr/bin/true#' "$service" > "$unit_dir/lilith-memory-broker.service"
+            cp services/memory-broker/deploy/lilith-memory-broker.socket "$unit_dir/lilith-memory-broker.socket"
             systemd-analyze verify \
-              services/memory-broker/deploy/lilith-memory-broker.service \
-              services/memory-broker/deploy/lilith-memory-broker.socket
+              "$unit_dir/lilith-memory-broker.service" \
+              "$unit_dir/lilith-memory-broker.socket"
           fi
 
   frontend-quality:
