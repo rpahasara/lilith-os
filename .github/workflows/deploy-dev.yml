@@ -91,6 +91,9 @@ jobs:
         run: |
           BROKER_PRESENT="$(python scripts/memory_broker_validation.py detect --source-root candidate)"
           echo "BROKER_PRESENT=${BROKER_PRESENT}" >> "${GITHUB_ENV}"
+          if test -f candidate/services/memory-broker/lilith_memory_broker/dev_core.py; then
+            echo "BROKER_PERSISTENT_CANDIDATE=true" >> "${GITHUB_ENV}"
+          fi
 
       - name: Build separate exact-SHA broker validation artifact
         if: env.BROKER_PRESENT == 'PRESENT'
@@ -103,6 +106,36 @@ jobs:
             --archive deployment-output/lilith-memory-broker-validation.tar.gz \
             --attestation deployment-output/lilith-memory-broker-validation.attestation.json \
             --candidate-sha "${VALIDATED_SHA}"
+
+      - name: Set up pinned Python for inert broker release validation
+        if: env.BROKER_PERSISTENT_CANDIDATE == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and verify inert exact-SHA synthetic broker release
+        if: env.BROKER_PERSISTENT_CANDIDATE == 'true'
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          mkdir -p deployment-output/broker-wheels
+          python -m pip download --disable-pip-version-check --no-deps \
+            --only-binary=:all: --platform manylinux2014_x86_64 \
+            --python-version 3.12 --implementation cp --abi cp312 \
+            --dest deployment-output/broker-wheels \
+            cffi==2.1.1 cryptography==50.0.1 fido2==2.2.1 \
+            pycparser==3.0 rfc8785==0.1.4
+          python scripts/memory_broker_os_release.py build \
+            --source-root candidate \
+            --wheelhouse deployment-output/broker-wheels \
+            --candidate-sha "${VALIDATED_SHA}" \
+            --archive deployment-output/lilith-broker-inert-release.tar.gz \
+            --attestation deployment-output/lilith-broker-inert-release.attestation.json
+          python scripts/memory_broker_os_release.py verify \
+            --candidate-sha "${VALIDATED_SHA}" \
+            --archive deployment-output/lilith-broker-inert-release.tar.gz \
+            --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
