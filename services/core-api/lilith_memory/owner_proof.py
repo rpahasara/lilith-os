@@ -16,6 +16,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -427,18 +428,86 @@ class DurableOwnerChallengeStore:
         return str(row[0]) if row else "UNKNOWN"
 
 
-class OwnerProofVerifier:
-    def __init__(self, store: DurableOwnerChallengeStore, *, owner_principal: str, rp_id: str, origin: str, test_mode: bool = False, now_fn: Callable[[], datetime] | None = None):
-        self.store = store
-        self.owner_principal = _text(owner_principal, "owner_principal", 256)
-        self.rp_id = _text(rp_id, "rp_id", 253)
-        self.origin = _text(origin, "origin", 512)
-        self.test_mode = test_mode
-        self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
-        if (rp_id.endswith(".invalid") or origin.endswith(".invalid")) and not (test_mode and os.environ.get("LILITH_ENV") == "test"):
-            raise OwnerProofError("SYNTHETIC_RP_FORBIDDEN")
-        if not origin.startswith("https://") or not (origin == "https://" + rp_id or origin.endswith("." + rp_id)):
+class _OwnerProofPolicyKind(Enum):
+    B1A_EXISTING = "B1A_EXISTING"
+    B1A_EXISTING_TEST_MODE = "B1A_EXISTING_TEST_MODE"
+    DEV_SYNTHETIC = "DEV_SYNTHETIC"
+
+
+_DEV_SYNTHETIC_OWNER = "user:synthetic-owner@example.invalid"
+
+
+@dataclass(frozen=True)
+class _OwnerProofVerificationPolicyV1:
+    """Trusted construction policy; never parsed from an assertion or request.
+
+    The shared engine owns every verification and durable-consumption step.
+    This policy only pins the expected identity, RP, origin and environment.
+    """
+
+    kind: _OwnerProofPolicyKind
+    owner_principal: str
+    rp_id: str
+    origin: str
+
+    def _b1a_test_allowed(self) -> bool:
+        return self.kind is _OwnerProofPolicyKind.B1A_EXISTING_TEST_MODE and os.environ.get("LILITH_ENV") == "test"
+
+    def validate_construction(self) -> None:
+        if type(self.kind) is not _OwnerProofPolicyKind:
+            raise OwnerProofError("UNSUPPORTED_OWNER_PROOF_POLICY")
+        if self.kind in (_OwnerProofPolicyKind.B1A_EXISTING, _OwnerProofPolicyKind.B1A_EXISTING_TEST_MODE):
+            # Preserve the existing B1a constructor guard and error ordering.
+            if (self.rp_id.endswith(".invalid") or self.origin.endswith(".invalid")) and not self._b1a_test_allowed():
+                raise OwnerProofError("SYNTHETIC_RP_FORBIDDEN")
+        elif self.kind is _OwnerProofPolicyKind.DEV_SYNTHETIC:
+            self._validate_dev()
+        else:
+            raise OwnerProofError("UNSUPPORTED_OWNER_PROOF_POLICY")
+        if not self.origin.startswith("https://") or not (self.origin == "https://" + self.rp_id or self.origin.endswith("." + self.rp_id)):
             raise OwnerProofError("INVALID_ORIGIN_CONFIGURATION")
+
+    def validate_verification(self) -> None:
+        if type(self.kind) is not _OwnerProofPolicyKind:
+            raise OwnerProofError("UNSUPPORTED_OWNER_PROOF_POLICY")
+        if self.kind in (_OwnerProofPolicyKind.B1A_EXISTING, _OwnerProofPolicyKind.B1A_EXISTING_TEST_MODE):
+            # B1a historically checks the synthetic RP again at use time.
+            if self.rp_id.endswith(".invalid") and not self._b1a_test_allowed():
+                raise OwnerProofError("SYNTHETIC_RP_FORBIDDEN")
+        elif self.kind is _OwnerProofPolicyKind.DEV_SYNTHETIC:
+            self._validate_dev()
+        else:
+            raise OwnerProofError("UNSUPPORTED_OWNER_PROOF_POLICY")
+
+    def _validate_dev(self) -> None:
+        if os.environ.get("LILITH_ENV") != "dev":
+            raise OwnerProofError("DEV_SYNTHETIC_ENV_REQUIRED")
+        if (self.owner_principal, self.rp_id, self.origin) != (
+            _DEV_SYNTHETIC_OWNER, SYNTHETIC_RP_ID, SYNTHETIC_ORIGIN
+        ):
+            raise OwnerProofError("INVALID_DEV_SYNTHETIC_POLICY")
+
+
+class _OwnerProofVerificationEngine:
+    """Only assertion-verification and atomic-consumption implementation."""
+
+    def __init__(self, store: DurableOwnerChallengeStore, policy: _OwnerProofVerificationPolicyV1, *, now_fn: Callable[[], datetime] | None = None):
+        policy.validate_construction()
+        self.store = store
+        self.__policy = policy
+        self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+
+    @property
+    def owner_principal(self) -> str:
+        return self.__policy.owner_principal
+
+    @property
+    def rp_id(self) -> str:
+        return self.__policy.rp_id
+
+    @property
+    def origin(self) -> str:
+        return self.__policy.origin
 
     def verify_and_consume(
         self, challenge_id: str, assertion: OwnerAssertionV1,
@@ -449,8 +518,7 @@ class OwnerProofVerifier:
         expected_privacy_notice_version: str,
     ) -> OwnerProofVerificationResultV1:
         _id(challenge_id, "challenge_id")
-        if self.rp_id.endswith(".invalid") and not (self.test_mode and os.environ.get("LILITH_ENV") == "test"):
-            raise OwnerProofError("SYNTHETIC_RP_FORBIDDEN")
+        self.__policy.validate_verification()
         assertion.validate()
         expected_action.validate()
         _digest(expected_request_digest, "request_digest")
@@ -565,3 +633,30 @@ class OwnerProofVerifier:
         if now.tzinfo is None or now.utcoffset() != timezone.utc.utcoffset(now):
             raise OwnerProofError("INVALID_NOW")
         return now
+
+
+class OwnerProofVerifier(_OwnerProofVerificationEngine):
+    """Existing B1a API; its TEST-only synthetic-RP rule is unchanged."""
+
+    def __init__(self, store: DurableOwnerChallengeStore, *, owner_principal: str, rp_id: str, origin: str, test_mode: bool = False, now_fn: Callable[[], datetime] | None = None):
+        self.test_mode = test_mode
+        policy = _OwnerProofVerificationPolicyV1(
+            _OwnerProofPolicyKind.B1A_EXISTING_TEST_MODE if test_mode else _OwnerProofPolicyKind.B1A_EXISTING,
+            _text(owner_principal, "owner_principal", 256),
+            _text(rp_id, "rp_id", 253),
+            _text(origin, "origin", 512),
+        )
+        super().__init__(store, policy, now_fn=now_fn)
+
+
+class DevSyntheticOwnerProofVerifier(_OwnerProofVerificationEngine):
+    """Future broker seam: fixed synthetic identity, never a live policy."""
+
+    def __init__(self, store: DurableOwnerChallengeStore, *, now_fn: Callable[[], datetime] | None = None):
+        policy = _OwnerProofVerificationPolicyV1(
+            _OwnerProofPolicyKind.DEV_SYNTHETIC,
+            _DEV_SYNTHETIC_OWNER,
+            SYNTHETIC_RP_ID,
+            SYNTHETIC_ORIGIN,
+        )
+        super().__init__(store, policy, now_fn=now_fn)
