@@ -26,13 +26,22 @@ B1a does not reinterpret or migrate it.
 
 `OwnerMemoryChallengeV1` has exactly these JSON fields, with no extras:
 `protocol`, `schemaVersion`, `ownerPrincipal`, `challengeId`, `actionDigest`,
-`payloadDigest`, `operation`, `memoryClass`, `subjectNamespace`, `subjectKey`,
+`requestDigest`, `payloadDigest`, `operation`, `memoryClass`, `subjectNamespace`, `subjectKey`,
 `purpose`, nullable `memoryItemId`, nullable `expectedActiveRevisionId`,
 nullable `restoreTargetRevisionId`, nullable `restoreTargetDigest`,
 `privacyNoticeVersion`, `nonce`, `issuedAt`, `expiresAt`, `rpId`. Operation is
 `CREATE` (future REMEMBER), `SUPERSEDE`, `RESTORE`, or `FORGET`. A RESTORE target
 digest must equal the frozen action's payload digest. The broker must
 eventually generate the challenge ID and 32-byte nonce; B1a has no issuer.
+`requestDigest` is the exact request digest later supplied as `request_digest`
+to `LocalOwnerAuthority.issue` and retained by `ActorEvidenceRefV1`: a required,
+lowercase 64-character SHA-256 hex string. B1a does not define a new request
+serialization or derive this digest from untrusted JSON. A future broker must
+obtain it from its trusted request construction, preserve it across PREPARE,
+and pass that independently trusted value as `expected_request_digest` to
+verification. The verifier rejects a mismatch with the durable challenge;
+neither a frontend, model, relay, HTTP caller, nor CLI assertion can replace it.
+The frozen action and its existing action-digest serialization are unchanged.
 Times are exact UTC `YYYY-MM-DDTHH:MM:SSZ`; lifetime is positive and at most
 60 seconds. The nonce is unpadded base64url. B1a's synthetic owner and RP are
 `user:synthetic-owner@example.invalid`, `owner.lilith.invalid`, and
@@ -55,7 +64,8 @@ fields and ask the owner to authorize these digest-bound bytes. No raw
 caller-supplied JSON is signed. Four golden canonical-byte and challenge-hash
 vectors live in `services/core-api/tests/owner_proof_golden.jsonl` and its test.
 They cover CREATE, SUPERSEDE, RESTORE, and FORGET shapes and contain no real
-memory value.
+memory value. Each vector was regenerated from the amended V1 canonicalization;
+changing `requestDigest` changes both canonical bytes and the WebAuthn challenge.
 
 `OwnerCredentialV1` has exactly `schemaVersion`, `recordId`, `ownerPrincipal`,
 `credentialId`, `publicKeyCose`, `algorithm`, `rpId`, `status`, `createdAt`,
@@ -82,15 +92,24 @@ The SQLite owner-control test ledger is distinct from cognitive and Privacy
 databases. A challenge starts `PREPARED`; cancellation is `CANCELLED`; an
 expired prepared challenge becomes `EXPIRED`; a successful assertion changes
 it to `CONSUMED` in the same `BEGIN IMMEDIATE` transaction that records the
-credential record ID. Consumed/cancelled/expired rows cannot verify again,
-including after process restart. A fresh server clock, not a request field,
-decides expiry. A non-monotonic positive sign counter produces a cloning-risk
+credential record ID. The canonical challenge JSON itself retains the signed
+`requestDigest`; no second mutable request-digest column exists. Consumed,
+cancelled, and expired rows cannot verify again, including after process
+restart. The verifier acquires `BEGIN IMMEDIATE`, reloads the authoritative
+row, then samples its trusted UTC clock. It samples again after cryptographic
+verification, immediately before the `CONSUMED` transition. If expiry is
+crossed during lock contention or cryptography, it durably records `EXPIRED`
+and rejects; no pre-lock clock sample authorizes consumption. A non-monotonic
+positive sign counter produces a cloning-risk
 observation; counter zero does not block modern passkeys. The durable
 challenge state, not the sign counter, is the replay authority.
 
 The only positive output is `OwnerProofVerificationResultV1` with status
 `VERIFIED_PROOF_ONLY`, challenge/credential/owner references, action digest,
-observed counter, and counter-risk flag. It is **not** ActorEvidence, Consent,
+the verified request digest, observed counter, and counter-risk flag. A future
+broker must claim the durable `challengeId` together with the exact verified
+action and request digests before requesting ActorEvidence; this is a design
+requirement, not a B1a integration. The result is **not** ActorEvidence, Consent,
 Policy ALLOWED, Rollback Authorization, Privacy authorization, a token, or
 canonical write permission. The module has no imports or call path to those
 issuers. Logging must contain only minimized references and result codes;

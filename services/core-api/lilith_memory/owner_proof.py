@@ -136,7 +136,7 @@ def _json_object(raw: bytes, *, allowed: frozenset[str]) -> dict[str, Any]:
 
 _CHALLENGE_FIELDS = frozenset({
     "protocol", "schemaVersion", "ownerPrincipal", "challengeId",
-    "actionDigest", "payloadDigest", "operation", "memoryClass",
+    "actionDigest", "requestDigest", "payloadDigest", "operation", "memoryClass",
     "subjectNamespace", "subjectKey", "purpose", "memoryItemId",
     "expectedActiveRevisionId", "restoreTargetRevisionId",
     "restoreTargetDigest", "privacyNoticeVersion", "nonce", "issuedAt",
@@ -151,6 +151,7 @@ class OwnerMemoryChallengeV1:
     owner_principal: str
     challenge_id: str
     action_digest: str
+    request_digest: str
     payload_digest: str
     operation: str
     memory_class: str
@@ -172,7 +173,7 @@ class OwnerMemoryChallengeV1:
         _exact(value, _CHALLENGE_FIELDS)
         result = cls(
             value["protocol"], value["schemaVersion"], value["ownerPrincipal"],
-            value["challengeId"], value["actionDigest"], value["payloadDigest"],
+            value["challengeId"], value["actionDigest"], value["requestDigest"], value["payloadDigest"],
             value["operation"], value["memoryClass"], value["subjectNamespace"],
             value["subjectKey"], value["purpose"], value["memoryItemId"],
             value["expectedActiveRevisionId"], value["restoreTargetRevisionId"],
@@ -189,6 +190,7 @@ class OwnerMemoryChallengeV1:
             "ownerPrincipal": self.owner_principal,
             "challengeId": self.challenge_id,
             "actionDigest": self.action_digest,
+            "requestDigest": self.request_digest,
             "payloadDigest": self.payload_digest,
             "operation": self.operation,
             "memoryClass": self.memory_class,
@@ -214,6 +216,7 @@ class OwnerMemoryChallengeV1:
             raise OwnerProofError("INVALID_OWNER")
         _id(self.challenge_id, "challenge_id")
         _digest(self.action_digest, "action_digest")
+        _digest(self.request_digest, "request_digest")
         _digest(self.payload_digest, "payload_digest")
         if self.operation not in {"CREATE", "SUPERSEDE", "RESTORE", "FORGET"}:
             raise OwnerProofError("INVALID_OPERATION")
@@ -361,6 +364,7 @@ class OwnerProofVerificationResultV1:
     credential_record_id: str
     owner_principal: str
     action_digest: str
+    request_digest: str
     observed_sign_count: int
     counter_risk: bool
     status: str = "VERIFIED_PROOF_ONLY"
@@ -439,6 +443,7 @@ class OwnerProofVerifier:
     def verify_and_consume(
         self, challenge_id: str, assertion: OwnerAssertionV1,
         *, expected_action: FrozenMemoryActionV1,
+        expected_request_digest: str,
         expected_memory_item_id: str | None,
         expected_restore_target_digest: str | None,
         expected_privacy_notice_version: str,
@@ -448,9 +453,7 @@ class OwnerProofVerifier:
             raise OwnerProofError("SYNTHETIC_RP_FORBIDDEN")
         assertion.validate()
         expected_action.validate()
-        now = self.now_fn()
-        if now.tzinfo is None or now.utcoffset() != timezone.utc.utcoffset(now):
-            raise OwnerProofError("INVALID_NOW")
+        _digest(expected_request_digest, "request_digest")
         conn = self.store._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -464,6 +467,7 @@ class OwnerProofVerifier:
             challenge = OwnerMemoryChallengeV1.from_dict(challenge_data)
             if raw != challenge.canonical_bytes():
                 raise OwnerProofError("NONCANONICAL_STORED_CHALLENGE")
+            now = self._trusted_now()
             if now >= _instant(challenge.expires_at):
                 conn.execute("UPDATE owner_proof_challenge_v1 SET state='EXPIRED' WHERE challenge_id=? AND state='PREPARED'", (challenge_id,))
                 conn.commit()
@@ -475,6 +479,7 @@ class OwnerProofVerifier:
                 or challenge.owner_principal != self.owner_principal
                 or challenge.rp_id != self.rp_id
                 or challenge.action_digest != expected_action.action_digest
+                or challenge.request_digest != expected_request_digest
                 or challenge.payload_digest != expected_action.payload_digest
                 or challenge.operation != expected_action.operation
                 or challenge.memory_class != expected_action.memory_class
@@ -527,6 +532,15 @@ class OwnerProofVerifier:
                 observed = response.response.authenticator_data.counter
             except (ValueError, TypeError, KeyError, IndexError, OverflowError) as exc:
                 raise OwnerProofError("INVALID_WEBAUTHN_ASSERTION") from exc
+            # A proof can cross expiry during crypto verification or lock wait.
+            # This is the decisive sample for the durable consumption transition.
+            now = self._trusted_now()
+            if now >= _instant(challenge.expires_at):
+                conn.execute("UPDATE owner_proof_challenge_v1 SET state='EXPIRED' WHERE challenge_id=? AND state='PREPARED'", (challenge_id,))
+                conn.commit()
+                raise OwnerProofError("CHALLENGE_EXPIRED")
+            if now < _instant(challenge.issued_at):
+                raise OwnerProofError("CHALLENGE_NOT_YET_VALID")
             consumed_at = now.isoformat(timespec="seconds").replace("+00:00", "Z")
             changed = conn.execute("UPDATE owner_proof_challenge_v1 SET state='CONSUMED',consumed_credential_record_id=?,consumed_at=? WHERE challenge_id=? AND state='PREPARED'", (credential.record_id, consumed_at, challenge_id)).rowcount
             if changed != 1:
@@ -538,10 +552,16 @@ class OwnerProofVerifier:
             conn.commit()
             return OwnerProofVerificationResultV1(
                 challenge_id, credential.record_id, self.owner_principal,
-                challenge.action_digest, observed, counter_risk,
+                challenge.action_digest, challenge.request_digest, observed, counter_risk,
             )
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
+
+    def _trusted_now(self) -> datetime:
+        now = self.now_fn()
+        if now.tzinfo is None or now.utcoffset() != timezone.utc.utcoffset(now):
+            raise OwnerProofError("INVALID_NOW")
+        return now

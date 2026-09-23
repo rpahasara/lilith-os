@@ -10,6 +10,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -59,6 +60,10 @@ def action(operation: str = "CREATE") -> C.FrozenMemoryActionV1:
     )
 
 
+def request_digest(operation: str = "CREATE") -> str:
+    return hashlib.sha256(("TEST_ONLY synthetic request:" + operation).encode()).hexdigest()
+
+
 def challenge(operation: str = "CREATE") -> P.OwnerMemoryChallengeV1:
     a = action(operation)
     return P.OwnerMemoryChallengeV1.from_dict({
@@ -67,6 +72,7 @@ def challenge(operation: str = "CREATE") -> P.OwnerMemoryChallengeV1:
         "ownerPrincipal": OWNER,
         "challengeId": "och.synthetic-" + operation.lower(),
         "actionDigest": a.action_digest,
+        "requestDigest": request_digest(operation),
         "payloadDigest": a.payload_digest,
         "operation": operation,
         "memoryClass": a.memory_class,
@@ -142,7 +148,8 @@ class OwnerProofCase(unittest.TestCase):
         self.verifier = P.OwnerProofVerifier(self.store, owner_principal=OWNER, rp_id=RP, origin=ORIGIN, test_mode=True, now_fn=lambda: self.current_now)
 
     def verify(self, ch=None, proof=None, a=None, *,
-               item=None, restore_digest=None, notice="privacy.synthetic.v1"):
+               item=None, restore_digest=None, notice="privacy.synthetic.v1",
+               expected_request_digest=None):
         ch = ch or challenge()
         a = a or action(ch.operation)
         proof = proof or assertion(ch)
@@ -150,6 +157,7 @@ class OwnerProofCase(unittest.TestCase):
         restore_digest = restore_digest if restore_digest is not None else ch.restore_target_digest
         return self.verifier.verify_and_consume(
             ch.challenge_id, proof, expected_action=a,
+            expected_request_digest=expected_request_digest or request_digest(ch.operation),
             expected_memory_item_id=item,
             expected_restore_target_digest=restore_digest,
             expected_privacy_notice_version=notice,
@@ -161,6 +169,7 @@ class OwnerProofCase(unittest.TestCase):
         result = self.verify(ch)
         self.assertEqual(result.status, "VERIFIED_PROOF_ONLY")
         self.assertEqual(result.action_digest, action().action_digest)
+        self.assertEqual(result.request_digest, request_digest())
         self.assertFalse(hasattr(result, "actor_evidence_ref_id"))
         self.assertEqual(self.store.state(ch.challenge_id), "CONSUMED")
         with self.assertRaises(P.OwnerProofError):
@@ -202,6 +211,107 @@ class OwnerProofCase(unittest.TestCase):
         self.assertEqual(self.store.state(ch.challenge_id), "EXPIRED")
         with self.assertRaises(P.OwnerProofError):
             self.verify(ch)
+
+    def test_expiry_crossed_during_cryptography_is_durable(self):
+        ch = challenge()
+        self.store.prepare(ch)
+        samples = iter((NOW, datetime(2026, 9, 23, 12, 1, 0, tzinfo=timezone.utc)))
+        self.verifier.now_fn = lambda: next(samples)
+        with self.assertRaisesRegex(P.OwnerProofError, "CHALLENGE_EXPIRED"):
+            self.verify(ch)
+        self.assertEqual(self.store.state(ch.challenge_id), "EXPIRED")
+        with self.assertRaisesRegex(P.OwnerProofError, "CHALLENGE_NOT_PREPARED"):
+            self.verify(ch)
+
+    def test_expiry_crossed_while_waiting_for_write_lock(self):
+        ch = challenge()
+        self.store.prepare(ch)
+        blocker = self.store._connect()
+        original_connect = self.store._connect
+        connected = threading.Event()
+
+        def signal_connect():
+            conn = original_connect()
+            connected.set()
+            return conn
+
+        try:
+            blocker.execute("BEGIN IMMEDIATE")
+            self.store._connect = signal_connect
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self._attempt, ch)
+                self.assertTrue(connected.wait(timeout=5), "verifier did not reach the locked database")
+                self.current_now = datetime(2026, 9, 23, 12, 1, 0, tzinfo=timezone.utc)
+                blocker.commit()
+                self.assertEqual(future.result(timeout=5), "CHALLENGE_EXPIRED")
+        finally:
+            blocker.rollback()
+            blocker.close()
+            self.store._connect = original_connect
+        self.assertEqual(self.store.state(ch.challenge_id), "EXPIRED")
+
+    def test_confirm_cancel_race_has_one_linearized_winner(self):
+        ch = challenge()
+        self.store.prepare(ch)
+        start = threading.Event()
+
+        def confirm():
+            self.assertTrue(start.wait(timeout=5))
+            return self._attempt(ch)
+
+        def cancel():
+            self.assertTrue(start.wait(timeout=5))
+            self.store.cancel(ch.challenge_id)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            confirmation = pool.submit(confirm)
+            cancellation = pool.submit(cancel)
+            start.set()
+            outcome = confirmation.result(timeout=5)
+            cancellation.result(timeout=5)
+        self.assertIn((outcome, self.store.state(ch.challenge_id)), {
+            ("VERIFIED_PROOF_ONLY", "CONSUMED"),
+            ("CHALLENGE_NOT_PREPARED", "CANCELLED"),
+        })
+        self.assertEqual(self._attempt(ch), "CHALLENGE_NOT_PREPARED")
+
+    def test_request_digest_binding_and_restart_evidence(self):
+        ch = challenge()
+        altered = dataclasses.replace(ch, request_digest="f" * 64)
+        self.assertNotEqual(ch.canonical_bytes(), altered.canonical_bytes())
+        self.assertNotEqual(ch.webauthn_challenge(), altered.webauthn_challenge())
+        self.assertEqual(ch.action_digest, altered.action_digest)
+        self.assertEqual(ch.payload_digest, altered.payload_digest)
+        self.store.prepare(ch)
+        with self.assertRaisesRegex(P.OwnerProofError, "ACTION_BINDING_MISMATCH"):
+            self.verify(ch, expected_request_digest=altered.request_digest)
+        with self.assertRaisesRegex(P.OwnerProofError, "INVALID_WEBAUTHN_ASSERTION"):
+            self.verify(ch, proof=assertion(altered))
+        with self.assertRaisesRegex(P.OwnerProofError, "INVALID_REQUEST_DIGEST"):
+            self.verify(ch, expected_request_digest="invalid")
+        with self.assertRaises(TypeError):
+            self.verifier.verify_and_consume(
+                ch.challenge_id, assertion(ch), expected_action=action(),
+                expected_memory_item_id=None, expected_restore_target_digest=None,
+                expected_privacy_notice_version="privacy.synthetic.v1",
+            )
+        self.assertEqual(self.store.state(ch.challenge_id), "PREPARED")
+        result = self.verify(ch)
+        self.assertEqual(result.request_digest, request_digest())
+        reopened = P.DurableOwnerChallengeStore(self.store.path)
+        conn = reopened._connect()
+        try:
+            raw, state = conn.execute(
+                "SELECT challenge_json,state FROM owner_proof_challenge_v1 WHERE challenge_id=?",
+                (ch.challenge_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(state, "CONSUMED")
+        self.assertEqual(P.OwnerMemoryChallengeV1.from_dict(json.loads(raw)).request_digest, request_digest())
+        self.assertEqual(self._attempt(ch), "CHALLENGE_NOT_PREPARED")
+        with self.assertRaisesRegex(P.OwnerProofError, "CHALLENGE_NOT_PREPARED"):
+            self.verify(ch, expected_request_digest=altered.request_digest)
 
     def test_wrong_credentials_and_public_key_cannot_sign(self):
         ch = challenge()
@@ -352,6 +462,9 @@ class OwnerProofCase(unittest.TestCase):
         for changed in (
             {**valid, "unexpected": True},
             {key: value for key, value in valid.items() if key != "nonce"},
+            {key: value for key, value in valid.items() if key != "requestDigest"},
+            {**valid, "requestDigest": "not-a-digest"},
+            {**valid, "requestDigest": valid["requestDigest"].upper()},
             {**valid, "schemaVersion": 2},
             {**valid, "nonce": "bad"},
             {**valid, "expiresAt": valid["issuedAt"]},
@@ -364,10 +477,10 @@ class OwnerProofCase(unittest.TestCase):
 
     def test_golden_vectors(self):
         expected = {
-            "CREATE": ("f762bbecc8bd9937e7f2474b1891786b1b0f24a838a4bfe84360857a525e864a", "01606536f41781a60bfea4849a92e39790cc9721e22ebd1f90fff5dde3aef6b5"),
-            "SUPERSEDE": ("1e727047338000f873262b6ddf5b259a4673cd3619f4ac33dcd385c31a48c625", "705c5f7f40b856e2f4a4b8250ce3ec7abadaacd3b1d27440d60b9785c5e77638"),
-            "RESTORE": ("4b733259a726f2c9864a2a4d2974e559b7410b3ac7327515eac6b9ff46e0a975", "ae45386cb0159c0a13a2dddfbd600a77529cf15cb5d4dfec943517360b657858"),
-            "FORGET": ("f7fe26056b5edffb046a0aad6ec9fbbc750911156ea781bcf803778ca5691115", "fad5e93d2be6c4cfe928e82346d77213e67a1cff83ac429a81ba9be7d1351bae"),
+            "CREATE": ("b373b73a71fd932824174c446b06a2c51f27bbdf7ed2e05dbc8931b149e85c3e", "4315f79cabab0baa730379c7af273e2219174a72d19663260934ba9eb1eb61b4"),
+            "SUPERSEDE": ("167a5303b5162b1bd7da8e1da25cd185971ad009399187c8ed945d5a953b9f5d", "ff5322ed9351be77f8eb1d69fe2a6d91d20bddbdf88e5dac6c77a77cd11ab15b"),
+            "RESTORE": ("b48b17e43e18bbdf16a4c7565d218c3970f89b67de2ce0c2976dad9a04e00e39", "562ac19384eed7db38eee29fe7749a497d18fff5e01db82e4eb2f5215e5d911c"),
+            "FORGET": ("a6b6491602c8f19df345a67ea337b6113b4e133006e081fc3f4ae0f9695a0d2d", "ff60120c401c14bd7907adf93c7cd9944a5ee6e51176bf9f0d71145aedcb553a"),
         }
         lines = (Path(__file__).parent / "owner_proof_golden.jsonl").read_bytes().splitlines()
         vector_bytes = {json.loads(line)["operation"]: line for line in lines}
@@ -403,6 +516,7 @@ class OwnerProofCase(unittest.TestCase):
         with self.assertRaisesRegex(P.OwnerProofError, "UNKNOWN_CHALLENGE"):
             self.verifier.verify_and_consume(
                 "och.unknown", assertion(ch), expected_action=action(),
+                expected_request_digest=request_digest(),
                 expected_memory_item_id=None, expected_restore_target_digest=None,
                 expected_privacy_notice_version="privacy.synthetic.v1",
             )
