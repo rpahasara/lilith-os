@@ -17,27 +17,50 @@ on:
         description: "Enter: I AUTHORIZE B1B2B_II ACTIVATE_AND_ISOLATION_TEST"
         required: true
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/memory-broker-dev-stage2-runtime.yml"
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: lilith-memory-broker-dev-stage2-runtime
   cancel-in-progress: false
 
-env:
-  GCP_PROJECT_ID: lilith-agent-260823-27389
-  GCP_ZONE: asia-southeast1-b
-  GCP_INSTANCE: lilith-dev-01
-  GCP_INSTANCE_ID: "7687007163730582258"
-  GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
-  GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
-  RELEASE_SHA: "817a83e44cec8965479fd97fc30b7a0b3ae49ab2"
-
 jobs:
+  registration_audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out registration source only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record exact registered workflow source
+        shell: bash
+        run: |
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          workflow=.github/workflows/memory-broker-dev-stage2-runtime.yml
+          test -f "$workflow"
+          {
+            echo "EVENT=$GITHUB_EVENT_NAME"
+            echo "REF=$GITHUB_REF"
+            echo "SHA=$GITHUB_SHA"
+            echo "WORKFLOW=$workflow"
+            sha256sum "$workflow"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   activate_and_isolation_test:
     if: >-
+      github.event_name == 'workflow_dispatch' &&
       github.actor == 'rpahasara' &&
       github.ref == 'refs/heads/main' &&
       inputs.approved_stage == 'B1B2B_II' &&
@@ -45,6 +68,17 @@ jobs:
       inputs.owner_confirmation == 'I AUTHORIZE B1B2B_II ACTIVATE_AND_ISOLATION_TEST'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_INSTANCE_ID: "7687007163730582258"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      RELEASE_SHA: "817a83e44cec8965479fd97fc30b7a0b3ae49ab2"
     steps:
       - name: Check out trusted main controls
         uses: actions/checkout@v7
