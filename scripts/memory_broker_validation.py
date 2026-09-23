@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trusted, closed B1b-1 broker validation artifact and transient runner.
+"""Trusted, closed B1b-1/B1b-2a validation artifact and transient runner.
 
 This script belongs to default-branch controls, never to the candidate bundle.
 """
@@ -44,6 +44,24 @@ SHARED_FILES = frozenset({
     "services/core-api/tests/owner_proof_golden.jsonl",
 })
 FILES = BROKER_FILES | SHARED_FILES
+B1B2A_EXTRA = frozenset({
+    "services/memory-broker/lilith_memory_broker/dev_config.py",
+    "services/memory-broker/lilith_memory_broker/dev_state.py",
+    "services/memory-broker/lilith_memory_broker/synthetic_evidence.py",
+    "services/memory-broker/lilith_memory_broker/dev_core.py",
+    "services/memory-broker/lilith_memory_broker/server.py",
+    "services/memory-broker/tests/test_dev_synthetic.py",
+    "services/memory-broker/tests/test_server_adapter.py",
+    "services/memory-broker/tests/test_deploy_assets.py",
+    "services/memory-broker/deploy/lilith-memory-broker.service",
+    "services/memory-broker/deploy/lilith-memory-broker.socket",
+    "services/memory-broker/deploy/lilith-memory-broker.tmpfiles.conf",
+    "services/memory-broker/deploy/dev-config.schema.json",
+    "services/memory-broker/deploy/public-synthetic-credential.json",
+})
+B1B2A_BROKER_FILES = BROKER_FILES | B1B2A_EXTRA
+B1B2A_FILES = B1B2A_BROKER_FILES | SHARED_FILES
+ALLOWED_FILES = FILES | B1B2A_FILES
 MANIFEST_NAME = "broker-validation-manifest.json"
 MAX_FILE = 1024 * 1024
 MAX_ARCHIVE = 8 * 1024 * 1024
@@ -63,7 +81,7 @@ def _canonical(value: dict) -> bytes:
 
 def _path(root: Path, name: str) -> Path:
     # Names originate in this trusted policy, but still guard each component.
-    if name not in FILES or name.startswith("/") or ".." in name.split("/"):
+    if name not in ALLOWED_FILES or name.startswith("/") or ".." in name.split("/"):
         raise ValidationError("UNTRUSTED_COMPONENT_PATH")
     path = root
     for part in name.split("/"):
@@ -96,14 +114,15 @@ def component_files(root: Path) -> dict[str, bytes] | None:
             actual.add(path.relative_to(root).as_posix())
         elif not path.is_dir():
             raise ValidationError("UNEXPECTED_COMPONENT_ENTRY")
-    if actual != BROKER_FILES:
-        raise ValidationError(f"BROKER_FILE_SET_MISMATCH missing={sorted(BROKER_FILES-actual)} extra={sorted(actual-BROKER_FILES)}")
+    if actual not in (BROKER_FILES, B1B2A_BROKER_FILES):
+        raise ValidationError(f"BROKER_FILE_SET_MISMATCH actual={sorted(actual)}")
+    selected = FILES if actual == BROKER_FILES else B1B2A_FILES
     values = {}
-    for name in sorted(FILES):
+    for name in sorted(selected):
         data = _path(root, name).read_bytes()
         if len(data) > MAX_FILE:
             raise ValidationError(f"COMPONENT_FILE_OVERSIZED:{name}")
-        if name in BROKER_FILES and (b"-----BEGIN PRIVATE KEY-----" in data or b"-----BEGIN EC PRIVATE KEY-----" in data):
+        if name in (BROKER_FILES | B1B2A_BROKER_FILES) and (b"-----BEGIN PRIVATE KEY-----" in data or b"-----BEGIN EC PRIVATE KEY-----" in data):
             raise ValidationError("PRIVATE_MATERIAL_IN_BROKER")
         values[name] = data
     return values
@@ -134,7 +153,7 @@ def build(root: Path, archive: Path, attestation: Path, candidate_sha: str) -> d
         return None
     manifest = {
         "schemaVersion": 1,
-        "componentVersion": "B1b-1",
+        "componentVersion": "B1b-1" if set(payloads) == FILES else "B1b-2a",
         "artifactRole": ROLE,
         "candidateSha": candidate_sha,
         "files": [
@@ -175,22 +194,23 @@ def verify_extract(archive: Path, attestation: Path, destination: Path, candidat
     value = json.loads(Path(attestation).read_bytes())
     if not isinstance(value, dict) or set(value) != {"schemaVersion", "componentVersion", "artifactRole", "candidateSha", "files", "archiveByteSize", "archiveSha256"}:
         raise ValidationError("INVALID_ATTESTATION_SCHEMA")
-    if (value["schemaVersion"], value["componentVersion"], value["artifactRole"], value["candidateSha"]) != (1, "B1b-1", ROLE, candidate_sha):
+    if (value["schemaVersion"], value["artifactRole"], value["candidateSha"]) != (1, ROLE, candidate_sha) or value["componentVersion"] not in ("B1b-1", "B1b-2a"):
         raise ValidationError("ATTESTATION_IDENTITY_MISMATCH")
+    selected = FILES if value["componentVersion"] == "B1b-1" else B1B2A_FILES
     if value["archiveByteSize"] != archive.stat().st_size or value["archiveSha256"] != _digest(archive.read_bytes()):
         raise ValidationError("ARTIFACT_DIGEST_MISMATCH")
     items = value["files"]
-    if not isinstance(items, list) or len(items) != len(FILES):
+    if not isinstance(items, list) or len(items) != len(selected):
         raise ValidationError("ATTESTED_FILE_SET_MISMATCH")
     indexed = {}
     for item in items:
         if not isinstance(item, dict) or set(item) != {"path", "byteSize", "sha256"}:
             raise ValidationError("INVALID_FILE_ATTESTATION")
         name = item["path"]
-        if name not in FILES or name in indexed or type(item["byteSize"]) is not int or not 0 <= item["byteSize"] <= MAX_FILE or not isinstance(item["sha256"], str) or not HEX.fullmatch(item["sha256"]):
+        if name not in selected or name in indexed or type(item["byteSize"]) is not int or not 0 <= item["byteSize"] <= MAX_FILE or not isinstance(item["sha256"], str) or not HEX.fullmatch(item["sha256"]):
             raise ValidationError("UNSAFE_ATTESTED_FILE")
         indexed[name] = item
-    if set(indexed) != FILES:
+    if set(indexed) != selected:
         raise ValidationError("ATTESTED_FILE_SET_MISMATCH")
     destination = Path(destination)
     if destination.exists() and any(destination.iterdir()):
@@ -200,7 +220,7 @@ def verify_extract(archive: Path, attestation: Path, destination: Path, candidat
     with tarfile.open(archive, "r:gz") as tar:
         members = tar.getmembers()
         names = [member.name for member in members]
-        if len(names) != len(set(names)) or set(names) != FILES | {MANIFEST_NAME}:
+        if len(names) != len(set(names)) or set(names) != selected | {MANIFEST_NAME}:
             raise ValidationError("ARCHIVE_MEMBER_SET_MISMATCH")
         for member in members:
             if not member.isfile() or member.issym() or member.islnk() or member.size > MAX_FILE or member.name.startswith("/") or ".." in member.name.split("/"):
@@ -232,7 +252,8 @@ def execute(root: Path, python: str = sys.executable) -> None:
     env["LILITH_ENV"] = "test"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     root = Path(root)
-    sources = [str(root / name) for name in sorted(FILES) if name.endswith(".py")]
+    selected = set(component_files(root) or ())
+    sources = [str(root / name) for name in sorted(selected) if name.endswith(".py")]
     _run([python, "-B", "-c", "import pathlib,sys; [compile(pathlib.Path(p).read_bytes(), p, 'exec') for p in sys.argv[1:]]", *sources], root, env)
     imports = "import sys; sys.path[:0]=['services/core-api','services/memory-broker']; import lilith_memory_broker.core, lilith_memory_broker.protocol, lilith_memory_broker.request, lilith_memory_broker.state"
     _run([python, "-B", "-c", imports], root, env)
@@ -245,8 +266,8 @@ def execute(root: Path, python: str = sys.executable) -> None:
         "result=unittest.TextTestRunner(verbosity=2).run(suite); "
         "sys.exit(0 if result.wasSuccessful() else 1)"
     )
-    _run([python, "-B", "-c", test_code, f"{BROKER_ROOT}/tests", "test_*.py", "14"], root, env)
-    _run([python, "-B", "-c", test_code, "services/core-api/tests", "test_owner_proof.py", "18"], root, env)
+    _run([python, "-B", "-c", test_code, f"{BROKER_ROOT}/tests", "test_*.py", "14" if selected == FILES else "35"], root, env)
+    _run([python, "-B", "-c", test_code, "services/core-api/tests", "test_owner_proof.py", "22"], root, env)
 
 
 def run_transient(archive: Path, attestation: Path, candidate_sha: str, python: str = sys.executable) -> dict:
@@ -254,7 +275,7 @@ def run_transient(archive: Path, attestation: Path, candidate_sha: str, python: 
         root = Path(temporary)
         value = verify_extract(archive, attestation, root, candidate_sha)
         execute(root, python)
-        result = {"status": "VALIDATED", "candidateSha": candidate_sha, "archiveSha256": value["archiveSha256"], "fileCount": len(FILES)}
+        result = {"status": "VALIDATED", "candidateSha": candidate_sha, "archiveSha256": value["archiveSha256"], "fileCount": len(value["files"])}
     if root.exists():
         raise ValidationError("TRANSIENT_CLEANUP_FAILED")
     return result

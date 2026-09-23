@@ -49,8 +49,20 @@ jobs:
       - name: Validate trusted memory broker artifact controls
         run: python -m unittest scripts/test_memory_broker_validation.py
 
+      - name: Validate inert broker release and installer controls
+        run: python -m unittest scripts/test_memory_broker_os_controls.py
+
       - name: Check broker DEV validation shell syntax
         run: bash -n scripts/run_memory_broker_dev_validation.sh
+
+      - name: Statically verify proposed broker systemd units when present
+        shell: bash
+        run: |
+          if test -f services/memory-broker/deploy/lilith-memory-broker.service; then
+            systemd-analyze verify \
+              services/memory-broker/deploy/lilith-memory-broker.service \
+              services/memory-broker/deploy/lilith-memory-broker.socket
+          fi
 
   frontend-quality:
     name: Frontend build and command core
