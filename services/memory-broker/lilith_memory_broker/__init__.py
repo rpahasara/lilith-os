@@ -6,4 +6,4 @@ The governed ``lilith_memory`` contract package is a dependency, not the
 model-facing Core API process.
 """
 
-__all__ = ("request", "protocol", "state", "core", "dev_config", "dev_proof", "dev_state", "synthetic_evidence", "dev_core", "server")
+__all__ = ("request", "protocol", "state", "core", "dev_config", "dev_state", "synthetic_evidence", "dev_core", "server")

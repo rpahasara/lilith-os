@@ -14,7 +14,7 @@ BROKER = ROOT / "services" / "memory-broker"
 
 class DeployAssetCase(unittest.TestCase):
     def test_operational_modules_exclude_canonical_authority(self):
-        names = ("request", "protocol", "state", "dev_config", "dev_proof", "dev_state", "synthetic_evidence", "dev_core", "server")
+        names = ("request", "protocol", "state", "dev_config", "dev_state", "synthetic_evidence", "dev_core", "server")
         for name in names:
             tree = ast.parse((BROKER / "lilith_memory_broker" / f"{name}.py").read_text(encoding="utf-8"))
             imports = []
@@ -27,6 +27,14 @@ class DeployAssetCase(unittest.TestCase):
             with self.subTest(module=name):
                 self.assertNotIn("canonical_authority", imports)
                 self.assertNotIn("app", imports)
+
+    def test_single_shared_verification_engine(self):
+        package = BROKER / "lilith_memory_broker"
+        self.assertFalse((package / "dev_proof.py").exists())
+        core = (package / "dev_core.py").read_text(encoding="utf-8")
+        self.assertIn("P.DevSyntheticOwnerProofVerifier(", core)
+        self.assertNotIn("Fido2Server", core)
+        self.assertNotIn("authenticate_complete", core)
 
     def test_systemd_assets_are_dev_only_and_closed(self):
         deploy = BROKER / "deploy"

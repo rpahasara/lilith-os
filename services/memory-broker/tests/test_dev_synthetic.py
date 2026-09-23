@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
+import rfc8785
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -18,7 +20,7 @@ sys.path[:0] = [str(ROOT / "services" / "core-api"), str(ROOT / "services" / "co
 
 from lilith_memory import canonical_contracts as C
 from lilith_memory import owner_proof as P
-from lilith_memory_broker import dev_config, dev_core, dev_state, request, synthetic_evidence
+from lilith_memory_broker import dev_config, dev_core, dev_state, protocol, request, server, synthetic_evidence
 import test_owner_proof as b1a_fixture
 
 
@@ -182,6 +184,81 @@ class DevSyntheticCase(unittest.TestCase):
         with self.assertRaises(P.OwnerProofError):
             broker.confirm_synthetic(challenge.challenge_id, bad_signature)
         self.assertIsNone(evidence.find(challenge.challenge_id))
+
+    def test_shared_engine_is_the_only_proof_path(self):
+        _, _, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        with patch.object(P.DevSyntheticOwnerProofVerifier, "verify_and_consume", side_effect=RuntimeError("SHARED_ENGINE_CALLED")):
+            with self.assertRaisesRegex(RuntimeError, "SHARED_ENGINE_CALLED"):
+                broker.confirm_synthetic(challenge.challenge_id, b1a_fixture.assertion(challenge))
+
+    def test_runtime_public_credential_pin_fails_closed(self):
+        owner, evidence, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        changed = self.credential.to_dict()
+        changed["credentialId"] = P._b64u(b"x" * 32)
+        with closing(sqlite3.connect(self.owner_path)) as conn:
+            conn.execute("UPDATE owner_credential_v1 SET credential_json=?", (rfc8785.dumps(changed),))
+            conn.commit()
+        with self.assertRaises(dev_state.legacy.StateError):
+            broker.confirm_synthetic(challenge.challenge_id, b1a_fixture.assertion(challenge))
+        self.assertEqual(owner.challenge_store.state(challenge.challenge_id), "PREPARED")
+        self.assertIsNone(evidence.find(challenge.challenge_id))
+
+    def test_dev_policy_cannot_run_as_test_or_live(self):
+        owner, _, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        for environment in ("test", "prod"):
+            with self.subTest(environment=environment), patch.dict(os.environ, {"LILITH_ENV": environment}):
+                with self.assertRaises(P.OwnerProofError):
+                    P.DevSyntheticOwnerProofVerifier(owner.challenge_store)
+                with self.assertRaises(P.OwnerProofError):
+                    broker.confirm_synthetic(challenge.challenge_id, b1a_fixture.assertion(challenge))
+
+    def test_peer_logical_owner_and_proof_are_separate(self):
+        owner, evidence, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        assertion = b1a_fixture.assertion(challenge)
+        payload = {
+            "challengeId": challenge.challenge_id,
+            "assertion": {
+                "credentialRecordId": assertion.credential_record_id,
+                "credentialId": assertion.credential_id,
+                "clientDataJSON": assertion.client_data_json,
+                "authenticatorData": assertion.authenticator_data,
+                "signature": assertion.signature,
+            },
+        }
+        frame = protocol.encode_frame("CONFIRM_SYNTHETIC", payload)
+
+        def exchange(peer: int, body: bytes) -> bytes:
+            client, accepted = socket.socketpair()
+            try:
+                client.sendall(body)
+                server.serve_connection(accepted, broker, authorized_uid=1001, peer_uid_reader=lambda _sock: peer)
+                try:
+                    return client.recv(16388)
+                except ConnectionResetError:
+                    return b""
+            finally:
+                client.close()
+
+        # A valid WebAuthn assertion from the wrong Linux peer is not dispatched.
+        self.assertEqual(exchange(1002, frame), b"")
+        self.assertEqual(owner.challenge_store.state(challenge.challenge_id), "PREPARED")
+        self.assertIsNone(evidence.find(challenge.challenge_id))
+        # A logical owner string supplied in JSON is not a credential or peer proof.
+        with self.assertRaises(protocol.ProtocolError):
+            protocol.encode_frame("PREPARE_SYNTHETIC", {
+                "fixtureId": request.SYNTHETIC_FIXTURE_ID,
+                "logicalOwnerId": request.LOGICAL_OWNER_ID,
+            })
+        # The correct peer alone does not confer proof: malformed assertion is rejected.
+        bad = dict(payload, assertion={**payload["assertion"], "signature": P._b64u(b"invalid")})
+        self.assertEqual(exchange(1001, protocol.encode_frame("CONFIRM_SYNTHETIC", bad)), b"")
+        self.assertEqual(owner.challenge_store.state(challenge.challenge_id), "PREPARED")
+        self.assertIn(b"SYNTHETIC_EVIDENCE_COMMITTED", exchange(1001, frame))
+        self.assertIsNotNone(evidence.find(challenge.challenge_id))
 
 
 if __name__ == "__main__":

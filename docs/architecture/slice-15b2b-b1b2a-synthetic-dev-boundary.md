@@ -7,20 +7,21 @@ B1b-2b requires a separate owner decision.
 ## Closed runtime modes
 
 The existing B1b-1 TEST path remains explicitly test-only and the Core API
-B1a owner-proof guard remains unchanged. The new `DEV_SYNTHETIC` path is a
-broker-local verifier and state adapter. It refuses `LILITH_ENV=test` or
+B1a owner-proof guard remains unchanged. The new `DEV_SYNTHETIC` path uses
+the shared owner-proof verification engine and a broker-local state adapter.
+It refuses `LILITH_ENV=test` or
 `prod`, requires the exact DEV host/machine marker, synthetic-only authority
 mode, disabled canonical capability, fixed `.invalid` RP/origin, fixed public
 credential fingerprint, exact release SHA, both schema fingerprints, and
 explicit absence of cognitive/Privacy/key custody. There is no live mode.
 
-The broker-local verifier duplicates the B1a post-crypto consumption sequence
-because B1a intentionally rejects `.invalid` outside TEST. A different RP
-suffix or temporary `LILITH_ENV=test` would evade that invariant. The
-operational release contains B1a contracts but no Core API `app.py` or
-`canonical_authority.py`. This verifier fork is a review-sensitive security
-surface: parity and negative WebAuthn vectors are mandatory CI gates before
-any DEV installation.
+The broker constructs the fixed `DevSyntheticOwnerProofVerifier` policy
+from the shared module. That policy permits the pinned synthetic RP/origin
+only in DEV; the existing B1a TEST-only constructor retains its prior guard.
+The shared engine alone performs WebAuthn verification and durable proof
+consumption. The operational release contains its contracts but no Core API
+`app.py` or `canonical_authority.py`. Negative WebAuthn and B1a golden
+vectors remain mandatory CI gates before any DEV installation.
 
 ## Synthetic evidence, not Actor authority
 

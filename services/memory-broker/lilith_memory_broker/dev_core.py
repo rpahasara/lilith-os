@@ -12,7 +12,6 @@ from typing import Callable
 from lilith_memory import owner_proof as P
 
 from .dev_config import DevConfig
-from .dev_proof import DevSyntheticProofVerifier
 from .dev_state import DevOwnerControlState
 from .protocol import BrokerMessageV1
 from .request import SYNTHETIC_ACCESS_IDENTITY, SYNTHETIC_FIXTURE_ID, construct_synthetic_request
@@ -81,10 +80,14 @@ class DevSyntheticBrokerCore:
         return challenge
 
     def confirm_synthetic(self, challenge_id: str, assertion: P.OwnerAssertionV1, *, fault_hook: Callable[[str], None] | None = None) -> dict[str, str]:
+        # Recheck the pinned public credential before each proof. The shared
+        # engine owns verification; this guard closes a mutable-state gap
+        # between broker startup and a later synthetic confirmation.
+        self.state.validate_startup()
         request = self.state.request(challenge_id)
         if request.access_identity != SYNTHETIC_ACCESS_IDENTITY:
             raise DevBrokerError("ACCESS_IDENTITY_MISMATCH")
-        proof = DevSyntheticProofVerifier(self.state.challenge_store, now_fn=self.now_fn).verify_and_consume(
+        proof = P.DevSyntheticOwnerProofVerifier(self.state.challenge_store, now_fn=self.now_fn).verify_and_consume(
             challenge_id, assertion, expected_action=request.action,
             expected_request_digest=request.request_digest,
             expected_memory_item_id=request.memory_item_id,

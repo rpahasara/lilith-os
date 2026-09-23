@@ -34,9 +34,10 @@ fingerprints, and explicit absence of canonical/Privacy/key custody. The
 public-only credential fixture is under `deploy/`; its private test scalar is
 not shipped. Explicit provisioning and ordinary startup are separate.
 
-`dev_proof.py` is a broker-local DEV synthetic verification boundary, not a
-change to the Core API B1a `.invalid` RP guard. Its verification and durable
-consumption semantics must be parity-tested against B1a. `dev_core.py` links
+`dev_core.py` constructs the shared `DevSyntheticOwnerProofVerifier` under
+the fixed DEV policy. The single shared engine performs verification and
+durable consumption; the Core API B1a `.invalid` RP guard remains unchanged.
+`dev_core.py` links
 consumed proof to a `synthetic_claim_v1` and separate
 `synthetic_evidence_v1`, never to `ActorEvidenceRefV1`. It imports no
 `canonical_authority` and requires no cognitive/Privacy DB or authority key.

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -97,6 +98,10 @@ class DevConfig:
         path = Path(path)
         if path.is_symlink() or not path.is_file():
             raise DevConfigError("CONFIG_FILE_INVALID")
+        if os.name != "nt":
+            metadata = path.stat()
+            if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o640:
+                raise DevConfigError("CONFIG_OWNERSHIP_INVALID")
         return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
     def validate_runtime(self, *, hostname: str, machine_id: str, release_sha: str) -> None:
