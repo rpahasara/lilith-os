@@ -1,0 +1,151 @@
+name: Memory Broker DEV first install (owner invoked)
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_stage:
+        description: "Only inert B1b-2b-I provisioning is available"
+        required: true
+        type: choice
+        options:
+          - B1B2B_I
+      approved_release_sha:
+        description: "Exact governed release SHA"
+        required: true
+        type: string
+      owner_confirmation:
+        description: "Enter: I AUTHORIZE B1B2B_I PROVISION_ONLY"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: lilith-memory-broker-dev-first-install
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: lilith-agent-260823-27389
+  GCP_ZONE: asia-southeast1-b
+  GCP_INSTANCE: lilith-dev-01
+  GCP_INSTANCE_ID: "7687007163730582258"
+  GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+  GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+  RELEASE_SHA: "817a83e44cec8965479fd97fc30b7a0b3ae49ab2"
+
+jobs:
+  provision_only:
+    if: >-
+      github.actor == 'rpahasara' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.approved_stage == 'B1B2B_I' &&
+      inputs.approved_release_sha == '817a83e44cec8965479fd97fc30b7a0b3ae49ab2' &&
+      inputs.owner_confirmation == 'I AUTHORIZE B1B2B_I PROVISION_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out trusted main controls
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify trusted control source
+        shell: bash
+        run: |
+          test "$(git branch --show-current)" = main
+          git merge-base --is-ancestor "$RELEASE_SHA" HEAD
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Check out exact governed release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Set up pinned Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and verify closed inert release
+        shell: bash
+        run: |
+          mkdir -p deployment-output/broker-wheels
+          python -m pip download --disable-pip-version-check --no-deps \
+            --only-binary=:all: --platform manylinux2014_x86_64 \
+            --python-version 3.12 --implementation cp --abi cp312 \
+            --dest deployment-output/broker-wheels \
+            cffi==2.1.1 cryptography==50.0.1 fido2==2.2.1 \
+            pycparser==3.0 rfc8785==0.1.4
+          python scripts/memory_broker_os_release.py build \
+            --source-root candidate \
+            --wheelhouse deployment-output/broker-wheels \
+            --candidate-sha "$RELEASE_SHA" \
+            --archive deployment-output/lilith-broker-os-release.tar.gz \
+            --attestation deployment-output/lilith-broker-os-release.attestation.json
+          python scripts/memory_broker_os_release.py verify \
+            --candidate-sha "$RELEASE_SHA" \
+            --archive deployment-output/lilith-broker-os-release.tar.gz \
+            --attestation deployment-output/lilith-broker-os-release.attestation.json
+          test "$(sha256sum deployment-output/lilith-broker-os-release.tar.gz | cut -d' ' -f1)" = \
+            b4cb4c1412908c1702d9cdf00717dff77574e70fc47abf31f05ff782eca04d87
+
+      - name: Authenticate to existing GCP deployer
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Independently pin DEV in cloud control plane
+        shell: bash
+        run: |
+          identity="$(gcloud compute instances describe "$GCP_INSTANCE" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --format='value(id,name,status)')"
+          test "$identity" = "$GCP_INSTANCE_ID"$'\t'"$GCP_INSTANCE"$'\t'RUNNING
+
+      - name: Read-only VM identity and collision gate
+        shell: bash
+        run: |
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="test \"\$(hostname -f)\" = 'lilith-dev-01.asia-southeast1-b.c.lilith-agent-260823-27389.internal' && test \"\$(cat /etc/machine-id)\" = 'ae929170e6fa4c8ab9cc7b9547238d9d' && ! getent passwd lilith-memory-broker && ! getent passwd lilith-memory-relay && ! getent group lilith-memory-ipc && test ! -e /opt/lilith-memory-broker && test ! -e /etc/lilith-memory-broker && test ! -e /var/lib/lilith-memory-broker && test ! -e /run/lilith-memory && test ! -e /etc/systemd/system/lilith-memory-broker.service && test ! -e /etc/systemd/system/lilith-memory-broker.socket && test ! -e /etc/tmpfiles.d/lilith-memory-broker.conf && test ! -e /tmp/lilith-broker-os-$RELEASE_SHA.tar.gz && test ! -e /tmp/lilith-broker-os-$RELEASE_SHA.attestation.json"
+
+      - name: Stage inert artifact only
+        shell: bash
+        run: |
+          remote_archive="/tmp/lilith-broker-os-${RELEASE_SHA}.tar.gz"
+          remote_attestation="/tmp/lilith-broker-os-${RELEASE_SHA}.attestation.json"
+          gcloud compute scp --quiet --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            deployment-output/lilith-broker-os-release.tar.gz "$GCP_INSTANCE:$remote_archive"
+          gcloud compute scp --quiet --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            deployment-output/lilith-broker-os-release.attestation.json "$GCP_INSTANCE:$remote_attestation"
+
+      - name: Owner-authorized Stage I only
+        shell: bash
+        run: |
+          release_source="$(base64 -w0 scripts/memory_broker_os_release.py)"
+          installer_source="$(base64 -w0 scripts/memory_broker_os_installer.py)"
+          loader='import base64,sys,types;m=types.ModuleType("memory_broker_os_release");sys.modules[m.__name__]=m;exec(base64.b64decode(sys.argv[1]),m.__dict__);source=base64.b64decode(sys.argv[2]);sys.argv=["trusted-installer"]+sys.argv[3:];exec(source,{"__name__":"__main__"})'
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="sudo -n /usr/bin/python3 -B -c '$loader' '$release_source' '$installer_source' authorize-dev --candidate-sha '$RELEASE_SHA'"
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="sudo -n /usr/bin/python3 -B -c '$loader' '$release_source' '$installer_source' install-dev --candidate-sha '$RELEASE_SHA'"
+
+      - name: Prove inertness and API non-interference
+        shell: bash
+        run: |
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="test -d /opt/lilith-memory-broker/releases/$RELEASE_SHA && test ! -e /run/lilith-memory && test \"\$(systemctl is-active lilith-memory-broker.service)\" = inactive && test \"\$(systemctl is-active lilith-memory-broker.socket)\" = inactive && curl -fsS http://127.0.0.1:8765/health"

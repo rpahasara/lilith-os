@@ -11,6 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -142,18 +143,200 @@ class TrustedInstallerCase(unittest.TestCase):
             opt=root / "opt", config=root / "etc", state=root / "state", runtime=root / "run",
             service=root / "units/broker.service", socket=root / "units/broker.socket", tmpfiles=root / "tmpfiles/broker.conf",
         )
-        self.sha = "a" * 40
+        self.sha = installer.SELECTED_RELEASE_SHA
 
     def test_host_and_staging_are_pinned(self):
-        installer.assert_dev_host(hostname=release.DEV_HOST, machine_id=release.DEV_MACHINE_ID)
-        for host, machine in (("lilith-01", release.DEV_MACHINE_ID), (release.DEV_HOST, "0" * 32)):
+        metadata = {
+            "project/project-id": installer.PROJECT,
+            "instance/zone": "projects/763184673487/zones/" + installer.ZONE,
+            "instance/id": installer.INSTANCE_ID,
+            "instance/name": release.DEV_HOST,
+        }
+        installer.assert_dev_host(hostname=installer.HOSTNAME, machine_id=release.DEV_MACHINE_ID, metadata=metadata.__getitem__)
+        for host, machine in (("lilith-01", release.DEV_MACHINE_ID), (installer.HOSTNAME, "0" * 32)):
             with self.assertRaises(installer.InstallError):
-                installer.assert_dev_host(hostname=host, machine_id=machine)
+                installer.assert_dev_host(hostname=host, machine_id=machine, metadata=metadata.__getitem__)
         archive, attestation = installer.staged_paths(self.sha)
         self.assertEqual(archive.name, f"lilith-broker-os-{self.sha}.tar.gz")
         self.assertEqual(attestation.name, f"lilith-broker-os-{self.sha}.attestation.json")
         with self.assertRaises(installer.InstallError):
             installer.staged_paths("../../evil")
+
+    def test_full_cloud_identity_and_explicit_prod_denial(self):
+        correct = {
+            "project/project-id": installer.PROJECT,
+            "instance/zone": "projects/763184673487/zones/" + installer.ZONE,
+            "instance/id": installer.INSTANCE_ID,
+            "instance/name": release.DEV_HOST,
+        }
+        installer.assert_dev_host(hostname=installer.HOSTNAME, machine_id=installer.MACHINE_ID, metadata=correct.__getitem__)
+        wrong = {
+            "project/project-id": "other-project",
+            "instance/zone": "projects/763184673487/zones/elsewhere",
+            "instance/id": installer.PROD_INSTANCE_ID,
+            "instance/name": "lilith-01",
+        }
+        for key, value in wrong.items():
+            with self.subTest(key=key):
+                observed = {**correct, key: value}
+                with self.assertRaises(installer.InstallError):
+                    installer.assert_dev_host(hostname=installer.HOSTNAME, machine_id=installer.MACHINE_ID, metadata=observed.__getitem__)
+        for hostname in ("lilith-01", "unknown", release.DEV_HOST):
+            with self.subTest(hostname=hostname), self.assertRaises(installer.InstallError):
+                installer.assert_dev_host(hostname=hostname, machine_id=installer.MACHINE_ID, metadata=correct.__getitem__)
+        with self.assertRaisesRegex(installer.InstallError, "CLOUD_IDENTITY_UNAVAILABLE"):
+            installer.assert_dev_host(hostname=installer.HOSTNAME, machine_id=installer.MACHINE_ID,
+                                      metadata=lambda key: (_ for _ in ()).throw(OSError("metadata unavailable")))
+
+    def test_marker_is_closed_stage_bound_and_expires(self):
+        self.paths.config.mkdir()
+        issued = datetime(2026, 9, 23, 13, 0, tzinfo=timezone.utc)
+        value = installer._authorization_value(self.sha, installer.STAGE_I, issued, "a" * 32)
+        self.paths.authorization.write_bytes(release.canonical(value))
+        os.chmod(self.paths.authorization, 0o600)
+        original_stat = Path.stat
+
+        def owned_stat(path, *args, **kwargs):
+            found = original_stat(path, *args, **kwargs)
+            if path == self.paths.authorization:
+                return SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o600)
+            return found
+
+        with patch.object(Path, "stat", owned_stat):
+            installer.require_authorization(self.paths, self.sha, installer.STAGE_I, now=issued + timedelta(minutes=1))
+            for stage in (installer.STAGE_II, installer.STAGE_III, installer.ROLLBACK_STAGE):
+                with self.subTest(stage=stage), self.assertRaisesRegex(installer.InstallError, "AUTHORIZATION_MISMATCH"):
+                    installer.require_authorization(self.paths, self.sha, stage, now=issued + timedelta(minutes=1))
+            with self.assertRaisesRegex(installer.InstallError, "AUTHORIZATION_EXPIRED"):
+                installer.require_authorization(self.paths, self.sha, now=issued + timedelta(minutes=30))
+            for field, replacement in (
+                ("schemaVersion", 1), ("purpose", "OTHER"), ("candidateSha", "0" * 40),
+                ("instanceId", installer.PROD_INSTANCE_ID), ("ownerActor", "candidate"),
+                ("allowedStage", installer.STAGE_II), ("authorizationId", "not-an-id"),
+            ):
+                with self.subTest(field=field):
+                    changed = {**value, field: replacement}
+                    self.paths.authorization.write_bytes(release.canonical(changed))
+                    with self.assertRaises(installer.InstallError):
+                        installer.require_authorization(self.paths, self.sha, now=issued + timedelta(minutes=1))
+
+    def test_stage_i_marker_is_claimed_once_and_preserved(self):
+        self.paths.config.mkdir()
+        issued = datetime.now(timezone.utc).replace(microsecond=0)
+        value = installer._authorization_value(self.sha, installer.STAGE_I, issued, "b" * 32)
+        self.paths.authorization.write_bytes(release.canonical(value))
+        original_stat = Path.stat
+
+        def owned_stat(path, *args, **kwargs):
+            found = original_stat(path, *args, **kwargs)
+            if path == self.paths.authorization:
+                return SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o600)
+            return found
+
+        with patch.object(Path, "stat", owned_stat):
+            installer.consume_authorization(self.paths, self.sha, installer.STAGE_I)
+        self.assertFalse(self.paths.authorization.exists())
+        self.assertEqual(json.loads(self.paths.used_authorization.read_bytes()), value)
+        with self.assertRaisesRegex(installer.InstallError, "AUTHORIZATION_MISSING"):
+            installer.consume_authorization(self.paths, self.sha, installer.STAGE_I)
+
+    def test_first_install_collision_matrix(self):
+        with patch.object(installer, "inspect_accounts", return_value=(False, False, False)):
+            installer.assert_first_install_preflight(self.paths, marker_expected=False)
+            for path in (self.paths.opt, self.paths.config, self.paths.state, self.paths.runtime,
+                         self.paths.service, self.paths.socket, self.paths.tmpfiles,
+                         Path(str(self.paths.service) + ".d"), Path(str(self.paths.socket) + ".d")):
+                with self.subTest(path=path):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.mkdir()
+                    with self.assertRaisesRegex(installer.InstallError, "FIRST_INSTALL_"):
+                        installer.assert_first_install_preflight(self.paths, marker_expected=False)
+                    path.rmdir()
+            with patch.object(installer, "inspect_accounts", return_value=(True, False, False)):
+                with self.assertRaisesRegex(installer.InstallError, "FIRST_INSTALL_ACCOUNT_COLLISION"):
+                    installer.assert_first_install_preflight(self.paths, marker_expected=False)
+
+    def test_marker_creation_never_precedes_preflight_or_artifact_verification(self):
+        archive, attestation = installer.staged_paths(self.sha)
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "assert_first_install_preflight", side_effect=installer.InstallError("collision")), patch.object(release, "verify_archive") as verify, patch.object(installer, "_ensure_dir") as create:
+            with self.assertRaisesRegex(installer.InstallError, "collision"):
+                installer.authorize_dev(self.paths, self.sha, archive, attestation)
+            verify.assert_not_called()
+            create.assert_not_called()
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "assert_first_install_preflight"), patch.object(release, "verify_archive", side_effect=release.ReleaseError("bad artifact")), patch.object(installer, "_ensure_dir") as create:
+            with self.assertRaisesRegex(release.ReleaseError, "bad artifact"):
+                installer.authorize_dev(self.paths, self.sha, archive, attestation)
+            create.assert_not_called()
+
+    def test_stage_i_marker_never_authorizes_activation(self):
+        issued = datetime(2026, 9, 23, 13, 0, tzinfo=timezone.utc)
+        self.paths.config.mkdir()
+        self.paths.authorization.write_bytes(release.canonical(installer._authorization_value(self.sha, installer.STAGE_I, issued, "a" * 32)))
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "_current_target") as current, patch.object(installer, "_fixed_run") as run:
+            with self.assertRaises(installer.InstallError):
+                installer.activate_dev(self.paths, self.sha)
+            current.assert_not_called()
+            run.assert_not_called()
+
+    def test_systemd_unit_preflight_rejects_alias_dropin_and_active_unit(self):
+        clean = "Names=lilith-memory-broker.service\nLoadState=not-found\nActiveState=inactive\nFragmentPath=\nDropInPaths=\nUnitFileState=\n"
+        with patch.object(installer.subprocess, "run", return_value=SimpleNamespace(stdout=clean)):
+            installer._unit_absent(installer.SERVICE)
+        for replacement in (
+            "Names=unexpected.service",
+            "LoadState=loaded",
+            "ActiveState=active",
+            "FragmentPath=/etc/systemd/system/lilith-memory-broker.service",
+            "DropInPaths=/etc/systemd/system/lilith-memory-broker.service.d/override.conf",
+            "UnitFileState=enabled",
+        ):
+            field = replacement.split("=", 1)[0]
+            lines = [replacement if line.startswith(field + "=") else line for line in clean.splitlines()]
+            with self.subTest(replacement=replacement), patch.object(
+                installer.subprocess, "run", return_value=SimpleNamespace(stdout="\n".join(lines))
+            ), self.assertRaisesRegex(installer.InstallError, "SYSTEMD_UNIT_COLLISION"):
+                installer._unit_absent(installer.SERVICE)
+
+    def test_selected_release_rejects_other_sha(self):
+        with self.assertRaisesRegex(installer.InstallError, "UNAPPROVED_RELEASE_SHA"):
+            installer.assert_selected_release("0" * 40)
+        installer.assert_selected_release(self.sha)
+
+    def test_metadata_requires_google_flavor_and_proxy_free_opener(self):
+        class Response:
+            headers = {"Metadata-Flavor": "other"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *unused):
+                return None
+
+        with patch.object(installer, "build_opener") as opener:
+            opener.return_value.open.return_value = Response()
+            with self.assertRaisesRegex(installer.InstallError, "UNTRUSTED_METADATA"):
+                installer._metadata("instance/id")
+            request = opener.return_value.open.call_args.args[0]
+            self.assertTrue(request.full_url.startswith("http://169.254.169.254/"))
+            self.assertEqual(request.get_header("Metadata-flavor"), "Google")
+
+    def test_manual_workflow_is_stage_i_only_and_uses_trusted_main(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/memory-broker-dev-first-install.yml").read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("\n  push:", workflow)
+        self.assertNotIn("\n  pull_request:", workflow)
+        self.assertIn("github.actor == 'rpahasara'", workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertIn("I AUTHORIZE B1B2B_I PROVISION_ONLY", workflow)
+        self.assertIn(installer.SELECTED_RELEASE_SHA, workflow)
+        self.assertIn(installer.SELECTED_ARCHIVE_SHA256, workflow)
+        self.assertIn("authorize-dev --candidate-sha", workflow)
+        self.assertIn("install-dev --candidate-sha", workflow)
+        self.assertNotIn("activate-dev --candidate-sha", workflow)
+        self.assertNotIn("sudo bash", workflow)
+        self.assertNotIn("sudo python candidate", workflow)
+        self.assertIn("types.ModuleType", workflow)
 
     def test_config_is_closed_and_no_live_custody(self):
         value = json.loads(installer._config_bytes(self.sha))
@@ -175,7 +358,7 @@ class TrustedInstallerCase(unittest.TestCase):
         (self.paths.state / "unknown.db").write_bytes(b"preserve")
         archive, attestation = installer.staged_paths(self.sha)
         with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(release, "verify_archive", return_value=({}, {})), patch.object(installer, "inspect_accounts", return_value=(False, False, False)), patch.object(installer, "provision_accounts") as provision:
-            with self.assertRaisesRegex(installer.InstallError, "UNEXPECTED_STATE_ENTRY"):
+            with self.assertRaisesRegex(installer.InstallError, "FIRST_INSTALL_PATH_COLLISION"):
                 installer.install_dev(self.paths, self.sha, archive, attestation)
             provision.assert_not_called()
         self.assertEqual((self.paths.state / "unknown.db").read_bytes(), b"preserve")
@@ -200,7 +383,7 @@ class TrustedInstallerCase(unittest.TestCase):
                 installer.inspect_accounts()
 
     def test_activation_has_only_fixed_systemctl_commands(self):
-        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_current_target", return_value=f"releases/{self.sha}"), patch.object(installer, "_fixed_run") as run:
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "assert_recorded_accounts"), patch.object(installer, "_current_target", return_value=f"releases/{self.sha}"), patch.object(installer, "_fixed_run") as run:
             installer.activate_dev(self.paths, self.sha)
         self.assertEqual([call.args for call in run.call_args_list], [
             ("/usr/bin/systemd-tmpfiles", "--create", "--prefix=/run/lilith-memory"),
@@ -221,7 +404,7 @@ class TrustedInstallerCase(unittest.TestCase):
         self.paths.config.mkdir()
         self.paths.previous.write_text("../../outside\n")
         os.chmod(self.paths.previous, 0o600)
-        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_fixed_run") as run:
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "assert_recorded_accounts"), patch.object(installer, "_fixed_run") as run:
             with self.assertRaises(installer.InstallError):
                 installer.rollback_dev(self.paths, self.sha)
             run.assert_not_called()
@@ -248,7 +431,7 @@ class TrustedInstallerCase(unittest.TestCase):
                 return SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o600)
             return original_stat(path, *args, **kwargs)
 
-        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_fixed_run") as run, patch.object(Path, "stat", owned_stat):
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "assert_recorded_accounts"), patch.object(installer, "_fixed_run") as run, patch.object(Path, "stat", owned_stat):
             result = installer.rollback_dev(self.paths, self.sha)
         self.assertEqual(result["status"], "INACTIVE_EVIDENCE_PRESERVED")
         self.assertEqual(owner.read_bytes(), b"owner forensic fixture")
