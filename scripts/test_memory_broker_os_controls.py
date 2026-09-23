@@ -1,0 +1,261 @@
+"""Local fixture tests for trusted release and inert DEV installer policy."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import stat
+import subprocess
+import tarfile
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+try:
+    from scripts import memory_broker_os_release as release
+    from scripts import memory_broker_os_installer as installer
+except ImportError:  # direct script discovery
+    import memory_broker_os_release as release
+    import memory_broker_os_installer as installer
+
+
+def digest(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+class TrustedReleaseCase(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.candidate = self.root / "candidate"
+        self.candidate.mkdir()
+        self.wheels = self.root / "wheels"
+        self.wheels.mkdir()
+        assets = {key: ("approved asset " + key).encode() for key in release.ASSET_HASHES}
+        shared = {key: ("governed shared " + key).encode() for key in release.SHARED_HASHES}
+        wheels = {key: ("approved wheel " + key).encode() for key in release.WHEEL_HASHES}
+        patches = (
+            patch.dict(release.ASSET_HASHES, {key: digest(value) for key, value in assets.items()}),
+            patch.dict(release.SHARED_HASHES, {key: digest(value) for key, value in shared.items()}),
+            patch.dict(release.WHEEL_HASHES, {key: digest(value) for key, value in wheels.items()}),
+        )
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        self.original_lock = release.LOCK
+        release.LOCK = b"trusted-offline-lock\n"
+        self.addCleanup(setattr, release, "LOCK", self.original_lock)
+        for source in release.SOURCE_MAP:
+            path = self.candidate / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(shared.get(source, ("# approved module " + source + "\n").encode()))
+        legacy_core = self.candidate / "services/memory-broker/lilith_memory_broker/core.py"
+        legacy_core.write_text("# B1b-1 test-only module\n", encoding="utf-8")
+        for source, data in assets.items():
+            path = self.candidate / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        for filename, data in wheels.items():
+            (self.wheels / filename).write_bytes(data)
+        subprocess.run(("git", "init", "-q", str(self.candidate)), check=True)
+        subprocess.run(("git", "-C", str(self.candidate), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "add", "."), check=True)
+        subprocess.run(("git", "-C", str(self.candidate), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"), check=True)
+        self.sha = subprocess.run(("git", "-C", str(self.candidate), "rev-parse", "HEAD"), capture_output=True, text=True, check=True).stdout.strip()
+        self.archive = self.root / "release.tar.gz"
+        self.attestation = self.root / "release.attestation.json"
+
+    def test_exact_release_build_and_verify(self):
+        release.build(self.candidate, self.wheels, self.sha, self.archive, self.attestation)
+        manifest, payloads = release.verify_archive(self.archive, self.attestation, self.sha)
+        self.assertEqual(manifest["candidateSha"], self.sha)
+        self.assertEqual(set(payloads), release.EXPECTED_PATHS)
+        self.assertNotIn("lilith_memory_broker/core.py", payloads)
+        self.assertNotIn("lilith_memory/canonical_authority.py", payloads)
+
+    def test_wrong_sha_dirty_tree_and_extra_module(self):
+        with self.assertRaises(release.ReleaseError):
+            release.build_payloads(self.candidate, self.wheels, "0" * 40)
+        extra = self.candidate / "services/memory-broker/lilith_memory_broker/surprise.py"
+        extra.write_text("pass\n")
+        with self.assertRaises(release.ReleaseError):
+            release.build_payloads(self.candidate, self.wheels, self.sha)
+
+    def test_unit_and_wheel_tamper(self):
+        with patch.dict(release.ASSET_HASHES, {next(iter(release.ASSET_HASHES)): "0" * 64}):
+            with self.assertRaises(release.ReleaseError):
+                release.build_payloads(self.candidate, self.wheels, self.sha)
+        (self.wheels / next(iter(release.WHEEL_HASHES))).write_bytes(b"tampered")
+        with self.assertRaises(release.ReleaseError):
+            release.build_payloads(self.candidate, self.wheels, self.sha)
+
+    def test_archive_tamper_and_closed_destinations(self):
+        release.build(self.candidate, self.wheels, self.sha, self.archive, self.attestation)
+        self.archive.write_bytes(self.archive.read_bytes() + b"tamper")
+        with self.assertRaises(release.ReleaseError):
+            release.verify_archive(self.archive, self.attestation, self.sha)
+        self.assertNotIn("/etc/systemd/system/evil.service", release.EXPECTED_PATHS)
+
+    def _rewrite_archive(self, changes: dict[str, bytes], extra: tuple[str, bytes] | None = None):
+        with tarfile.open(self.archive, "r:gz") as old:
+            payloads = {item.name: old.extractfile(item).read() for item in old}
+        payloads.update(changes)
+        if extra is not None:
+            payloads[extra[0]] = extra[1]
+        with tarfile.open(self.archive, "w:gz") as output:
+            for name, data in payloads.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                output.addfile(member, io.BytesIO(data))
+        stamp = json.loads(self.attestation.read_bytes())
+        stamp["archiveByteSize"] = self.archive.stat().st_size
+        stamp["archiveSha256"] = digest(self.archive.read_bytes())
+        stamp["manifestSha256"] = digest(payloads["release-manifest.json"])
+        self.attestation.write_bytes(release.canonical(stamp))
+
+    def test_archive_rejects_traversal_with_rehashed_attestation(self):
+        release.build(self.candidate, self.wheels, self.sha, self.archive, self.attestation)
+        self._rewrite_archive({}, ("../escape", b"unexpected executable"))
+        with self.assertRaises(release.ReleaseError):
+            release.verify_archive(self.archive, self.attestation, self.sha)
+
+    def test_manifest_mismatch_with_rehashed_attestation(self):
+        release.build(self.candidate, self.wheels, self.sha, self.archive, self.attestation)
+        with tarfile.open(self.archive, "r:gz") as old:
+            manifest = json.loads(old.extractfile("release-manifest.json").read())
+        manifest["deploymentEnvironment"] = "production"
+        self._rewrite_archive({"release-manifest.json": release.canonical(manifest)})
+        with self.assertRaisesRegex(release.ReleaseError, "MANIFEST_CONTENT_MISMATCH"):
+            release.verify_archive(self.archive, self.attestation, self.sha)
+
+
+class TrustedInstallerCase(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        self.paths = installer.Paths(
+            opt=root / "opt", config=root / "etc", state=root / "state", runtime=root / "run",
+            service=root / "units/broker.service", socket=root / "units/broker.socket", tmpfiles=root / "tmpfiles/broker.conf",
+        )
+        self.sha = "a" * 40
+
+    def test_host_and_staging_are_pinned(self):
+        installer.assert_dev_host(hostname=release.DEV_HOST, machine_id=release.DEV_MACHINE_ID)
+        for host, machine in (("lilith-01", release.DEV_MACHINE_ID), (release.DEV_HOST, "0" * 32)):
+            with self.assertRaises(installer.InstallError):
+                installer.assert_dev_host(hostname=host, machine_id=machine)
+        archive, attestation = installer.staged_paths(self.sha)
+        self.assertEqual(archive.name, f"lilith-broker-os-{self.sha}.tar.gz")
+        self.assertEqual(attestation.name, f"lilith-broker-os-{self.sha}.attestation.json")
+        with self.assertRaises(installer.InstallError):
+            installer.staged_paths("../../evil")
+
+    def test_config_is_closed_and_no_live_custody(self):
+        value = json.loads(installer._config_bytes(self.sha))
+        self.assertEqual(value["deploymentEnvironment"], "dev")
+        self.assertEqual(value["authorityMode"], "SYNTHETIC_ONLY")
+        self.assertEqual(value["canonicalCapability"], "DISABLED")
+        self.assertEqual(set(value["custody"].values()), {"ABSENT"})
+        self.assertEqual(value["credentialFingerprint"], release.CREDENTIAL_FINGERPRINT)
+
+    def test_install_refuses_without_b1b2b_authorization(self):
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"):
+            with self.assertRaisesRegex(installer.InstallError, "AUTHORIZATION_MISSING"):
+                installer.install_dev(self.paths, self.sha, Path("/tmp/anything"), Path("/tmp/anything"))
+        self.assertFalse(self.paths.opt.exists())
+        self.assertFalse(self.paths.state.exists())
+
+    def test_install_refuses_unknown_state_before_account_provision(self):
+        self.paths.state.mkdir()
+        (self.paths.state / "unknown.db").write_bytes(b"preserve")
+        archive, attestation = installer.staged_paths(self.sha)
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(release, "verify_archive", return_value=({}, {})), patch.object(installer, "inspect_accounts", return_value=(False, False, False)), patch.object(installer, "provision_accounts") as provision:
+            with self.assertRaisesRegex(installer.InstallError, "UNEXPECTED_STATE_ENTRY"):
+                installer.install_dev(self.paths, self.sha, archive, attestation)
+            provision.assert_not_called()
+        self.assertEqual((self.paths.state / "unknown.db").read_bytes(), b"preserve")
+
+    def test_rollback_also_requires_b1b2b_authorization(self):
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "_fixed_run") as run:
+            with self.assertRaisesRegex(installer.InstallError, "AUTHORIZATION_MISSING"):
+                installer.rollback_dev(self.paths, self.sha)
+            run.assert_not_called()
+
+    def test_account_and_group_collisions_fail_closed(self):
+        invalid_user = SimpleNamespace(
+            pw_name=installer.BROKER, pw_shell="/bin/bash", pw_dir="/nonexistent",
+            pw_gid=900, pw_uid=900,
+        )
+        with patch.object(installer, "_lookup_user", side_effect=lambda name: invalid_user if name == installer.BROKER else None), patch.object(installer, "_lookup_group", return_value=None):
+            with self.assertRaisesRegex(installer.InstallError, "ACCOUNT_COLLISION"):
+                installer.inspect_accounts()
+        invalid_group = SimpleNamespace(gr_name=installer.IPC_GROUP, gr_mem=["outsider"], gr_gid=901)
+        with patch.object(installer, "_lookup_user", return_value=None), patch.object(installer, "_lookup_group", side_effect=lambda name: invalid_group if name == installer.IPC_GROUP else None):
+            with self.assertRaisesRegex(installer.InstallError, "IPC_GROUP_COLLISION"):
+                installer.inspect_accounts()
+
+    def test_activation_has_only_fixed_systemctl_commands(self):
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_current_target", return_value=f"releases/{self.sha}"), patch.object(installer, "_fixed_run") as run:
+            installer.activate_dev(self.paths, self.sha)
+        self.assertEqual([call.args for call in run.call_args_list], [
+            ("/usr/bin/systemd-tmpfiles", "--create", "--prefix=/run/lilith-memory"),
+            ("/usr/bin/systemctl", "daemon-reload"),
+            ("/usr/bin/systemctl", "enable", "--now", installer.SOCKET),
+        ])
+
+    def test_current_pointer_rejects_escape(self):
+        self.paths.opt.mkdir()
+        try:
+            self.paths.current.symlink_to("../../outside")
+        except OSError:
+            self.skipTest("symlink creation unavailable on this Windows host")
+        with self.assertRaises(installer.InstallError):
+            installer._current_target(self.paths)
+
+    def test_rollback_refuses_unknown_pointer_before_service_change(self):
+        self.paths.config.mkdir()
+        self.paths.previous.write_text("../../outside\n")
+        os.chmod(self.paths.previous, 0o600)
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_fixed_run") as run:
+            with self.assertRaises(installer.InstallError):
+                installer.rollback_dev(self.paths, self.sha)
+            run.assert_not_called()
+
+    def test_rollback_preserves_state_and_accounts(self):
+        self.paths.config.mkdir()
+        self.paths.opt.mkdir()
+        self.paths.state.mkdir()
+        owner = self.paths.state / "owner_control.db"
+        evidence = self.paths.state / "synthetic_evidence.db"
+        owner.write_bytes(b"owner forensic fixture")
+        evidence.write_bytes(b"synthetic evidence fixture")
+        self.paths.previous.write_text("NONE\n")
+        os.chmod(self.paths.previous, 0o600)
+        try:
+            self.paths.current.symlink_to("releases/" + self.sha)
+        except OSError:
+            self.skipTest("symlink creation unavailable on this Windows host")
+        (self.paths.releases / self.sha).mkdir(parents=True)
+        original_stat = Path.stat
+
+        def owned_stat(path, *args, **kwargs):
+            if path == self.paths.previous:
+                return SimpleNamespace(st_uid=0, st_mode=stat.S_IFREG | 0o600)
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(installer, "assert_dev_host"), patch.object(installer, "require_root"), patch.object(installer, "require_authorization"), patch.object(installer, "_fixed_run") as run, patch.object(Path, "stat", owned_stat):
+            result = installer.rollback_dev(self.paths, self.sha)
+        self.assertEqual(result["status"], "INACTIVE_EVIDENCE_PRESERVED")
+        self.assertEqual(owner.read_bytes(), b"owner forensic fixture")
+        self.assertEqual(evidence.read_bytes(), b"synthetic evidence fixture")
+        self.assertFalse(self.paths.current.is_symlink())
+        run.assert_called_once_with("/usr/bin/systemctl", "disable", "--now", installer.SERVICE, installer.SOCKET)
+
+
+if __name__ == "__main__":
+    unittest.main()
