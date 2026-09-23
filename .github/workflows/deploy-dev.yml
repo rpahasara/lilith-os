@@ -38,6 +38,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: read
       statuses: write
 
     steps:
@@ -51,7 +52,7 @@ jobs:
               sha: context.payload.workflow_run.head_sha,
               state: 'pending',
               context: 'LILITH DEV deployment',
-              description: 'Deploying the CI-validated commit to DEV',
+              description: 'Validating trusted DEV gate for CI-validated commit',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
@@ -66,6 +67,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           path: candidate
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify the checked-out revision
@@ -74,7 +76,61 @@ jobs:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"
 
+      - name: Resolve trusted PR base and exact validated candidate
+        id: pr-revisions
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const number = context.payload.workflow_run.pull_requests[0].number;
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: number});
+            const candidate = context.payload.workflow_run.head_sha;
+            if (pr.head.sha !== candidate || pr.base.repo.full_name !== context.repo.owner + '/' + context.repo.repo ||
+                pr.base.ref !== context.payload.repository.default_branch) {
+              throw new Error('PR identity or validated SHA changed; no trusted mode can be selected');
+            }
+            core.setOutput('base_sha', pr.base.sha);
+            core.setOutput('candidate_sha', candidate);
+
+      - name: Classify complete effective diff using protected-main control
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.pr-revisions.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.pr-revisions.outputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          git -C candidate fetch --no-tags origin "${BASE_SHA}"
+          python scripts/classify_dev_deployment.py \
+            --candidate-root candidate --base-sha "${BASE_SHA}" \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Validate control-only candidate on the ephemeral runner
+        if: steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.classify.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.classify.outputs.candidate_sha }}
+        run: |
+          test "$(git -C candidate rev-parse HEAD)" = "${CANDIDATE_SHA}"
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          cd candidate
+          python scripts/validate_repository.py
+          python -m compileall -q scripts/memory_broker_stage2_control.py scripts/memory_broker_os_installer.py
+          python -m unittest scripts/test_memory_broker_os_controls.py scripts/test_memory_broker_stage2_control.py
+          ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' \
+            .github/workflows/ci.yml .github/workflows/memory-broker-dev-stage2-runtime.yml
+          bash -n scripts/run_memory_broker_dev_validation.sh
+          {
+            echo 'MODE=CONTROL_ONLY_NO_DEPLOY'
+            echo 'DEV_MUTATION=NONE'
+            echo "BASE_SHA=${BASE_SHA}"
+            echo "CANDIDATE_SHA=${CANDIDATE_SHA}"
+            echo 'Validation: repository contracts, dedicated Linux Stage-II and installer tests, workflow syntax, Python compilation, shell syntax.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Build deterministic exact-SHA Core API bundle
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -87,6 +143,7 @@ jobs:
             --candidate-sha "${VALIDATED_SHA}"
 
       - name: Detect broker component from exact candidate SHA
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         run: |
           BROKER_PRESENT="$(python scripts/memory_broker_validation.py detect --source-root candidate)"
@@ -96,7 +153,7 @@ jobs:
           fi
 
       - name: Build separate exact-SHA broker validation artifact
-        if: env.BROKER_PRESENT == 'PRESENT'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -108,13 +165,13 @@ jobs:
             --candidate-sha "${VALIDATED_SHA}"
 
       - name: Set up pinned Python for inert broker release validation
-        if: env.BROKER_PERSISTENT_CANDIDATE == 'true'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PERSISTENT_CANDIDATE == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Build and verify inert exact-SHA synthetic broker release
-        if: env.BROKER_PERSISTENT_CANDIDATE == 'true'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PERSISTENT_CANDIDATE == 'true'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -138,6 +195,7 @@ jobs:
             --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
       - name: Authenticate to Google Cloud
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
@@ -145,11 +203,13 @@ jobs:
           service_account: ${{ env.GCP_DEPLOY_SA }}
 
       - name: Set up Google Cloud CLI
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Verify DEV deployment identity and target
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         run: |
           gcloud auth list --filter=status:ACTIVE --format="value(account)"
@@ -159,6 +219,7 @@ jobs:
             --format="value(name,status)"
 
       - name: Upload DEV bootstrap and exact-SHA bundle through IAP
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         env:
           REMOTE_BUNDLE: /tmp/lilith-dev-bundle-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
@@ -206,6 +267,7 @@ jobs:
             "${GCP_INSTANCE}:${REMOTE_DURABILITY_PROBE}"
 
       - name: Bootstrap and deploy the isolated DEV service
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -223,6 +285,7 @@ jobs:
             --command="set -e; trap 'rm -f ${REMOTE_BUNDLE} ${REMOTE_ATTESTATION} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY} ${REMOTE_VERIFIER} ${REMOTE_DURABILITY_PROBE}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_BUNDLE}' '${REMOTE_ATTESTATION}' '${VALIDATED_SHA}' '${REMOTE_VERIFIER}' '${REMOTE_DURABILITY_PROBE}'"
 
       - name: Verify DEV service health
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -234,7 +297,7 @@ jobs:
             --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && test \"\$(sudo -u lilith python3 -c 'import json; print(json.load(open(\"/home/lilith/.hermes/lilith-os-dev/current/deployment-manifest.json\"))[\"candidateSha\"])')\" = '${VALIDATED_SHA}' && sudo -u lilith cat /home/lilith/.hermes/lilith-os-dev/current/.bundle-sha256"
 
       - name: Upload separate broker validation artifact through IAP
-        if: env.BROKER_PRESENT == 'PRESENT'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
         shell: bash
         env:
           REMOTE_BROKER_DIR: /tmp/lilith-broker-validation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -252,7 +315,7 @@ jobs:
             scripts/run_memory_broker_dev_validation.sh "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/runner.sh"
 
       - name: Validate broker transiently on DEV and prove no operational state
-        if: env.BROKER_PRESENT == 'PRESENT'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
         shell: bash
         env:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -263,7 +326,7 @@ jobs:
             --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/usr/bin/python3'"
 
       - name: Confirm broker validation upload cleanup
-        if: always() && env.BROKER_PRESENT == 'PRESENT'
+        if: always() && steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
         shell: bash
         env:
           REMOTE_BROKER_DIR: /tmp/lilith-broker-validation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -273,6 +336,7 @@ jobs:
             --command="if test -d '${REMOTE_BROKER_DIR}'; then rm -f -- '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${REMOTE_BROKER_DIR}/validator.py' '${REMOTE_BROKER_DIR}/runner.sh'; rmdir -- '${REMOTE_BROKER_DIR}'; fi; test ! -e '${REMOTE_BROKER_DIR}'"
 
       - name: Audit production darkness on the pinned production VM
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         run: |
           test "${GCP_PROD_INSTANCE}" = "lilith-01"
@@ -293,13 +357,21 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
+            const mode = '${{ steps.classify.outputs.mode }}';
+            if (!['DEPLOY_REQUIRED', 'CONTROL_ONLY_NO_DEPLOY'].includes(mode)) {
+              throw new Error('No trusted classification completed');
+            }
+            const description = mode === 'CONTROL_ONLY_NO_DEPLOY'
+              ? 'MODE=CONTROL_ONLY_NO_DEPLOY DEV_MUTATION=NONE'
+              : 'MODE=DEPLOY_REQUIRED DEV deployment and health passed';
+            await core.summary.addRaw(`MODE=${mode}\nDEV_MUTATION=${mode === 'CONTROL_ONLY_NO_DEPLOY' ? 'NONE' : 'TRUSTED_DEPLOY'}\nBASE_SHA=${{ steps.classify.outputs.base_sha }}\nCANDIDATE_SHA=${{ steps.classify.outputs.candidate_sha }}\n`).write();
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.payload.workflow_run.head_sha,
               state: 'success',
               context: 'LILITH DEV deployment',
-              description: 'DEV deployment and health verification passed',
+              description,
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
@@ -314,6 +386,6 @@ jobs:
               sha: context.payload.workflow_run.head_sha,
               state: 'failure',
               context: 'LILITH DEV deployment',
-              description: 'DEV deployment or health verification failed',
+              description: 'Trusted DEV gate, validation, or health failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
