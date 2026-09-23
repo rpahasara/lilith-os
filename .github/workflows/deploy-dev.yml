@@ -313,6 +313,8 @@ jobs:
             scripts/memory_broker_validation.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/validator.py"
           gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
             scripts/run_memory_broker_dev_validation.sh "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/runner.sh"
+          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
+            scripts/verify_broker_dev_lifecycle.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/lifecycle.py"
 
       - name: Validate broker transiently on DEV and prove no operational state
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
@@ -323,7 +325,7 @@ jobs:
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/usr/bin/python3'"
+            --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/usr/bin/python3' '${REMOTE_BROKER_DIR}/lifecycle.py'"
 
       - name: Confirm broker validation upload cleanup
         if: always() && steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
@@ -333,7 +335,7 @@ jobs:
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="if test -d '${REMOTE_BROKER_DIR}'; then rm -f -- '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${REMOTE_BROKER_DIR}/validator.py' '${REMOTE_BROKER_DIR}/runner.sh'; rmdir -- '${REMOTE_BROKER_DIR}'; fi; test ! -e '${REMOTE_BROKER_DIR}'"
+            --command="if test -d '${REMOTE_BROKER_DIR}'; then rm -f -- '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${REMOTE_BROKER_DIR}/validator.py' '${REMOTE_BROKER_DIR}/lifecycle.py' '${REMOTE_BROKER_DIR}/runner.sh'; rmdir -- '${REMOTE_BROKER_DIR}'; fi; test ! -e '${REMOTE_BROKER_DIR}'"
 
       - name: Audit production darkness on the pinned production VM
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'

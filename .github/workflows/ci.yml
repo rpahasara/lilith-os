@@ -55,6 +55,9 @@ jobs:
       - name: Validate protected-main DEV gate classification and bypass resistance
         run: python -m unittest scripts/test_classify_dev_deployment.py
 
+      - name: Validate trusted broker lifecycle and production absence gates
+        run: python -m unittest scripts/test_broker_dev_lifecycle.py
+
       - name: Check broker DEV validation shell syntax
         run: bash -n scripts/run_memory_broker_dev_validation.sh
 
