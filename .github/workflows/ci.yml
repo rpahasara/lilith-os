@@ -46,6 +46,12 @@ jobs:
       - name: Validate trusted DEV durability controls
         run: python -m unittest scripts/test_core_api_dev_durability_probe.py
 
+      - name: Validate trusted memory broker artifact controls
+        run: python -m unittest scripts/test_memory_broker_validation.py
+
+      - name: Check broker DEV validation shell syntax
+        run: bash -n scripts/run_memory_broker_dev_validation.sh
+
   frontend-quality:
     name: Frontend build and command core
     runs-on: ubuntu-latest
@@ -97,6 +103,9 @@ jobs:
 
       - name: Run Core API tests
         run: python -m unittest discover -s services/core-api/tests -p "test_*.py"
+
+      - name: Compile and test governed memory broker when present
+        run: python scripts/memory_broker_validation.py ci --source-root .
 
       - name: Run Slice 8-15 architecture regressions
         run: python scripts/run_cognitive_regressions.py
