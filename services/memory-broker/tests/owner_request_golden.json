@@ -1,0 +1,8 @@
+{
+  "challengeId": "och.synthetic-golden",
+  "requestDigest": "e7b7bb582ce9d48cf5982b027c9ef8d0d8941242484d9f635228bd79a9a76064",
+  "secondChallengeId": "och.synthetic-golden-2",
+  "secondRequestDigest": "ea417ec75ee8303f1ba5e3c3b1fd8ca07724eb8fdda900ad8c921a519821fd11",
+  "actionDigest": "edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0",
+  "canonicalJson": "{\"accessIdentity\":\"user:synthetic-owner@example.invalid\",\"action\":{\"actorRefId\":\"actor.local-owner.v1\",\"expectedActiveRevisionId\":null,\"memoryClass\":\"SYNTHETIC_PROJECT_CODENAME_FACT\",\"operation\":\"CREATE\",\"payloadDigest\":\"8cde37c37795cd4069724f9f934d1e363da35c65e261d39d4a659c8e7f8eb772\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"restoreRevisionId\":null,\"schemaVersion\":1,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.synthetic\",\"valueSchema\":\"SyntheticCodenameV1\"},\"actionDigest\":\"edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0\",\"actorRefId\":\"actor.local-owner.v1\",\"challengeId\":\"och.synthetic-golden\",\"expectedActiveRevisionId\":null,\"intentRefId\":\"intent.synthetic.b1b1\",\"logicalOwnerId\":\"owner.ravindu.v1\",\"memoryClass\":\"SYNTHETIC_PROJECT_CODENAME_FACT\",\"memoryItemId\":null,\"operation\":\"CREATE\",\"privacyNoticeVersion\":\"privacy.synthetic.v1\",\"protocol\":\"LILITH_OWNER_MEMORY_REQUEST\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"restoreTargetDigest\":null,\"restoreTargetRevisionId\":null,\"schemaVersion\":1,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.synthetic\"}"
+}
