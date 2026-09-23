@@ -161,6 +161,18 @@ class DevSyntheticCase(unittest.TestCase):
             owner.validate_startup()
         with self.assertRaises(dev_state.legacy.StateError):
             dev_core.DevSyntheticBrokerCore(self.config, owner, evidence, hostname="lilith-dev-01", machine_id=MACHINE, release_sha=SHA)
+        with closing(sqlite3.connect(self.owner_path)) as conn:
+            conn.execute("UPDATE owner_access_identity_v1 SET access_identity=?", (request.SYNTHETIC_ACCESS_IDENTITY,))
+            conn.execute("CREATE TABLE unexpected_authority_state (value TEXT)")
+            conn.commit()
+        with self.assertRaises(dev_state.legacy.StateError):
+            owner.validate_startup()
+        with closing(sqlite3.connect(self.owner_path)) as conn:
+            conn.execute("DROP TABLE unexpected_authority_state")
+            conn.commit()
+        self.owner_path.write_bytes(b"not a sqlite database")
+        with self.assertRaises((dev_state.legacy.StateError, sqlite3.DatabaseError)):
+            owner.validate_startup()
 
     def test_wrong_credential_fingerprint_or_owner_mode(self):
         wrong = config_value(self.credential)
@@ -168,6 +180,14 @@ class DevSyntheticCase(unittest.TestCase):
         with self.assertRaises(dev_config.DevConfigError):
             dev_config.DevConfig.from_dict(wrong)
         owner, _, _ = self.provision()
+        real = self.credential.to_dict()
+        real["ownerPrincipal"] = "user:real@example.com"
+        real["rpId"] = "real.example"
+        with closing(sqlite3.connect(self.owner_path)) as conn:
+            conn.execute("UPDATE owner_credential_v1 SET credential_json=?", (rfc8785.dumps(real),))
+            conn.commit()
+        with self.assertRaises(dev_state.legacy.StateError):
+            owner.validate_startup()
         if os.name != "nt":
             os.chmod(self.owner_path, 0o644)
             with self.assertRaises(dev_state.legacy.StateError):
