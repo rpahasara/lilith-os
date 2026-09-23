@@ -2,35 +2,29 @@
 # Trusted transient validation on lilith-dev-01; no broker installation.
 set -Eeuo pipefail
 
-test "$#" -eq 5
+test "$#" -eq 6
 ARCHIVE="$1"
 ATTESTATION="$2"
 CANDIDATE_SHA="$3"
 VALIDATOR="$4"
 SYSTEM_PYTHON="$5"
+LIFECYCLE="$6"
 WORKSPACE="$(dirname -- "$ARCHIVE")"
 [[ "$WORKSPACE" =~ ^/tmp/lilith-broker-validation-[0-9]+-[0-9]+$ ]]
 test ! -L "$WORKSPACE"
 test "$(stat -c '%a' -- "$WORKSPACE")" = "700"
+test "$LIFECYCLE" = "${WORKSPACE}/lifecycle.py"
+test -f "$LIFECYCLE" && test ! -L "$LIFECYCLE"
 VENV_DIR="${WORKSPACE}/venv"
 
 cleanup() {
   rm -rf -- "$VENV_DIR"
-  rm -f -- "$ARCHIVE" "$ATTESTATION" "$VALIDATOR" "$0"
+  rm -f -- "$ARCHIVE" "$ATTESTATION" "$VALIDATOR" "$LIFECYCLE" "$0"
   rmdir -- "$WORKSPACE"
 }
 trap cleanup EXIT
 
 STATE_ROOT="/home/lilith/.hermes/lilith-os-dev/data"
-broker_absent() {
-  ! getent passwd lilith-memory-broker >/dev/null
-  ! getent group lilith-memory-broker >/dev/null
-  test "$(systemctl show -p LoadState --value lilith-memory-broker.service)" = "not-found"
-  test "$(systemctl show -p LoadState --value lilith-memory-broker.socket)" = "not-found"
-  test ! -e /run/lilith-memory
-  test ! -e /var/lib/lilith-memory-broker
-  sudo test ! -e "${STATE_ROOT}/owner_control.db"
-}
 
 custody_snapshot() {
   for path in \
@@ -45,9 +39,9 @@ custody_snapshot() {
   done
 }
 
-broker_absent
-BEFORE="$(custody_snapshot)"
-echo 'BROKER_DEV_STATE_PRECHECK_OK'
+BEFORE_LIFECYCLE="$(sudo -n /usr/bin/python3 -B "$LIFECYCLE" snapshot)"
+BEFORE_CUSTODY="$(custody_snapshot)"
+echo 'BROKER_DEV_TRUSTED_LIFECYCLE_PRECHECK_OK'
 test -x "$SYSTEM_PYTHON"
 "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
 VENV_PYTHON="${VENV_DIR}/bin/python"
@@ -60,7 +54,8 @@ echo 'BROKER_TEST_DEPENDENCIES_READY'
   --attestation "$ATTESTATION" \
   --candidate-sha "$CANDIDATE_SHA" \
   --python "$VENV_PYTHON"
-broker_absent
-AFTER="$(custody_snapshot)"
-test "$BEFORE" = "$AFTER"
+AFTER_LIFECYCLE="$(sudo -n /usr/bin/python3 -B "$LIFECYCLE" snapshot)"
+AFTER_CUSTODY="$(custody_snapshot)"
+test "$BEFORE_LIFECYCLE" = "$AFTER_LIFECYCLE"
+test "$BEFORE_CUSTODY" = "$AFTER_CUSTODY"
 echo 'BROKER_DEV_TRANSIENT_CLEANUP_AND_CUSTODY_OK'
