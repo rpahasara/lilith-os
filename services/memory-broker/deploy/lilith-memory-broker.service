@@ -1,0 +1,39 @@
+[Unit]
+Description=LILITH synthetic Memory Broker (DEV only)
+Requires=lilith-memory-broker.socket
+After=lilith-memory-broker.socket
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lilith-memory-broker
+Group=lilith-memory-broker
+WorkingDirectory=/opt/lilith-memory-broker/current
+Environment=LILITH_ENV=dev
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+ExecStart=/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server
+StateDirectory=lilith-memory-broker
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/opt/lilith-memory-broker /etc/lilith-memory-broker
+ReadWritePaths=/var/lib/lilith-memory-broker
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=15s
+TimeoutStopSec=10s

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LILITH B1b-2 synthetic DEV broker configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deploymentEnvironment", "authorityMode", "stateProfile", "canonicalCapability", "expectedHost", "machineId", "releaseSha", "logicalOwnerId", "accessIdentity", "fixtureId", "fixtureFingerprint", "credentialFingerprint", "rpId", "origin", "ownerSchemaFingerprint", "evidenceSchemaFingerprint", "custody"],
+  "properties": {
+    "deploymentEnvironment": {"const": "dev"},
+    "authorityMode": {"const": "SYNTHETIC_ONLY"},
+    "stateProfile": {"const": "B1B2_SYNTHETIC_DEV_V1"},
+    "canonicalCapability": {"const": "DISABLED"},
+    "expectedHost": {"const": "lilith-dev-01"},
+    "machineId": {"const": "ae929170e6fa4c8ab9cc7b9547238d9d"},
+    "releaseSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "logicalOwnerId": {"const": "owner.ravindu.v1"},
+    "accessIdentity": {"const": "user:synthetic-owner@example.invalid"},
+    "fixtureId": {"const": "fixture.b1b1.synthetic-codename.v1"},
+    "fixtureFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "credentialFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "rpId": {"const": "owner.lilith.invalid"},
+    "origin": {"const": "https://owner.lilith.invalid"},
+    "ownerSchemaFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evidenceSchemaFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cognitiveDb", "privacyDb", "actorKey", "privacyKey", "containmentKey"],
+      "properties": {
+        "cognitiveDb": {"const": "ABSENT"},
+        "privacyDb": {"const": "ABSENT"},
+        "actorKey": {"const": "ABSENT"},
+        "privacyKey": {"const": "ABSENT"},
+        "containmentKey": {"const": "ABSENT"}
+      }
+    }
+  }
+}
