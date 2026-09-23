@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -438,6 +439,109 @@ class TrustedInstallerCase(unittest.TestCase):
         self.assertEqual(evidence.read_bytes(), b"synthetic evidence fixture")
         self.assertFalse(self.paths.current.is_symlink())
         run.assert_called_once_with("/usr/bin/systemctl", "disable", "--now", installer.SERVICE, installer.SOCKET)
+
+
+class TrustedSourceAncestryCase(unittest.TestCase):
+    """Execute the workflow's actual source gate against disposable Git graphs."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.origin = self.root / "origin"
+        self.origin.mkdir()
+        self._git(self.origin, "init", "-q", "-b", "main")
+        self._git(self.origin, "config", "user.name", "Test")
+        self._git(self.origin, "config", "user.email", "test@example.invalid")
+        self.source = self._commit("approved source")
+        self._commit("intermediate main")
+        self._git(self.origin, "branch", "feature")
+        self.main = self._commit("governed main")
+        self._git(self.origin, "switch", "-q", "feature")
+        self.non_ancestor = self._commit("divergent feature")
+        self._git(self.origin, "switch", "-q", "main")
+        workflow = (Path(__file__).resolve().parents[1] /
+                    ".github/workflows/memory-broker-dev-first-install.yml").read_text(encoding="utf-8")
+        self.workflow = workflow
+        step = workflow.split("      - name: Verify trusted control source\n", 1)[1].split("\n      - name:", 1)[0]
+        self.script = "\n".join(line[10:] for line in step.split("        run: |\n", 1)[1].splitlines())
+        git_path = Path(shutil.which("git"))
+        self.bash = (git_path.parent.parent / "bin/bash.exe") if os.name == "nt" else Path(shutil.which("bash"))
+
+    @staticmethod
+    def _git(where: Path, *args: str) -> str:
+        result = subprocess.run(("git", "-C", str(where), *args), check=True,
+                                capture_output=True, text=True)
+        return result.stdout.strip()
+
+    def _commit(self, message: str) -> str:
+        path = self.origin / "history.txt"
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(message + "\n")
+        self._git(self.origin, "add", "history.txt")
+        self._git(self.origin, "commit", "-qm", message)
+        return self._git(self.origin, "rev-parse", "HEAD")
+
+    def _clone(self, name: str, *, shallow: bool = False, branch: str = "main") -> Path:
+        destination = self.root / name
+        args = ["git", "clone", "--quiet", "--no-local", "--branch", branch]
+        if shallow:
+            args.extend(("--depth", "1"))
+        subprocess.run((*args, self.origin.as_uri(), str(destination)), check=True,
+                       capture_output=True, text=True)
+        return destination
+
+    def _check(self, checkout: Path, source: str, *, ref: str = "refs/heads/main",
+               workflow_sha: str | None = None) -> subprocess.CompletedProcess:
+        environment = {**os.environ, "RELEASE_SHA": source, "GITHUB_REF": ref,
+                       "GITHUB_SHA": workflow_sha or self._git(checkout, "rev-parse", "HEAD")}
+        return subprocess.run((str(self.bash), "-e", "-o", "pipefail", "-c", self.script),
+                              cwd=checkout, env=environment, capture_output=True, text=True)
+
+    def test_workflow_retains_complete_history_and_exact_main_gate(self):
+        checkout_step = self.workflow.split("      - name: Check out trusted main controls\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("fetch-depth: 0", checkout_step)
+        self.assertIn('test "$GITHUB_REF" = refs/heads/main', self.script)
+        self.assertIn('test "$GITHUB_SHA" = "$checked_out_main"', self.script)
+        self.assertIn('git cat-file -e "${RELEASE_SHA}^{commit}"', self.script)
+        self.assertIn('git merge-base --is-ancestor "$RELEASE_SHA" "$checked_out_main"', self.script)
+
+    def test_full_history_proves_approved_ancestor(self):
+        checkout = self._clone("full")
+        self.assertEqual(self._git(checkout, "rev-parse", "--is-shallow-repository"), "false")
+        result = self._check(checkout, self.source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WORKFLOW_REF=refs/heads/main", result.stdout)
+        self.assertIn(f"CHECKED_OUT_MAIN_SHA={self.main}", result.stdout)
+
+    def test_shallow_tip_fails_closed_then_unshallow_passes(self):
+        checkout = self._clone("shallow", shallow=True)
+        self.assertEqual(self._git(checkout, "rev-parse", "--is-shallow-repository"), "true")
+        self.assertNotEqual(self._check(checkout, self.source).returncode, 0)
+        self._git(checkout, "fetch", "--unshallow")
+        self.assertEqual(self._git(checkout, "rev-parse", "--is-shallow-repository"), "false")
+        result = self._check(checkout, self.source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_existing_non_ancestor_fails(self):
+        checkout = self._clone("non-ancestor")
+        self._git(checkout, "cat-file", "-e", self.non_ancestor + "^{commit}")
+        self.assertNotEqual(self._check(checkout, self.non_ancestor).returncode, 0)
+
+    def test_unknown_and_malformed_sha_fail(self):
+        checkout = self._clone("unknown")
+        for source in ("0" * 40, "not-a-sha"):
+            with self.subTest(source=source):
+                self.assertNotEqual(self._check(checkout, source).returncode, 0)
+
+    def test_feature_ref_and_branch_substitution_fail(self):
+        checkout = self._clone("feature", branch="feature")
+        self.assertNotEqual(self._check(checkout, self.source, ref="refs/heads/feature").returncode, 0)
+        self.assertNotEqual(self._check(checkout, self.source).returncode, 0)
+
+    def test_workflow_sha_mismatch_fails(self):
+        checkout = self._clone("mismatch")
+        self.assertNotEqual(self._check(checkout, self.source, workflow_sha=self.source).returncode, 0)
 
 
 if __name__ == "__main__":
