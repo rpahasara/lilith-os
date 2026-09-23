@@ -216,6 +216,12 @@ class BrokerControlTests(unittest.TestCase):
         self.assertLess(workflow.index("Validate broker transiently on DEV"), workflow.index("Audit production darkness on the pinned production VM"))
         self.assertIn("Confirm broker validation upload cleanup", workflow)
         self.assertIn("Publish successful DEV deployment status", workflow)
+        self.assertIn("'/usr/bin/python3'", workflow)
+        self.assertNotIn("api-venv/bin/python'\"", workflow)
+        self.assertIn('"$SYSTEM_PYTHON" -m venv "$VENV_DIR"', runner)
+        self.assertIn("'fido2==2.2.1' 'rfc8785==0.1.4'", runner)
+        self.assertIn('rm -rf -- "$VENV_DIR"', runner)
+        self.assertIn('sudo test ! -e "${STATE_ROOT}/owner_control.db"', runner)
         for marker in ("trap cleanup EXIT", "rmdir -- \"$WORKSPACE\"", "getent passwd lilith-memory-broker", "getent group lilith-memory-broker", "lilith-memory-broker.service", "lilith-memory-broker.socket", "owner_control.db", "cognitive_memory.dev.db", "privacy_governance.dev.db", 'test "$BEFORE" = "$AFTER"'):
             self.assertIn(marker, runner)
 

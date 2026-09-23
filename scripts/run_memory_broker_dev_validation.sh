@@ -7,13 +7,15 @@ ARCHIVE="$1"
 ATTESTATION="$2"
 CANDIDATE_SHA="$3"
 VALIDATOR="$4"
-PYTHON="$5"
+SYSTEM_PYTHON="$5"
 WORKSPACE="$(dirname -- "$ARCHIVE")"
 [[ "$WORKSPACE" =~ ^/tmp/lilith-broker-validation-[0-9]+-[0-9]+$ ]]
 test ! -L "$WORKSPACE"
 test "$(stat -c '%a' -- "$WORKSPACE")" = "700"
+VENV_DIR="${WORKSPACE}/venv"
 
 cleanup() {
+  rm -rf -- "$VENV_DIR"
   rm -f -- "$ARCHIVE" "$ATTESTATION" "$VALIDATOR" "$0"
   rmdir -- "$WORKSPACE"
 }
@@ -27,7 +29,7 @@ broker_absent() {
   test "$(systemctl show -p LoadState --value lilith-memory-broker.socket)" = "not-found"
   test ! -e /run/lilith-memory
   test ! -e /var/lib/lilith-memory-broker
-  test ! -e "${STATE_ROOT}/owner_control.db"
+  sudo test ! -e "${STATE_ROOT}/owner_control.db"
 }
 
 custody_snapshot() {
@@ -45,12 +47,19 @@ custody_snapshot() {
 
 broker_absent
 BEFORE="$(custody_snapshot)"
-test -x "$PYTHON"
-"$PYTHON" -B "$VALIDATOR" verify-run \
+echo 'BROKER_DEV_STATE_PRECHECK_OK'
+test -x "$SYSTEM_PYTHON"
+"$SYSTEM_PYTHON" -m venv "$VENV_DIR"
+VENV_PYTHON="${VENV_DIR}/bin/python"
+echo 'BROKER_TEST_VENV_READY'
+"$VENV_PYTHON" -m pip install --no-input --no-cache-dir --disable-pip-version-check \
+  'fido2==2.2.1' 'rfc8785==0.1.4'
+echo 'BROKER_TEST_DEPENDENCIES_READY'
+"$SYSTEM_PYTHON" -B "$VALIDATOR" verify-run \
   --archive "$ARCHIVE" \
   --attestation "$ATTESTATION" \
   --candidate-sha "$CANDIDATE_SHA" \
-  --python "$PYTHON"
+  --python "$VENV_PYTHON"
 broker_absent
 AFTER="$(custody_snapshot)"
 test "$BEFORE" = "$AFTER"
