@@ -10,6 +10,7 @@ confined broker account during explicit synthetic-state provisioning.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
@@ -17,12 +18,14 @@ import socket
 import stat
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.request import ProxyHandler, Request, build_opener
 
-try:
+if globals().get("__package__"):
     from scripts import memory_broker_os_release as release
-except ImportError:  # Direct execution after trusted standalone installation.
+else:  # Direct trusted execution, including an in-memory module preloaded by CI.
     import memory_broker_os_release as release
 
 try:  # The pure policy is testable on Windows; host operations are Linux-only.
@@ -38,6 +41,21 @@ RELAY = "lilith-memory-relay"
 IPC_GROUP = "lilith-memory-ipc"
 SERVICE = "lilith-memory-broker.service"
 SOCKET = "lilith-memory-broker.socket"
+PROJECT = "lilith-agent-260823-27389"
+ZONE = "asia-southeast1-b"
+INSTANCE_ID = "7687007163730582258"
+HOSTNAME = f"{release.DEV_HOST}.{ZONE}.c.{PROJECT}.internal"
+MACHINE_ID = release.DEV_MACHINE_ID
+SELECTED_RELEASE_SHA = "817a83e44cec8965479fd97fc30b7a0b3ae49ab2"
+SELECTED_ARCHIVE_SHA256 = "b4cb4c1412908c1702d9cdf00717dff77574e70fc47abf31f05ff782eca04d87"
+SELECTED_MANIFEST_SHA256 = "7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614"
+OWNER_ACTOR = "rpahasara"
+STAGE_I = "B1B2B_I"
+STAGE_II = "B1B2B_II"
+STAGE_III = "B1B2B_III"
+ROLLBACK_STAGE = "B1B2B_ROLLBACK"
+PROD_INSTANCE_ID = "1332996232081478576"
+METADATA_ROOT = "http://169.254.169.254/computeMetadata/v1/"
 
 
 class InstallError(RuntimeError):
@@ -74,15 +92,45 @@ class Paths:
     def authorization(self) -> Path:
         return self.config / "b1b2b-authorization.json"
 
+    @property
+    def used_authorization(self) -> Path:
+        return self.config / "b1b2b-authorization.used.json"
+
+    @property
+    def identities(self) -> Path:
+        return self.config / "identities.json"
+
 
 LIVE = Paths()
 
 
-def assert_dev_host(*, hostname: str | None = None, machine_id: str | None = None) -> None:
-    hostname = hostname or socket.gethostname()
-    machine_id = machine_id or Path("/etc/machine-id").read_text(encoding="ascii").strip()
-    if hostname != release.DEV_HOST or machine_id != release.DEV_MACHINE_ID:
-        raise InstallError("PINNED_DEV_HOST_REQUIRED")
+def _metadata(key: str) -> str:
+    request = Request(METADATA_ROOT + key, headers={"Metadata-Flavor": "Google"})
+    with build_opener(ProxyHandler({})).open(request, timeout=5) as response:
+        if response.headers.get("Metadata-Flavor") != "Google":
+            raise InstallError("UNTRUSTED_METADATA")
+        return response.read(256).decode("ascii", "strict").strip()
+
+
+def assert_dev_host(*, hostname: str | None = None, machine_id: str | None = None, metadata=None) -> None:
+    """Require independent VM metadata and local identity to agree exactly."""
+    hostname = hostname if hostname is not None else socket.getfqdn()
+    machine_id = machine_id if machine_id is not None else Path("/etc/machine-id").read_text(encoding="ascii").strip()
+    lookup = metadata or _metadata
+    try:
+        observed = {key: lookup(key) for key in ("project/project-id", "instance/zone", "instance/id", "instance/name")}
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise InstallError("CLOUD_IDENTITY_UNAVAILABLE") from exc
+    if hostname.startswith("lilith-01") or observed["instance/name"] == "lilith-01" or observed["instance/id"] == PROD_INSTANCE_ID:
+        raise InstallError("PROD_HOST_FORBIDDEN")
+    expected = {
+        "project/project-id": PROJECT,
+        "instance/zone": f"projects/763184673487/zones/{ZONE}",
+        "instance/id": INSTANCE_ID,
+        "instance/name": release.DEV_HOST,
+    }
+    if observed != expected or hostname != HOSTNAME or machine_id != MACHINE_ID:
+        raise InstallError("PINNED_DEV_IDENTITY_REQUIRED")
 
 
 def require_root() -> None:
@@ -90,20 +138,52 @@ def require_root() -> None:
         raise InstallError("ROOT_REQUIRED")
 
 
-def require_authorization(paths: Paths, sha: str) -> None:
+def _authorization_value(sha: str, stage: str, issued_at: datetime, authorization_id: str) -> dict:
+    return {
+        "schemaVersion": 2, "purpose": "B1B2B_DEV_FIRST_INSTALL",
+        "project": PROJECT, "zone": ZONE, "instanceId": INSTANCE_ID,
+        "hostname": HOSTNAME, "machineId": MACHINE_ID,
+        "candidateSha": sha, "authorityMode": "SYNTHETIC_ONLY",
+        "canonicalCapability": "DISABLED", "allowedStage": stage,
+        "ownerActor": OWNER_ACTOR, "authorizationId": authorization_id,
+        "issuedAt": issued_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "expiresAt": (issued_at + timedelta(minutes=30)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
+
+
+def require_authorization(paths: Paths, sha: str, stage: str = STAGE_I, *, now: datetime | None = None) -> dict:
     marker = paths.authorization
     if marker.is_symlink() or not marker.is_file():
         raise InstallError("B1B2B_AUTHORIZATION_MISSING")
     metadata = marker.stat()
     if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600:
         raise InstallError("B1B2B_AUTHORIZATION_NOT_ROOT_OWNED")
-    value = json.loads(marker.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or value != {
-        "schemaVersion": 1, "candidateSha": sha,
-        "host": release.DEV_HOST, "machineId": release.DEV_MACHINE_ID,
-        "scope": "B1B2B_DEV_OS_ISOLATION_ONLY",
-    }:
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+        issued = datetime.fromisoformat(value["issuedAt"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
+        authorization_id = value["authorizationId"]
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise InstallError("B1B2B_AUTHORIZATION_MALFORMED") from exc
+    if not isinstance(authorization_id, str) or not re.fullmatch(r"[0-9a-f]{32}", authorization_id):
+        raise InstallError("B1B2B_AUTHORIZATION_ID_INVALID")
+    if issued.tzinfo is None or expires != issued + timedelta(minutes=30):
+        raise InstallError("B1B2B_AUTHORIZATION_WINDOW_INVALID")
+    observed_now = now or datetime.now(timezone.utc)
+    if observed_now < issued or observed_now >= expires:
+        raise InstallError("B1B2B_AUTHORIZATION_EXPIRED")
+    if value != _authorization_value(sha, stage, issued, authorization_id):
         raise InstallError("B1B2B_AUTHORIZATION_MISMATCH")
+    return value
+
+
+def consume_authorization(paths: Paths, sha: str, stage: str) -> None:
+    """Claim once before the first operational mutation; preserve the record."""
+    require_authorization(paths, sha, stage)
+    used = paths.used_authorization
+    if used.exists() or used.is_symlink():
+        raise InstallError("B1B2B_AUTHORIZATION_REPLAY")
+    os.replace(paths.authorization, used)
 
 
 def staged_paths(sha: str) -> tuple[Path, Path]:
@@ -111,6 +191,88 @@ def staged_paths(sha: str) -> tuple[Path, Path]:
         raise InstallError("INVALID_CANDIDATE_SHA")
     prefix = f"lilith-broker-os-{sha}"
     return Path("/tmp") / (prefix + ".tar.gz"), Path("/tmp") / (prefix + ".attestation.json")
+
+
+def assert_selected_release(sha: str) -> None:
+    if sha != SELECTED_RELEASE_SHA:
+        raise InstallError("UNAPPROVED_RELEASE_SHA")
+
+
+def verify_selected_archive(archive: Path, attestation: Path, sha: str) -> tuple[dict, dict[str, bytes]]:
+    assert_selected_release(sha)
+    manifest, payloads = release.verify_archive(archive, attestation, sha)
+    if (manifest.get("candidateSha") != sha or manifest.get("deploymentEnvironment") != "dev"
+            or release.digest(archive.read_bytes()) != SELECTED_ARCHIVE_SHA256
+            or release.digest(release.canonical(manifest)) != SELECTED_MANIFEST_SHA256):
+        raise InstallError("SELECTED_RELEASE_MISMATCH")
+    return manifest, payloads
+
+
+def _unit_absent(name: str) -> None:
+    result = subprocess.run(
+        ("/usr/bin/systemctl", "show", name,
+         "--property=LoadState,ActiveState,FragmentPath,DropInPaths,UnitFileState,Names",
+         "--no-pager"),
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if (fields.get("LoadState") != "not-found" or fields.get("ActiveState") != "inactive"
+            or fields.get("FragmentPath") or fields.get("DropInPaths")
+            or fields.get("UnitFileState") not in ("", None)
+            or fields.get("Names") not in ("", name)):
+        raise InstallError("SYSTEMD_UNIT_COLLISION")
+
+
+def assert_first_install_preflight(paths: Paths, *, marker_expected: bool) -> None:
+    """Reject all pre-existing operational state before account creation."""
+    if any(inspect_accounts()):
+        raise InstallError("FIRST_INSTALL_ACCOUNT_COLLISION")
+    for path in (paths.opt, paths.state, paths.runtime, paths.service, paths.socket, paths.tmpfiles,
+                 Path(str(paths.service) + ".d"), Path(str(paths.socket) + ".d")):
+        if path.exists() or path.is_symlink() or os.path.ismount(path):
+            raise InstallError("FIRST_INSTALL_PATH_COLLISION")
+    if marker_expected:
+        if paths.config.is_symlink() or not paths.config.is_dir() or {p.name for p in paths.config.iterdir()} != {"b1b2b-authorization.json"}:
+            raise InstallError("FIRST_INSTALL_MARKER_DIRECTORY_COLLISION")
+        meta = paths.config.stat()
+        if meta.st_uid != 0 or meta.st_gid != 0 or stat.S_IMODE(meta.st_mode) != 0o755:
+            raise InstallError("FIRST_INSTALL_MARKER_DIRECTORY_OWNERSHIP")
+    elif paths.config.exists() or paths.config.is_symlink():
+        raise InstallError("FIRST_INSTALL_CONFIG_COLLISION")
+    if paths == LIVE:
+        runtime = Path("/run")
+        result = subprocess.run(
+            ("/usr/bin/findmnt", "-T", str(runtime), "-no", "TARGET,FSTYPE"),
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+        if result.stdout.strip().split() != ["/run", "tmpfs"]:
+            raise InstallError("RUNTIME_PARENT_NOT_TMPFS")
+        for root in ("/run/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"):
+            for name in (SERVICE, SOCKET):
+                path = Path(root) / name
+                if path.exists() or path.is_symlink() or Path(str(path) + ".d").exists():
+                    raise InstallError("SYSTEMD_UNIT_SHADOW_COLLISION")
+        _unit_absent(SERVICE)
+        _unit_absent(SOCKET)
+
+
+def authorize_dev(paths: Paths, sha: str, archive: Path, attestation: Path, *, stage: str = STAGE_I) -> dict:
+    """Separate, owner-invoked first-run ceremony; never starts a service."""
+    assert_dev_host()
+    require_root()
+    assert_selected_release(sha)
+    if stage != STAGE_I:
+        raise InstallError("STAGE_NOT_AVAILABLE")
+    if (archive, attestation) != staged_paths(sha) or archive.is_symlink() or attestation.is_symlink():
+        raise InstallError("UNEXPECTED_STAGING_PATH")
+    assert_first_install_preflight(paths, marker_expected=False)
+    verify_selected_archive(archive, attestation, sha)
+    issued = datetime.now(timezone.utc)
+    value = _authorization_value(sha, stage, issued, uuid.uuid4().hex)
+    _ensure_dir(paths.config, 0, 0, 0o755)
+    _write_fixed(paths.authorization, release.canonical(value), 0, 0, 0o600)
+    return {"status": "STAGE_I_AUTHORIZED_ONLY", "authorizationId": value["authorizationId"],
+            "expiresAt": value["expiresAt"], "candidateSha": sha}
 
 
 def _fixed_run(*args: str, cwd: Path | None = None) -> None:
@@ -155,7 +317,7 @@ def inspect_accounts() -> tuple[bool, bool, bool]:
     return group is not None, broker is not None, relay is not None
 
 
-def provision_accounts() -> tuple[int, int, int]:
+def provision_accounts() -> tuple[int, int, int, int, int]:
     has_group, has_broker, has_relay = inspect_accounts()
     if not has_group:
         _fixed_run("/usr/sbin/groupadd", "--system", IPC_GROUP)
@@ -170,7 +332,55 @@ def provision_accounts() -> tuple[int, int, int]:
     group = grp.getgrnam(IPC_GROUP)
     if broker.pw_uid == relay.pw_uid or broker.pw_uid == pwd.getpwnam("lilith").pw_uid:
         raise InstallError("ACCOUNT_UID_COLLISION")
-    return broker.pw_uid, broker.pw_gid, group.gr_gid
+    return broker.pw_uid, broker.pw_gid, relay.pw_uid, relay.pw_gid, group.gr_gid
+
+
+def verify_account_contract() -> dict:
+    """Assert OS-assigned local identities after creation and on later stages."""
+    inspect_accounts()
+    broker = pwd.getpwnam(BROKER)
+    relay = pwd.getpwnam(RELAY)
+    ipc = grp.getgrnam(IPC_GROUP)
+    if (broker.pw_uid >= 1000 or relay.pw_uid >= 1000 or broker.pw_uid == relay.pw_uid
+            or broker.pw_gid == relay.pw_gid or Path("/nonexistent").exists()
+            or set(ipc.gr_mem) != {RELAY}):
+        raise InstallError("ACCOUNT_IDENTITY_CONTRACT")
+    local_lines = Path("/etc/passwd").read_text(encoding="utf-8").splitlines()
+    shadow_lines = Path("/etc/shadow").read_text(encoding="utf-8").splitlines()
+    for name, user in ((BROKER, broker), (RELAY, relay)):
+        if sum(line.startswith(name + ":") for line in local_lines) != 1:
+            raise InstallError("ACCOUNT_NOT_LOCAL")
+        shadow = [line.split(":", 2)[1] for line in shadow_lines if line.startswith(name + ":")]
+        if len(shadow) != 1 or not shadow[0].startswith(("!", "*")):
+            raise InstallError("ACCOUNT_PASSWORD_NOT_LOCKED")
+        if user.pw_dir != "/nonexistent" or user.pw_shell != "/usr/sbin/nologin":
+            raise InstallError("ACCOUNT_LOGIN_CONTRACT")
+        for path in (Path("/etc/ssh/authorized_keys") / name, Path("/home") / name):
+            if path.exists() or path.is_symlink():
+                raise InstallError("ACCOUNT_SSH_OR_HOME_COLLISION")
+        sudo = subprocess.run(("/usr/bin/sudo", "-n", "-l", "-U", name),
+                              capture_output=True, text=True, timeout=10)
+        denied = f"User {name} is not allowed to run sudo on {release.DEV_HOST}."
+        if sudo.stdout.strip() != denied or sudo.stderr.strip():
+            raise InstallError("ACCOUNT_SUDO_PRIVILEGE")
+    return {
+        "schemaVersion": 1, "brokerUid": broker.pw_uid, "brokerGid": broker.pw_gid,
+        "relayUid": relay.pw_uid, "relayGid": relay.pw_gid, "ipcGid": ipc.gr_gid,
+        "broker": BROKER, "relay": RELAY, "ipcGroup": IPC_GROUP,
+    }
+
+
+def assert_recorded_accounts(paths: Paths) -> dict:
+    path = paths.identities
+    if path.is_symlink() or not path.is_file():
+        raise InstallError("ACCOUNT_RECORD_MISSING")
+    metadata = path.stat()
+    if metadata.st_uid != 0 or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise InstallError("ACCOUNT_RECORD_OWNERSHIP")
+    recorded = json.loads(path.read_text(encoding="utf-8"))
+    if recorded != verify_account_contract():
+        raise InstallError("ACCOUNT_MAPPING_CHANGED")
+    return recorded
 
 
 def _ensure_dir(path: Path, uid: int, gid: int, mode: int) -> None:
@@ -241,7 +451,8 @@ def inspect_existing_state(paths: Paths, *, broker_account_present: bool) -> Non
     """Refuse unknown operational data before creating accounts or directories."""
     expected = (
         (paths.opt, {"releases", "current"}),
-        (paths.config, {"b1b2b-authorization.json", "dev.json", "previous-release"}),
+        (paths.config, {"b1b2b-authorization.json", "b1b2b-authorization.used.json",
+                        "dev.json", "identities.json", "previous-release"}),
         (paths.state, {"owner-control", "state"}),
         (paths.state / "owner-control", {"owner_control.db", "owner_control.db-wal", "owner_control.db-shm"}),
         (paths.state / "state", {"synthetic_evidence.db", "synthetic_evidence.db-wal", "synthetic_evidence.db-shm"}),
@@ -314,17 +525,25 @@ def _provision_synthetic_state(paths: Paths, release_dir: Path) -> None:
 def install_dev(paths: Paths, sha: str, archive: Path, attestation: Path) -> dict:
     assert_dev_host()
     require_root()
-    require_authorization(paths, sha)
+    assert_selected_release(sha)
+    require_authorization(paths, sha, STAGE_I)
     if (archive, attestation) != staged_paths(sha) or archive.is_symlink() or attestation.is_symlink():
         raise InstallError("UNEXPECTED_STAGING_PATH")
-    manifest, payloads = release.verify_archive(archive, attestation, sha)
-    _has_group, has_broker, _has_relay = inspect_accounts()  # Fail on known collisions before any mutation.
+    assert_first_install_preflight(paths, marker_expected=True)
+    manifest, payloads = verify_selected_archive(archive, attestation, sha)
+    _has_group, has_broker, _has_relay = inspect_accounts()
     for path in (paths.opt, paths.config, paths.state, paths.service, paths.socket, paths.tmpfiles):
         if path.is_symlink():
             raise InstallError("INSTALL_TARGET_SYMLINK")
     _current_target(paths)
     inspect_existing_state(paths, broker_account_present=has_broker)
-    broker_uid, broker_gid, _ipc_gid = provision_accounts()
+    consume_authorization(paths, sha, STAGE_I)
+    broker_uid, broker_gid, relay_uid, relay_gid, ipc_gid = provision_accounts()
+    identities = verify_account_contract()
+    if (broker_uid, broker_gid, relay_uid, relay_gid, ipc_gid) != (
+            identities["brokerUid"], identities["brokerGid"], identities["relayUid"],
+            identities["relayGid"], identities["ipcGid"]):
+        raise InstallError("ACCOUNT_MAPPING_CHANGED")
     _ensure_dir(paths.opt, 0, 0, 0o755)
     _ensure_dir(paths.releases, 0, 0, 0o755)
     _ensure_dir(paths.config, 0, 0, 0o755)
@@ -350,6 +569,7 @@ def install_dev(paths: Paths, sha: str, archive: Path, attestation: Path) -> dic
         if release_dir.is_symlink() or not release_dir.is_dir() or (release_dir / "release-manifest.json").read_bytes() != release.canonical(manifest):
             raise InstallError("EXISTING_RELEASE_COLLISION")
     _write_fixed(paths.dev_config, _config_bytes(sha), 0, broker_gid, 0o640)
+    _write_fixed(paths.identities, release.canonical(identities), 0, 0, 0o600)
     _provision_synthetic_state(paths, release_dir)
     for name, target in ((SERVICE, paths.service), (SOCKET, paths.socket), ("lilith-memory-broker.tmpfiles.conf", paths.tmpfiles)):
         _write_fixed(target, payloads["assets/" + name], 0, 0, 0o644)
@@ -360,7 +580,9 @@ def install_dev(paths: Paths, sha: str, archive: Path, attestation: Path) -> dic
 def activate_dev(paths: Paths, sha: str) -> None:
     assert_dev_host()
     require_root()
-    require_authorization(paths, sha)
+    assert_selected_release(sha)
+    require_authorization(paths, sha, STAGE_II)
+    assert_recorded_accounts(paths)
     if _current_target(paths) != f"releases/{sha}":
         raise InstallError("ACTIVE_RELEASE_MISMATCH")
     _fixed_run("/usr/bin/systemd-tmpfiles", "--create", "--prefix=/run/lilith-memory")
@@ -371,7 +593,9 @@ def activate_dev(paths: Paths, sha: str) -> None:
 def rollback_dev(paths: Paths, sha: str) -> dict:
     assert_dev_host()
     require_root()
-    require_authorization(paths, sha)
+    assert_selected_release(sha)
+    require_authorization(paths, sha, ROLLBACK_STAGE)
+    assert_recorded_accounts(paths)
     previous = paths.previous
     if previous.is_symlink() or not previous.is_file() or previous.stat().st_uid != 0 or stat.S_IMODE(previous.stat().st_mode) != 0o600:
         raise InstallError("PREVIOUS_POINTER_INVALID")
@@ -396,7 +620,7 @@ def rollback_dev(paths: Paths, sha: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("verify", "install-dev", "activate-dev", "status-dev", "rollback-dev"))
+    parser.add_argument("operation", choices=("verify", "authorize-dev", "install-dev", "activate-dev", "status-dev", "rollback-dev"))
     parser.add_argument("--candidate-sha", required=True)
     args = parser.parse_args()
     if not release.SHA40.fullmatch(args.candidate_sha):
@@ -411,8 +635,11 @@ def main() -> None:
     archive, attestation = staged_paths(args.candidate_sha)
     if args.operation == "verify":
         assert_dev_host()
-        manifest, _ = release.verify_archive(archive, attestation, args.candidate_sha)
+        assert_selected_release(args.candidate_sha)
+        manifest, _ = verify_selected_archive(archive, attestation, args.candidate_sha)
         print(json.dumps({"status": "VERIFIED", "candidateSha": manifest["candidateSha"]}, sort_keys=True))
+    elif args.operation == "authorize-dev":
+        print(json.dumps(authorize_dev(LIVE, args.candidate_sha, archive, attestation), sort_keys=True))
     elif args.operation == "install-dev":
         print(json.dumps(install_dev(LIVE, args.candidate_sha, archive, attestation), sort_keys=True))
     else:
