@@ -266,19 +266,42 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertNotIn("exec(", stage2.ISOLATION_PROBE)
         self.assertNotIn("argparse", stage2.ISOLATION_PROBE)
 
-    def test_workflow_is_separate_owner_only_main_only_no_auto_trigger(self):
+    def test_workflow_registration_push_cannot_reach_stage_ii(self):
         workflow = (ROOT / ".github/workflows/memory-broker-dev-stage2-runtime.yml"
                     ).read_text(encoding="utf-8")
-        self.assertIn("workflow_dispatch:", workflow)
-        self.assertNotIn("\n  push:", workflow)
-        self.assertNotIn("\n  pull_request:", workflow)
-        self.assertIn("github.actor == 'rpahasara'", workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        triggers = workflow.split("\npermissions:\n", 1)[0]
+        registration = workflow.split("\n  registration_audit:\n", 1)[1].split(
+            "\n  activate_and_isolation_test:\n", 1)[0]
+        privileged = workflow.split("\n  activate_and_isolation_test:\n", 1)[1]
+        self.assertIn("\n  workflow_dispatch:\n", triggers)
+        self.assertEqual(triggers.count("\n  push:\n"), 1)
+        self.assertIn("\n  push:\n    branches:\n      - main\n    paths:\n"
+                      "      - \".github/workflows/memory-broker-dev-stage2-runtime.yml\"\n",
+                      triggers)
+        self.assertNotIn("\n  pull_request:", triggers)
+        self.assertIn("permissions:\n  contents: read\n", workflow)
+        self.assertNotIn("permissions:\n  contents: read\n  id-token: write\n", workflow)
+        self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main'",
+                      registration)
+        self.assertIn("permissions:\n      contents: read\n", registration)
+        self.assertIn("uses: actions/checkout@v4", registration)
+        self.assertIn("$GITHUB_SHA", registration)
+        self.assertIn("sha256sum \"$workflow\"", registration)
+        for forbidden in ("id-token: write", "gcloud", "sudo", "ssh", "auth@",
+                          "memory_broker_stage2_control.py", "GCP_DEPLOY_SA"):
+            self.assertNotIn(forbidden, registration)
+        self.assertIn("if: >-\n      github.event_name == 'workflow_dispatch' &&\n",
+                      privileged)
+        self.assertIn("github.actor == 'rpahasara'", privileged)
+        self.assertIn("github.ref == 'refs/heads/main'", privileged)
+        self.assertIn("permissions:\n      contents: read\n      id-token: write\n",
+                      privileged)
+        self.assertIn("GCP_DEPLOY_SA:", privileged)
         self.assertIn("I AUTHORIZE B1B2B_II ACTIVATE_AND_ISOLATION_TEST", workflow)
-        self.assertIn("instances describe", workflow)
-        self.assertIn("< scripts/memory_broker_stage2_control.py", workflow)
-        self.assertIn("failure-stop", workflow)
-        self.assertIn("audit_core_api_production_read_only.py", workflow)
+        self.assertIn("instances describe", privileged)
+        self.assertIn("< scripts/memory_broker_stage2_control.py", privileged)
+        self.assertIn("failure-stop", privileged)
+        self.assertIn("audit_core_api_production_read_only.py", privileged)
         self.assertNotIn("systemctl enable", workflow)
         self.assertNotIn("Stage III", workflow)
         self.assertNotIn("deploy.yml", workflow)
