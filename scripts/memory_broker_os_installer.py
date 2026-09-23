@@ -578,16 +578,9 @@ def install_dev(paths: Paths, sha: str, archive: Path, attestation: Path) -> dic
 
 
 def activate_dev(paths: Paths, sha: str) -> None:
-    assert_dev_host()
-    require_root()
-    assert_selected_release(sha)
-    require_authorization(paths, sha, STAGE_II)
-    assert_recorded_accounts(paths)
-    if _current_target(paths) != f"releases/{sha}":
-        raise InstallError("ACTIVE_RELEASE_MISMATCH")
-    _fixed_run("/usr/bin/systemd-tmpfiles", "--create", "--prefix=/run/lilith-memory")
-    _fixed_run("/usr/bin/systemctl", "daemon-reload")
-    _fixed_run("/usr/bin/systemctl", "enable", "--now", SOCKET)
+    # The historical entrypoint had no Stage-II workflow or isolation gates
+    # and enabled the socket at boot. It must not bypass the dedicated control.
+    raise InstallError("STAGE_II_REQUIRES_DEDICATED_CONTROL")
 
 
 def rollback_dev(paths: Paths, sha: str) -> dict:
