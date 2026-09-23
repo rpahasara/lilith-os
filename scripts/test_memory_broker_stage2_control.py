@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import os
 from pathlib import Path
 import subprocess
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import uuid
 
 from scripts import memory_broker_stage2_control as stage2
@@ -18,9 +19,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Stage2ControlContracts(unittest.TestCase):
+    @staticmethod
+    def api_fields(pid=88740, started="Wed 2026-09-23 19:28:51 UTC"):
+        return {
+            "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+            "MainPID": str(pid), "NRestarts": "0",
+            "ExecMainStartTimestamp": started, "User": "lilith", "Group": "lilith",
+            "WorkingDirectory": stage2.API_WORKDIR,
+            "FragmentPath": str(stage2.API_UNIT), "DropInPaths": "",
+            "ExecStart": "{ path=" + stage2.API_EXECUTABLE + " ; argv[]=" +
+                         stage2.API_COMMAND + " ; ignore_errors=no ; start_time=[" +
+                         started + "] ; stop_time=[n/a] ; pid=" + str(pid) +
+                         " ; code=(null) ; status=0/0 }",
+        }
+
+    def api_snapshot(self, fields=None, hashes=None, health=None):
+        fields = fields or self.api_fields()
+        hashes = hashes or {}
+        health = health or {"status": "ok", "database": True}
+        def file_digest(path):
+            return hashes.get(path, stage2.API_APP_SHA if path == stage2.API_APP
+                              else stage2.API_FILES[path])
+        with patch.object(stage2, "show", return_value=fields), \
+             patch.object(stage2, "digest", side_effect=file_digest), \
+             patch.object(stage2, "api_health", return_value=health):
+            return stage2.capture_api_runtime_baseline(captured_at="2026-09-23T19:30:00Z")
+
     def test_marker_is_closed_fresh_and_not_stage_iii(self):
         issued = datetime(2026, 9, 23, 16, 0, tzinfo=timezone.utc)
-        value = stage2.marker_value(issued, "a" * 32)
+        baseline = self.api_snapshot()
+        value = stage2.marker_value(issued, "a" * 32, baseline)
+        self.assertEqual(value["schemaVersion"], 2)
+        self.assertEqual(value["apiRuntimeBaseline"], baseline)
+        self.assertEqual(value["apiBaselineDigest"], stage2.baseline_digest(baseline))
         self.assertEqual(value["purpose"], stage2.PURPOSE)
         self.assertEqual(value["stage"], "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST")
         self.assertEqual(value["authorityMode"], "SYNTHETIC_ONLY")
@@ -34,6 +65,150 @@ class Stage2ControlContracts(unittest.TestCase):
             Path("/etc/systemd/system/lilith-memory-broker.service")])
         self.assertEqual(value["identityMapSha256"], stage2.HASHES[
             stage2.CONFIG / "identities.json"])
+
+    def test_legitimate_restart_captures_new_session_without_source_repin(self):
+        old = self.api_snapshot(self.api_fields(80100, "Wed 2026-09-23 15:03:22 UTC"))
+        new = self.api_snapshot(self.api_fields())
+        self.assertEqual((old["MainPID"], new["MainPID"]), (80100, 88740))
+        self.assertNotEqual(stage2.baseline_digest(old), stage2.baseline_digest(new))
+        self.assertEqual(new["appSha256"], stage2.API_APP_SHA)
+        self.assertEqual(new["NRestarts"], 0)
+        self.assertEqual(stage2.baseline_digest(new),
+                         "af1939a20270c314a2fc267d26fdb068d7e9b2ba7e76fc47194a6f9ecd111d9f")
+        self.assertNotIn("API_PID", vars(stage2))
+        self.assertNotIn("API_START", vars(stage2))
+
+    def test_api_service_selection_and_wrong_dev_host_fail_closed(self):
+        with patch.object(stage2, "show", return_value=self.api_fields()) as selected, \
+             patch.object(stage2, "digest", side_effect=lambda path: stage2.API_APP_SHA
+                          if path == stage2.API_APP else stage2.API_FILES[path]), \
+             patch.object(stage2, "api_health", return_value={"status": "ok", "database": True}):
+            stage2.capture_api_runtime_baseline(captured_at="2026-09-23T19:30:00Z")
+            self.assertEqual(selected.call_args.args[0], "lilith-os-api-dev.service")
+        wrong = {
+            "project/project-id": stage2.PROJECT,
+            "instance/zone": f"projects/763184673487/zones/{stage2.ZONE}",
+            "instance/id": stage2.INSTANCE_ID,
+            "instance/name": "wrong-dev",
+        }
+        with patch.object(stage2.os, "geteuid", return_value=0, create=True):
+            with self.assertRaisesRegex(stage2.Stage2Error, "DEV_METADATA_MISMATCH"):
+                stage2.assert_host(lookup=wrong.__getitem__,
+                                   hostname=stage2.HOSTNAME,
+                                   machine_id=stage2.MACHINE_ID)
+
+    def test_api_durable_identity_and_custody_drift_fail_closed(self):
+        for changed, code in (
+            ({"ActiveState": "inactive"}, "API_SERVICE_DRIFT"),
+            ({"User": "root"}, "API_SERVICE_DRIFT"),
+            ({"Group": "root"}, "API_SERVICE_DRIFT"),
+            ({"WorkingDirectory": "/wrong"}, "API_SERVICE_DRIFT"),
+            ({"FragmentPath": "/wrong"}, "API_SERVICE_DRIFT"),
+            ({"ExecStart": "{ path=/wrong ; argv[]=/wrong ;"}, "API_SERVICE_DRIFT"),
+            ({"NRestarts": "1"}, "API_SERVICE_DRIFT"),
+            ({"MainPID": "abc"}, "API_SERVICE_DRIFT"),
+        ):
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(stage2.Stage2Error, code):
+                    self.api_snapshot({**self.api_fields(), **changed})
+        with self.assertRaisesRegex(stage2.Stage2Error, "API_SERVICE_DATA_MALFORMED"):
+            self.api_snapshot({key: value for key, value in self.api_fields().items()
+                               if key != "User"})
+        for path, code in ((stage2.API_APP, "API_APP_DRIFT"),
+                           (stage2.API_UNIT, "API_CUSTODY_DRIFT"),
+                           (next(path for path in stage2.API_FILES if path != stage2.API_UNIT),
+                            "API_CUSTODY_DRIFT")):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(stage2.Stage2Error, code):
+                    self.api_snapshot(hashes={path: "0" * 64})
+        with patch.object(stage2, "api_health", side_effect=stage2.Stage2Error("API_UNHEALTHY")), \
+             patch.object(stage2, "show", return_value=self.api_fields()), \
+             patch.object(stage2, "digest", side_effect=lambda path: stage2.API_APP_SHA
+                          if path == stage2.API_APP else stage2.API_FILES[path]):
+            with self.assertRaisesRegex(stage2.Stage2Error, "API_UNHEALTHY"):
+                stage2.capture_api_runtime_baseline()
+
+    def test_authorized_baseline_detects_toctou_and_post_run_change(self):
+        authorized = self.api_snapshot()
+        with patch.object(stage2, "capture_api_runtime_baseline", return_value=authorized):
+            self.assertEqual(stage2.require_api_baseline_unchanged(authorized), authorized)
+        for changed in (
+            {"MainPID": 88741}, {"ExecMainStartTimestamp": "later"},
+            {"NRestarts": 1}, {"appSha256": "0" * 64},
+            {"serviceUnitSha256": "0" * 64}, {"health": {"status": "fail"}},
+            {"custodySha256": {}},
+        ):
+            with self.subTest(changed=changed):
+                with patch.object(stage2, "capture_api_runtime_baseline",
+                                  return_value={**authorized, **changed}):
+                    with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
+                        stage2.require_api_baseline_unchanged(authorized)
+        self.assertLess(stage2.execute.__code__.co_firstlineno,
+                        stage2.failure_stop.__code__.co_firstlineno)
+
+    def test_execute_rechecks_before_marker_consumption_and_after_experiment(self):
+        baseline = self.api_snapshot()
+        marker = {"authorizationId": "a" * 32, "apiRuntimeBaseline": baseline,
+                  "apiBaselineDigest": stage2.baseline_digest(baseline)}
+        preflight = {"status": "STAGE_II_PREFLIGHT_OK",
+                     "apiRuntimeBaseline": baseline,
+                     "apiBaselineDigest": stage2.baseline_digest(baseline)}
+        operations = []
+        with patch.object(stage2, "verify_marker", return_value=marker), \
+             patch.object(stage2, "preflight", return_value=preflight), \
+             patch.object(stage2.os, "replace", side_effect=lambda *_: operations.append("consume")), \
+             patch.object(stage2, "run_fixed", side_effect=lambda *_: operations.append("mutation")), \
+             patch.object(stage2, "assert_broker_hardening", return_value={}), \
+             patch.object(stage2, "inspect_run_directory", return_value={}), \
+             patch.object(stage2, "inspect_socket", return_value={}), \
+             patch.object(stage2, "assert_unit_state", return_value=({"MainPID": "111"}, {})), \
+             patch.object(stage2, "relay", return_value={"status": "HEALTH_OK"}), \
+             patch.object(stage2, "inspect_process", return_value={}), \
+             patch.object(stage2, "trace_peer_uid", return_value={}), \
+             patch.object(stage2, "negative_peer", return_value={}), \
+             patch.object(stage2, "probe_equivalent_sandbox", return_value={}), \
+             patch.object(stage2, "assert_relay_restrictions", return_value={}), \
+             patch.object(stage2, "functional_tests", return_value={}), \
+             patch.object(stage2.subprocess, "run") as stopped:
+            with patch.object(stage2, "capture_api_runtime_baseline",
+                              side_effect=lambda **_: operations.append("recheck") or baseline):
+                self.assertEqual(stage2.execute()["apiUnchanged"], True)
+            self.assertEqual(operations[:3], ["recheck", "consume", "mutation"])
+            self.assertEqual(operations[-1], "recheck")
+            stopped.assert_not_called()
+
+            changed = {**baseline, "MainPID": baseline["MainPID"] + 1}
+            operations.clear()
+            with patch.object(stage2, "capture_api_runtime_baseline", return_value=changed):
+                with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
+                    stage2.execute()
+            self.assertEqual(operations, [])  # No marker claim or activation mutation.
+
+            operations.clear()
+            with patch.object(stage2, "capture_api_runtime_baseline",
+                              side_effect=[baseline, changed]):
+                with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
+                    stage2.execute()
+            self.assertEqual(operations[:3], ["consume", "mutation", "mutation"])
+            self.assertEqual(stopped.call_count, 2)  # Existing failure-stop policy.
+
+    def test_marker_rejects_old_schema_and_baseline_tamper(self):
+        baseline = self.api_snapshot()
+        issued = datetime(2026, 9, 23, 19, 30, 1, tzinfo=timezone.utc)
+        value = stage2.marker_value(issued, "a" * 32, baseline)
+        marker = MagicMock()
+        marker.lstat.return_value = os.stat_result((0o100600, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        used = MagicMock()
+        used.exists.return_value = False
+        used.is_symlink.return_value = False
+        with patch.object(stage2, "MARKER", marker), patch.object(stage2, "USED", used):
+            marker.read_bytes.return_value = json.dumps(value).encode()
+            self.assertEqual(stage2.verify_marker(now=issued), value)
+            for bad in ({**value, "schemaVersion": 1},
+                        {**value, "apiBaselineDigest": "0" * 64}):
+                marker.read_bytes.return_value = json.dumps(bad).encode()
+                with self.assertRaises(stage2.Stage2Error):
+                    stage2.verify_marker(now=issued)
 
     def test_prod_metadata_is_rejected_before_any_mutation(self):
         observed = {
