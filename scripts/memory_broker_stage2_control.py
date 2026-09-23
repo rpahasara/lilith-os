@@ -218,7 +218,7 @@ def capture_api_runtime_baseline(*, captured_at: str | None = None) -> dict:
     expected = {
         "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
         "NRestarts": "0", "User": "lilith", "Group": "lilith",
-        "WorkingDirectory": API_WORKDIR, "FragmentPath": str(API_UNIT),
+        "WorkingDirectory": API_WORKDIR, "FragmentPath": API_UNIT.as_posix(),
         "DropInPaths": "",
     }
     require(all(fields[key] == value for key, value in expected.items()),
@@ -234,8 +234,8 @@ def capture_api_runtime_baseline(*, captured_at: str | None = None) -> dict:
             "API_SERVICE_DRIFT")
     app_sha = digest(API_APP)
     require(app_sha == API_APP_SHA, "API_APP_DRIFT")
-    custody = {str(path): digest(path) for path in API_FILES}
-    require(all(custody[str(path)] == expected for path, expected in API_FILES.items()),
+    custody = {path.as_posix(): digest(path) for path in API_FILES}
+    require(all(custody[path.as_posix()] == expected for path, expected in API_FILES.items()),
             "API_CUSTODY_DRIFT")
     health = api_health()
     require(health == {"status": "ok", "database": True}, "API_UNHEALTHY")
@@ -250,7 +250,7 @@ def capture_api_runtime_baseline(*, captured_at: str | None = None) -> dict:
         "serviceUser": fields["User"], "serviceGroup": fields["Group"],
         "workingDirectory": fields["WorkingDirectory"],
         "execStart": fields["ExecStart"],
-        "appSha256": app_sha, "serviceUnitSha256": custody[str(API_UNIT)],
+        "appSha256": app_sha, "serviceUnitSha256": custody[API_UNIT.as_posix()],
         "health": health, "custodySha256": custody, "capturedAt": timestamp,
     }
 

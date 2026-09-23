@@ -26,7 +26,7 @@ class Stage2ControlContracts(unittest.TestCase):
             "MainPID": str(pid), "NRestarts": "0",
             "ExecMainStartTimestamp": started, "User": "lilith", "Group": "lilith",
             "WorkingDirectory": stage2.API_WORKDIR,
-            "FragmentPath": str(stage2.API_UNIT), "DropInPaths": "",
+            "FragmentPath": stage2.API_UNIT.as_posix(), "DropInPaths": "",
             "ExecStart": "{ path=" + stage2.API_EXECUTABLE + " ; argv[]=" +
                          stage2.API_COMMAND + " ; ignore_errors=no ; start_time=[" +
                          started + "] ; stop_time=[n/a] ; pid=" + str(pid) +
@@ -74,7 +74,7 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertEqual(new["appSha256"], stage2.API_APP_SHA)
         self.assertEqual(new["NRestarts"], 0)
         self.assertEqual(stage2.baseline_digest(new),
-                         "af1939a20270c314a2fc267d26fdb068d7e9b2ba7e76fc47194a6f9ecd111d9f")
+                         "6892d54c5bbdd8dda7f3378b8c8c1e22d660cac04fc902833df171458ae34316")
         self.assertNotIn("API_PID", vars(stage2))
         self.assertNotIn("API_START", vars(stage2))
 
