@@ -457,6 +457,113 @@ class OwnerProofCase(unittest.TestCase):
             with self.assertRaisesRegex(P.OwnerProofError, "TEST_CREDENTIAL_INSTALL_FORBIDDEN"):
                 self.store.replace_synthetic_test_credential(credential())
 
+    def test_dev_policy_is_fixed_and_fails_closed_across_environment_change(self):
+        with self.assertRaisesRegex(P.OwnerProofError, "DEV_SYNTHETIC_ENV_REQUIRED"):
+            P.DevSyntheticOwnerProofVerifier(self.store)
+        with patch.dict(os.environ, {"LILITH_ENV": "dev"}):
+            verifier = P.DevSyntheticOwnerProofVerifier(self.store, now_fn=lambda: self.current_now)
+            self.assertEqual((verifier.owner_principal, verifier.rp_id, verifier.origin), (OWNER, RP, ORIGIN))
+            for field, value in (("owner_principal", "user:other@example.invalid"), ("rp_id", "other.invalid"), ("origin", "https://other.invalid")):
+                with self.subTest(field=field):
+                    with self.assertRaises(AttributeError):
+                        setattr(verifier, field, value)
+            with self.assertRaises(TypeError):
+                P.DevSyntheticOwnerProofVerifier(self.store, rp_id="attacker.invalid")
+            with self.assertRaises(TypeError):
+                P.DevSyntheticOwnerProofVerifier(self.store, test_mode=True)
+            ch = challenge()
+            self.store.prepare(ch)
+            with patch.dict(os.environ, {"LILITH_ENV": "prod"}):
+                with self.assertRaisesRegex(P.OwnerProofError, "DEV_SYNTHETIC_ENV_REQUIRED"):
+                    self._verify_with(verifier, ch, assertion(ch))
+            self.assertEqual(self.store.state(ch.challenge_id), "PREPARED")
+            self.assertEqual(self._verify_with(verifier, ch, assertion(ch)).status, "VERIFIED_PROOF_ONLY")
+
+    def test_policy_shapes_reject_unsupported_and_malformed_dev(self):
+        with patch.dict(os.environ, {"LILITH_ENV": "dev"}):
+            dev = P._OwnerProofVerificationPolicyV1(
+                P._OwnerProofPolicyKind.DEV_SYNTHETIC, OWNER, RP, ORIGIN
+            )
+            for invalid in (
+                dataclasses.replace(dev, kind="LIVE"),
+                dataclasses.replace(dev, owner_principal="user:other@example.invalid"),
+                dataclasses.replace(dev, rp_id="other.invalid"),
+                dataclasses.replace(dev, origin="https://other.invalid"),
+            ):
+                with self.subTest(policy=invalid):
+                    with self.assertRaises(P.OwnerProofError):
+                        P._OwnerProofVerificationEngine(self.store, invalid)
+
+    def test_dev_policy_cannot_bypass_shared_verification_or_consumption(self):
+        with patch.dict(os.environ, {"LILITH_ENV": "dev"}):
+            verifier = P.DevSyntheticOwnerProofVerifier(self.store, now_fn=lambda: self.current_now)
+            ch = challenge()
+            self.store.prepare(ch)
+            for proof in (
+                assertion(ch, origin="https://wrong.invalid"),
+                assertion(ch, rp="wrong.invalid"),
+                assertion(ch, flags=0x04),  # missing UP
+                assertion(ch, flags=0x01),  # missing UV
+                assertion(ch, signature=b"invalid"),
+                assertion(dataclasses.replace(ch, nonce=b64(b"X" * 32))),
+            ):
+                with self.subTest(proof=proof):
+                    with self.assertRaises(P.OwnerProofError):
+                        self._verify_with(verifier, ch, proof)
+                    self.assertEqual(self.store.state(ch.challenge_id), "PREPARED")
+            with self.assertRaisesRegex(P.OwnerProofError, "ACTION_BINDING_MISMATCH"):
+                verifier.verify_and_consume(
+                    ch.challenge_id, assertion(ch), expected_action=action(),
+                    expected_request_digest="f" * 64,
+                    expected_memory_item_id=ch.memory_item_id,
+                    expected_restore_target_digest=ch.restore_target_digest,
+                    expected_privacy_notice_version=ch.privacy_notice_version,
+                )
+            with patch.dict(os.environ, {"LILITH_ENV": "test"}):
+                self.store.replace_synthetic_test_credential(credential(status="REVOKED"))
+            with self.assertRaisesRegex(P.OwnerProofError, "CREDENTIAL_NOT_AUTHORIZED"):
+                self._verify_with(verifier, ch, assertion(ch))
+            with patch.dict(os.environ, {"LILITH_ENV": "test"}):
+                self.store.replace_synthetic_test_credential(credential(owner="user:other@example.invalid"))
+            with self.assertRaisesRegex(P.OwnerProofError, "CREDENTIAL_NOT_AUTHORIZED"):
+                self._verify_with(verifier, ch, assertion(ch))
+            with patch.dict(os.environ, {"LILITH_ENV": "test"}):
+                self.store.replace_synthetic_test_credential(credential())
+            self.assertEqual(self._verify_with(verifier, ch, assertion(ch)).status, "VERIFIED_PROOF_ONLY")
+            with self.assertRaisesRegex(P.OwnerProofError, "CHALLENGE_NOT_PREPARED"):
+                self._verify_with(verifier, ch, assertion(ch))
+
+    def test_dev_policy_cannot_bypass_expiry_or_caller_schema(self):
+        with patch.dict(os.environ, {"LILITH_ENV": "dev"}):
+            verifier = P.DevSyntheticOwnerProofVerifier(self.store, now_fn=lambda: self.current_now)
+            ch = challenge()
+            self.store.prepare(ch)
+            proof = assertion(ch)
+            with self.assertRaises(P.OwnerProofError):
+                P.OwnerAssertionV1.from_dict({**{
+                    "credentialRecordId": proof.credential_record_id,
+                    "credentialId": proof.credential_id,
+                    "clientDataJSON": proof.client_data_json,
+                    "authenticatorData": proof.authenticator_data,
+                    "signature": proof.signature,
+                }, "policy": "DEV_SYNTHETIC"})
+            with self.assertRaises(TypeError):
+                self._verify_with(verifier, ch, proof, policy="DEV_SYNTHETIC")
+            self.current_now = datetime(2026, 9, 23, 12, 1, 0, tzinfo=timezone.utc)
+            with self.assertRaisesRegex(P.OwnerProofError, "CHALLENGE_EXPIRED"):
+                self._verify_with(verifier, ch, proof)
+            self.assertEqual(self.store.state(ch.challenge_id), "EXPIRED")
+
+    def _verify_with(self, verifier, ch, proof, **extra):
+        return verifier.verify_and_consume(
+            ch.challenge_id, proof, expected_action=action(ch.operation),
+            expected_request_digest=request_digest(ch.operation),
+            expected_memory_item_id=ch.memory_item_id,
+            expected_restore_target_digest=ch.restore_target_digest,
+            expected_privacy_notice_version=ch.privacy_notice_version,
+            **extra,
+        )
+
     def test_closed_schema_and_lifetime(self):
         valid = challenge().to_dict()
         for changed in (
