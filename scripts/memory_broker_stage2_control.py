@@ -62,12 +62,16 @@ EVIDENCE_DB_SHA = "b8f619e5e6ede9dc9ea8a721150ea52d7082f5eb95543b0d11453efcb9581
 OWNER_SCHEMA = "8074e95c1a1b1de6081cc686efc10159793f7c4768f362b64e9e6a34705eb314"
 EVIDENCE_SCHEMA = "c18c904a9f2b4f1c48fa3aeafb3f587a33f59f35219c872f7c33d972d996e718"
 API = "lilith-os-api-dev.service"
-API_PID = 80100
-API_START = "Wed 2026-09-23 15:03:22 UTC"
+API_APP = Path("/home/lilith/.hermes/lilith-os-dev/current/app.py")
+API_APP_SHA = "bb0a4139641c0a81607263b07fa854deb34241b5fcfcdcab965c6a82dd8826d3"
+API_UNIT = Path("/etc/systemd/system/lilith-os-api-dev.service")
+API_WORKDIR = "/home/lilith/.hermes/lilith-os-dev/current"
+API_EXECUTABLE = "/home/lilith/.hermes/lilith-os-dev/api-venv/bin/uvicorn"
+API_COMMAND = API_EXECUTABLE + " app:app --host 0.0.0.0 --port 8765"
 API_FILES = {
     Path("/home/lilith/.hermes/lilith-os-dev/data/canonical-runtime.json"): "65ac5077486cfe25665fc8f5815661b1653878182492a0309ec974e9394c08e7",
     Path("/home/lilith/.hermes/lilith-os-dev/data/lilith-dev.db"): "e4080d47ac782dc5578c4537b8aab277e73b27546e704ee2fff6fda506f67e6c",
-    Path("/etc/systemd/system/lilith-os-api-dev.service"): "bacfbac4b0f9502ebfe0a745cd2a9ff691f6a16bad9a8706f03085d588c21243",
+    API_UNIT: "bacfbac4b0f9502ebfe0a745cd2a9ff691f6a16bad9a8706f03085d588c21243",
 }
 OPTIONAL_CUSTODY = {
     "cognitive": Path("/home/lilith/.hermes/lilith-os-dev/data/cognitive_memory.dev.db"),
@@ -196,16 +200,66 @@ def verify_database(path: Path, expected_sha: str, expected_tables: dict[str, in
         db.close()
 
 
-def verify_api() -> dict[str, str]:
-    fields = show(API, "ActiveState", "SubState", "MainPID", "NRestarts",
-                  "ActiveEnterTimestamp")
-    require(fields == {
-        "ActiveState": "active", "SubState": "running", "MainPID": str(API_PID),
-        "NRestarts": "0", "ActiveEnterTimestamp": API_START,
-    }, "API_SERVICE_DRIFT")
-    for path, expected in API_FILES.items():
-        require(digest(path) == expected, "API_CUSTODY_DRIFT")
-    return fields
+def baseline_digest(value: dict) -> str:
+    """Digest the complete closed observation using the marker's JSON convention."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def capture_api_runtime_baseline(*, captured_at: str | None = None) -> dict:
+    """Pin durable API identity, then observe one process session, read-only."""
+    fields = show(API, "LoadState", "ActiveState", "SubState", "MainPID",
+                  "NRestarts", "ExecMainStartTimestamp", "User", "Group",
+                  "WorkingDirectory", "FragmentPath", "DropInPaths", "ExecStart")
+    require(set(fields) == {"LoadState", "ActiveState", "SubState", "MainPID",
+                            "NRestarts", "ExecMainStartTimestamp", "User", "Group",
+                            "WorkingDirectory", "FragmentPath", "DropInPaths", "ExecStart"},
+            "API_SERVICE_DATA_MALFORMED")
+    expected = {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "NRestarts": "0", "User": "lilith", "Group": "lilith",
+        "WorkingDirectory": API_WORKDIR, "FragmentPath": API_UNIT.as_posix(),
+        "DropInPaths": "",
+    }
+    require(all(fields[key] == value for key, value in expected.items()),
+            "API_SERVICE_DRIFT")
+    require(fields["MainPID"].isdigit() and int(fields["MainPID"]) > 0 and
+            fields["ExecMainStartTimestamp"] and
+            fields["ExecMainStartTimestamp"] != "n/a" and
+            fields["ExecStart"].startswith(
+                "{ path=" + API_EXECUTABLE + " ; argv[]=" + API_COMMAND + " ; ") and
+            " ; start_time=[" + fields["ExecMainStartTimestamp"] + "] ; " in
+            fields["ExecStart"] and
+            " ; pid=" + fields["MainPID"] + " ; " in fields["ExecStart"],
+            "API_SERVICE_DRIFT")
+    app_sha = digest(API_APP)
+    require(app_sha == API_APP_SHA, "API_APP_DRIFT")
+    custody = {path.as_posix(): digest(path) for path in API_FILES}
+    require(all(custody[path.as_posix()] == expected for path, expected in API_FILES.items()),
+            "API_CUSTODY_DRIFT")
+    health = api_health()
+    require(health == {"status": "ok", "database": True}, "API_UNHEALTHY")
+    timestamp = captured_at or datetime.now(timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+    return {
+        "schemaVersion": 1, "serviceName": API,
+        "MainPID": int(fields["MainPID"]),
+        "ExecMainStartTimestamp": fields["ExecMainStartTimestamp"],
+        "NRestarts": int(fields["NRestarts"]),
+        "ActiveState": fields["ActiveState"], "SubState": fields["SubState"],
+        "serviceUser": fields["User"], "serviceGroup": fields["Group"],
+        "workingDirectory": fields["WorkingDirectory"],
+        "execStart": fields["ExecStart"],
+        "appSha256": app_sha, "serviceUnitSha256": custody[API_UNIT.as_posix()],
+        "health": health, "custodySha256": custody, "capturedAt": timestamp,
+    }
+
+
+def require_api_baseline_unchanged(authorized: dict) -> dict:
+    """Re-observe without adopting a changed PID, start, health, or custody."""
+    observed = capture_api_runtime_baseline(captured_at=authorized["capturedAt"])
+    require(observed == authorized, "API_BASELINE_CHANGED")
+    return observed
 
 
 def preflight() -> dict:
@@ -292,15 +346,16 @@ def preflight() -> dict:
     require(subprocess.run(["/usr/bin/pgrep", "-u", "999"],
                            capture_output=True, timeout=5).returncode == 1,
             "UNEXPECTED_BROKER_PROCESS")
-    require(verify_api()["MainPID"] == str(API_PID), "API_DRIFT")
-    api_health()
+    api_baseline = capture_api_runtime_baseline()
     return {"status": "STAGE_II_PREFLIGHT_OK", "release": RELEASE,
-            "identities": mapping, "payloadsVerified": 23}
+            "identities": mapping, "payloadsVerified": 23,
+            "apiRuntimeBaseline": api_baseline,
+            "apiBaselineDigest": baseline_digest(api_baseline)}
 
 
-def marker_value(issued: datetime, authorization_id: str) -> dict:
+def marker_value(issued: datetime, authorization_id: str, api_baseline: dict) -> dict:
     return {
-        "schemaVersion": 1, "purpose": PURPOSE, "stage": STAGE,
+        "schemaVersion": 2, "purpose": PURPOSE, "stage": STAGE,
         "project": PROJECT, "zone": ZONE, "instanceId": INSTANCE_ID,
         "hostname": HOSTNAME, "machineId": MACHINE_ID,
         "releaseSha": RELEASE, "manifestSha256": MANIFEST_SHA,
@@ -313,17 +368,19 @@ def marker_value(issued: datetime, authorization_id: str) -> dict:
         "evidenceSchemaFingerprint": EVIDENCE_SCHEMA,
         "ownerActor": OWNER, "authorityMode": "SYNTHETIC_ONLY",
         "canonicalCapability": "DISABLED", "authorizationId": authorization_id,
+        "apiRuntimeBaseline": api_baseline,
+        "apiBaselineDigest": baseline_digest(api_baseline),
         "issuedAt": issued.isoformat(timespec="seconds").replace("+00:00", "Z"),
         "expiresAt": (issued + timedelta(minutes=30)).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
 
 
 def authorize() -> dict:
-    preflight()
+    baseline = preflight()["apiRuntimeBaseline"]
     require(not MARKER.exists() and not MARKER.is_symlink() and
             not USED.exists() and not USED.is_symlink(), "STAGE_II_AUTHORIZATION_COLLISION")
     issued = datetime.now(timezone.utc)
-    value = marker_value(issued, uuid.uuid4().hex)
+    value = marker_value(issued, uuid.uuid4().hex, baseline)
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     fd = os.open(MARKER, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
@@ -333,7 +390,7 @@ def authorize() -> dict:
     os.chown(MARKER, 0, 0)
     os.chmod(MARKER, 0o600)
     return {"status": "STAGE_II_AUTHORIZED_ONLY", "authorizationId": value["authorizationId"],
-            "expiresAt": value["expiresAt"]}
+            "expiresAt": value["expiresAt"], "apiBaselineDigest": value["apiBaselineDigest"]}
 
 
 def verify_marker(*, now: datetime | None = None) -> dict:
@@ -346,16 +403,31 @@ def verify_marker(*, now: datetime | None = None) -> dict:
         issued = datetime.fromisoformat(value["issuedAt"].replace("Z", "+00:00"))
         expires = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
         authorization_id = value["authorizationId"]
+        api_baseline = value["apiRuntimeBaseline"]
+        captured = datetime.fromisoformat(api_baseline["capturedAt"].replace("Z", "+00:00"))
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise Stage2Error("STAGE_II_MARKER_MALFORMED") from exc
     require(issued.tzinfo is not None and issued.utcoffset() == timedelta(0) and
             expires == issued + timedelta(minutes=30) and
+            captured.tzinfo is not None and captured.utcoffset() == timedelta(0) and
+            timedelta(0) <= issued - captured <= timedelta(minutes=5) and
             isinstance(authorization_id, str) and
             re.fullmatch(r"[0-9a-f]{32}", authorization_id) is not None,
             "STAGE_II_MARKER_WINDOW")
     moment = now or datetime.now(timezone.utc)
+    require(isinstance(api_baseline, dict) and
+            set(api_baseline) == {"schemaVersion", "serviceName", "MainPID",
+                                  "ExecMainStartTimestamp", "NRestarts", "ActiveState",
+                                  "SubState", "serviceUser", "serviceGroup",
+                                  "workingDirectory", "execStart", "appSha256",
+                                  "serviceUnitSha256", "health", "custodySha256",
+                                  "capturedAt"} and
+            api_baseline["schemaVersion"] == 1 and
+            value.get("apiBaselineDigest") == baseline_digest(api_baseline),
+            "STAGE_II_MARKER_BASELINE_INVALID")
     require(issued <= moment < expires and
-            value == marker_value(issued, authorization_id), "STAGE_II_MARKER_MISMATCH")
+            value == marker_value(issued, authorization_id, api_baseline),
+            "STAGE_II_MARKER_MISMATCH")
     return value
 
 
@@ -944,8 +1016,11 @@ def execute() -> dict:
     # No operational mutation before all host, marker, and Stage-I gates pass.
     marker = verify_marker()
     baseline = preflight()
-    api_before = verify_api()
-    api_health()
+    require(marker["apiBaselineDigest"] == baseline_digest(
+        {**baseline["apiRuntimeBaseline"],
+         "capturedAt": marker["apiRuntimeBaseline"]["capturedAt"]}),
+        "API_BASELINE_CHANGED")
+    require_api_baseline_unchanged(marker["apiRuntimeBaseline"])
     os.replace(MARKER, USED)  # One-time claim before daemon-reload.
     try:
         run_fixed("/usr/bin/systemctl", "daemon-reload")
@@ -965,8 +1040,7 @@ def execute() -> dict:
         probe = probe_equivalent_sandbox(effective)
         relay_limits = assert_relay_restrictions()
         functional = functional_tests()
-        require(verify_api() == api_before, "API_STATE_CHANGED")
-        api_health()
+        require_api_baseline_unchanged(marker["apiRuntimeBaseline"])
         assert_unit_state(socket_active=True, service_active=True)
         return {"status": "STAGE_II_RUNTIME_EVIDENCE_COLLECTED",
                 "authorizationId": marker["authorizationId"],
