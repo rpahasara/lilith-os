@@ -1,0 +1,22 @@
+[Unit]
+Description=LILITH synthetic Memory Broker socket (DEV only)
+Requires=systemd-tmpfiles-setup.service
+After=systemd-tmpfiles-setup.service
+AssertPathIsDirectory=/run/lilith-memory
+
+[Socket]
+ListenStream=/run/lilith-memory/owner.sock
+Accept=no
+Service=lilith-memory-broker.service
+SocketUser=lilith-memory-broker
+SocketGroup=lilith-memory-ipc
+SocketMode=0660
+DirectoryMode=0710
+FlushPending=yes
+RemoveOnStop=yes
+Backlog=16
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=3
+
+[Install]
+WantedBy=sockets.target

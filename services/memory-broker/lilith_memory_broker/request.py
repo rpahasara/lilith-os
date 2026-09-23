@@ -10,7 +10,6 @@ from typing import Any, Mapping
 import rfc8785
 
 from lilith_memory import canonical_contracts as C
-from lilith_memory.canonical_authority import LocalOwnerAuthority
 
 
 PROTOCOL = "LILITH_OWNER_MEMORY_REQUEST"
@@ -22,6 +21,7 @@ SYNTHETIC_FIXTURE_ID = "fixture.b1b1.synthetic-codename.v1"
 SYNTHETIC_MEMORY_CLASS = "SYNTHETIC_PROJECT_CODENAME_FACT"
 SYNTHETIC_NOTICE = "privacy.synthetic.v1"
 SYNTHETIC_INTENT = "intent.synthetic.b1b1"
+SYNTHETIC_ACTOR_REF_ID = "actor.local-owner.v1"  # Contract value, never authority issuance.
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _FIELDS = frozenset({
@@ -50,7 +50,7 @@ def synthetic_action(fixture_id: str) -> C.FrozenMemoryActionV1:
         raise RequestError("UNKNOWN_SYNTHETIC_FIXTURE")
     action = C.FrozenMemoryActionV1(
         schema_version=1,
-        actor_ref_id=LocalOwnerAuthority.ACTOR.actor_ref_id,
+        actor_ref_id=SYNTHETIC_ACTOR_REF_ID,
         operation=C.CREATE,
         memory_class=SYNTHETIC_MEMORY_CLASS,
         subject_namespace="project.synthetic",

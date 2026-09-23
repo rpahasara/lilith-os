@@ -1,8 +1,9 @@
-"""Isolated, synthetic-only Slice 15B2b-B1b-1 broker contracts.
+"""Isolated, synthetic-only Memory Broker contracts and DEV runtime candidate.
 
-This package has no socket, HTTP server, deployment entry point, or production
-authority initializer. The governed ``lilith_memory`` package is a runtime
-dependency, not the model-facing Core API process.
+The B1b-2a adapter accepts only an inherited AF_UNIX listener; it never binds
+or installs one. There is no HTTP server or production authority initializer.
+The governed ``lilith_memory`` contract package is a dependency, not the
+model-facing Core API process.
 """
 
-__all__ = ("request", "protocol", "state", "core")
+__all__ = ("request", "protocol", "state", "core", "dev_config", "dev_proof", "dev_state", "synthetic_evidence", "dev_core", "server")
