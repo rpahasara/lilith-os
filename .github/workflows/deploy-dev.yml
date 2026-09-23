@@ -227,7 +227,7 @@ jobs:
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/home/lilith/.hermes/lilith-os-dev/api-venv/bin/python'"
+            --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/usr/bin/python3'"
 
       - name: Confirm broker validation upload cleanup
         if: always() && env.BROKER_PRESENT == 'PRESENT'
