@@ -31,7 +31,8 @@ PRE_B1B2B = "PRE_B1B2B"
 POST_STAGE_I = "POST_STAGE_I"
 POST_STAGE_II = "POST_STAGE_II"  # Reserved; not accepted or selectable.
 POST_STAGE_II_FAILED_INERT_V1 = "POST_STAGE_II_FAILED_INERT_V1"
-TRUSTED_DEV_PROFILE = POST_STAGE_II_FAILED_INERT_V1
+POST_STAGE_II_ACCEPTED_V1 = "POST_STAGE_II_ACCEPTED_V1"
+TRUSTED_DEV_PROFILE = POST_STAGE_II_ACCEPTED_V1
 
 PROJECT = "lilith-agent-260823-27389"
 ZONE = "asia-southeast1-b"
@@ -132,6 +133,215 @@ FAILED_FILES = {
 }
 FAILED_ABSENT = tuple(path for path in POST_ABSENT if path not in
                       (str(RUNTIME), str(CONFIG / "b1b2b-stage2-authorization.used.json")))
+
+# Frozen from accepted Stage-II run 35965971283. Installed release is independent of HEAD.
+ACCEPTED_RUN_ID = "35965971283"
+ACCEPTED_GOVERNED_SOURCE = "ab78b63b2011392f1991e720e7b795348e93fb98"
+ACCEPTED_RETRY_AUTHORIZATION_ID = "317c11bba95441369af17c2292e6b1d0"
+ACCEPTED_RETRY_USED_SHA = "ad43a9e3b822390b227d4e72d4a29a9f2915773f646b192015d98f7f9e720249"
+ACCEPTED_RETRY_CHALLENGE = "och.84786dd17a0d45a089672e47f537ad87"
+ACCEPTED_RETRY_EVIDENCE_ID = "se.8f51f58203a4218a1ffe16540400db3526261864b2cab87bd87e0e8a2166ee7c"
+ACCEPTED_OWNER_DB_SHA = "939b5a0e4c5471bac5843f9c17de9548494ab49bfa54a062994f57900de2b7bb"
+ACCEPTED_EVIDENCE_DB_SHA = "a4ff3d076a51019a6287c2a492a44e755dae5e9a7da55c9d9e942d9b9362c785"
+ACCEPTED_SERVICE_INVOCATION = "5c1eb955e2dc44e78139c416f0c9469a"
+ACCEPTED_SERVICE_STARTED = "Thu 2026-09-24 06:51:22 UTC"
+ACCEPTED_FILES = {
+    **FILE_CONTRACT,
+    str(OWNER_DB): (ACCEPTED_OWNER_DB_SHA, 999, 987, 0o600),
+    str(EVIDENCE_DB): (ACCEPTED_EVIDENCE_DB_SHA, 999, 987, 0o600),
+    str(CONFIG / "b1b2b-stage2-authorization.used.json"):
+        (FAILED_USED_MARKER_SHA, 0, 0, 0o600),
+    str(CONFIG / "b1b2b-stage2-retry2-authorization.used.json"):
+        (ACCEPTED_RETRY_USED_SHA, 0, 0, 0o600),
+}
+ACCEPTED_OWNER_COUNTS = {**OWNER_COUNTS, "owner_proof_challenge_v1": 24,
+                         "owner_request_v1": 24, "synthetic_claim_v1": 2}
+ACCEPTED_EVIDENCE_COUNTS = {**EVIDENCE_COUNTS, "synthetic_evidence_v1": 2}
+ACCEPTED_ABSENT = tuple(path for path in FAILED_ABSENT if path != str(RUNTIME / "owner.sock")) + (
+    str(CONFIG / "b1b2b-stage2-retry2-authorization.json"),
+    str(CONFIG / "b1b2b-stage2-retry2-authorization.pending.json"),
+    str(CONFIG / "b1b2b-stage2-retry2-authorization.used.pending.json"),
+)
+# Each hash covers a canonical JSON object of every SQLite column in that row;
+# BLOBs use "hex:<hex>". Both identity and complete content are pinned.
+ACCEPTED_ROW_HASHES = \
+{
+    "owner": {
+        "broker_schema_v1": {
+            "2": "6be47bf27fd1f95738b6275217188077ce15ecde33307ce1e034f7b95cb0d098"
+        },
+        "owner_access_identity_v1": {
+            "owner.ravindu.v1": "8371c2a182121938ece055db450c729e40574648c5c886d1d26670e0d69e9e90"
+        },
+        "owner_credential_v1": {
+            "ocred.synthetic": "edb8abb214bc3e18a84542c7d7b9beb36a8d8a62172bf0a50bab7cd75f142526"
+        },
+        "owner_identity_v1": {
+            "owner.ravindu.v1": "06958fa1968f025093b2aa777c63c79969a48242571457067e4e7652aa4a0033"
+        },
+        "owner_proof_challenge_v1": {
+            "och.0a8e46578c2a4c87b0919d24f0552d9b": "2d38d552070a44610c6c03b0e00856ce0258bc04953ba3fc35f8b1ba229c75db",
+            "och.17449e78f4164137a6624529688b335f": "4758468b6eb69805c460d5eb6bce3ff3ae97dd8b4cc48de8f71481de03149c44",
+            "och.1d9fc3fad6e745b0ad0c6069ef823300": "3540f28ea54c105839d85eaf5a5ed9dd1f9f71f84384fbc9b8a6eb033223ba01",
+            "och.29a95f94bd664a6787cde965f0011ba6": "0ba408428be0b161af418e96ba85cc82480e5fb48352a99bb0d71cd3423c32dd",
+            "och.3013cea1f2d142f29100a595295d8905": "50e608e66c72de8cf90777cc710aafd04aa72fff312094e67f548af9135e2ef8",
+            "och.33e005623af9453c837cc6ce76a4c71e": "0666e786d2e08b9b1ebced215f18fcef14fc9c3a264b2005c5f6118345a21ded",
+            "och.52ed36f8bdce415c9c14bcb33e11c59b": "b02291cc3edb8d4473c98ab117a2c14da114f600d2b6561c85938b5a5941b5f3",
+            "och.6f2a37eefb75465f8d2e4e683266baa3": "9ceede85265698655acfb1f66ae901fa7760e422dfbd473cd7c9a43d8f127218",
+            "och.6f71a276fef74e4b9dae9460e8e25466": "4d098ebe0363d6578aafeb7f3fbb97c1c6b8183c4f7e22ebf2a6b54c59a9ff47",
+            "och.7944731fe1b5497084574110ceb7f5ad": "8c66d0462c3c8451efa99f43f9276ae2ab291d652c1b101bb8b1785e01c861c3",
+            "och.84786dd17a0d45a089672e47f537ad87": "948c5bb87ed159a9bc379426df6a82be03d870b620aaef2ed566df03e8a37621",
+            "och.873aa7d86d91472ebd8892490ea05e3e": "537b5e7956f027c5f83cc10dce25381fec568b4491fc4b28c4bb8d7784e0d136",
+            "och.922cd4c2951c461aa72dcb74f8e78102": "28edfd86dba0bbd75c58b4bfd2eef935baf51edab4c4014dd8a67aa6f029630c",
+            "och.a149571e3010440eb612b97f219ff2f1": "109283a2ec71983d5ca1a4a6a9efe8f1b97b9306f6fc918ea2feae2d8f7e3f1e",
+            "och.abb1596f820c49ff80832e386fbfaa91": "8a8273b98e8720aa10a1e578000d52fcbd99315c87a868b0763bab11d939f403",
+            "och.aff2e5613b194241b45431af7c498ec3": "ce11ee780aabd2317126a7f50afbd24b35cca770011f652709ff5813d95db032",
+            "och.c0428179d86442d0a9fde0f0531778ed": "f2c039760e1c7cae182d462aae3aebc28f36d7c7868e6021e178190cbca1b5b1",
+            "och.ce2cc7d68c6f41ed89e176e4360e474e": "af441f1a542e5c53d23fd0b0bcac3582aa9ae77549793a141c8b9a598deba259",
+            "och.d4cbf6f8cede404e9ed741a541aa6819": "a16a8cf5727fbe5aa0becc10268df10c01393486d7a38900f9fd38a4bdd00638",
+            "och.d5329ab29d2f43e582d539829d18fdf9": "bba7007a19331a23f805783c1d410df9d79566964d303db29bd3b2c7cb1f2f94",
+            "och.e36d313a6234428a9fb16adf8eebf133": "300a318cb09180658af05a3d89f1f00fcf0ac0a8c30b335de479e515b62db803",
+            "och.f001ae4e1f004412b01eeb8083dd7a54": "216d2e1a5fdaec9d362d8ff1affa4dc82417824e77485d540fe3dd158d7074f9",
+            "och.fa8f087bc0fb4e3ba48b89e2650bd99b": "61973f4d93dfa08f752e2c0573979ba8afc21fd0cdb6382c11f0e322d26de9d7",
+            "och.ff951f82e97649ce93c542d935fc62c8": "645f886f59871705fc9a49683fefe4a23639f6a793d4a4be0f02f523b580489c"
+        },
+        "owner_request_v1": {
+            "och.0a8e46578c2a4c87b0919d24f0552d9b": "b04a6b4e807f03447809991a15d9efde722f13cbaeeb117eef73e3a4171363fc",
+            "och.17449e78f4164137a6624529688b335f": "e2b7706490b44989ab35b9d7d2b974b3fb379604f5b1dd64125c1ca2369874b0",
+            "och.1d9fc3fad6e745b0ad0c6069ef823300": "4e2bf221e25eade9f8e629ac0e3f4e069775a76cd74eccd83785559f542ab928",
+            "och.29a95f94bd664a6787cde965f0011ba6": "ff755cc036fe192f06ecefff7b86523518ea6bdc4cb37f4a9f3c11bc40f1476c",
+            "och.3013cea1f2d142f29100a595295d8905": "ef286d7c27d7448a07fac215d23ea98ec2c07d65f1feea17831c26aae546e0c0",
+            "och.33e005623af9453c837cc6ce76a4c71e": "7b0186f1b6af9726f04e87cb890affa396210721c6c1c8b4dec845d326c19213",
+            "och.52ed36f8bdce415c9c14bcb33e11c59b": "2803e759b82bdb2411de9f148d0dd1e1cb141f3f68c4d988a361a8e1422aeee1",
+            "och.6f2a37eefb75465f8d2e4e683266baa3": "c40a6d19d9c49ca3737b5d11e79a36722ba6adb21bdf1d304cd8cd0b5bcb2034",
+            "och.6f71a276fef74e4b9dae9460e8e25466": "e615fe56c5acc8c142055262e3e58ca8319020989c336d326a003808f5a1ecb9",
+            "och.7944731fe1b5497084574110ceb7f5ad": "f74e5d59ec648c0eec8ee0fddf4f06cfee8f52196f72582866de6a06ce26dd36",
+            "och.84786dd17a0d45a089672e47f537ad87": "d1183275a7c353aea66aa479ce8fc90579643105f50fd803a07d8ec1deef0cf5",
+            "och.873aa7d86d91472ebd8892490ea05e3e": "9e54dd2783ee8dce8aabd8c1538eaa337d336e7f13ccd04509fb57d4327d7dde",
+            "och.922cd4c2951c461aa72dcb74f8e78102": "4bda198736bfc87a3b5106ba14ff2f043198aec5caf81d0e9a1aab5ec2b4ac85",
+            "och.a149571e3010440eb612b97f219ff2f1": "ae12143540b76e3b584e0fc3fbbe8cfca26b74191ec13ee45ba14acd397b1735",
+            "och.abb1596f820c49ff80832e386fbfaa91": "c9f8fcaf4d0f2c1fee83a04b07ba5f8a3b51e122563ad37f5bd817ec422dd1c8",
+            "och.aff2e5613b194241b45431af7c498ec3": "7d12b6337d00a52ec27f6361ab00b4ab49117df9d5c9cadb4ebd7b7971021d41",
+            "och.c0428179d86442d0a9fde0f0531778ed": "14517ed4eeb715c025104c26ce97395b578bb1e313b55f0f413f0e3c05a55b49",
+            "och.ce2cc7d68c6f41ed89e176e4360e474e": "15c913aab4e6f885199113771368a2c4fd164f4ecf59a3a376d5586435f5e099",
+            "och.d4cbf6f8cede404e9ed741a541aa6819": "d5825905a4acba06893941b26ea2da2b298518ef9c19e18f2aaf60f694a131be",
+            "och.d5329ab29d2f43e582d539829d18fdf9": "022dc929e8eabbd9f3c52103b66d75983cf803059f05cbf5aa7c9e3f3dcf583b",
+            "och.e36d313a6234428a9fb16adf8eebf133": "d8a3464d4031cc3a2a0c2fdb7cf95b8447bad9b100e424ab9e9696f1edc0a833",
+            "och.f001ae4e1f004412b01eeb8083dd7a54": "6e85496829beb3b3a2ff63ee4c6bbcf62fea0b3a3055fa0f13dfe6ca88ae3110",
+            "och.fa8f087bc0fb4e3ba48b89e2650bd99b": "42ccf486589d58d79c3925fb58a3b4b520b1971729b41d9eab789ffe868aadb5",
+            "och.ff951f82e97649ce93c542d935fc62c8": "aad8697b88bfdf0e71ca4ae43a25067166c28e00409b94f0990dda137065b8aa"
+        },
+        "synthetic_claim_v1": {
+            "och.84786dd17a0d45a089672e47f537ad87": "b0ae697452e983dd725e2267d40b28bb4527cf1ce6e387b5db9f8c28e5be2f68",
+            "och.ce2cc7d68c6f41ed89e176e4360e474e": "88d9dd145423effbfbb6bacd909ab0d6efd9421efbb9bad49244b9f81cacc232"
+        }
+    },
+    "evidence": {
+        "synthetic_evidence_v1": {
+            "och.84786dd17a0d45a089672e47f537ad87": "b8dcc7867a63c6065801bd73a5e871500f3ddec85929e523f812ffd53f51cedf",
+            "och.ce2cc7d68c6f41ed89e176e4360e474e": "457b9830224f0d465253c218f53892e01a1a6b1e9a60ab7cebc10ad4f903569e"
+        },
+        "synthetic_schema_v1": {
+            "B1B2_SYNTHETIC_EVIDENCE_V1": "af3c400bc6270765eeb73eb598ab3b79216709d828fd1aac59c7f8434f26146c"
+        }
+    }
+}
+ACCEPTED_CHALLENGE_STATES = \
+{
+    "och.0a8e46578c2a4c87b0919d24f0552d9b": "CANCELLED",
+    "och.17449e78f4164137a6624529688b335f": "CANCELLED",
+    "och.1d9fc3fad6e745b0ad0c6069ef823300": "CANCELLED",
+    "och.29a95f94bd664a6787cde965f0011ba6": "CANCELLED",
+    "och.3013cea1f2d142f29100a595295d8905": "CANCELLED",
+    "och.33e005623af9453c837cc6ce76a4c71e": "CANCELLED",
+    "och.52ed36f8bdce415c9c14bcb33e11c59b": "CANCELLED",
+    "och.6f2a37eefb75465f8d2e4e683266baa3": "CANCELLED",
+    "och.6f71a276fef74e4b9dae9460e8e25466": "CANCELLED",
+    "och.7944731fe1b5497084574110ceb7f5ad": "CANCELLED",
+    "och.84786dd17a0d45a089672e47f537ad87": "CONSUMED",
+    "och.873aa7d86d91472ebd8892490ea05e3e": "CANCELLED",
+    "och.922cd4c2951c461aa72dcb74f8e78102": "CANCELLED",
+    "och.a149571e3010440eb612b97f219ff2f1": "EXPIRED",
+    "och.abb1596f820c49ff80832e386fbfaa91": "EXPIRED",
+    "och.aff2e5613b194241b45431af7c498ec3": "CANCELLED",
+    "och.c0428179d86442d0a9fde0f0531778ed": "CANCELLED",
+    "och.ce2cc7d68c6f41ed89e176e4360e474e": "CONSUMED",
+    "och.d4cbf6f8cede404e9ed741a541aa6819": "CANCELLED",
+    "och.d5329ab29d2f43e582d539829d18fdf9": "CANCELLED",
+    "och.e36d313a6234428a9fb16adf8eebf133": "CANCELLED",
+    "och.f001ae4e1f004412b01eeb8083dd7a54": "CANCELLED",
+    "och.fa8f087bc0fb4e3ba48b89e2650bd99b": "CANCELLED",
+    "och.ff951f82e97649ce93c542d935fc62c8": "CANCELLED"
+}
+ACCEPTED_REQUEST_DIGESTS = \
+{
+    "och.0a8e46578c2a4c87b0919d24f0552d9b": "e4a7bd8c0c6ccfe0d04d9741a19a6348213fc9845940715294e4f0d1acaf0bac",
+    "och.17449e78f4164137a6624529688b335f": "55bf674b8b819c08d995a93c633775b2e9d27f8163c20894cdf948dad309d767",
+    "och.1d9fc3fad6e745b0ad0c6069ef823300": "1caa6ce7aa14c95d6bbdac43672aba9495293e80c3c2e4fe3365ae81b3247ebb",
+    "och.29a95f94bd664a6787cde965f0011ba6": "87c5b5ca47083ec64b18dbe853cb37cd7018d03f8fc6c7e3f1648fd13f8d51e6",
+    "och.3013cea1f2d142f29100a595295d8905": "edd84c33590679798b3a53a805a0db802784d4d9ff7ab9146a343afea517d264",
+    "och.33e005623af9453c837cc6ce76a4c71e": "7bdf190626bac380da19ec9ee1bc25f3ad7909405832605592f3ceb3f005a301",
+    "och.52ed36f8bdce415c9c14bcb33e11c59b": "69d440618af91d328a2b1614b7a7b3c1af7c35ea4e9b108d7df16d4441814872",
+    "och.6f2a37eefb75465f8d2e4e683266baa3": "b965b5a91d32af7ab55be2f42b9cc7d475f7d4de4a6a359c9ac55348fe0650f8",
+    "och.6f71a276fef74e4b9dae9460e8e25466": "8973bb2bfd96251140b687f016c45f971998b1fddb02288e652f119c75858a66",
+    "och.7944731fe1b5497084574110ceb7f5ad": "4bfdcbeea3a42f8a4547254c6c6371fb9eee58335b2132c121ffe3ac2a0b97b4",
+    "och.84786dd17a0d45a089672e47f537ad87": "ac33ca13511276e62793bbcbb52f741881adb0aa44764a282f180ac722cebfcd",
+    "och.873aa7d86d91472ebd8892490ea05e3e": "0d409fb7056e8f9fa3d4837d1d8f058a1110a7d524ab20008747b3ee450f1ec3",
+    "och.922cd4c2951c461aa72dcb74f8e78102": "f67f13fe3cb822215f215543da7e5634f5874e3290d7599d8e9833f5251fe7bc",
+    "och.a149571e3010440eb612b97f219ff2f1": "4ef36ee35420b93ff261abb8ded89307a7b5dfea95a1a33529b79e54b8415a4d",
+    "och.abb1596f820c49ff80832e386fbfaa91": "2162ae2d36922cc524138e8358644e651ec931e7992c072a37af6e8ee4f7d8a7",
+    "och.aff2e5613b194241b45431af7c498ec3": "2f417d43068a9187261f0c26601572de83a6023484c144b9eb9cbfa98fd65429",
+    "och.c0428179d86442d0a9fde0f0531778ed": "fb9382de34b70a3a9c58ccf8d29120be5fe4e16fa6dba5c1f9e4b31492c3eec8",
+    "och.ce2cc7d68c6f41ed89e176e4360e474e": "03cc4a128cef589f6268b66ba2294521688a916e46bfdda8a5abe1dea951b73d",
+    "och.d4cbf6f8cede404e9ed741a541aa6819": "7bb65961c5bfb1810c450c87c88ab972726bb227798e0ac1f879b8747e6276ba",
+    "och.d5329ab29d2f43e582d539829d18fdf9": "2c9318d9663f7a93ac990d533429ad547fdc2a35452982194f5d83f084cedf55",
+    "och.e36d313a6234428a9fb16adf8eebf133": "bfb4fa3b532309ede325008dd5e100599cf93a5c47400fc9ac27fbf9aae47ab0",
+    "och.f001ae4e1f004412b01eeb8083dd7a54": "d8f38f249ee96a818ba5ae4f1b6b158f3d2dba36ccf7cdccc9f49f8516f24f7e",
+    "och.fa8f087bc0fb4e3ba48b89e2650bd99b": "99f9bceedcbcb442f890d50792cdd4ce5bf8d9efc078aad60870db5c7ea6ed97",
+    "och.ff951f82e97649ce93c542d935fc62c8": "2485a536fdb0edf05b980a63fd1a1d2803f6a9fc1a34409be01558d1b2251549"
+}
+ACCEPTED_CLAIMS = \
+[
+    [
+        "och.84786dd17a0d45a089672e47f537ad87",
+        "ac33ca13511276e62793bbcbb52f741881adb0aa44764a282f180ac722cebfcd",
+        "edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0",
+        "ocred.synthetic",
+        "SYNTHETIC_EVIDENCE_COMMITTED",
+        "se.8f51f58203a4218a1ffe16540400db3526261864b2cab87bd87e0e8a2166ee7c"
+    ],
+    [
+        "och.ce2cc7d68c6f41ed89e176e4360e474e",
+        "03cc4a128cef589f6268b66ba2294521688a916e46bfdda8a5abe1dea951b73d",
+        "edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0",
+        "ocred.synthetic",
+        "SYNTHETIC_EVIDENCE_COMMITTED",
+        "se.68b647fc14aeea4fb32bdd7d0fada54d8f4af7c272ec6784f5d22c4c8980e7b5"
+    ]
+]
+ACCEPTED_EVIDENCE_ROWS = \
+[
+    [
+        "och.84786dd17a0d45a089672e47f537ad87",
+        "se.8f51f58203a4218a1ffe16540400db3526261864b2cab87bd87e0e8a2166ee7c",
+        "ac33ca13511276e62793bbcbb52f741881adb0aa44764a282f180ac722cebfcd",
+        "edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0",
+        "owner.ravindu.v1",
+        "ocred.synthetic",
+        "fixture.b1b1.synthetic-codename.v1",
+        "SYNTHETIC_COMMITTED"
+    ],
+    [
+        "och.ce2cc7d68c6f41ed89e176e4360e474e",
+        "se.68b647fc14aeea4fb32bdd7d0fada54d8f4af7c272ec6784f5d22c4c8980e7b5",
+        "03cc4a128cef589f6268b66ba2294521688a916e46bfdda8a5abe1dea951b73d",
+        "edb9a1ff061722e0c83a72689b2135c5f333526146c3a3a0f344a4202dcb8bf0",
+        "owner.ravindu.v1",
+        "ocred.synthetic",
+        "fixture.b1b1.synthetic-codename.v1",
+        "SYNTHETIC_COMMITTED"
+    ]
+]
 
 
 class LifecycleError(RuntimeError):
@@ -358,6 +568,160 @@ def validate_failed_inert(snapshot: dict) -> None:
             "FAILED_API_OR_CANONICAL_DRIFT")
 
 
+def stage2_accepted_baseline(snapshot: dict) -> dict:
+    """Durable descriptive evidence. Volatile PIDs and capture time are excluded."""
+    owner = snapshot["databases"]["owner"]
+    evidence = snapshot["databases"]["evidence"]
+    core = {
+        "schema": "Stage2AcceptedBaselineV1",
+        "lifecycleProfile": POST_STAGE_II_ACCEPTED_V1,
+        "acceptedStage2RunId": ACCEPTED_RUN_ID,
+        "acceptedGovernedSourceSha": ACCEPTED_GOVERNED_SOURCE,
+        "installedBrokerReleaseSha": RELEASE_SHA,
+        "stage1ManifestSha256": MANIFEST_SHA,
+        "stage1OwnerSchemaFingerprint": OWNER_SCHEMA,
+        "stage1EvidenceSchemaFingerprint": EVIDENCE_SCHEMA,
+        "host": snapshot["host"],
+        "authorizationHistory": snapshot["usedAuthorizations"],
+        "ownerDb": {"file": snapshot["files"][str(OWNER_DB)], "fingerprint": owner["fingerprint"],
+                    "counts": owner["counts"], "rowHashes": owner["rowHashes"],
+                    "sidecars": owner["sidecars"]},
+        "evidenceDb": {"file": snapshot["files"][str(EVIDENCE_DB)], "fingerprint": evidence["fingerprint"],
+                       "counts": evidence["counts"], "rowHashes": evidence["rowHashes"],
+                       "sidecars": evidence["sidecars"]},
+        "challengeStates": owner["challengeStates"],
+        "requestDigests": owner["requestDigests"],
+        "claims": owner["claims"],
+        "evidenceRows": evidence["evidenceRows"],
+        "brokerConfigAndCustody": {
+            Path(path).as_posix(): snapshot["files"][path] for path in (
+                str(CONFIG / "dev.json"), str(CONFIG / "identities.json"),
+                "/etc/systemd/system/lilith-memory-broker.service",
+                "/etc/systemd/system/lilith-memory-broker.socket",
+                "/etc/tmpfiles.d/lilith-memory-broker.conf")},
+        "devApiCustody": {Path(path).as_posix(): value
+                          for path, value in snapshot["api"]["custody"].items()},
+        "brokerService": {"state": "active/running", "unitFileState": "static",
+                          "acceptedInvocationId": ACCEPTED_SERVICE_INVOCATION},
+        "brokerSocket": {"state": "active/listening", "unitFileState": "disabled"},
+    }
+    evidence_core = {key: core[key] for key in (
+        "authorizationHistory", "ownerDb", "evidenceDb", "challengeStates",
+        "requestDigests", "claims", "evidenceRows")}
+    core["stage2AcceptanceEvidenceDigestSha256"] = hashlib.sha256(
+        json.dumps(evidence_core, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    core["stage2AcceptedBaselineDigest"] = hashlib.sha256(
+        json.dumps(core, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return core
+
+
+def validate_accepted(snapshot: dict) -> None:
+    """Exact accepted synthetic Stage-II state; no Stage-III authority is implied."""
+    require(snapshot.get("profile") == POST_STAGE_II_ACCEPTED_V1, "ACCEPTED_PROFILE_MISMATCH")
+    _validate_stage_i_static(snapshot, ACCEPTED_FILES)
+    owner = snapshot.get("databases", {}).get("owner", {})
+    evidence = snapshot.get("databases", {}).get("evidence", {})
+    require(owner.get("integrity") == "ok" and owner.get("foreignKeyViolations") == 0
+            and owner.get("fingerprint") == OWNER_SCHEMA and owner.get("version") == 2
+            and owner.get("mode") == "B1B2_SYNTHETIC_DEV_V1"
+            and owner.get("counts") == ACCEPTED_OWNER_COUNTS
+            and owner.get("accessIdentity") ==
+            ["owner.ravindu.v1", "user:synthetic-owner@example.invalid", "ACTIVE"]
+            and owner.get("credentialCount") == 1, "ACCEPTED_OWNER_DB_DRIFT")
+    require(evidence.get("integrity") == "ok" and evidence.get("foreignKeyViolations") == 0
+            and evidence.get("fingerprint") == EVIDENCE_SCHEMA
+            and evidence.get("profile") == "B1B2_SYNTHETIC_EVIDENCE_V1"
+            and evidence.get("releaseSha") == RELEASE_SHA
+            and evidence.get("counts") == ACCEPTED_EVIDENCE_COUNTS,
+            "ACCEPTED_EVIDENCE_DB_DRIFT")
+    require(owner.get("rowHashes") == ACCEPTED_ROW_HASHES["owner"]
+            and evidence.get("rowHashes") == ACCEPTED_ROW_HASHES["evidence"],
+            "ACCEPTED_ROW_HASH_DRIFT")
+    require(owner.get("challengeStates") == ACCEPTED_CHALLENGE_STATES
+            and owner.get("requestDigests") == ACCEPTED_REQUEST_DIGESTS
+            and owner.get("claims") == ACCEPTED_CLAIMS
+            and evidence.get("evidenceRows") == ACCEPTED_EVIDENCE_ROWS,
+            "ACCEPTED_HISTORY_LINKAGE_DRIFT")
+    require({state: list(ACCEPTED_CHALLENGE_STATES.values()).count(state)
+             for state in set(ACCEPTED_CHALLENGE_STATES.values())} ==
+            {"CANCELLED": 20, "CONSUMED": 2, "EXPIRED": 2},
+            "ACCEPTED_TERMINAL_DISTRIBUTION")
+    for claim, row in zip(ACCEPTED_CLAIMS, ACCEPTED_EVIDENCE_ROWS):
+        require(claim[0] == row[0] and claim[1:4] == [row[2], row[3], row[5]]
+                and claim[5] == row[1] and owner["requestDigests"][claim[0]] == claim[1],
+                "ACCEPTED_CLAIM_EVIDENCE_LINKAGE")
+    expected_sidecars = {
+        "-wal": {"sha256": hashlib.sha256(b"").hexdigest(), "uid": 999, "gid": 987,
+                 "mode": 0o600, "size": 0},
+        "-shm": {"sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+                 "uid": 999, "gid": 987, "mode": 0o600, "size": 32768},
+    }
+    require(owner.get("sidecars") == expected_sidecars
+            and evidence.get("sidecars") == expected_sidecars, "ACCEPTED_SIDECAR_DRIFT")
+    used = snapshot.get("usedAuthorizations", {})
+    require(used.get("attempt1") == {
+        "sha256": FAILED_USED_MARKER_SHA, "authorizationId": FAILED_AUTHORIZATION_ID,
+        "schemaVersion": 2, "stage": "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST",
+        "authorityMode": "SYNTHETIC_ONLY", "canonicalCapability": "DISABLED",
+        "releaseSha": RELEASE_SHA, "ownerActor": "rpahasara",
+        "apiBaselineDigest": "0fbed57b7746be3051e3de623990c6402daaa1f88197e614d60499419e1cdbd5",
+    } and used.get("retry2") == {
+        "sha256": ACCEPTED_RETRY_USED_SHA, "authorizationId": ACCEPTED_RETRY_AUTHORIZATION_ID,
+        "schemaVersion": 2, "stage": "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST",
+        "releaseSha": RELEASE_SHA, "ownerActor": "rpahasara",
+        "apiBaselineDigest": "3d039d4b1bf3eb1483f9e885a9a953f41883b56f2fe08d107d4ea6c2c16d71e4",
+        "consumedAt": "2026-09-24T06:51:21.170362Z",
+    }, "ACCEPTED_AUTHORIZATION_HISTORY_DRIFT")
+    require(snapshot.get("absent") == {path: True for path in ACCEPTED_ABSENT},
+            "ACCEPTED_ACTIVE_OR_PENDING_AUTHORIZATION")
+    require(snapshot.get("runtimeDirectory") ==
+            {"uid": 0, "gid": 988, "mode": 0o710, "children": ["owner.sock"]},
+            "ACCEPTED_RUNTIME_DIRECTORY_DRIFT")
+    require(snapshot.get("ownerSocket") ==
+            {"uid": 999, "gid": 988, "mode": 0o660, "type": "socket", "listening": True},
+            "ACCEPTED_SOCKET_PATH_DRIFT")
+    service = snapshot.get("units", {}).get(SERVICE, {})
+    broker_socket = snapshot.get("units", {}).get(SOCKET, {})
+    require(all(service.get(k) == v for k, v in {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "UnitFileState": "static", "NRestarts": "0",
+        "ExecMainStartTimestamp": ACCEPTED_SERVICE_STARTED,
+        "InvocationID": ACCEPTED_SERVICE_INVOCATION,
+        "FragmentPath": "/etc/systemd/system/lilith-memory-broker.service",
+        "DropInPaths": "",
+    }.items()), "ACCEPTED_SERVICE_DRIFT")
+    require(all(broker_socket.get(k) == v for k, v in {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "UnitFileState": "disabled", "FragmentPath": "/etc/systemd/system/lilith-memory-broker.socket",
+        "DropInPaths": "",
+    }.items()), "ACCEPTED_SOCKET_UNIT_DRIFT")
+    pid = service.get("MainPID", "")
+    require(str(pid).isdigit() and int(pid) > 1
+            and snapshot.get("broker_processes") == [int(pid)]
+            and snapshot.get("broker_uid_processes") == [int(pid)],
+            "ACCEPTED_BROKER_PROCESS_SET")
+    process = snapshot.get("brokerProcess", {})
+    require(process == {
+        "pid": int(pid), "uid": [999] * 4, "gid": [987] * 4,
+        "groups": [987], "ppid": 1,
+        "cmdline": "/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server",
+        "exe": "/usr/bin/python3.12",
+        "cwd": str(ROOT / "releases" / RELEASE_SHA),
+    }, "ACCEPTED_BROKER_PROCESS_IDENTITY")
+    api = snapshot.get("api", {})
+    require(api.get("ActiveState") == "active" and api.get("NRestarts") == "0"
+            and str(api.get("MainPID", "")).isdigit() and int(api["MainPID"]) > 0
+            and api.get("ExecMainStartTimestamp")
+            and api.get("health") == {"status": "ok", "database": True}
+            and api.get("custody", {}).get(str(API_ROOT / "data/lilith-dev.db"), {}).get("sha256") ==
+            "e4080d47ac782dc5578c4537b8aab277e73b27546e704ee2fff6fda506f67e6c"
+            and api.get("custody", {}).get(str(API_ROOT / "data/canonical-runtime.json"), {}).get("sha256") ==
+            "65ac5077486cfe25665fc8f5815661b1653878182492a0309ec974e9394c08e7",
+            "ACCEPTED_API_OR_CANONICAL_DRIFT")
+    require(snapshot.get("stage2AcceptedBaseline") == stage2_accepted_baseline(snapshot),
+            "ACCEPTED_BASELINE_DRIFT")
+
+
 def validate(snapshot: dict) -> None:
     if TRUSTED_DEV_PROFILE == PRE_B1B2B:
         validate_pre(snapshot)
@@ -365,6 +729,8 @@ def validate(snapshot: dict) -> None:
         validate_post(snapshot)
     elif TRUSTED_DEV_PROFILE == POST_STAGE_II_FAILED_INERT_V1:
         validate_failed_inert(snapshot)
+    elif TRUSTED_DEV_PROFILE == POST_STAGE_II_ACCEPTED_V1:
+        validate_accepted(snapshot)
     else:
         raise LifecycleError("UNACCEPTED_LIFECYCLE_PROFILE")
 
@@ -462,7 +828,7 @@ def _groups() -> dict:
 
 
 def _unit(name: str) -> dict[str, str]:
-    properties = "LoadState,ActiveState,SubState,MainPID,UnitFileState,NRestarts,ExecMainStartTimestamp,FragmentPath,DropInPaths"
+    properties = "LoadState,ActiveState,SubState,MainPID,UnitFileState,NRestarts,ExecMainStartTimestamp,InvocationID,FragmentPath,DropInPaths"
     output = _command("/usr/bin/systemctl", "show", name, "--property=" + properties, "--no-pager")
     return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
 
@@ -563,7 +929,24 @@ def _database(path: Path, tables: dict[str, int], *, historical: bool = False) -
         raise
 
 
-def _owner_database(*, historical: bool = False) -> dict:
+def _row_hashes(conn: sqlite3.Connection, tables: dict[str, int]) -> dict[str, dict[str, str]]:
+    result = {}
+    for table in tables:
+        columns = [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')]
+        hashes = {}
+        for row in conn.execute(f'SELECT * FROM "{table}"'):
+            record = {key: "hex:" + value.hex() if isinstance(value, bytes) else value
+                      for key, value in zip(columns, row)}
+            key = str(next(iter(record.values())))
+            require(key not in hashes, "DUPLICATE_ROW_IDENTITY:" + table)
+            hashes[key] = hashlib.sha256(json.dumps(
+                record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")).hexdigest()
+        result[table] = hashes
+    return result
+
+
+def _owner_database(*, historical: bool = False, accepted: bool = False) -> dict:
     conn, result = _database(OWNER_DB, OWNER_COUNTS, historical=historical)
     try:
         rows = conn.execute("SELECT version,fingerprint,mode FROM broker_schema_v1").fetchall()
@@ -589,12 +972,14 @@ def _owner_database(*, historical: bool = False) -> dict:
             result["claims"] = [list(row) for row in conn.execute(
                 "SELECT challenge_id,request_digest,action_digest,synthetic_credential_record_id,"
                 "status,synthetic_evidence_id FROM synthetic_claim_v1 ORDER BY challenge_id")]
+        if accepted:
+            result["rowHashes"] = _row_hashes(conn, ACCEPTED_OWNER_COUNTS)
         return result
     finally:
         conn.close()
 
 
-def _evidence_database(*, historical: bool = False) -> dict:
+def _evidence_database(*, historical: bool = False, accepted: bool = False) -> dict:
     conn, result = _database(EVIDENCE_DB, EVIDENCE_COUNTS, historical=historical)
     try:
         rows = conn.execute("SELECT profile,release_sha FROM synthetic_schema_v1").fetchall()
@@ -607,6 +992,8 @@ def _evidence_database(*, historical: bool = False) -> dict:
                 "SELECT challenge_id,synthetic_evidence_id,request_digest,action_digest,"
                 "logical_owner_id,synthetic_credential_record_id,fixture_marker,state "
                 "FROM synthetic_evidence_v1 ORDER BY challenge_id")]
+        if accepted:
+            result["rowHashes"] = _row_hashes(conn, ACCEPTED_EVIDENCE_COUNTS)
         return result
     finally:
         conn.close()
@@ -639,12 +1026,89 @@ def _used_authorization() -> dict:
                 "canonicalCapability", "releaseSha", "ownerActor", "apiBaselineDigest")}}
 
 
+def _retry_used_authorization() -> dict:
+    path = CONFIG / "b1b2b-stage2-retry2-authorization.used.json"
+    data, meta = _read_regular(path)
+    require((meta.st_uid, meta.st_gid, stat.S_IMODE(meta.st_mode)) == (0, 0, 0o600),
+            "ACCEPTED_RETRY_USED_OWNERSHIP")
+    value = json.loads(data)
+    require(isinstance(value, dict), "ACCEPTED_RETRY_USED_FORMAT")
+    return {"sha256": hashlib.sha256(data).hexdigest(),
+            **{key: value.get(key) for key in (
+                "authorizationId", "schemaVersion", "stage", "releaseSha",
+                "ownerActor", "apiBaselineDigest", "consumedAt")}}
+
+
 def _runtime_directory() -> dict:
     meta = RUNTIME.lstat()
     require(stat.S_ISDIR(meta.st_mode), "FAILED_RUNTIME_DIRECTORY_TYPE")
     return {"uid": meta.st_uid, "gid": meta.st_gid,
             "mode": stat.S_IMODE(meta.st_mode),
             "children": sorted(item.name for item in RUNTIME.iterdir())}
+
+
+def _owner_socket() -> dict:
+    path = RUNTIME / "owner.sock"
+    meta = path.lstat()
+    require(stat.S_ISSOCK(meta.st_mode), "ACCEPTED_OWNER_SOCKET_TYPE")
+    # /proc/net/unix exposes the kernel listening flag; no probe traffic is sent.
+    listening = any(
+        len(parts) >= 8 and parts[7] == str(path)
+        and parts[3] == "00010000" and parts[4] == "0001"
+        for line in Path("/proc/net/unix").read_text(encoding="ascii").splitlines()[1:]
+        if (parts := line.split())
+    )
+    return {"uid": meta.st_uid, "gid": meta.st_gid,
+            "mode": stat.S_IMODE(meta.st_mode), "type": "socket",
+            "listening": listening}
+
+
+def _broker_process(pid: int) -> dict:
+    proc = Path("/proc") / str(pid)
+    status = dict(line.split(":", 1) for line in
+                  (proc / "status").read_text(encoding="ascii").splitlines() if ":" in line)
+    return {
+        "pid": pid,
+        "uid": [int(x) for x in status["Uid"].split()],
+        "gid": [int(x) for x in status["Gid"].split()],
+        "groups": [int(x) for x in status["Groups"].split()],
+        "ppid": int(status["PPid"]),
+        "cmdline": (proc / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8").strip(),
+        "exe": os.readlink(proc / "exe"),
+        "cwd": os.readlink(proc / "cwd"),
+    }
+
+
+def collect_accepted() -> dict:
+    """Read-only accepted-state observation; no broker or API mutation."""
+    owner = _owner_database(historical=True, accepted=True)
+    evidence = _evidence_database(historical=True, accepted=True)
+    units = {name: _unit(name) for name in (SERVICE, SOCKET)}
+    pid = int(units[SERVICE].get("MainPID", "0"))
+    snapshot = {
+        "profile": POST_STAGE_II_ACCEPTED_V1,
+        "host": _host(),
+        "accounts": _accounts(),
+        "groups": _groups(),
+        "directories": {str(path): _directory(path) for path in (
+            ROOT, ROOT / "releases", CONFIG, STATE, STATE / "owner-control", STATE / "state")},
+        "release": _release(),
+        "files": {path: _file(Path(path)) for path in ACCEPTED_FILES},
+        "databases": {"owner": owner, "evidence": evidence},
+        "usedAuthorizations": {"attempt1": _used_authorization(),
+                               "retry2": _retry_used_authorization()},
+        "units": units,
+        "absent": {path: not os.path.lexists(path) for path in ACCEPTED_ABSENT},
+        "runtimeDirectory": _runtime_directory(),
+        "ownerSocket": _owner_socket(),
+        "broker_processes": _broker_processes(),
+        "broker_uid_processes": _broker_uid_processes(),
+        "brokerProcess": _broker_process(pid) if pid > 1 else {},
+        "api": _api(),
+    }
+    snapshot["stage2AcceptedBaseline"] = stage2_accepted_baseline(snapshot)
+    validate_accepted(snapshot)
+    return snapshot
 
 
 def collect_post() -> dict:
@@ -717,6 +1181,8 @@ def main() -> int:
         snapshot = collect_post()
     elif TRUSTED_DEV_PROFILE == POST_STAGE_II_FAILED_INERT_V1:
         snapshot = collect_failed_inert()
+    elif TRUSTED_DEV_PROFILE == POST_STAGE_II_ACCEPTED_V1:
+        snapshot = collect_accepted()
     elif TRUSTED_DEV_PROFILE == PRE_B1B2B:
         snapshot = collect_pre()
     else:
