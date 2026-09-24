@@ -390,6 +390,8 @@ class SnapshotFoundationTests(unittest.TestCase):
                     installer.install(control, release_id, root_custody=False, self_test=fail)
             self.assertEqual(calls, [True])
             self.assertEqual(caught.exception.diagnostics["diagnostics"]["stderrExcerpt"], "fixture")
+            self.assertEqual(caught.exception.diagnostics["selfTestResult"], "FAIL")
+            self.assertEqual(caught.exception.diagnostics["selfTestReleaseId"], release_id)
             self.assertEqual(os.readlink(control / "current"),
                              "releases/" + installer.KNOWN_OLD_UNACCEPTED)
             self.assertTrue(old.is_dir())
@@ -426,6 +428,29 @@ class SnapshotFoundationTests(unittest.TestCase):
             self.assertEqual(calls, [True, False])
             self.assertNotEqual(caught.exception.diagnostics["firstCompleteSnapshotDigest"],
                                 caught.exception.diagnostics["secondCompleteSnapshotDigest"])
+            self.assertEqual(caught.exception.diagnostics["selfTestLifecycleProfile"], tool.PROFILE)
+            self.assertEqual(caught.exception.diagnostics["selfTestAcceptedBaselineDigest"],
+                             installer.BASELINE)
+            self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
+            self.assertTrue(old.is_dir())
+
+    @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
+    def test_second_failure_retains_first_result(self):
+        with tempfile.TemporaryDirectory() as temp:
+            control, old, release_id = installer_fixture(Path(temp))
+            def check(*, direct):
+                if direct:
+                    return accepted_snapshot(release_id)
+                raise installer.InstallError("SNAPSHOT_SELF_TEST_FAILED", {"stderrExcerpt": "fixture"})
+            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
+                with self.assertRaisesRegex(installer.InstallError,
+                                            "SELECTED_BUT_UNACCEPTED_SECOND_SNAPSHOT_FAILED") as caught:
+                    installer.install(control, release_id, root_custody=False, self_test=check)
+            details = caught.exception.diagnostics
+            self.assertEqual(details["firstCompleteSnapshotDigest"],
+                             accepted_snapshot(release_id)["completeDigestSha256"])
+            self.assertEqual(details["selfTestLifecycleProfile"], tool.PROFILE)
+            self.assertEqual(details["selfTestAcceptedBaselineDigest"], installer.BASELINE)
             self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
             self.assertTrue(old.is_dir())
 

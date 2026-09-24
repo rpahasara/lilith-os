@@ -497,7 +497,8 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
         diagnostics = exc.diagnostics if isinstance(exc, InstallError) else {
             "exception": type(exc).__name__}
         raise InstallError("NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED", {
-            "selfTestResult": "FAIL", "reason": str(exc)[:128],
+            "selfTestResult": "FAIL", "selfTestReleaseId": release_id,
+            "reason": str(exc)[:128],
             "diagnostics": diagnostics}) from exc
     temporary = control / (".current-" + release_id)
     if temporary.exists() or temporary.is_symlink():
@@ -520,12 +521,20 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
         diagnostics = exc.diagnostics if isinstance(exc, InstallError) else {
             "exception": type(exc).__name__}
         raise InstallError("SELECTED_BUT_UNACCEPTED_SECOND_SNAPSHOT_FAILED", {
+            "selfTestResult": "PASS", "selfTestReleaseId": release_id,
+            "selfTestLifecycleProfile": first["profile"],
+            "selfTestAcceptedBaselineDigest": first["acceptedBaselineDigest"],
             "firstCompleteSnapshotDigest": first["completeDigestSha256"],
             "reason": str(exc)[:128], "diagnostics": diagnostics}) from exc
     if first["completeDigestSha256"] != second["completeDigestSha256"]:
         raise InstallError("SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH", {
+            "selfTestResult": "PASS", "selfTestReleaseId": release_id,
+            "selfTestLifecycleProfile": first["profile"],
+            "selfTestAcceptedBaselineDigest": first["acceptedBaselineDigest"],
             "firstCompleteSnapshotDigest": first["completeDigestSha256"],
-            "secondCompleteSnapshotDigest": second["completeDigestSha256"]})
+            "secondCompleteSnapshotDigest": second["completeDigestSha256"],
+            "secondLifecycleProfile": second["profile"],
+            "secondAcceptedBaselineDigest": second["acceptedBaselineDigest"]})
     return {
         "result": "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED", "releaseId": release_id,
         "oldPreservedReleaseId": KNOWN_OLD_UNACCEPTED,
