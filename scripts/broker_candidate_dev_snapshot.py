@@ -155,13 +155,22 @@ elif action == "read":
     frame = "LILITH_TRUSTED_SNAPSHOT_V1:{}:{}:{}".format(
         len(data), hashlib.sha256(data).hexdigest(), base64.b64encode(data).decode("ascii"))
     print(frame)
-elif action == "cleanup":
+elif action in {"cleanup_empty", "cleanup_part", "cleanup_full"}:
     directory()
     names = os.listdir(path)
-    if not set(names) <= {"lifecycle.py.part", "lifecycle.py", "snapshot.json"}:
+    allowed = {"cleanup_empty": set(),
+               "cleanup_part": {"lifecycle.py.part"},
+               "cleanup_full": {"lifecycle.py", "snapshot.json"}}[action]
+    if not set(names) <= allowed:
         raise SystemExit("REMOTE_STAGING_UNEXPECTED_CONTENTS")
     for name in names:
         file_info(name, {0o600})
+    if "lifecycle.py" in names:
+        source = os.path.join(path, "lifecycle.py")
+        with open(source, "rb") as trusted:
+            content = trusted.read(source_size + 1)
+        if len(content) != source_size or hashlib.sha256(content).hexdigest() != expected_sha:
+            raise SystemExit("REMOTE_SOURCE_IDENTITY")
     for name in names:
         os.unlink(os.path.join(path, name))
     os.rmdir(path)
@@ -200,7 +209,8 @@ def validate_staging_path(path: str) -> str:
 def remote_action(path: str, action: str, source_size: int, source_sha: str,
                   *, source_bytes: bytes = b"") -> bytes:
     path = validate_staging_path(path)
-    if action not in {"create", "upload", "snapshot", "read", "cleanup"}:
+    if action not in {"create", "upload", "snapshot", "read",
+                      "cleanup_empty", "cleanup_part", "cleanup_full"}:
         raise SnapshotError("REMOTE_STAGING_ACTION")
     if (not isinstance(source_size, int) or not 0 < source_size <= MAX_SOURCE_BYTES or
             not isinstance(source_sha, str) or not SOURCE_SHA.fullmatch(source_sha) or
@@ -270,13 +280,22 @@ def capture(run_id: str, run_attempt: str, phase: str) -> dict:
         # Creation may have occurred before transport failure. Do not delete a
         # possibly pre-existing path; report exact run-bound residue for audit.
         raise SnapshotError(f"REMOTE_STAGING_CREATE_UNCERTAIN path={directory}") from exc
+    cleanup_action = "cleanup_empty"
     try:
-        remote_action(directory, "upload", source_size, source_sha, source_bytes=source_bytes)
+        try:
+            remote_action(directory, "upload", source_size, source_sha, source_bytes=source_bytes)
+        except SnapshotError as exc:
+            if ("reason=REMOTE_SOURCE_SIZE_MISMATCH" in str(exc) or
+                    "reason=REMOTE_SOURCE_HASH_MISMATCH" in str(exc) or
+                    "TRUSTED_SSH_TIMEOUT action=upload" in str(exc)):
+                cleanup_action = "cleanup_part"
+            raise
+        cleanup_action = "cleanup_full"
         remote_action(directory, "snapshot", source_size, source_sha)
         snapshot = decode_snapshot_frame(remote_action(directory, "read", source_size, source_sha))
     finally:
         try:
-            remote_action(directory, "cleanup", source_size, source_sha)
+            remote_action(directory, cleanup_action, source_size, source_sha)
         except Exception as exc:
             raise SnapshotError(f"REMOTE_STAGING_CLEANUP_FAILED path={directory}") from exc
     return snapshot

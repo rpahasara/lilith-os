@@ -76,7 +76,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                 try:
                     exec(compile(guard._REMOTE_SOURCE, "<trusted-remote-staging>", "exec"), {})
                 finally:
-                    if action == "cleanup" and names:
+                    if action.startswith("cleanup") and names:
                         unlink.assert_not_called()
                         rmdir.assert_not_called()
                 return mkdir
@@ -87,11 +87,11 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                      SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=uid + 1, st_gid=gid),
                      SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=uid, st_gid=gid)):
             with self.subTest(info=info), self.assertRaises(SystemExit):
-                run("cleanup", target_info=info)
+                run("cleanup_full", target_info=info)
         with self.assertRaises(SystemExit):
             run("create", names=("unexpected",))
         with self.assertRaises(SystemExit):
-            run("cleanup", names=("unexpected",))
+            run("cleanup_full", names=("unexpected",))
         with self.assertRaises(SystemExit):
             run("create", parent_info=SimpleNamespace(
                 st_mode=stat.S_IFLNK | 0o777, st_uid=0, st_gid=0))
@@ -119,7 +119,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
             result = guard.capture("35977618907", "1", "preflight")
         self.assertEqual(result, fixture())
         self.assertEqual(calls, [(path, "create"), (path, "upload"), (path, "snapshot"),
-                                 (path, "read"), (path, "cleanup")])
+                                 (path, "read"), (path, "cleanup_full")])
 
     def test_remote_transport_stdout_never_becomes_staging_path(self):
         path = guard.staging_path("35977618907", "1", "preflight")
@@ -189,7 +189,8 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                     os.chmod(Path(path, preexisting), 0o600)
                 result = remote("upload", payload, prefix + guard._REMOTE_SOURCE)
                 self.assertEqual(result.returncode == 0, expect_success, result.stderr)
-                self.assertEqual(Path(path, "lifecycle.py").exists(), expect_success)
+                self.assertEqual(Path(path, "lifecycle.py").exists(),
+                                 expect_success or preexisting == "lifecycle.py")
                 if expect_success:
                     self.assertEqual(Path(path, "lifecycle.py").read_bytes(), data)
                     self.assertFalse(Path(path, "lifecycle.py.part").exists())
@@ -200,7 +201,13 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                     read = remote("read")
                     self.assertEqual(read.returncode, 0, read.stderr)
                     self.assertEqual(guard.decode_snapshot_frame(read.stdout), {"profile": "test"})
-                self.assertEqual(remote("cleanup").returncode, 0)
+                if preexisting:
+                    self.assertNotEqual(remote("cleanup_empty").returncode, 0)
+                    self.assertEqual(Path(path, preexisting).read_bytes(), b"existing")
+                    Path(path, preexisting).unlink()
+                    self.assertEqual(remote("cleanup_empty").returncode, 0)
+                else:
+                    self.assertEqual(remote("cleanup_full" if expect_success else "cleanup_part").returncode, 0)
                 self.assertFalse(os.path.lexists(path))
             finally:
                 if os.path.lexists(path):
@@ -234,18 +241,18 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
             self.assertEqual(remote("create").returncode, 0)
             unexpected = Path(path, "candidate.tar.gz")
             unexpected.write_bytes(b"evidence")
-            self.assertNotEqual(remote("cleanup").returncode, 0)
+            self.assertNotEqual(remote("cleanup_full").returncode, 0)
             self.assertEqual(unexpected.read_bytes(), b"evidence")
             unexpected.unlink()
             link = Path(path, "lifecycle.py.part")
             os.symlink("/dev/null", link)
-            self.assertNotEqual(remote("cleanup").returncode, 0)
+            self.assertNotEqual(remote("cleanup_full").returncode, 0)
             self.assertTrue(link.is_symlink())
             link.unlink()
             os.chmod(path, 0o755)
-            self.assertNotEqual(remote("cleanup").returncode, 0)
+            self.assertNotEqual(remote("cleanup_full").returncode, 0)
             os.chmod(path, 0o700)
-            self.assertEqual(remote("cleanup").returncode, 0)
+            self.assertEqual(remote("cleanup_empty").returncode, 0)
             self.assertFalse(os.path.lexists(path))
         finally:
             if os.path.isdir(path) and not os.path.islink(path):
@@ -272,12 +279,12 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
         def action(_path, name, _size, _digest, **kwargs):
             calls.append(name)
             if name == "upload":
-                raise guard.SnapshotError("SSH_STREAM_TIMEOUT")
+                raise guard.SnapshotError("TRUSTED_SSH_TIMEOUT action=upload")
         with patch.object(guard, "gcloud", side_effect=identity), \
              patch.object(guard, "remote_action", side_effect=action):
-            with self.assertRaisesRegex(guard.SnapshotError, "SSH_STREAM_TIMEOUT"):
+            with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SSH_TIMEOUT"):
                 guard.capture("35977618907", "1", "preflight")
-        self.assertEqual(calls, ["create", "upload", "cleanup"])
+        self.assertEqual(calls, ["create", "upload", "cleanup_part"])
 
     def test_uncertain_create_and_cleanup_failure_report_exact_path(self):
         path = guard.staging_path("35977618907", "1", "postflight")
@@ -287,7 +294,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
             with self.assertRaisesRegex(guard.SnapshotError, "REMOTE_STAGING_CREATE_UNCERTAIN path=" + path):
                 guard.capture("35977618907", "1", "postflight")
         def action(_path, name, _size, _digest, **kwargs):
-            if name == "cleanup":
+            if name.startswith("cleanup"):
                 raise RuntimeError("unexpected contents")
             if name == "upload":
                 raise RuntimeError("upload failed")

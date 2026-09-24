@@ -65,7 +65,7 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         self.assertNotIn('gcloud("scp"', helper)
         self.assertIn('remote_action(directory, "upload"', helper)
         self.assertIn('remote_action(directory, "read"', helper)
-        self.assertIn('remote_action(directory, "cleanup"', helper)
+        self.assertIn('remote_action(directory, cleanup_action', helper)
 
     def test_control_only_and_full_mode_routes_remain(self):
         full = job("deploy")
