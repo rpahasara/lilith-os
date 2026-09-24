@@ -1,4 +1,4 @@
-"""Deterministic pre-install, Stage-I, and PROD broker lifecycle regressions."""
+"""Deterministic pre-install, Stage-I, accepted Stage-II, and PROD regressions."""
 
 from __future__ import annotations
 
@@ -118,6 +118,63 @@ def failed_fixture() -> dict:
     return snapshot
 
 
+def accepted_fixture() -> dict:
+    snapshot = failed_fixture()
+    snapshot["profile"] = gate.POST_STAGE_II_ACCEPTED_V1
+    snapshot["files"] = {path: {"sha256": sha, "uid": uid, "gid": gid, "mode": mode}
+                         for path, (sha, uid, gid, mode) in gate.ACCEPTED_FILES.items()}
+    snapshot["absent"] = {path: True for path in gate.ACCEPTED_ABSENT}
+    snapshot["runtimeDirectory"]["children"] = ["owner.sock"]
+    snapshot["ownerSocket"] = {"uid": 999, "gid": 988, "mode": 0o660,
+                               "type": "socket", "listening": True}
+    snapshot["usedAuthorizations"] = {
+        "attempt1": copy.deepcopy(snapshot["usedAuthorization"]),
+        "retry2": {
+            "sha256": gate.ACCEPTED_RETRY_USED_SHA,
+            "authorizationId": gate.ACCEPTED_RETRY_AUTHORIZATION_ID,
+            "schemaVersion": 2, "stage": "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST",
+            "releaseSha": gate.RELEASE_SHA, "ownerActor": "rpahasara",
+            "apiBaselineDigest": "3d039d4b1bf3eb1483f9e885a9a953f41883b56f2fe08d107d4ea6c2c16d71e4",
+            "consumedAt": "2026-09-24T06:51:21.170362Z",
+        },
+    }
+    snapshot["databases"]["owner"]["counts"] = dict(gate.ACCEPTED_OWNER_COUNTS)
+    snapshot["databases"]["evidence"]["counts"] = dict(gate.ACCEPTED_EVIDENCE_COUNTS)
+    snapshot["databases"]["owner"]["rowHashes"] = copy.deepcopy(gate.ACCEPTED_ROW_HASHES["owner"])
+    snapshot["databases"]["evidence"]["rowHashes"] = copy.deepcopy(gate.ACCEPTED_ROW_HASHES["evidence"])
+    snapshot["databases"]["owner"]["challengeStates"] = copy.deepcopy(gate.ACCEPTED_CHALLENGE_STATES)
+    snapshot["databases"]["owner"]["requestDigests"] = copy.deepcopy(gate.ACCEPTED_REQUEST_DIGESTS)
+    snapshot["databases"]["owner"]["claims"] = copy.deepcopy(gate.ACCEPTED_CLAIMS)
+    snapshot["databases"]["evidence"]["evidenceRows"] = copy.deepcopy(gate.ACCEPTED_EVIDENCE_ROWS)
+    snapshot["units"][gate.SERVICE] = {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "MainPID": "96650", "UnitFileState": "static", "NRestarts": "0",
+        "ExecMainStartTimestamp": gate.ACCEPTED_SERVICE_STARTED,
+        "InvocationID": gate.ACCEPTED_SERVICE_INVOCATION,
+        "FragmentPath": "/etc/systemd/system/lilith-memory-broker.service", "DropInPaths": "",
+    }
+    snapshot["units"][gate.SOCKET] = {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "UnitFileState": "disabled",
+        "FragmentPath": "/etc/systemd/system/lilith-memory-broker.socket", "DropInPaths": "",
+    }
+    snapshot["broker_processes"] = [96650]
+    snapshot["broker_uid_processes"] = [96650]
+    snapshot["brokerProcess"] = {
+        "pid": 96650, "uid": [999] * 4, "gid": [987] * 4,
+        "groups": [987], "ppid": 1,
+        "cmdline": "/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server",
+        "exe": "/usr/bin/python3.12",
+        "cwd": str(gate.ROOT / "releases" / gate.RELEASE_SHA),
+    }
+    snapshot["api"]["custody"][str(gate.API_ROOT / "data/lilith-dev.db")].update(
+        {"uid": 1001, "gid": 1002, "mode": 0o644})
+    snapshot["api"]["custody"][str(gate.API_ROOT / "data/canonical-runtime.json")].update(
+        {"uid": 1001, "gid": 1002, "mode": 0o600})
+    snapshot["stage2AcceptedBaseline"] = gate.stage2_accepted_baseline(snapshot)
+    return snapshot
+
+
 def pre_fixture() -> dict:
     return {
         "profile": gate.PRE_B1B2B, "host": gate.expected_host(),
@@ -208,7 +265,7 @@ class LifecyclePolicyTests(unittest.TestCase):
         self._reject_all(mutations)
 
     def test_unaccepted_stage_ii_profile_cannot_be_selected(self):
-        self.assertEqual(gate.TRUSTED_DEV_PROFILE, gate.POST_STAGE_II_FAILED_INERT_V1)
+        self.assertEqual(gate.TRUSTED_DEV_PROFILE, gate.POST_STAGE_II_ACCEPTED_V1)
         snapshot = post_fixture()
         snapshot["profile"] = gate.POST_STAGE_II
         with self.assertRaises(gate.LifecycleError):
@@ -218,7 +275,8 @@ class LifecyclePolicyTests(unittest.TestCase):
         gate.validate_post(post_fixture())
         snapshot = failed_fixture()
         gate.validate_failed_inert(snapshot)
-        gate.validate(snapshot)
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate(snapshot)
         with self.assertRaises(gate.LifecycleError):
             gate.validate_post(snapshot)
         snapshot["profile"] = gate.POST_STAGE_I
@@ -267,6 +325,104 @@ class LifecyclePolicyTests(unittest.TestCase):
             lambda s: s["api"]["custody"][str(gate.API_ROOT / "data/canonical-runtime.json")].__setitem__("sha256", "0" * 64),
         )
         self._reject_failed(mutations)
+
+    def test_accepted_stage_ii_exact_and_separate_from_prior_lifecycles(self):
+        accepted = accepted_fixture()
+        gate.validate_accepted(accepted)
+        gate.validate(accepted)
+        self.assertEqual(accepted["stage2AcceptedBaseline"]["schema"], "Stage2AcceptedBaselineV1")
+        self.assertEqual(accepted["stage2AcceptedBaseline"]["acceptedStage2RunId"], "35965971283")
+        self.assertEqual(accepted["stage2AcceptedBaseline"]["installedBrokerReleaseSha"], gate.RELEASE_SHA)
+        self.assertEqual(
+            accepted["stage2AcceptedBaseline"]["stage2AcceptedBaselineDigest"],
+            "abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a")
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_failed_inert(accepted)
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_accepted(post_fixture())
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_accepted(failed_fixture())
+
+    def test_accepted_history_hashes_and_authority_fail_closed(self):
+        mutations = (
+            lambda s: s["databases"]["evidence"]["rowHashes"]["synthetic_evidence_v1"].pop(
+                gate.FAILED_CONSUMED_CHALLENGE),
+            lambda s: s["databases"]["evidence"]["rowHashes"]["synthetic_evidence_v1"].pop(
+                gate.ACCEPTED_RETRY_CHALLENGE),
+            lambda s: s["databases"]["evidence"]["rowHashes"]["synthetic_evidence_v1"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "0" * 64),
+            lambda s: s["databases"]["evidence"]["rowHashes"]["synthetic_evidence_v1"].__setitem__(
+                "och.third", "0" * 64),
+            lambda s: s["databases"]["owner"]["rowHashes"]["owner_proof_challenge_v1"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "0" * 64),
+            lambda s: s["databases"]["owner"]["rowHashes"]["owner_request_v1"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "0" * 64),
+            lambda s: s["databases"]["owner"]["rowHashes"]["synthetic_claim_v1"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "0" * 64),
+            lambda s: s["databases"]["owner"]["challengeStates"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "CANCELLED"),
+            lambda s: s["databases"]["owner"]["requestDigests"].__setitem__(
+                gate.ACCEPTED_RETRY_CHALLENGE, "0" * 64),
+            lambda s: s["databases"]["owner"]["claims"][0].__setitem__(5, "se.wrong"),
+            lambda s: s["databases"]["evidence"]["evidenceRows"][1].__setitem__(1, "se.wrong"),
+            lambda s: s["usedAuthorizations"].__setitem__("attempt1", {}),
+            lambda s: s["usedAuthorizations"].__setitem__("retry2", {}),
+            lambda s: s["usedAuthorizations"]["retry2"].__setitem__("sha256", "0" * 64),
+            lambda s: s["absent"].__setitem__(
+                str(gate.CONFIG / "b1b2b-stage2-retry2-authorization.json"), False),
+            lambda s: s["absent"].__setitem__(
+                str(gate.CONFIG / "b1b2b-stage2-retry2-authorization.used.json.pending"), False),
+            lambda s: s["databases"]["owner"].__setitem__("credentialCount", 2),
+            lambda s: s["databases"]["owner"]["rowHashes"]["owner_credential_v1"].__setitem__(
+                "ocred.real", "0" * 64),
+            lambda s: s["databases"]["evidence"]["counts"].__setitem__("actor_evidence", 1),
+            lambda s: s["api"]["custody"][str(gate.API_ROOT / "data/canonical-runtime.json")].__setitem__(
+                "sha256", "0" * 64),
+        )
+        self._reject_accepted(mutations)
+
+    def test_accepted_runtime_integrity_release_and_api_fail_closed(self):
+        mutations = (
+            lambda s: s["databases"]["owner"].__setitem__("fingerprint", "0" * 64),
+            lambda s: s["databases"]["evidence"].__setitem__("fingerprint", "0" * 64),
+            lambda s: s["databases"]["owner"].__setitem__("integrity", "corrupt"),
+            lambda s: s["databases"]["evidence"].__setitem__("foreignKeyViolations", 1),
+            lambda s: s["databases"]["owner"]["sidecars"]["-wal"].__setitem__("mode", 0o644),
+            lambda s: s["files"][str(gate.OWNER_DB)].__setitem__("mode", 0o644),
+            lambda s: s["accounts"]["broker"].__setitem__("uid", 998),
+            lambda s: s["broker_uid_processes"].append(12345),
+            lambda s: s["brokerProcess"].__setitem__("groups", [987, 988]),
+            lambda s: s["units"][gate.SOCKET].__setitem__("ActiveState", "inactive"),
+            lambda s: s["units"][gate.SOCKET].__setitem__("UnitFileState", "enabled"),
+            lambda s: s["ownerSocket"].__setitem__("listening", False),
+            lambda s: s["ownerSocket"].__setitem__("mode", 0o666),
+            lambda s: s["runtimeDirectory"]["children"].clear(),
+            lambda s: s["release"].__setitem__("candidateSha", "0" * 40),
+            lambda s: s["units"][gate.SERVICE].__setitem__("InvocationID", "ungoverned"),
+            lambda s: s["api"]["health"].__setitem__("status", "down"),
+            lambda s: s["files"][str(gate.API_ROOT / "current/app.py")].__setitem__(
+                "sha256", "0" * 64),
+        )
+        self._reject_accepted(mutations)
+
+    def test_accepted_pid_is_observation_not_durable_identity(self):
+        snapshot = accepted_fixture()
+        original_digest = snapshot["stage2AcceptedBaseline"]["stage2AcceptedBaselineDigest"]
+        snapshot["units"][gate.SERVICE]["MainPID"] = "96651"
+        snapshot["broker_processes"] = [96651]
+        snapshot["broker_uid_processes"] = [96651]
+        snapshot["brokerProcess"]["pid"] = 96651
+        gate.validate_accepted(snapshot)
+        self.assertEqual(gate.stage2_accepted_baseline(snapshot)["stage2AcceptedBaselineDigest"],
+                         original_digest)
+
+    def _reject_accepted(self, mutations):
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                snapshot = accepted_fixture()
+                mutation(snapshot)
+                with self.assertRaises(gate.LifecycleError):
+                    gate.validate_accepted(snapshot)
 
     def _reject_failed(self, mutations):
         for mutation in mutations:
