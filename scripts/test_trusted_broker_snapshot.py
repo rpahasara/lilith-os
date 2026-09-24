@@ -63,6 +63,89 @@ def encode_sudo(entries: list[dict]) -> str:
                                                    "accounts": entries})).decode("ascii")
 
 
+def accepted_anchor() -> dict:
+    unit = {"LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+            "NRestarts": "0", "ExecMainStartTimestamp": "Thu 2026-09-24 06:51:22 UTC",
+            "InvocationID": installer.ACCEPTED_BROKER_INVOCATION}
+    return {
+        "schema": installer.ANCHOR_SCHEMA,
+        "host": {"project/project-id": installer.DEV_PROJECT,
+                 "instance/zone": installer.DEV_ZONE,
+                 "instance/id": installer.DEV_INSTANCE_ID,
+                 "instance/name": installer.DEV_HOST,
+                 "hostname": installer.DEV_FQDN,
+                 "machineId": installer.DEV_MACHINE_ID},
+        "api": {"unit": {**unit, "MainPID": "88740"},
+                "incarnation": {"pid": 88740, "bootId": installer.ACCEPTED_BOOT_ID,
+                                "startTicks": installer.ACCEPTED_API_START_TICKS},
+                "health": {"status": "ok", "database": True}},
+        "broker": {"unit": {**unit, "MainPID": "96650"},
+                   "incarnation": {"pid": 96650, "bootId": installer.ACCEPTED_BOOT_ID,
+                                   "startTicks": installer.ACCEPTED_BROKER_START_TICKS},
+                   "socketUnit": {"LoadState": "loaded", "ActiveState": "active",
+                                  "SubState": "running", "UnitFileState": "disabled"},
+                   "releaseTarget": "releases/" + installer.ACCEPTED_BROKER_RELEASE,
+                   "ownerSocket": {"uid": 999, "gid": 988, "mode": 0o660,
+                                   "listening": True}},
+        "files": {path: {"sha256": sha, "uid": installer.ANCHOR_FILE_CUSTODY[path][0],
+                         "gid": installer.ANCHOR_FILE_CUSTODY[path][1],
+                         "mode": installer.ANCHOR_FILE_CUSTODY[path][2]}
+                  for path, sha in installer.ANCHOR_FILE_SHA.items()},
+        "counts": {"owner": {"owner_proof_challenge_v1": 24,
+                             "owner_request_v1": 24, "synthetic_claim_v1": 2},
+                   "evidence": {"synthetic_evidence_v1": 2}},
+    }
+
+
+def accepted_snapshot(release_id: str, *, variant: str = "first") -> dict:
+    snapshot = {"profile": "POST_STAGE_II_ACCEPTED_V1",
+                "stage2AcceptedBaseline": {"stage2AcceptedBaselineDigest": installer.BASELINE},
+                "fixture": variant}
+    digest = hashlib.sha256(tool.canonical(snapshot)).hexdigest()
+    return {"schema": tool.SCHEMA, "operation": tool.OPERATION, "profile": tool.PROFILE,
+            "toolReleaseId": release_id, "manifestSha256": release_id,
+            "acceptedBaselineDigest": installer.BASELINE, "completeDigestSha256": digest,
+            "validation": "PASS", "snapshot": snapshot}
+
+
+def installer_fixture(root: Path) -> tuple[Path, Path, str]:
+    control = root / "broker-snapshot"
+    incoming = control / "incoming"
+    incoming.mkdir(parents=True)
+    for path in (root, control, incoming):
+        path.chmod(0o755)
+    releases = control / "releases"
+    old = releases / installer.KNOWN_OLD_UNACCEPTED
+    old.mkdir(parents=True)
+    releases.chmod(0o755)
+    old.chmod(0o755)
+    (control / "current").symlink_to("releases/" + installer.KNOWN_OLD_UNACCEPTED)
+    source = root / "source"
+    source.mkdir()
+    subprocess.run(("git", "init", "-q", str(source)), check=True)
+    subprocess.run(("git", "-C", str(source), "config", "user.email", "test@example.invalid"), check=True)
+    subprocess.run(("git", "-C", str(source), "config", "user.name", "Test"), check=True)
+    for name in release.SOURCE_MAP:
+        target = source / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / name).read_bytes())
+    subprocess.run(("git", "-C", str(source), "add", "scripts"), check=True)
+    subprocess.run(("git", "-C", str(source), "commit", "-qm", "fixture"), check=True)
+    commit = subprocess.check_output(("git", "-C", str(source), "rev-parse", "HEAD"), text=True).strip()
+    payloads = sources()
+    release_id = release.digest(release.canonical(release.make_manifest(payloads)))
+    staged = incoming / release_id
+    staged.mkdir()
+    staged.chmod(0o700)
+    for name in installer.INCOMING_FILES - {"snapshot-release.tar.gz", "snapshot-release.attestation.json"}:
+        (staged / name).write_bytes((ROOT / "scripts" / name).read_bytes())
+    release.build(source, commit, staged / "snapshot-release.tar.gz",
+                  staged / "snapshot-release.attestation.json")
+    for path in staged.iterdir():
+        path.chmod(0o600)
+    return control, old, release_id
+
+
 class SnapshotFoundationTests(unittest.TestCase):
     def test_cli_operation_is_closed(self):
         with patch.object(sys, "argv", ["snapshot", "anything"]):
@@ -270,50 +353,127 @@ class SnapshotFoundationTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
     def test_installer_only_known_old_unaccepted_transition(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            control = root / "broker-snapshot"
-            incoming = control / "incoming"
-            incoming.mkdir(parents=True)
-            for path in (root, control, incoming):
-                path.chmod(0o755)
-            releases = control / "releases"
-            old = releases / installer.KNOWN_OLD_UNACCEPTED
-            old.mkdir(parents=True)
-            releases.chmod(0o755)
-            old.chmod(0o755)
-            (control / "current").symlink_to("releases/" + installer.KNOWN_OLD_UNACCEPTED)
-            source = root / "source"
-            source.mkdir()
-            subprocess.run(("git", "init", "-q", str(source)), check=True)
-            subprocess.run(("git", "-C", str(source), "config", "user.email", "test@example.invalid"), check=True)
-            subprocess.run(("git", "-C", str(source), "config", "user.name", "Test"), check=True)
-            for name in release.SOURCE_MAP:
-                target = source / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes((ROOT / name).read_bytes())
-            subprocess.run(("git", "-C", str(source), "add", "scripts"), check=True)
-            subprocess.run(("git", "-C", str(source), "commit", "-qm", "fixture"), check=True)
-            commit = subprocess.check_output(("git", "-C", str(source), "rev-parse", "HEAD"), text=True).strip()
-            payloads = sources()
-            release_id = release.digest(release.canonical(release.make_manifest(payloads)))
-            staged = incoming / release_id
-            staged.mkdir()
-            staged.chmod(0o700)
-            for name in installer.INCOMING_FILES - {"snapshot-release.tar.gz", "snapshot-release.attestation.json"}:
-                (staged / name).write_bytes((ROOT / "scripts" / name).read_bytes())
-            release.build(source, commit, staged / "snapshot-release.tar.gz",
-                          staged / "snapshot-release.attestation.json")
-            for path in staged.iterdir():
-                path.chmod(0o600)
+            control, old, release_id = installer_fixture(Path(temp))
+            calls = []
+            def check(*, direct):
+                target = os.readlink(control / "current")
+                calls.append((direct, target))
+                if direct:
+                    installer._installed_bytes(control / "releases" / release_id,
+                                               release_id, sources(), root_custody=False)
+                return accepted_snapshot(release_id)
             with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
-                result = installer.install(control, release_id, root_custody=False,
-                                           self_test=lambda: {"acceptedBaselineDigest": installer.BASELINE})
+                result = installer.install(control, release_id, root_custody=False, self_test=check)
                 self.assertEqual(result["releaseId"], release_id)
+                self.assertEqual(result["result"], "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED")
+                self.assertEqual(result["selfTestCompleteSnapshotDigest"],
+                                 result["secondCompleteSnapshotDigest"])
+                self.assertEqual(calls, [
+                    (True, "releases/" + installer.KNOWN_OLD_UNACCEPTED),
+                    (False, "releases/" + release_id)])
                 self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
                 self.assertTrue(old.is_dir())
                 with self.assertRaisesRegex(installer.InstallError, "INSTALL_EXISTING"):
-                    installer.install(control, release_id, root_custody=False,
-                                      self_test=lambda: {"acceptedBaselineDigest": installer.BASELINE})
+                    installer.install(control, release_id, root_custody=False, self_test=check)
+
+    @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
+    def test_failed_first_self_test_leaves_old_selected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            control, old, release_id = installer_fixture(Path(temp))
+            calls = []
+            def fail(*, direct):
+                calls.append(direct)
+                raise installer.InstallError("SNAPSHOT_SELF_TEST_FAILED", {"stderrExcerpt": "fixture"})
+            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
+                with self.assertRaisesRegex(installer.InstallError,
+                                            "NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED") as caught:
+                    installer.install(control, release_id, root_custody=False, self_test=fail)
+            self.assertEqual(calls, [True])
+            self.assertEqual(caught.exception.diagnostics["diagnostics"]["stderrExcerpt"], "fixture")
+            self.assertEqual(os.readlink(control / "current"),
+                             "releases/" + installer.KNOWN_OLD_UNACCEPTED)
+            self.assertTrue(old.is_dir())
+            self.assertTrue((control / "releases" / release_id).is_dir())
+
+    @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
+    def test_installed_byte_failure_precedes_self_test_and_switch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            control, old, release_id = installer_fixture(Path(temp))
+            def forbidden(*, direct):
+                self.fail("self-test ran before installed-byte verification")
+            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id), \
+                 patch.object(installer, "_installed_bytes",
+                              side_effect=installer.InstallError("INSTALLED_PAYLOAD_MISMATCH")):
+                with self.assertRaisesRegex(installer.InstallError, "INSTALLED_PAYLOAD_MISMATCH"):
+                    installer.install(control, release_id, root_custody=False, self_test=forbidden)
+            self.assertEqual(os.readlink(control / "current"),
+                             "releases/" + installer.KNOWN_OLD_UNACCEPTED)
+            self.assertTrue(old.is_dir())
+            self.assertTrue((control / "releases" / release_id).is_dir())
+
+    @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
+    def test_digest_mismatch_is_selected_but_unaccepted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            control, old, release_id = installer_fixture(Path(temp))
+            calls = []
+            def check(*, direct):
+                calls.append(direct)
+                return accepted_snapshot(release_id, variant="first" if direct else "second")
+            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
+                with self.assertRaisesRegex(installer.InstallError,
+                                            "SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH") as caught:
+                    installer.install(control, release_id, root_custody=False, self_test=check)
+            self.assertEqual(calls, [True, False])
+            self.assertNotEqual(caught.exception.diagnostics["firstCompleteSnapshotDigest"],
+                                caught.exception.diagnostics["secondCompleteSnapshotDigest"])
+            self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
+            self.assertTrue(old.is_dir())
+
+    def test_stage2_install_anchor_accepts_only_exact_pins(self):
+        value = accepted_anchor()
+        installer.validate_install_anchor(value)
+        mutations = [
+            ("API incarnation", lambda v: v["api"]["incarnation"].__setitem__("startTicks", 1)),
+            ("API restart", lambda v: v["api"]["unit"].__setitem__("NRestarts", "1")),
+            ("broker incarnation", lambda v: v["broker"]["incarnation"].__setitem__("bootId", "wrong")),
+            ("broker release", lambda v: v["broker"].__setitem__("releaseTarget", "releases/wrong")),
+            ("owner DB", lambda v: v["files"][str(installer.OWNER_DB)].__setitem__("sha256", "0" * 64)),
+            ("evidence DB", lambda v: v["files"][str(installer.EVIDENCE_DB)].__setitem__("sha256", "0" * 64)),
+            ("counts", lambda v: v["counts"]["owner"].__setitem__("owner_request_v1", 23)),
+            ("DEV identity", lambda v: v["host"].__setitem__("instance/id", "wrong")),
+            ("PROD", lambda v: v["host"].__setitem__("instance/name", "lilith-01")),
+        ]
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                changed = copy.deepcopy(value)
+                mutate(changed)
+                with self.assertRaises(installer.InstallError):
+                    installer.validate_install_anchor(changed)
+
+    def test_direct_command_fixed_release_and_snapshot_result_contract(self):
+        command = installer.direct_command("YWJj")
+        self.assertEqual(command[-5:], ("/usr/bin/python3", "-I", "-B", "-c",
+                                        installer.DIRECT_LOADER))
+        self.assertIn(installer.APPROVED_REPAIRED_RELEASE, command[-1])
+        self.assertNotIn("--release-path", command)
+        value = accepted_snapshot(installer.APPROVED_REPAIRED_RELEASE)
+        framed = tool.frame(value)
+        proof = b"LILITH_CONFINEMENT_EVIDENCE_V1:READ_PASS_WRITE_DENIED\n"
+        result = SimpleNamespace(returncode=0, stdout=proof + framed, stderr=b"")
+        self.assertEqual(installer._snapshot_result(result, direct=True)["completeDigestSha256"],
+                         value["completeDigestSha256"])
+        with self.assertRaisesRegex(installer.InstallError, "SNAPSHOT_CONFINEMENT_EVIDENCE"):
+            installer._snapshot_result(SimpleNamespace(returncode=0, stdout=framed, stderr=b""),
+                                       direct=True)
+        with self.assertRaisesRegex(installer.InstallError, "SNAPSHOT_SELF_TEST_FAILED") as caught:
+            installer._snapshot_result(SimpleNamespace(returncode=1, stdout=b"bad", stderr=b"failure"),
+                                       direct=True)
+        self.assertEqual(caught.exception.diagnostics["stderrExcerpt"], "failure")
+        overlong = SimpleNamespace(returncode=1, stdout=b"x" * 1000, stderr=b"y" * 5000)
+        with self.assertRaisesRegex(installer.InstallError, "SNAPSHOT_SELF_TEST_BOUNDS") as caught:
+            installer._snapshot_result(overlong, direct=True)
+        self.assertLessEqual(len(caught.exception.diagnostics["stdoutExcerpt"]), 768)
+        self.assertLessEqual(len(caught.exception.diagnostics["stderrExcerpt"]), 768)
 
 
 if __name__ == "__main__":
