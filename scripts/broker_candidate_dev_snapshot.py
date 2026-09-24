@@ -14,7 +14,6 @@ import json
 import re
 import shlex
 import subprocess
-import tempfile
 from pathlib import Path
 
 
@@ -33,19 +32,29 @@ STAGING_PATTERN = re.compile(
 RUN_ID = re.compile(r"[1-9][0-9]{0,19}\Z")
 RUN_ATTEMPT = re.compile(r"[1-9][0-9]{0,7}\Z")
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+MAX_SOURCE_BYTES = 512 * 1024
+SOURCE_SHA = re.compile(r"[0-9a-f]{64}\Z")
+SNAPSHOT_FRAME = b"LILITH_TRUSTED_SNAPSHOT_V1:"
 
 # Executed only by protected-main code as the GitHub OS Login account. No
 # candidate source, workflow input, or remote stdout chooses a path.
 _REMOTE_SOURCE = r'''
 import os
+import base64
+import hashlib
 import re
 import stat
 import subprocess
 import sys
 
-path, action = sys.argv[1:]
+path, action, size_text, expected_sha = sys.argv[1:]
 if not re.fullmatch(__STAGING_REGEX__, path) or os.path.dirname(path) != "/tmp":
     raise SystemExit("REMOTE_STAGING_PATH")
+if not re.fullmatch(r"[1-9][0-9]{0,6}", size_text) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+    raise SystemExit("REMOTE_SOURCE_IDENTITY")
+source_size = int(size_text)
+if source_size > 524288:
+    raise SystemExit("REMOTE_SOURCE_SIZE")
 parent = os.lstat("/tmp")
 if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_gid != 0 or stat.S_IMODE(parent.st_mode) != 0o1777:
     raise SystemExit("REMOTE_STAGING_PARENT")
@@ -71,24 +80,88 @@ elif action == "snapshot":
     directory()
     if sorted(os.listdir(path)) != ["lifecycle.py"]:
         raise SystemExit("REMOTE_STAGING_CONTENTS")
-    file_info("lifecycle.py", {0o600, 0o644})
     source = os.path.join(path, "lifecycle.py")
-    os.chmod(source, 0o600)
     file_info("lifecycle.py", {0o600})
+    source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(source_fd, "rb") as trusted:
+        trusted_info = os.fstat(trusted.fileno())
+        if not stat.S_ISREG(trusted_info.st_mode) or trusted_info.st_uid != os.geteuid() or trusted_info.st_gid != os.getegid() or stat.S_IMODE(trusted_info.st_mode) != 0o600 or trusted_info.st_nlink != 1:
+            raise SystemExit("REMOTE_SOURCE_CUSTODY")
+        content = trusted.read(source_size + 1)
+    if len(content) != source_size or hashlib.sha256(content).hexdigest() != expected_sha:
+        raise SystemExit("REMOTE_SOURCE_IDENTITY")
     output = os.path.join(path, "snapshot.json")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
     fd = os.open(output, flags, 0o600)
     with os.fdopen(fd, "wb") as target:
         subprocess.run(["sudo", "-n", "/usr/bin/python3", "-B", source, "snapshot"],
                        stdout=target, check=True, timeout=90)
+        target.flush()
+        os.fsync(target.fileno())
     file_info("snapshot.json", {0o600})
+elif action == "upload":
+    directory()
+    if os.listdir(path):
+        raise SystemExit("REMOTE_STAGING_CONTENTS")
+    part = os.path.join(path, "lifecycle.py.part")
+    final = os.path.join(path, "lifecycle.py")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(part, flags, 0o600)
+    count = 0
+    digest = hashlib.sha256()
+    with os.fdopen(fd, "wb") as target:
+        while True:
+            chunk = sys.stdin.buffer.read(min(65536, source_size + 1 - count))
+            if not chunk:
+                break
+            count += len(chunk)
+            if count > source_size:
+                raise SystemExit("REMOTE_SOURCE_SIZE_MISMATCH")
+            target.write(chunk)
+            digest.update(chunk)
+        target.flush()
+        os.fsync(target.fileno())
+    info = file_info("lifecycle.py.part", {0o600})
+    if count != source_size or info.st_size != source_size:
+        raise SystemExit("REMOTE_SOURCE_SIZE_MISMATCH")
+    if digest.hexdigest() != expected_sha:
+        raise SystemExit("REMOTE_SOURCE_HASH_MISMATCH")
+    if os.path.lexists(final):
+        raise SystemExit("REMOTE_FINAL_EXISTS")
+    os.rename(part, final)
+    file_info("lifecycle.py", {0o600})
+    directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+elif action == "read":
+    directory()
+    if sorted(os.listdir(path)) != ["lifecycle.py", "snapshot.json"]:
+        raise SystemExit("REMOTE_STAGING_CONTENTS")
+    file_info("lifecycle.py", {0o600})
+    info = file_info("snapshot.json", {0o600})
+    if not 0 < info.st_size <= 2097152:
+        raise SystemExit("REMOTE_SNAPSHOT_SIZE")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(os.path.join(path, "snapshot.json"), flags)
+    with os.fdopen(fd, "rb") as source:
+        opened = os.fstat(source.fileno())
+        if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.geteuid() or opened.st_gid != os.getegid() or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1:
+            raise SystemExit("REMOTE_SNAPSHOT_CUSTODY")
+        data = source.read(2097153)
+    if len(data) != info.st_size:
+        raise SystemExit("REMOTE_SNAPSHOT_SIZE")
+    frame = "LILITH_TRUSTED_SNAPSHOT_V1:{}:{}:{}".format(
+        len(data), hashlib.sha256(data).hexdigest(), base64.b64encode(data).decode("ascii"))
+    print(frame)
 elif action == "cleanup":
     directory()
     names = os.listdir(path)
-    if not set(names) <= {"lifecycle.py", "snapshot.json"}:
+    if not set(names) <= {"lifecycle.py.part", "lifecycle.py", "snapshot.json"}:
         raise SystemExit("REMOTE_STAGING_UNEXPECTED_CONTENTS")
     for name in names:
-        file_info(name, {0o600, 0o644} if name == "lifecycle.py" else {0o600})
+        file_info(name, {0o600})
     for name in names:
         os.unlink(os.path.join(path, name))
     os.rmdir(path)
@@ -124,16 +197,56 @@ def validate_staging_path(path: str) -> str:
     return path
 
 
-def remote_action(path: str, action: str) -> None:
+def remote_action(path: str, action: str, source_size: int, source_sha: str,
+                  *, source_bytes: bytes = b"") -> bytes:
     path = validate_staging_path(path)
-    if action not in {"create", "snapshot", "cleanup"}:
+    if action not in {"create", "upload", "snapshot", "read", "cleanup"}:
         raise SnapshotError("REMOTE_STAGING_ACTION")
+    if (not isinstance(source_size, int) or not 0 < source_size <= MAX_SOURCE_BYTES or
+            not isinstance(source_sha, str) or not SOURCE_SHA.fullmatch(source_sha) or
+            (action == "upload" and
+             (len(source_bytes) != source_size or hashlib.sha256(source_bytes).hexdigest() != source_sha)) or
+            (action != "upload" and source_bytes)):
+        raise SnapshotError("TRUSTED_SOURCE_IDENTITY")
     encoded = base64.b64encode(_REMOTE_SOURCE.encode("utf-8")).decode("ascii")
     remote_command = (
         "/usr/bin/python3 -B -c 'import base64;exec(base64.b64decode(\""
-        + encoded + "\"))' " + shlex.quote(path) + " " + action
+        + encoded + "\"))' " + shlex.quote(path) + " " + action +
+        " " + str(source_size) + " " + source_sha
     )
-    gcloud("ssh", INSTANCE, "--tunnel-through-iap", f"--command={remote_command}")
+    args = ("gcloud", "compute", "ssh", INSTANCE, "--tunnel-through-iap", "--ssh-flag=-T",
+            f"--command={remote_command}", "--quiet", f"--project={PROJECT}", f"--zone={ZONE}")
+    try:
+        result = subprocess.run(args, input=source_bytes, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        raise SnapshotError(f"TRUSTED_SSH_TIMEOUT action={action} path={path}") from exc
+    if result.returncode != 0:
+        reason = re.search(rb"\bREMOTE_[A-Z0-9_]+\b", result.stderr[:8192])
+        label = reason.group().decode("ascii") if reason else "TRANSPORT_OR_PROCESS"
+        raise SnapshotError(f"TRUSTED_SSH_EXIT action={action} code={result.returncode} reason={label} path={path}")
+    if len(result.stdout) > MAX_SNAPSHOT_BYTES * 2:
+        raise SnapshotError(f"TRUSTED_SSH_OUTPUT_SIZE action={action}")
+    return result.stdout
+
+
+def decode_snapshot_frame(raw: bytes) -> dict:
+    lines = [line for line in raw.splitlines() if line.startswith(SNAPSHOT_FRAME)]
+    if len(lines) != 1:
+        raise SnapshotError("SNAPSHOT_FRAME_COUNT")
+    try:
+        size_text, digest, encoded = lines[0][len(SNAPSHOT_FRAME):].split(b":", 2)
+        if not re.fullmatch(rb"[1-9][0-9]{0,6}", size_text) or not re.fullmatch(rb"[0-9a-f]{64}", digest):
+            raise ValueError("invalid frame identity")
+        size = int(size_text)
+        if size > MAX_SNAPSHOT_BYTES:
+            raise ValueError("oversized frame")
+        data = base64.b64decode(encoded, validate=True)
+        if len(data) != size or hashlib.sha256(data).hexdigest().encode() != digest:
+            raise ValueError("frame digest mismatch")
+        return json.loads(data)
+    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise SnapshotError("SNAPSHOT_FRAME_INVALID") from exc
 
 
 def capture(run_id: str, run_attempt: str, phase: str) -> dict:
@@ -146,24 +259,24 @@ def capture(run_id: str, run_attempt: str, phase: str) -> dict:
     lifecycle = Path(__file__).with_name("verify_broker_dev_lifecycle.py")
     if not lifecycle.is_file() or lifecycle.is_symlink():
         raise SnapshotError("TRUSTED_LIFECYCLE_SOURCE")
+    source_bytes = lifecycle.read_bytes()
+    if not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
+        raise SnapshotError("TRUSTED_SOURCE_SIZE")
+    source_sha = hashlib.sha256(source_bytes).hexdigest()
+    source_size = len(source_bytes)
     try:
-        remote_action(directory, "create")
+        remote_action(directory, "create", source_size, source_sha)
     except Exception as exc:
         # Creation may have occurred before transport failure. Do not delete a
         # possibly pre-existing path; report exact run-bound residue for audit.
         raise SnapshotError(f"REMOTE_STAGING_CREATE_UNCERTAIN path={directory}") from exc
     try:
-        gcloud("scp", "--tunnel-through-iap", str(lifecycle), f"{INSTANCE}:{directory}/lifecycle.py")
-        remote_action(directory, "snapshot")
-        with tempfile.TemporaryDirectory(prefix="lilith-broker-accepted-snapshot-") as temporary:
-            local = Path(temporary) / "snapshot.json"
-            gcloud("scp", "--tunnel-through-iap", f"{INSTANCE}:{directory}/snapshot.json", str(local))
-            if local.is_symlink() or not local.is_file() or not 0 < local.stat().st_size <= MAX_SNAPSHOT_BYTES:
-                raise SnapshotError("SNAPSHOT_FILE_INVALID")
-            snapshot = json.loads(local.read_text(encoding="utf-8"))
+        remote_action(directory, "upload", source_size, source_sha, source_bytes=source_bytes)
+        remote_action(directory, "snapshot", source_size, source_sha)
+        snapshot = decode_snapshot_frame(remote_action(directory, "read", source_size, source_sha))
     finally:
         try:
-            remote_action(directory, "cleanup")
+            remote_action(directory, "cleanup", source_size, source_sha)
         except Exception as exc:
             raise SnapshotError(f"REMOTE_STAGING_CLEANUP_FAILED path={directory}") from exc
     return snapshot
