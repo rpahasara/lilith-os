@@ -432,7 +432,9 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
-          python scripts/broker_candidate_dev_snapshot.py > "${RUNNER_TEMP}/broker-preflight.json"
+          python scripts/broker_candidate_dev_snapshot.py \
+            --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}' \
+            --phase preflight > "${RUNNER_TEMP}/broker-preflight.json"
           python - <<'PY'
           import json, os
           from pathlib import Path
@@ -561,6 +563,8 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
           python scripts/broker_candidate_dev_snapshot.py \
+            --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}' \
+            --phase postflight \
             --expected-snapshot-sha '${{ needs.broker_preflight.outputs.snapshot_sha }}' \
             >> "${GITHUB_STEP_SUMMARY}"
       - name: Audit pinned production darkness without mutation
