@@ -2,6 +2,19 @@
 
 Status: governance control, not Stage-III authorization. This change does not implement the A2 fault seam or install a broker candidate.
 
+**Transport retirement decision (subsequent design):** the broker-only lane
+will no longer transfer executable trusted lifecycle source to DEV on each PR.
+The required property is execution of the exact approved trusted snapshot
+implementation, not successful per-PR transport of that implementation.
+Hosted-Linux SCP/SFTP, SSH stdin, and packed SSH command-channel publication
+did not establish a reliable path; their exact Linux cause remains unproven.
+The transport descriptions below are historical, not active alternatives or
+fallback authorization. The proposed persistent root-controlled DEV snapshot
+tool and its separate governance transition are specified in
+`slice15b2b-trusted-dev-snapshot-tool.md`. Until that transition is approved,
+installed, and workflow-validated, PR #38 remains open and the current gate
+must fail closed; this record does not activate a new path.
+
 ## Change scope determines validation scope
 
 The protected-main `scripts/classify_dev_deployment.py` classifies the complete effective base-to-candidate diff. It accepts ordinary added/modified files only; deletion, rename, symlink, submodule, unknown path, or mixed classes select `DEPLOY_REQUIRED`. The existing exact Stage-II control set remains `CONTROL_ONLY_NO_DEPLOY` and retains its pinned installer blob and CI-step checks. A closed broker-owned set selects `BROKER_CANDIDATE_VALIDATE_ONLY`: the nine broker package files named by `BROKER_CANDIDATE_PATHS`, four dedicated broker tests, the owner-request golden fixture, and one future A2 architecture record. No directory wildcard is used. Core API files, the shared owner-proof verifier and other shared dependencies, deployment/build/installer/control scripts, workflows, units, dependency declarations, and unknown paths are excluded. A broker-plus-any-excluded-path diff therefore takes the full route. Neither candidate metadata nor an input or environment variable can choose a narrower mode. A change to this classifier or workflow cannot classify itself under the new lane.
