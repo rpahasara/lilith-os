@@ -48,6 +48,7 @@ RUN = Path("/run/lilith-memory")
 MARKER = CONFIG / "b1b2b-stage2-authorization.json"
 HISTORICAL_USED = CONFIG / "b1b2b-stage2-authorization.used.json"
 USED = CONFIG / "b1b2b-stage2-retry2-authorization.used.json"
+USED_PENDING = CONFIG / "b1b2b-stage2-retry2-authorization.used.pending.json"
 FAILED_PROFILE = "POST_STAGE_II_FAILED_INERT_V1"
 HISTORICAL_DIGEST = "8068e066743d70252a6fd0f0e6fdbab12c1be2c9ac00e152c4746ee810fcfe83"
 HISTORICAL_AUTHORIZATION = "4006ead71ca04c219b3b41e6818010f2"
@@ -607,6 +608,105 @@ def verify_marker(*, now: datetime | None = None) -> dict:
     return value
 
 
+USED_RECORD_FIELDS = frozenset({
+    "schemaVersion", "recordType", "sourceMarkerSchemaVersion", "sourceMarkerSha256",
+    "authorizationId", "ownerActor", "stage", "purpose", "project", "instanceId",
+    "releaseSha", "apiBaselineDigest", "retryBaselineDigest", "issuedAt", "expiresAt",
+    "consumedAt",
+})
+
+
+def used_record_value(marker: dict, consumed_at: datetime, source_sha: str) -> dict:
+    """Versioned record for retry #2 only; attempt #1's used marker is untouched."""
+    return {
+        "schemaVersion": 2, "recordType": "Stage2UsedAuthorizationV2",
+        "sourceMarkerSchemaVersion": marker["schemaVersion"],
+        "sourceMarkerSha256": source_sha,
+        "authorizationId": marker["authorizationId"],
+        "ownerActor": marker["ownerActor"], "stage": marker["stage"],
+        "purpose": marker["purpose"], "project": marker["project"],
+        "instanceId": marker["instanceId"], "releaseSha": marker["releaseSha"],
+        "apiBaselineDigest": marker["apiBaselineDigest"],
+        "retryBaselineDigest": marker["retryBaselineDigest"],
+        "issuedAt": marker["issuedAt"], "expiresAt": marker["expiresAt"],
+        "consumedAt": consumed_at.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+    }
+
+
+def validate_used_record(value: dict, marker: dict, source_sha: str,
+                         *, now: datetime | None = None) -> None:
+    try:
+        require(isinstance(value, dict) and set(value) == USED_RECORD_FIELDS,
+                "USED_RECORD_MALFORMED")
+        issued = datetime.fromisoformat(value["issuedAt"].replace("Z", "+00:00"))
+        consumed = datetime.fromisoformat(value["consumedAt"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise Stage2Error("USED_RECORD_MALFORMED") from exc
+    require(value.get("schemaVersion") == 2 and
+            value.get("recordType") == "Stage2UsedAuthorizationV2" and
+            value.get("sourceMarkerSchemaVersion") == 3 and
+            value == used_record_value(marker, consumed, source_sha),
+            "USED_RECORD_MALFORMED")
+    moment = now or datetime.now(timezone.utc)
+    require(all(item.tzinfo is not None and item.utcoffset() == timedelta(0)
+                for item in (issued, consumed, expires, moment)) and
+            issued <= consumed <= expires and consumed <= moment and
+            value["consumedAt"].endswith("Z") and
+            value["authorizationId"] != HISTORICAL_AUTHORIZATION,
+            "USED_RECORD_TIME_OR_ID_INVALID")
+
+
+def fsync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def consume_authorization(marker: dict) -> dict:
+    """Terminal claim first, then durable timestamp publication before mutation.
+
+    A crash after the hard-link claim leaves USED present and prevents marker
+    reuse, even if the versioned record could not yet be published. No runtime
+    mutation may follow until the complete used record is durably verified.
+    """
+    require(not USED.exists() and not USED.is_symlink() and
+            not USED_PENDING.exists() and not USED_PENDING.is_symlink(),
+            "USED_RECORD_COLLISION")
+    expected_marker = json.dumps(marker, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    require(MARKER.read_bytes() == expected_marker, "MARKER_CHANGED_BEFORE_CONSUME")
+    source_sha = digest(MARKER)
+    os.link(MARKER, USED, follow_symlinks=False)  # O_EXCL-like claim; never overwrite USED.
+    consumed_at = datetime.now(timezone.utc)  # Immediate observation of the claim event.
+    fsync_directory(CONFIG)
+    require(digest(USED) == source_sha, "USED_SOURCE_MARKER_CHANGED")
+    value = used_record_value(marker, consumed_at, source_sha)
+    validate_used_record(value, marker, source_sha, now=consumed_at)
+    MARKER.unlink()
+    fsync_directory(CONFIG)
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    fd = os.open(USED_PENDING, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    info = USED_PENDING.lstat()
+    require(stat.S_ISREG(info.st_mode) and
+            (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, 0, 0o600),
+            "USED_RECORD_PERMISSION_DRIFT")
+    os.replace(USED_PENDING, USED)
+    fsync_directory(CONFIG)
+    final = USED.lstat()
+    require(stat.S_ISREG(final.st_mode) and
+            (final.st_uid, final.st_gid, stat.S_IMODE(final.st_mode)) == (0, 0, 0o600) and
+            not MARKER.exists() and not MARKER.is_symlink() and
+            USED.read_bytes() == payload, "USED_RECORD_NOT_DURABLE")
+    validate_used_record(json.loads(payload), marker, source_sha)
+    return value
+
+
 # This source runs only under a dedicated transient systemd service whose
 # relevant hardening properties are compared with the actual broker unit.
 # It never imports broker code and never writes to a prohibited path.
@@ -753,6 +853,41 @@ def assert_unit_state(*, socket_active: bool, service_active: bool) -> tuple[dic
     require((int(s["MainPID"]) > 0) == service_active, "BROKER_PID_STATE_DRIFT")
     require(s["UnitFileState"] != "enabled", "BOOT_ENABLE_FORBIDDEN")
     return s, k
+
+
+SERVICE_HISTORY_FIELDS = ("InvocationID", "ExecMainStartTimestamp", "NRestarts",
+                          "ActiveEnterTimestampMonotonic")
+
+
+def capture_service_activation_history() -> dict[str, str]:
+    observed = show(SERVICE, *SERVICE_HISTORY_FIELDS)
+    require(set(observed) == set(SERVICE_HISTORY_FIELDS),
+            "BROKER_ACTIVATION_HISTORY_UNOBSERVABLE")
+    return observed
+
+
+def assert_pre_health_boundary(peer: str, expected_socket: dict,
+                               expected_service_history: dict,
+                               retry_baseline: dict) -> dict:
+    """After *each* negative connection, prove no activation or state write."""
+    service, sock = assert_unit_state(socket_active=True, service_active=False)
+    require(service["ActiveState"] == "inactive" and
+            service["SubState"] == "dead" and service["MainPID"] == "0" and
+            service["UnitFileState"] == "static" and
+            sock["ActiveState"] == "active" and sock["SubState"] == "listening" and
+            inspect_socket() == expected_socket,
+            "NEGATIVE_PROBE_ACTIVATED_BROKER")
+    require(capture_service_activation_history() == expected_service_history,
+            "NEGATIVE_PROBE_TRANSIENT_ACTIVATION")
+    require(subprocess.run(["/usr/bin/pgrep", "-u", "999"],
+                           capture_output=True, timeout=5).returncode == 1,
+            "NEGATIVE_PROBE_BROKER_UID_PROCESS")
+    current, _ = snapshot_retry_rows()
+    require(current == {key: retry_baseline[key] for key in current},
+            "NEGATIVE_PROBE_DATABASE_MUTATION")
+    return {"peer": peer, "brokerInactive": True, "brokerUidProcessAbsent": True,
+            "socketUnchanged": True, "activationHistoryUnchanged": True,
+            "retryDatabaseDelta": 0}
 
 
 def inspect_process(pid: int) -> dict:
@@ -1227,21 +1362,31 @@ def execute() -> dict:
     require_api_baseline_unchanged(marker["apiRuntimeBaseline"])
     require(baseline_digest(capture_retry_baseline()) ==
             marker["retryBaselineDigest"], "RETRY_BASELINE_CHANGED")
-    os.replace(MARKER, USED)  # One-time claim before daemon-reload.
+    used_record = consume_authorization(marker)  # Durable terminal claim before mutation.
     try:
         run_fixed("/usr/bin/systemctl", "daemon-reload")
+        require_api_baseline_unchanged(marker["apiRuntimeBaseline"])
         effective = assert_broker_hardening()
         run_fixed("/usr/bin/systemd-tmpfiles", "--create",
                   "--prefix=/run/lilith-memory")
         runtime_dir = inspect_run_directory()
+        activation_history = capture_service_activation_history()
         run_fixed("/usr/bin/systemctl", "start", SOCKET)
         sock = inspect_socket()
         assert_unit_state(socket_active=True, service_active=False)
-        # Filesystem/socket denial must be observed before any relay HEALTH.
-        first_layer = {user: negative_peer(user) for user in ("lilith", "nobody")}
-        require(all(value["layer"] == "filesystem_or_socket"
-                    for value in first_layer.values()), "NEGATIVE_FIRST_LAYER_FAILED")
-        assert_unit_state(socket_active=True, service_active=False)
+        require(capture_service_activation_history() == activation_history,
+                "SOCKET_START_ACTIVATED_BROKER")
+        # Each negative is followed immediately by an independent inert-state
+        # observation, even when the negative client itself raises.
+        first_layer = {}
+        for user in ("lilith", "nobody"):
+            try:
+                value = negative_peer(user)
+            finally:
+                boundary = assert_pre_health_boundary(
+                    user, sock, activation_history, marker["retryBaseline"])
+            require(value["layer"] == "filesystem_or_socket", "NEGATIVE_FIRST_LAYER_FAILED")
+            first_layer[user] = {**value, "inertBoundary": boundary}
         require(relay("health")["status"] == "HEALTH_OK", "RELAY_HEALTH_FAILED")
         service, _ = assert_unit_state(socket_active=True, service_active=True)
         process = inspect_process(int(service["MainPID"]))
@@ -1261,7 +1406,8 @@ def execute() -> dict:
                 "negativePeers": negative, "equivalentSandboxProbe": probe,
                 "relayRestrictions": relay_limits, "syntheticFunction": functional,
                 "apiUnchanged": True, "bootEnabled": False,
-                "retryBaselineDigest": marker["retryBaselineDigest"]}
+                "retryBaselineDigest": marker["retryBaselineDigest"],
+                "usedAuthorization": used_record}
     except Exception:
         # Preserve DBs, release, config, marker record, and journal for review.
         for unit in (SERVICE, SOCKET):

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 import copy
 import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -367,37 +369,68 @@ class Stage2ControlContracts(unittest.TestCase):
                      "retryBaseline": retry,
                      "retryBaselineDigest": stage2.baseline_digest(retry)}
         operations = []
-        with patch.object(stage2, "verify_marker", return_value=marker), \
-             patch.object(stage2, "preflight", return_value=preflight), \
-             patch.object(stage2, "assert_host"), \
-             patch.object(stage2, "capture_retry_baseline", return_value=retry), \
-             patch.object(stage2.os, "replace", side_effect=lambda *_: operations.append("consume")), \
-             patch.object(stage2, "run_fixed", side_effect=lambda *_: operations.append("mutation")), \
-             patch.object(stage2, "assert_broker_hardening", return_value={}), \
-             patch.object(stage2, "inspect_run_directory", return_value={}), \
-             patch.object(stage2, "inspect_socket", return_value={}), \
-             patch.object(stage2, "assert_unit_state", return_value=({"MainPID": "111"}, {})), \
-             patch.object(stage2, "relay", side_effect=lambda *_: operations.append("health") or
-                          {"status": "HEALTH_OK"}), \
-             patch.object(stage2, "inspect_process", return_value={}), \
-             patch.object(stage2, "trace_peer_uid",
-                          side_effect=lambda *_: operations.append("SO_PEERCRED") or {}), \
-             patch.object(stage2, "negative_peer", side_effect=lambda user:
-                          operations.append("negative:" + user) or
-                          {"layer": "filesystem_or_socket"}), \
-             patch.object(stage2, "probe_equivalent_sandbox", return_value={}), \
-             patch.object(stage2, "assert_relay_restrictions", return_value={}), \
-             patch.object(stage2, "functional_tests", return_value={}), \
-             patch.object(stage2.subprocess, "run") as stopped:
+        with ExitStack() as patches:
+            patches.enter_context(patch.object(stage2, "verify_marker", return_value=marker))
+            patches.enter_context(patch.object(stage2, "preflight", return_value=preflight))
+            patches.enter_context(patch.object(stage2, "assert_host"))
+            patches.enter_context(patch.object(stage2, "capture_retry_baseline",
+                                               return_value=retry))
+            patches.enter_context(patch.object(stage2, "consume_authorization",
+                                               side_effect=lambda *_: operations.append("consume") or {}))
+            patches.enter_context(patch.object(stage2, "run_fixed",
+                                               side_effect=lambda *_: operations.append("mutation")))
+            for name in ("assert_broker_hardening", "inspect_run_directory", "inspect_socket",
+                         "inspect_process", "probe_equivalent_sandbox", "assert_relay_restrictions",
+                         "functional_tests"):
+                patches.enter_context(patch.object(stage2, name, return_value={}))
+            patches.enter_context(patch.object(stage2, "assert_unit_state",
+                                               return_value=({"MainPID": "111"}, {})))
+            patches.enter_context(patch.object(stage2, "capture_service_activation_history",
+                                               return_value={}))
+            patches.enter_context(patch.object(stage2, "relay",
+                                               side_effect=lambda *_: operations.append("health") or
+                                               {"status": "HEALTH_OK"}))
+            patches.enter_context(patch.object(stage2, "trace_peer_uid",
+                                               side_effect=lambda *_: operations.append("SO_PEERCRED") or {}))
+            negative_mock = patches.enter_context(patch.object(
+                stage2, "negative_peer", side_effect=lambda user:
+                operations.append("negative:" + user) or {"layer": "filesystem_or_socket"}))
+            boundary_mock = patches.enter_context(patch.object(
+                stage2, "assert_pre_health_boundary", side_effect=lambda user, *_:
+                operations.append("inert:" + user) or {}))
+            stopped = patches.enter_context(patch.object(stage2.subprocess, "run"))
             with patch.object(stage2, "capture_api_runtime_baseline",
                               side_effect=lambda **_: operations.append("recheck") or baseline):
                 self.assertEqual(stage2.execute()["apiUnchanged"], True)
             self.assertEqual(operations[:3], ["recheck", "consume", "mutation"])
+            self.assertEqual(operations[3], "recheck")  # Immediately after daemon-reload.
+            self.assertEqual(operations[operations.index("negative:lilith") + 1],
+                             "inert:lilith")
+            self.assertEqual(operations[operations.index("negative:nobody") + 1],
+                             "inert:nobody")
+            self.assertLess(operations.index("inert:lilith"),
+                            operations.index("negative:nobody"))
+            self.assertLess(operations.index("inert:nobody"), operations.index("health"))
             self.assertLess(operations.index("negative:lilith"), operations.index("health"))
             self.assertLess(operations.index("negative:nobody"), operations.index("health"))
             self.assertLess(operations.index("health"), operations.index("SO_PEERCRED"))
             self.assertLess(operations.index("SO_PEERCRED"),
                             operations.index("negative:lilith-memory-broker"))
+            required_order = ["negative:lilith", "inert:lilith", "negative:nobody",
+                              "inert:nobody", "health"]
+            def require_gate_order(events):
+                self.assertEqual([event for event in events if event in required_order],
+                                 required_order)
+            require_gate_order(operations)
+            def verify_wrong_orders():
+                for wrong in (
+                    ["negative:lilith", "negative:nobody", "inert:lilith", "health"],
+                    ["negative:lilith", "inert:lilith", "health", "negative:nobody"],
+                    ["health", "negative:lilith", "inert:lilith", "negative:nobody"],
+                ):
+                    with self.assertRaises(AssertionError):
+                        require_gate_order(wrong)
+            verify_wrong_orders()
             self.assertEqual(operations[-1], "recheck")
             stopped.assert_not_called()
 
@@ -408,13 +441,106 @@ class Stage2ControlContracts(unittest.TestCase):
                     stage2.execute()
             self.assertEqual(operations, [])  # No marker claim or activation mutation.
 
+            def verify_post_daemon_and_negative_failures():
+                drift_cases = (
+                    {"MainPID": baseline["MainPID"] + 1},
+                    {"processIncarnation": {**baseline["processIncarnation"], "startTicks": 1}},
+                    {"processIncarnation": {**baseline["processIncarnation"], "cmdline": []}},
+                    {"ExecMainStartTimestamp": "later"}, {"NRestarts": 1},
+                    {"configuredExecStart": {}}, {"appSha256": "0" * 64},
+                    {"serviceUnitSha256": "0" * 64}, {"custodySha256": {}},
+                    {"health": {"status": "fail"}}, {"ActiveState": "inactive"},
+                )
+                for changed_fields in drift_cases:
+                    operations.clear()
+                    with patch.object(stage2, "capture_api_runtime_baseline",
+                                      side_effect=[baseline, {**baseline, **changed_fields}]):
+                        with self.assertRaisesRegex(stage2.Stage2Error,
+                                                    "API_BASELINE_CHANGED"):
+                            stage2.execute()
+                    self.assertEqual(operations, ["consume", "mutation"])
+                self.assertEqual(stopped.call_count, 2 * len(drift_cases))
+
+                for failing_user in ("lilith", "nobody"):
+                    operations.clear()
+                    boundary_mock.side_effect = lambda user, *_: (
+                        operations.append("inert:" + user),
+                        (_ for _ in ()).throw(stage2.Stage2Error("NEGATIVE_PROBE_ACTIVATED_BROKER"))
+                        if user == failing_user else {})[1]
+                    with patch.object(stage2, "capture_api_runtime_baseline", return_value=baseline):
+                        with self.assertRaisesRegex(stage2.Stage2Error,
+                                                    "NEGATIVE_PROBE_ACTIVATED_BROKER"):
+                            stage2.execute()
+                    self.assertNotIn("health", operations)
+                    self.assertNotIn("SO_PEERCRED", operations)
+                    if failing_user == "lilith":
+                        self.assertNotIn("negative:nobody", operations)
+                    else:
+                        self.assertLess(operations.index("inert:lilith"),
+                                        operations.index("negative:nobody"))
+            verify_post_daemon_and_negative_failures()
             operations.clear()
-            with patch.object(stage2, "capture_api_runtime_baseline",
-                              side_effect=[baseline, changed]):
-                with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
+            boundary_mock.side_effect = lambda user, *_: operations.append("inert:" + user) or {}
+            negative_mock.side_effect = lambda user: (
+                operations.append("negative:" + user),
+                (_ for _ in ()).throw(stage2.Stage2Error("NEGATIVE_CLIENT_FAILED")))[1]
+            with patch.object(stage2, "capture_api_runtime_baseline", return_value=baseline):
+                with self.assertRaisesRegex(stage2.Stage2Error, "NEGATIVE_CLIENT_FAILED"):
                     stage2.execute()
-            self.assertEqual(operations[:3], ["consume", "mutation", "mutation"])
-            self.assertEqual(stopped.call_count, 2)  # Existing failure-stop policy.
+            self.assertIn("inert:lilith", operations)
+            self.assertNotIn("health", operations)
+
+    def test_each_negative_boundary_checks_service_socket_uid_and_zero_db_delta(self):
+        service = {"ActiveState": "inactive", "SubState": "dead", "MainPID": "0",
+                   "UnitFileState": "static"}
+        socket_state = {"ActiveState": "active", "SubState": "listening",
+                        "UnitFileState": "disabled"}
+        socket_meta = {"inode": 123, "uid": 999, "gid": 988,
+                       "mode": "0660", "type": "socket"}
+        snapshot = {"counts": {"owner": 12, "evidence": 1}, "rowHashes": {"old": "hash"}}
+        history = {"InvocationID": "old", "ExecMainStartTimestamp": "old",
+                   "NRestarts": "0", "ActiveEnterTimestampMonotonic": "123"}
+        with patch.object(stage2, "assert_unit_state", return_value=(service, socket_state)) as unit, \
+             patch.object(stage2, "inspect_socket", return_value=socket_meta) as inspect, \
+             patch.object(stage2, "capture_service_activation_history",
+                          return_value=history) as activation, \
+             patch.object(stage2.subprocess, "run",
+                          return_value=subprocess.CompletedProcess([], 1)) as process, \
+             patch.object(stage2, "snapshot_retry_rows", return_value=(snapshot, {})) as rows:
+            for user in ("lilith", "nobody"):
+                result = stage2.assert_pre_health_boundary(user, socket_meta,
+                                                           history, snapshot)
+                self.assertEqual(result["retryDatabaseDelta"], 0)
+                self.assertTrue(result["brokerUidProcessAbsent"])
+                self.assertTrue(result["activationHistoryUnchanged"])
+            self.assertEqual(unit.call_count, 2)
+            self.assertEqual(inspect.call_count, 2)
+            self.assertEqual(process.call_count, 2)
+            self.assertEqual(rows.call_count, 2)
+            unit.return_value = ({**service, "MainPID": "999"}, socket_state)
+            with self.assertRaisesRegex(stage2.Stage2Error,
+                                        "NEGATIVE_PROBE_ACTIVATED_BROKER"):
+                stage2.assert_pre_health_boundary("lilith", socket_meta, history, snapshot)
+            unit.return_value = (service, socket_state)
+            activation.return_value = {**history, "InvocationID": "new"}
+            with self.assertRaisesRegex(stage2.Stage2Error,
+                                        "NEGATIVE_PROBE_TRANSIENT_ACTIVATION"):
+                stage2.assert_pre_health_boundary("lilith", socket_meta, history, snapshot)
+            activation.return_value = history
+            process.return_value = subprocess.CompletedProcess([], 0)
+            with self.assertRaisesRegex(stage2.Stage2Error,
+                                        "NEGATIVE_PROBE_BROKER_UID_PROCESS"):
+                stage2.assert_pre_health_boundary("nobody", socket_meta, history, snapshot)
+            process.return_value = subprocess.CompletedProcess([], 1)
+            inspect.return_value = {**socket_meta, "inode": 999}
+            with self.assertRaisesRegex(stage2.Stage2Error,
+                                        "NEGATIVE_PROBE_ACTIVATED_BROKER"):
+                stage2.assert_pre_health_boundary("lilith", socket_meta, history, snapshot)
+            inspect.return_value = socket_meta
+            rows.return_value = ({**snapshot, "counts": {}}, {})
+            with self.assertRaisesRegex(stage2.Stage2Error,
+                                        "NEGATIVE_PROBE_DATABASE_MUTATION"):
+                stage2.assert_pre_health_boundary("nobody", socket_meta, history, snapshot)
 
     def test_marker_rejects_old_schema_and_baseline_tamper(self):
         baseline = self.api_snapshot()
@@ -433,10 +559,130 @@ class Stage2ControlContracts(unittest.TestCase):
                         {**value, "apiBaselineDigest": "0" * 64},
                         {**value, "retryBaselineDigest": "0" * 64},
                         {**value, "authorizationId": stage2.HISTORICAL_AUTHORIZATION},
+                        {**value, "consumedAt": issued.isoformat()},
                         {**value, "apiRuntimeBaseline": {**baseline, "schemaVersion": 1}}):
                 marker.read_bytes.return_value = json.dumps(bad).encode()
                 with self.assertRaises(stage2.Stage2Error):
                     stage2.verify_marker(now=issued)
+
+    def test_used_record_is_closed_versioned_and_time_bounded(self):
+        issued = datetime(2026, 9, 23, 19, 30, tzinfo=timezone.utc)
+        marker = stage2.marker_value(issued, "a" * 32,
+                                     self.api_snapshot(), self.retry_snapshot())
+        consumed = issued + timedelta(minutes=1)
+        value = stage2.used_record_value(marker, consumed, "f" * 64)
+        stage2.validate_used_record(value, marker, "f" * 64,
+                                    now=consumed + timedelta(seconds=1))
+        self.assertEqual(value["schemaVersion"], 2)
+        self.assertEqual(value["sourceMarkerSchemaVersion"], 3)
+        self.assertEqual(value["authorizationId"], marker["authorizationId"])
+        self.assertEqual(value["apiBaselineDigest"], marker["apiBaselineDigest"])
+        self.assertEqual(value["retryBaselineDigest"], marker["retryBaselineDigest"])
+        self.assertEqual(value["consumedAt"], "2026-09-23T19:31:00.000000Z")
+        for bad in ({**value, "extra": True},
+                    {**value, "authorizationId": stage2.HISTORICAL_AUTHORIZATION},
+                    {**value, "consumedAt": "not-a-time"},
+                    {**value, "consumedAt": "2026-09-23T19:29:00.000000Z"},
+                    {**value, "consumedAt": "2026-09-23T20:01:00.000000Z"},
+                    {**value, "consumedAt": "2026-09-23T19:31:00.000000+05:30"}):
+            with self.subTest(bad=bad):
+                with self.assertRaises(stage2.Stage2Error):
+                    stage2.validate_used_record(bad, marker, "f" * 64,
+                                                now=consumed + timedelta(seconds=1))
+        with self.assertRaisesRegex(stage2.Stage2Error, "USED_RECORD_TIME_OR_ID_INVALID"):
+            stage2.validate_used_record(value, marker, "f" * 64,
+                                        now=consumed - timedelta(microseconds=1))
+
+    def test_used_record_claim_is_terminal_and_published_before_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            marker_path = directory / "authorization.json"
+            used_path = directory / "authorization.used.json"
+            pending_path = directory / "authorization.used.pending.json"
+            issued = datetime.now(timezone.utc) - timedelta(minutes=1)
+            marker = stage2.marker_value(issued, "a" * 32,
+                                         self.api_snapshot(), self.retry_snapshot())
+            marker_path.write_bytes(json.dumps(marker, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            original_lstat = Path.lstat
+            def trusted_lstat(path):
+                result = original_lstat(path)
+                if path in (used_path, pending_path):
+                    return os.stat_result((0o100600, result.st_ino, result.st_dev,
+                                           result.st_nlink, 0, 0, result.st_size,
+                                           result.st_atime, result.st_mtime, result.st_ctime))
+                return result
+            events = []
+            original_link = os.link
+            original_replace = os.replace
+            def link(*args, **kwargs):
+                events.append("claim")
+                return original_link(*args, **kwargs)
+            def replace(*args, **kwargs):
+                events.append("publish")
+                return original_replace(*args, **kwargs)
+            with patch.object(stage2, "CONFIG", directory), \
+                 patch.object(stage2, "MARKER", marker_path), \
+                 patch.object(stage2, "USED", used_path), \
+                 patch.object(stage2, "USED_PENDING", pending_path), \
+                 patch.object(stage2.os, "O_NOFOLLOW", 0, create=True), \
+                 patch.object(stage2, "fsync_directory", side_effect=lambda *_: events.append("sync")), \
+                 patch.object(stage2.Path, "lstat", trusted_lstat), \
+                 patch.object(stage2.os, "link", side_effect=link), \
+                 patch.object(stage2.os, "replace", side_effect=replace):
+                value = stage2.consume_authorization(marker)
+                self.assertEqual(events, ["claim", "sync", "sync", "publish", "sync"])
+                self.assertFalse(marker_path.exists())
+                self.assertTrue(used_path.exists())
+                self.assertFalse(pending_path.exists())
+                self.assertEqual(json.loads(used_path.read_bytes()), value)
+                with self.assertRaisesRegex(stage2.Stage2Error, "USED_RECORD_COLLISION"):
+                    stage2.consume_authorization(marker)
+                self.assertFalse(marker_path.exists())
+                self.assertFalse((directory / "b1b2b-stage2-authorization.used.json").exists())
+
+    def test_used_record_publication_failure_leaves_terminal_claim(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            marker_path = directory / "authorization.json"
+            used_path = directory / "authorization.used.json"
+            pending_path = directory / "authorization.used.pending.json"
+            marker = stage2.marker_value(datetime.now(timezone.utc) - timedelta(minutes=1),
+                                         "a" * 32, self.api_snapshot(), self.retry_snapshot())
+            marker_path.write_bytes(json.dumps(marker, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            with patch.object(stage2, "CONFIG", directory), \
+                 patch.object(stage2, "MARKER", marker_path), \
+                 patch.object(stage2, "USED", used_path), \
+                 patch.object(stage2, "USED_PENDING", pending_path), \
+                 patch.object(stage2.os, "O_NOFOLLOW", 0, create=True), \
+                 patch.object(stage2, "fsync_directory"), \
+                 patch.object(stage2.os, "open", side_effect=lambda path, *args, **kwargs:
+                              (_ for _ in ()).throw(OSError("injected durable-write failure"))
+                              if path == pending_path else os.open(path, *args, **kwargs)):
+                with self.assertRaises(OSError):
+                    stage2.consume_authorization(marker)
+                self.assertFalse(marker_path.exists())
+                self.assertTrue(used_path.exists())
+                with self.assertRaisesRegex(stage2.Stage2Error, "USED_RECORD_COLLISION"):
+                    stage2.consume_authorization(marker)
+
+    def test_marker_change_before_claim_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            marker_path = directory / "authorization.json"
+            used_path = directory / "authorization.used.json"
+            pending_path = directory / "authorization.used.pending.json"
+            marker = stage2.marker_value(datetime.now(timezone.utc) - timedelta(minutes=1),
+                                         "a" * 32, self.api_snapshot(), self.retry_snapshot())
+            marker_path.write_bytes(json.dumps(marker).encode() + b"\n")
+            with patch.object(stage2, "MARKER", marker_path), \
+                 patch.object(stage2, "USED", used_path), \
+                 patch.object(stage2, "USED_PENDING", pending_path), \
+                 patch.object(stage2.os, "link") as claim:
+                with self.assertRaisesRegex(stage2.Stage2Error,
+                                            "MARKER_CHANGED_BEFORE_CONSUME"):
+                    stage2.consume_authorization(marker)
+            claim.assert_not_called()
+            self.assertFalse(used_path.exists())
 
     def test_prod_metadata_is_rejected_before_any_mutation(self):
         observed = {
