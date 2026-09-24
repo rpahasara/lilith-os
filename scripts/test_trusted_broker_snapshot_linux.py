@@ -10,9 +10,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import trusted_broker_snapshot_invocation as invocation
 from scripts import trusted_broker_snapshot as tool
+from scripts import verify_broker_dev_lifecycle as lifecycle
 from scripts.test_broker_dev_lifecycle import accepted_fixture
 from scripts.test_trusted_broker_snapshot import fixture_release, sudo_entries, encode_sudo
 
@@ -134,6 +136,27 @@ print(json.dumps({"denied": denied, "process": module._broker_process(pid),
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux systemd mount namespace")
 class LinuxConfinementTests(unittest.TestCase):
+    def test_dev_boot_id_format_reaches_exact_accepted_incarnation_assertion(self):
+        kernel_boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        self.assertRegex(kernel_boot, r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+        dev_boot = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
+        snapshot = accepted_fixture()
+        snapshot["runtimeIncarnations"]["broker"] = {
+            "pid": 96650, "bootId": dev_boot, "startTicks": 91036598,
+        }
+        self.assertNotIn("exe", snapshot["brokerProcess"])
+        self.assertNotIn("cwd", snapshot["brokerProcess"])
+        self.assertEqual(snapshot["stage2AcceptedBaseline"]["stage2AcceptedBaselineDigest"],
+                         "abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a")
+        # Recreate the exact pre-repair assertion that failed in the DEV unit.
+        with patch.object(lifecycle, "ACCEPTED_BROKER_BOOT_ID", dev_boot.replace("-", "")):
+            with self.assertRaisesRegex(lifecycle.LifecycleError,
+                                        "ACCEPTED_BROKER_INCARNATION") as caught:
+                lifecycle.validate_accepted(snapshot)
+        self.assertIn("field=runtimeIncarnations.broker", str(caught.exception))
+        self.assertEqual(lifecycle.ACCEPTED_BROKER_BOOT_ID, dev_boot)
+        lifecycle.validate_accepted(snapshot)
+
     def test_real_broker_observation_without_ptrace_authority(self):
         if os.geteuid() != 0:
             self.fail("Linux broker-process proof must run as root in credential-free CI")

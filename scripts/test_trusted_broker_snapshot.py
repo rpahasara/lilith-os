@@ -119,9 +119,12 @@ def installer_fixture(root: Path) -> tuple[Path, Path, str]:
     old.mkdir(parents=True)
     failed = releases / installer.KNOWN_FAILED_UNACCEPTED
     failed.mkdir()
+    boot_id_failed = releases / installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED
+    boot_id_failed.mkdir()
     releases.chmod(0o755)
     old.chmod(0o755)
     failed.chmod(0o755)
+    boot_id_failed.chmod(0o755)
     (control / "current").symlink_to("releases/" + installer.KNOWN_OLD_UNACCEPTED)
     source = root / "source"
     source.mkdir()
@@ -150,6 +153,14 @@ def installer_fixture(root: Path) -> tuple[Path, Path, str]:
 
 
 class SnapshotFoundationTests(unittest.TestCase):
+    def test_new_payload_is_exact_installer_target(self):
+        release_id = release.digest(release.canonical(release.make_manifest(sources())))
+        self.assertEqual(release_id, installer.APPROVED_REPAIRED_RELEASE)
+        self.assertEqual(release_id, "c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261")
+        with self.assertRaisesRegex(installer.InstallError, "UNAPPROVED_REPAIRED_RELEASE"):
+            installer.install(Path("/nonexistent-control"), installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED,
+                              root_custody=False)
+
     def test_installer_rejects_arbitrary_release_before_file_access(self):
         with self.assertRaisesRegex(installer.InstallError, "UNAPPROVED_REPAIRED_RELEASE"):
             installer.install(Path("/nonexistent-control"), "a" * 64, root_custody=False)
@@ -363,6 +374,12 @@ class SnapshotFoundationTests(unittest.TestCase):
             control, old, release_id = installer_fixture(Path(temp))
             self.assertEqual(release_id, installer.APPROVED_REPAIRED_RELEASE)
             failed = control / "releases" / installer.KNOWN_FAILED_UNACCEPTED
+            boot_id_failed = control / "releases" / installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED
+            self.assertEqual({p.name for p in (control / "releases").iterdir()},
+                             {installer.KNOWN_OLD_UNACCEPTED, installer.KNOWN_FAILED_UNACCEPTED,
+                              installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED})
+            self.assertEqual(os.readlink(control / "current"),
+                             "releases/" + installer.KNOWN_OLD_UNACCEPTED)
             calls = []
             def check(*, direct):
                 target = os.readlink(control / "current")
@@ -370,7 +387,8 @@ class SnapshotFoundationTests(unittest.TestCase):
                 if direct:
                     self.assertEqual({p.name for p in (control / "releases").iterdir()},
                                      {installer.KNOWN_OLD_UNACCEPTED,
-                                      installer.KNOWN_FAILED_UNACCEPTED, release_id})
+                                      installer.KNOWN_FAILED_UNACCEPTED,
+                                      installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED, release_id})
                     installer._installed_bytes(control / "releases" / release_id,
                                                release_id, sources(), root_custody=False)
                 return accepted_snapshot(release_id)
@@ -378,6 +396,8 @@ class SnapshotFoundationTests(unittest.TestCase):
             self.assertEqual(result["releaseId"], release_id)
             self.assertEqual(result["result"], "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED")
             self.assertEqual(result["failedPreservedReleaseId"], installer.KNOWN_FAILED_UNACCEPTED)
+            self.assertEqual(result["bootIdFailedPreservedReleaseId"],
+                             installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED)
             self.assertEqual(result["selfTestCompleteSnapshotDigest"],
                              result["secondCompleteSnapshotDigest"])
             self.assertEqual(calls, [
@@ -386,12 +406,14 @@ class SnapshotFoundationTests(unittest.TestCase):
             self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
             self.assertTrue(old.is_dir())
             self.assertTrue(failed.is_dir())
+            self.assertTrue(boot_id_failed.is_dir())
             with self.assertRaisesRegex(installer.InstallError, "INSTALL_EXISTING"):
                 installer.install(control, release_id, root_custody=False, self_test=check)
 
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
     def test_installer_rejects_unapproved_release_topology(self):
-        for variant in ("missing_old", "missing_failed", "extra", "wrong_current", "target_present"):
+        for variant in ("missing_old", "missing_failed", "missing_boot_id_failed", "extra",
+                        "wrong_current", "target_present"):
             with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temp:
                 control, _, release_id = installer_fixture(Path(temp))
                 releases = control / "releases"
@@ -399,6 +421,8 @@ class SnapshotFoundationTests(unittest.TestCase):
                     (releases / installer.KNOWN_OLD_UNACCEPTED).rmdir()
                 elif variant == "missing_failed":
                     (releases / installer.KNOWN_FAILED_UNACCEPTED).rmdir()
+                elif variant == "missing_boot_id_failed":
+                    (releases / installer.KNOWN_BOOT_ID_FAILED_UNACCEPTED).rmdir()
                 elif variant == "extra":
                     (releases / ("f" * 64)).mkdir(mode=0o755)
                 elif variant == "wrong_current":
@@ -410,8 +434,10 @@ class SnapshotFoundationTests(unittest.TestCase):
                                             "INSTALL_EXISTING_RELEASE" if variant == "target_present"
                                             else "INSTALL_UNEXPECTED_RELEASE" if variant != "wrong_current"
                                             else "INSTALL_UNEXPECTED_CURRENT"):
-                    installer.install(control, release_id, root_custody=False,
-                                      self_test=lambda **_: self.fail("unexpected self-test"))
+                    installer.install(
+                        control, release_id, root_custody=False,
+                        self_test=lambda **_: self.fail("unexpected self-test"),
+                    )
 
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
     def test_failed_first_self_test_leaves_old_selected(self):
@@ -533,6 +559,24 @@ class SnapshotFoundationTests(unittest.TestCase):
             installer._snapshot_result(overlong, direct=True)
         self.assertLessEqual(len(caught.exception.diagnostics["stdoutExcerpt"]), 768)
         self.assertLessEqual(len(caught.exception.diagnostics["stderrExcerpt"]), 768)
+
+    def test_bounded_diagnostics_preserve_final_lifecycle_failure(self):
+        expected = {"bootId": "24d1771d-e1b5-4e5f-816d-da08ad8b367a",
+                    "pid": 96650, "startTicks": 91036598}
+        observed = {**expected, "bootId": expected["bootId"].replace("-", "")}
+        final = ("installed_lifecycle.LifecycleError: ACCEPTED_BROKER_INCARNATION "
+                 "field=runtimeIncarnations.broker expected="
+                 + json.dumps(expected, sort_keys=True, separators=(",", ":"))
+                 + " observed=" + json.dumps(observed, sort_keys=True, separators=(",", ":")))
+        stderr = ("Traceback (most recent call last):\n" + "x" * 900 + "\n" + final + "\n").encode()
+        details = installer._diagnostics(SimpleNamespace(returncode=1, stdout=b"", stderr=stderr))
+        self.assertEqual(details["exceptionType"], "LifecycleError")
+        self.assertEqual(details["validationCode"], "ACCEPTED_BROKER_INCARNATION")
+        self.assertEqual(details["failingField"], "runtimeIncarnations.broker")
+        self.assertEqual(details["expectedObservedSummary"],
+                         {"expected": expected, "observed": observed})
+        self.assertIn("ACCEPTED_BROKER_INCARNATION", details["stderrTail"])
+        self.assertNotIn("ACCEPTED_BROKER_INCARNATION", details["stderrExcerpt"])
 
 
 if __name__ == "__main__":

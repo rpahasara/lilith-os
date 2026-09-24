@@ -40,19 +40,25 @@ remains historical until the new release itself reproduces it.
 ## Exact fixed transition
 
 The installer accepts only the source-pinned new release
-`b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055`
+`c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261`
 with `current` pointing to the preserved, unaccepted old release
 `8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958`.
 Before installation, the release directory set must contain exactly that old
-release and the previously installed but failed/unaccepted
-`36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`.
-Both historical directories remain preserved. The new target must be absent.
+release and the two previously installed but failed/unaccepted releases:
+`36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`
+(nested-sudo self-test) and
+`b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055`
+(boot-ID-format self-test). All three historical directories remain preserved.
+The new target must be absent.
 It validates the host and direct anchor, verifies the exact incoming archive
 and manifest, runtime pins and existing release/selector state, and requires
-the new release directory to be absent. It installs alongside both historical
+the new release directory to be absent. It installs alongside all three historical
 releases, then re-opens the installed directory and verifies its exact file
 set, directory/file custody, manifest identity and every payload hash before
 executing anything or changing `current`.
+At that post-install/pre-first-test boundary the set is exactly the old,
+both failed historical releases, and `c4d60b9c...`; `current` still points
+to `8b4dbee...`. The new release is installed, unselected and unaccepted.
 
 The installer-private first self-test derives the exact new release path
 from protected source constants. It gathers the two fixed root-side `sudo`
@@ -82,14 +88,38 @@ and second complete-digest equality. Only then may it report
 `TRUSTED_SNAPSHOT_RELEASE_ACCEPTED`, including both digests, lifecycle,
 baseline, preserved historical identities and final `current` target. If the second
 digest differs, it reports `SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH` and
-leaves all three releases present without inventing rollback. Other second-test
+leaves all four releases present without inventing rollback. Other second-test
 failures are also selected but unaccepted. No persistent authority-state
 acceptance row is written.
 
 This follow-up repair changes only protected snapshot-control source, focused
 tests, the exact deployment-classifier allowlist, and this architecture record;
 it does not authorize a DEV deployment or tool installation.
-`TrustedBrokerSnapshotReleaseV1` payloads are the
-CLI, invoker and lifecycle validator; none are changed. The pre-existing
-authorized release identity therefore remains byte-identical subject to
-artifact verification at the later owner-authorized installation gate.
+`TrustedBrokerSnapshotReleaseV1` payloads are the CLI, invoker and lifecycle
+validator; none were changed by that pin repair, so its release identity
+remained byte-identical at that point. The subsequent first-test diagnosis
+below supersedes its installation readiness.
+
+## B2D6 first-test diagnosis
+
+The owner-authorized `b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055`
+installation stopped at its first confined test with
+`NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED`. The installed bytes matched the
+immutable manifest. `current` remained on `8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958`;
+the historical failed `36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`
+and new candidate remained preserved. Direct accepted-state anchors passed
+before and after the failure. No second snapshot or selector change occurred.
+
+The single confined diagnostic identified `ACCEPTED_BROKER_INCARNATION`:
+the validator compared an unhyphenated boot-ID constant with the hyphenated
+UUID returned by `/proc/sys/kernel/random/boot_id`. PID `96650` and start
+ticks `91036598` matched, as did the broker process identity. The durable
+accepted baseline remained
+`abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a`;
+the corrected boot-ID representation does not change that semantic claim.
+Because the correction changes the immutable lifecycle-validator payload,
+`b2d6a450...` remains unaccepted historical evidence. The corrected validator
+is in the new `c4d60b9c...` immutable payload, and the fixed installer target
+and protected snapshot expected-release pin now name that release. This source
+contract does not authorize staging, installation, a self-test, selector change,
+or DEV cleanup. A fresh exact owner authorization is required before DEV action.

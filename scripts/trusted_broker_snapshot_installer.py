@@ -29,7 +29,8 @@ else:
 CONTROL = Path("/opt/lilith-trusted-controls/broker-snapshot")
 KNOWN_OLD_UNACCEPTED = "8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958"
 KNOWN_FAILED_UNACCEPTED = "36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec"
-APPROVED_REPAIRED_RELEASE = "b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055"
+KNOWN_BOOT_ID_FAILED_UNACCEPTED = "b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055"
+APPROVED_REPAIRED_RELEASE = "c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261"
 DEV_HOST = "lilith-dev-01"
 DEV_MACHINE_ID = "ae929170e6fa4c8ab9cc7b9547238d9d"
 DEV_PROJECT = "lilith-agent-260823-27389"
@@ -386,9 +387,30 @@ def _diagnostics(result: subprocess.CompletedProcess) -> dict:
         value = raw[:768].decode("utf-8", "replace")
         value = re.sub(r"[A-Za-z0-9_+/=-]{40,}", "[redacted]", value)
         return "".join(ch if ch.isprintable() or ch in "\n\t" else "?" for ch in value)
-    return {"returncode": result.returncode, "stdoutBytes": len(result.stdout),
-            "stderrBytes": len(result.stderr), "stdoutExcerpt": excerpt(result.stdout),
-            "stderrExcerpt": excerpt(result.stderr)}
+    details = {"returncode": result.returncode, "stdoutBytes": len(result.stdout),
+               "stderrBytes": len(result.stderr), "stdoutExcerpt": excerpt(result.stdout),
+               "stderrExcerpt": excerpt(result.stderr), "stderrTail": excerpt(result.stderr[-768:])}
+    final_line = result.stderr[-1024:].decode("utf-8", "replace").splitlines()
+    if final_line:
+        match = re.fullmatch(
+            r"(?P<exception>[A-Za-z_][A-Za-z0-9_.]*): (?P<code>[A-Z][A-Z0-9_]+)"
+            r"(?: field=(?P<field>[A-Za-z0-9_.]+) expected=(?P<expected>\{[^\r\n]{0,256}\})"
+            r" observed=(?P<observed>\{[^\r\n]{0,256}\}))?",
+            final_line[-1],
+        )
+        if match:
+            details["exceptionType"] = match["exception"].rsplit(".", 1)[-1]
+            details["validationCode"] = match["code"]
+            if match["field"]:
+                details["failingField"] = match["field"]
+                try:
+                    details["expectedObservedSummary"] = {
+                        "expected": json.loads(match["expected"]),
+                        "observed": json.loads(match["observed"]),
+                    }
+                except ValueError:
+                    pass
+    return details
 
 
 def _snapshot_result(result: subprocess.CompletedProcess, *, direct: bool = False) -> dict:
@@ -469,10 +491,12 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
     _directory(releases, 0o755, root_custody=root_custody)
     if final.exists() or final.is_symlink() or staging.exists() or staging.is_symlink():
         raise InstallError("INSTALL_EXISTING_RELEASE")
-    if {p.name for p in releases.iterdir()} != {KNOWN_OLD_UNACCEPTED, KNOWN_FAILED_UNACCEPTED}:
+    if {p.name for p in releases.iterdir()} != {KNOWN_OLD_UNACCEPTED, KNOWN_FAILED_UNACCEPTED,
+                                                  KNOWN_BOOT_ID_FAILED_UNACCEPTED}:
         raise InstallError("INSTALL_UNEXPECTED_RELEASE")
     _directory(releases / KNOWN_OLD_UNACCEPTED, 0o755, root_custody=root_custody)
     _directory(releases / KNOWN_FAILED_UNACCEPTED, 0o755, root_custody=root_custody)
+    _directory(releases / KNOWN_BOOT_ID_FAILED_UNACCEPTED, 0o755, root_custody=root_custody)
     pointer = current.lstat()
     if not stat.S_ISLNK(pointer.st_mode) or os.readlink(current) != "releases/" + KNOWN_OLD_UNACCEPTED or \
             (root_custody and (pointer.st_uid, pointer.st_gid) != (0, 0)):
@@ -541,6 +565,7 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
         "result": "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED", "releaseId": release_id,
         "oldPreservedReleaseId": KNOWN_OLD_UNACCEPTED,
         "failedPreservedReleaseId": KNOWN_FAILED_UNACCEPTED,
+        "bootIdFailedPreservedReleaseId": KNOWN_BOOT_ID_FAILED_UNACCEPTED,
         "currentTarget": "releases/" + release_id,
         "selfTestResult": "PASS", "selfTestReleaseId": release_id,
         "selfTestLifecycleProfile": first["profile"],
