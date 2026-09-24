@@ -14,6 +14,8 @@ import json
 import re
 import shlex
 import subprocess
+import sys
+import zlib
 from pathlib import Path
 
 
@@ -33,8 +35,13 @@ RUN_ID = re.compile(r"[1-9][0-9]{0,19}\Z")
 RUN_ATTEMPT = re.compile(r"[1-9][0-9]{0,7}\Z")
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 MAX_SOURCE_BYTES = 512 * 1024
+MAX_COMPRESSED_BYTES = 36 * 1024
+MAX_ENCODED_BYTES = 48 * 1024
+MAX_REMOTE_COMMAND_BYTES = 48 * 1024
 SOURCE_SHA = re.compile(r"[0-9a-f]{64}\Z")
 SNAPSHOT_FRAME = b"LILITH_TRUSTED_SNAPSHOT_V1:"
+PUBLISH_FRAME = b"LILITH_TRUSTED_PUBLISH_V1:"
+PACKED_ALPHABET = re.compile(rb"[A-Za-z0-9_-]+={0,2}\Z")
 
 # Executed only by protected-main code as the GitHub OS Login account. No
 # candidate source, workflow input, or remote stdout chooses a path.
@@ -46,8 +53,10 @@ import re
 import stat
 import subprocess
 import sys
+import json
+import zlib
 
-path, action, size_text, expected_sha = sys.argv[1:]
+path, action, size_text, expected_sha, *payload_args = sys.argv[1:]
 if not re.fullmatch(__STAGING_REGEX__, path) or os.path.dirname(path) != "/tmp":
     raise SystemExit("REMOTE_STAGING_PATH")
 if not re.fullmatch(r"[1-9][0-9]{0,6}", size_text) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
@@ -55,6 +64,8 @@ if not re.fullmatch(r"[1-9][0-9]{0,6}", size_text) or not re.fullmatch(r"[0-9a-f
 source_size = int(size_text)
 if source_size > 524288:
     raise SystemExit("REMOTE_SOURCE_SIZE")
+if action != "publish" and payload_args:
+    raise SystemExit("REMOTE_PACKED_ARGUMENTS")
 parent = os.lstat("/tmp")
 if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_gid != 0 or stat.S_IMODE(parent.st_mode) != 0o1777:
     raise SystemExit("REMOTE_STAGING_PARENT")
@@ -99,42 +110,62 @@ elif action == "snapshot":
         target.flush()
         os.fsync(target.fileno())
     file_info("snapshot.json", {0o600})
-elif action == "upload":
+elif action == "publish":
     directory()
     if os.listdir(path):
         raise SystemExit("REMOTE_STAGING_CONTENTS")
+    if len(payload_args) != 2:
+        raise SystemExit("REMOTE_PACKED_ARGUMENTS")
+    compressed_size_text, packed = payload_args
+    if not re.fullmatch(r"[1-9][0-9]{0,4}", compressed_size_text):
+        raise SystemExit("REMOTE_PACKED_SIZE")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", packed) or len(packed) > 49152:
+        raise SystemExit("REMOTE_PACKED_ALPHABET")
+    try:
+        compressed = base64.b64decode(packed, altchars=b"-_", validate=True)
+        if len(compressed) != int(compressed_size_text) or len(compressed) > 36864:
+            raise ValueError("packed size")
+        inflater = zlib.decompressobj()
+        content = inflater.decompress(compressed, source_size + 1)
+        if (len(content) != source_size or not inflater.eof or inflater.unused_data or
+                inflater.unconsumed_tail or inflater.flush()):
+            raise ValueError("packed stream")
+    except (ValueError, zlib.error) as exc:
+        raise SystemExit("REMOTE_PACKED_DECODE") from None
+    if hashlib.sha256(content).hexdigest() != expected_sha:
+        raise SystemExit("REMOTE_SOURCE_HASH_MISMATCH")
     part = os.path.join(path, "lifecycle.py.part")
     final = os.path.join(path, "lifecycle.py")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
     fd = os.open(part, flags, 0o600)
-    count = 0
-    digest = hashlib.sha256()
     with os.fdopen(fd, "wb") as target:
-        while True:
-            chunk = sys.stdin.buffer.read(min(65536, source_size + 1 - count))
-            if not chunk:
-                break
-            count += len(chunk)
-            if count > source_size:
-                raise SystemExit("REMOTE_SOURCE_SIZE_MISMATCH")
-            target.write(chunk)
-            digest.update(chunk)
+        target.write(content)
         target.flush()
         os.fsync(target.fileno())
     info = file_info("lifecycle.py.part", {0o600})
-    if count != source_size or info.st_size != source_size:
+    if info.st_size != source_size:
         raise SystemExit("REMOTE_SOURCE_SIZE_MISMATCH")
-    if digest.hexdigest() != expected_sha:
-        raise SystemExit("REMOTE_SOURCE_HASH_MISMATCH")
+    with open(part, "rb") as written:
+        if hashlib.sha256(written.read(source_size + 1)).hexdigest() != expected_sha:
+            raise SystemExit("REMOTE_SOURCE_HASH_MISMATCH")
     if os.path.lexists(final):
         raise SystemExit("REMOTE_FINAL_EXISTS")
     os.rename(part, final)
-    file_info("lifecycle.py", {0o600})
+    final_info = file_info("lifecycle.py", {0o600})
+    if final_info.st_size != source_size:
+        raise SystemExit("REMOTE_FINAL_SIZE_MISMATCH")
+    with open(final, "rb") as published:
+        if hashlib.sha256(published.read(source_size + 1)).hexdigest() != expected_sha:
+            raise SystemExit("REMOTE_FINAL_HASH_MISMATCH")
     directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
+    print("LILITH_TRUSTED_PUBLISH_V1:" + json.dumps({
+        "schemaVersion": 1, "action": "TRUSTED_PAYLOAD_PUBLISH",
+        "rawSize": source_size, "sha256": expected_sha, "result": "OK",
+    }, sort_keys=True, separators=(",", ":")))
 elif action == "read":
     directory()
     if sorted(os.listdir(path)) != ["lifecycle.py", "snapshot.json"]:
@@ -155,13 +186,16 @@ elif action == "read":
     frame = "LILITH_TRUSTED_SNAPSHOT_V1:{}:{}:{}".format(
         len(data), hashlib.sha256(data).hexdigest(), base64.b64encode(data).decode("ascii"))
     print(frame)
-elif action in {"cleanup_empty", "cleanup_part", "cleanup_full"}:
+elif action in {"cleanup_empty", "cleanup_part", "cleanup_publish_uncertain", "cleanup_full"}:
     directory()
     names = os.listdir(path)
     allowed = {"cleanup_empty": set(),
-               "cleanup_part": {"lifecycle.py.part"},
-               "cleanup_full": {"lifecycle.py", "snapshot.json"}}[action]
+                "cleanup_part": {"lifecycle.py.part"},
+                "cleanup_publish_uncertain": {"lifecycle.py.part", "lifecycle.py"},
+                "cleanup_full": {"lifecycle.py", "snapshot.json"}}[action]
     if not set(names) <= allowed:
+        raise SystemExit("REMOTE_STAGING_UNEXPECTED_CONTENTS")
+    if action == "cleanup_publish_uncertain" and len(names) > 1:
         raise SystemExit("REMOTE_STAGING_UNEXPECTED_CONTENTS")
     for name in names:
         file_info(name, {0o600})
@@ -206,37 +240,97 @@ def validate_staging_path(path: str) -> str:
     return path
 
 
+def trusted_source_bytes() -> bytes:
+    # This module runs from the protected-main checkout. No candidate path or
+    # caller-supplied root is accepted as a source selector.
+    lifecycle = Path(__file__).with_name("verify_broker_dev_lifecycle.py")
+    if not lifecycle.is_file() or lifecycle.is_symlink():
+        raise SnapshotError("TRUSTED_LIFECYCLE_SOURCE")
+    source = lifecycle.read_bytes()
+    if not 0 < len(source) <= MAX_SOURCE_BYTES:
+        raise SnapshotError("TRUSTED_SOURCE_SIZE")
+    return source
+
+
+def pack_source(source: bytes) -> tuple[str, int]:
+    if not isinstance(source, bytes) or not 0 < len(source) <= MAX_SOURCE_BYTES:
+        raise SnapshotError("TRUSTED_SOURCE_SIZE")
+    compressed = zlib.compress(source, level=9)
+    packed = base64.urlsafe_b64encode(compressed)
+    if (not 0 < len(compressed) <= MAX_COMPRESSED_BYTES or
+            not 0 < len(packed) <= MAX_ENCODED_BYTES or
+            not PACKED_ALPHABET.fullmatch(packed)):
+        raise SnapshotError("TRUSTED_PACKED_SIZE_OR_ALPHABET")
+    return packed.decode("ascii"), len(compressed)
+
+
+def publish_result(raw: bytes, source_size: int, source_sha: str) -> None:
+    frames = [line[len(PUBLISH_FRAME):] for line in raw.splitlines()
+              if line.startswith(PUBLISH_FRAME)]
+    if len(frames) != 1 or len(frames[0]) > 512:
+        raise SnapshotError("TRUSTED_PUBLISH_FRAME")
+    try:
+        result = json.loads(frames[0])
+    except (UnicodeError, json.JSONDecodeError):
+        raise SnapshotError("TRUSTED_PUBLISH_FRAME") from None
+    if result != {"schemaVersion": 1, "action": "TRUSTED_PAYLOAD_PUBLISH",
+                  "rawSize": source_size, "sha256": source_sha, "result": "OK"}:
+        raise SnapshotError("TRUSTED_PUBLISH_RESULT")
+
+
 def remote_action(path: str, action: str, source_size: int, source_sha: str,
                   *, source_bytes: bytes = b"") -> bytes:
     path = validate_staging_path(path)
-    if action not in {"create", "upload", "snapshot", "read",
-                      "cleanup_empty", "cleanup_part", "cleanup_full"}:
+    if action not in {"create", "publish", "snapshot", "read",
+                      "cleanup_empty", "cleanup_part", "cleanup_publish_uncertain", "cleanup_full"}:
         raise SnapshotError("REMOTE_STAGING_ACTION")
     if (not isinstance(source_size, int) or not 0 < source_size <= MAX_SOURCE_BYTES or
             not isinstance(source_sha, str) or not SOURCE_SHA.fullmatch(source_sha) or
-            (action == "upload" and
+            (action == "publish" and
              (len(source_bytes) != source_size or hashlib.sha256(source_bytes).hexdigest() != source_sha)) or
-            (action != "upload" and source_bytes)):
+            (action != "publish" and source_bytes)):
         raise SnapshotError("TRUSTED_SOURCE_IDENTITY")
-    encoded = base64.b64encode(_REMOTE_SOURCE.encode("utf-8")).decode("ascii")
+    # The decoder is fixed protected-main code, compressed only to keep the
+    # complete command well below process argument limits. Candidate bytes
+    # cannot select either decoder or packed lifecycle source.
+    encoded = base64.urlsafe_b64encode(zlib.compress(_REMOTE_SOURCE.encode("utf-8"), 9)).decode("ascii")
     remote_command = (
-        "/usr/bin/python3 -B -c 'import base64;exec(base64.b64decode(\""
-        + encoded + "\"))' " + shlex.quote(path) + " " + action +
+        "/usr/bin/python3 -B -c 'import base64,zlib;exec(zlib.decompress(base64.urlsafe_b64decode(\""
+        + encoded + "\")))' " + shlex.quote(path) + " " + action +
         " " + str(source_size) + " " + source_sha
     )
+    compressed_size = 0
+    encoded_size = 0
+    if action == "publish":
+        packed, compressed_size = pack_source(source_bytes)
+        encoded_size = len(packed)
+        remote_command += " " + str(compressed_size) + " " + packed
+    command_size = len(remote_command.encode("ascii"))
+    if command_size > MAX_REMOTE_COMMAND_BYTES:
+        raise SnapshotError("TRUSTED_COMMAND_SIZE")
     args = ("gcloud", "compute", "ssh", INSTANCE, "--tunnel-through-iap", "--ssh-flag=-T",
             f"--command={remote_command}", "--quiet", f"--project={PROJECT}", f"--zone={ZONE}")
     try:
-        result = subprocess.run(args, input=source_bytes, stdout=subprocess.PIPE,
+        result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, timeout=120)
-    except subprocess.TimeoutExpired as exc:
-        raise SnapshotError(f"TRUSTED_SSH_TIMEOUT action={action} path={path}") from exc
+    except subprocess.TimeoutExpired:
+        # TimeoutExpired includes the full command, including packed source.
+        raise SnapshotError(f"TRUSTED_SSH_TIMEOUT action={action} path={path}") from None
+    except OSError:
+        # OS process-creation exceptions can also contain the packed argv.
+        raise SnapshotError(f"TRUSTED_SSH_INVOCATION action={action} path={path}") from None
     if result.returncode != 0:
         reason = re.search(rb"\bREMOTE_[A-Z0-9_]+\b", result.stderr[:8192])
         label = reason.group().decode("ascii") if reason else "TRANSPORT_OR_PROCESS"
         raise SnapshotError(f"TRUSTED_SSH_EXIT action={action} code={result.returncode} reason={label} path={path}")
     if len(result.stdout) > MAX_SNAPSHOT_BYTES * 2:
         raise SnapshotError(f"TRUSTED_SSH_OUTPUT_SIZE action={action}")
+    if action == "publish":
+        publish_result(result.stdout, source_size, source_sha)
+        print(json.dumps({"transportAction": "publish", "rawSize": source_size,
+                          "compressedSize": compressed_size, "encodedSize": encoded_size,
+                          "remoteCommandSize": command_size, "rawSha256": source_sha,
+                          "result": "OK"}, sort_keys=True), file=sys.stderr)
     return result.stdout
 
 
@@ -266,12 +360,7 @@ def capture(run_id: str, run_attempt: str, phase: str) -> dict:
     ):
         raise SnapshotError("DEV_INSTANCE_IDENTITY")
     directory = staging_path(run_id, run_attempt, phase)
-    lifecycle = Path(__file__).with_name("verify_broker_dev_lifecycle.py")
-    if not lifecycle.is_file() or lifecycle.is_symlink():
-        raise SnapshotError("TRUSTED_LIFECYCLE_SOURCE")
-    source_bytes = lifecycle.read_bytes()
-    if not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
-        raise SnapshotError("TRUSTED_SOURCE_SIZE")
+    source_bytes = trusted_source_bytes()
     source_sha = hashlib.sha256(source_bytes).hexdigest()
     source_size = len(source_bytes)
     try:
@@ -283,12 +372,14 @@ def capture(run_id: str, run_attempt: str, phase: str) -> dict:
     cleanup_action = "cleanup_empty"
     try:
         try:
-            remote_action(directory, "upload", source_size, source_sha, source_bytes=source_bytes)
+            cleanup_action = "cleanup_publish_uncertain"
+            remote_action(directory, "publish", source_size, source_sha, source_bytes=source_bytes)
         except SnapshotError as exc:
-            if ("reason=REMOTE_SOURCE_SIZE_MISMATCH" in str(exc) or
-                    "reason=REMOTE_SOURCE_HASH_MISMATCH" in str(exc) or
-                    "TRUSTED_SSH_TIMEOUT action=upload" in str(exc)):
-                cleanup_action = "cleanup_part"
+            if ("reason=REMOTE_STAGING_CONTENTS" in str(exc) or
+                    "TRUSTED_SOURCE_IDENTITY" in str(exc) or
+                    "TRUSTED_PACKED_SIZE_OR_ALPHABET" in str(exc) or
+                    "TRUSTED_COMMAND_SIZE" in str(exc)):
+                cleanup_action = "cleanup_empty"
             raise
         cleanup_action = "cleanup_full"
         remote_action(directory, "snapshot", source_size, source_sha)

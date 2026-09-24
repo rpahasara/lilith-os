@@ -427,6 +427,17 @@ jobs:
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Record broker-only transport tool versions
+        shell: bash
+        run: |
+          gcloud version
+          ssh -V
+          python --version
+          uname -srm
+          getconf ARG_MAX
+          getconf PAGESIZE
+          . /etc/os-release
+          printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
       - name: Capture accepted DEV lifecycle without candidate code
         id: snapshot
         shell: bash
@@ -556,6 +567,18 @@ jobs:
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Record broker-only transport tool versions
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        shell: bash
+        run: |
+          gcloud version
+          ssh -V
+          python --version
+          uname -srm
+          getconf ARG_MAX
+          getconf PAGESIZE
+          . /etc/os-release
+          printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
       - name: Prove complete accepted DEV snapshot equality
         id: equality
         if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
