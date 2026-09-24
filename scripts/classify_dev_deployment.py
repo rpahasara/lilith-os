@@ -1,6 +1,6 @@
 """Trusted, fail-closed classifier for the existing DEV deployment check.
 
-Run this file from the protected default-branch checkout, never the PR checkout.
+Run this file from the exact CI-validated protected-main candidate, never a PR checkout.
 The candidate has no mode input. The complete effective merge-base diff is
 classified; any missing, malformed, or unfamiliar data fails closed.
 """
@@ -17,22 +17,31 @@ DEPLOY_REQUIRED = "DEPLOY_REQUIRED"
 CONTROL_ONLY_NO_DEPLOY = "CONTROL_ONLY_NO_DEPLOY"
 BROKER_CANDIDATE_VALIDATE_ONLY = "BROKER_CANDIDATE_VALIDATE_ONLY"
 
-# Exact reviewed Stage-II control surface. No directory globs are accepted.
+# Exact non-application control and separately installed snapshot-tool surface.
+# This is a DEV application deployment decision, not a source-review exemption.
+# No directory globs are accepted.
 CONTROL_ONLY_PATHS = frozenset(
     {
         ".github/workflows/ci.yml",
+        ".github/workflows/deploy-dev.yml",
         ".github/workflows/memory-broker-dev-stage2-runtime.yml",
+        "scripts/classify_dev_deployment.py",
         "scripts/memory_broker_os_installer.py",
         "scripts/memory_broker_stage2_control.py",
+        "scripts/test_classify_dev_deployment.py",
         "scripts/test_memory_broker_os_controls.py",
         "scripts/test_memory_broker_stage2_control.py",
+        "scripts/test_pr_ci_dev_separation.py",
+        "scripts/verify_broker_dev_lifecycle.py",
+        "scripts/test_broker_dev_lifecycle.py",
+        "scripts/test_trusted_broker_snapshot_linux.py",
+        "scripts/test_broker_candidate_dev_snapshot.py",
         "docs/architecture/slice-15b2b-b1b2b-stage2-runtime-control.md",
     }
 )
 
-# These two existing general controls are admitted only at the exact reviewed
-# Stage-II revisions: CI adds the dedicated tests; the installer disables its
-# legacy activation shortcut. Any later change to either takes full deployment.
+# The installer is admitted only at the exact reviewed Stage-II revision.
+# Any later change to it takes full deployment.
 PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
 }
@@ -57,10 +66,6 @@ BROKER_CANDIDATE_PATHS = frozenset({
     "services/memory-broker/tests/owner_request_golden.json",
     "docs/architecture/slice15b2b-stage3-a2-fault-seam.md",
 })
-CI_PATH = ".github/workflows/ci.yml"
-CI_ANCHOR = b"      - name: Validate inert broker release and installer controls\n        run: python -m unittest scripts/test_memory_broker_os_controls.py\n"
-CI_ADDITION = b"\n      - name: Validate Stage-II control-only and Linux isolation harness contracts\n        run: python -m unittest scripts/test_memory_broker_stage2_control.py\n"
-
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 RAW_HEADER = re.compile(
     rb":(?P<old_mode>[0-7]{6}) (?P<new_mode>[0-7]{6}) "
@@ -101,7 +106,6 @@ def parse_raw_diff(data: bytes) -> list[tuple[str, str, str, str]]:
 
 def classify_entries(
     entries: list[tuple[str, str, str, str]], candidate_blobs: dict[str, str],
-    ci_step_exact: bool = False,
 ) -> str:
     if not entries:
         return DEPLOY_REQUIRED
@@ -118,8 +122,6 @@ def classify_entries(
         if path in CONTROL_ONLY_PATHS:
             if path in PINNED_CANDIDATE_BLOBS and candidate_blobs.get(path) != PINNED_CANDIDATE_BLOBS[path]:
                 return DEPLOY_REQUIRED
-            if path == CI_PATH and not ci_step_exact:
-                return DEPLOY_REQUIRED
             current = CONTROL_ONLY_NO_DEPLOY
         elif path in BROKER_CANDIDATE_PATHS:
             current = BROKER_CANDIDATE_VALIDATE_ONLY
@@ -129,12 +131,6 @@ def classify_entries(
             return DEPLOY_REQUIRED
         mode = current
     return mode or DEPLOY_REQUIRED
-
-
-def ci_change_is_exact(original: bytes, proposed: bytes) -> bool:
-    return original.count(CI_ANCHOR) == 1 and proposed == original.replace(
-        CI_ANCHOR, CI_ANCHOR + CI_ADDITION, 1
-    )
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -160,15 +156,10 @@ def classify_repository(candidate_root: Path, base_sha: str, candidate_sha: str)
     )
     entries = parse_raw_diff(raw)
     blobs = {}
-    ci_step_exact = False
     for path, _, _, _ in entries:
         if path in PINNED_CANDIDATE_BLOBS:
             blobs[path] = git(candidate_root, "rev-parse", f"{candidate_sha}:{path}").decode()
-        if path == CI_PATH:
-            original = git(candidate_root, "show", f"{base_sha}:{CI_PATH}")
-            proposed = git(candidate_root, "show", f"{candidate_sha}:{CI_PATH}")
-            ci_step_exact = ci_change_is_exact(original, proposed)
-    mode = classify_entries(entries, blobs, ci_step_exact)
+    mode = classify_entries(entries, blobs)
     return mode, [path for path, _, _, _ in entries]
 
 

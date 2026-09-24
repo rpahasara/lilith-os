@@ -6,6 +6,8 @@ on:
       - Repository validation
     types:
       - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -26,13 +28,13 @@ env:
 
 jobs:
   deploy:
-    name: Deploy successful same-repository PR to DEV
+    name: Evaluate validated protected main for DEV
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0] != null &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.pull_requests[0].base.ref == github.event.repository.default_branch
+      github.event.workflow_run.head_sha != ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -64,6 +66,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check out the exact commit validated by CI
@@ -80,31 +83,31 @@ jobs:
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"
 
-      - name: Resolve trusted PR base and exact validated candidate
-        id: pr-revisions
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const number = context.payload.workflow_run.pull_requests[0].number;
-            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: number});
-            const candidate = context.payload.workflow_run.head_sha;
-            if (pr.head.sha !== candidate || pr.base.repo.full_name !== context.repo.owner + '/' + context.repo.repo ||
-                pr.base.ref !== context.payload.repository.default_branch) {
-              throw new Error('PR identity or validated SHA changed; no trusted mode can be selected');
-            }
-            core.setOutput('base_sha', pr.base.sha);
-            core.setOutput('candidate_sha', candidate);
+      - name: Resolve exact protected-main candidate and first parent
+        id: main-revisions
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${VALIDATED_SHA}"
+          test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"
+          BASE_SHA="$(git -C candidate rev-parse HEAD^)"
+          test "$(git rev-parse "${BASE_SHA}^{commit}")" = "${BASE_SHA}"
+          echo "base_sha=${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "candidate_sha=${VALIDATED_SHA}" >> "${GITHUB_OUTPUT}"
+          git checkout --detach "${BASE_SHA}"
 
-      - name: Classify complete effective diff using protected-main control
+      - name: Classify complete effective diff using validated protected-main candidate control
         id: classify
         shell: bash
         env:
-          BASE_SHA: ${{ steps.pr-revisions.outputs.base_sha }}
-          CANDIDATE_SHA: ${{ steps.pr-revisions.outputs.candidate_sha }}
+          BASE_SHA: ${{ steps.main-revisions.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.main-revisions.outputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          test "$(git -C candidate rev-parse HEAD)" = "${CANDIDATE_SHA}"
           git -C candidate fetch --no-tags origin "${BASE_SHA}"
-          python scripts/classify_dev_deployment.py \
+          python candidate/scripts/classify_dev_deployment.py \
             --candidate-root candidate --base-sha "${BASE_SHA}" \
             --candidate-sha "${CANDIDATE_SHA}" \
             --github-output "${GITHUB_OUTPUT}"
@@ -199,7 +202,10 @@ jobs:
             --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
       - name: Authenticate to Google Cloud
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: >-
+          steps.classify.outputs.mode == 'DEPLOY_REQUIRED' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == github.event.repository.default_branch
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
@@ -399,7 +405,11 @@ jobs:
   broker_preflight:
     name: Read-only accepted DEV preflight for broker candidate
     needs: deploy
-    if: needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'
+    if: >-
+      needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -418,6 +428,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Authenticate for read-only DEV observation
+        if: >-
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == github.event.repository.default_branch
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
@@ -533,7 +546,11 @@ jobs:
   broker_postflight:
     name: Read-only DEV postflight and required broker candidate status
     needs: [deploy, broker_preflight, broker_candidate]
-    if: always() && needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'
+    if: >-
+      always() && needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -553,7 +570,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Authenticate for read-only DEV and PROD observation
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == github.event.repository.default_branch
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}

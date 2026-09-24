@@ -61,6 +61,12 @@ jobs:
       - name: Validate broker-only DEV gate and accepted-state equality contracts
         run: python -m unittest scripts/test_broker_candidate_dev_snapshot.py scripts/test_broker_only_dev_workflow.py
 
+      - name: Validate PR source-only and protected-main DEV event boundaries
+        run: python -m unittest scripts/test_pr_ci_dev_separation.py
+
+      - name: Parse PR and DEV workflow YAML
+        run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' .github/workflows/ci.yml .github/workflows/deploy-dev.yml
+
       - name: Validate fixed trusted snapshot source, release, and installer contracts
         run: python -m unittest scripts/test_trusted_broker_snapshot.py
 
@@ -148,3 +154,23 @@ jobs:
 
       - name: Run Slice 8-15 architecture regressions
         run: python scripts/run_cognitive_regressions.py
+
+  pr-source-required-check:
+    # Preserve the existing required-check name without granting PRs DEV access.
+    name: LILITH DEV deployment
+    if: always() && github.event_name == 'pull_request'
+    needs: [repository-contracts, frontend-quality, backend-quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require all source-validation jobs to pass without DEV access
+        env:
+          CONTRACTS: ${{ needs.repository-contracts.result }}
+          FRONTEND: ${{ needs.frontend-quality.result }}
+          BACKEND: ${{ needs.backend-quality.result }}
+        run: |
+          test "${CONTRACTS}" = success
+          test "${FRONTEND}" = success
+          test "${BACKEND}" = success
+          echo 'PR_SOURCE_VALIDATION=PASS DEV_AUTH=NONE DEV_DEPLOYMENT=NONE'
