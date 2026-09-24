@@ -70,6 +70,54 @@ def post_fixture() -> dict:
     }
 
 
+def failed_fixture() -> dict:
+    snapshot = post_fixture()
+    snapshot["profile"] = gate.POST_STAGE_II_FAILED_INERT_V1
+    snapshot["files"] = {path: {"sha256": sha, "uid": uid, "gid": gid, "mode": mode}
+                         for path, (sha, uid, gid, mode) in gate.FAILED_FILES.items()}
+    snapshot["absent"] = {path: True for path in gate.FAILED_ABSENT}
+    snapshot["runtimeDirectory"] = {"uid": 0, "gid": 988, "mode": 0o710, "children": []}
+    snapshot["broker_uid_processes"] = []
+    snapshot["usedAuthorization"] = {
+        "sha256": gate.FAILED_USED_MARKER_SHA,
+        "authorizationId": gate.FAILED_AUTHORIZATION_ID,
+        "schemaVersion": 2, "stage": "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST",
+        "authorityMode": "SYNTHETIC_ONLY", "canonicalCapability": "DISABLED",
+        "releaseSha": gate.RELEASE_SHA, "ownerActor": "rpahasara",
+        "apiBaselineDigest": "0fbed57b7746be3051e3de623990c6402daaa1f88197e614d60499419e1cdbd5",
+    }
+    sidecars = {
+        "-wal": {"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                 "uid": 999, "gid": 987, "mode": 0o600, "size": 0},
+        "-shm": {"sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+                 "uid": 999, "gid": 987, "mode": 0o600, "size": 32768},
+    }
+    owner = snapshot["databases"]["owner"]
+    evidence = snapshot["databases"]["evidence"]
+    owner["counts"] = dict(gate.FAILED_OWNER_COUNTS)
+    owner["sidecars"] = copy.deepcopy(sidecars)
+    owner["challengeStates"] = dict(gate.FAILED_CHALLENGES)
+    owner["requestDigests"] = dict(gate.FAILED_REQUESTS)
+    owner["consumedCredential"] = [gate.FAILED_CONSUMED_CHALLENGE,
+                                   "ocred.synthetic", "2026-09-23T21:54:26Z"]
+    owner["claims"] = [[gate.FAILED_CONSUMED_CHALLENGE, gate.FAILED_REQUEST_DIGEST,
+                        gate.FAILED_ACTION_DIGEST, "ocred.synthetic",
+                        "SYNTHETIC_EVIDENCE_COMMITTED", gate.FAILED_EVIDENCE_ID]]
+    evidence["counts"] = dict(gate.FAILED_EVIDENCE_COUNTS)
+    evidence["sidecars"] = copy.deepcopy(sidecars)
+    evidence["evidenceRows"] = [[gate.FAILED_CONSUMED_CHALLENGE, gate.FAILED_EVIDENCE_ID,
+                                 gate.FAILED_REQUEST_DIGEST, gate.FAILED_ACTION_DIGEST,
+                                 "owner.ravindu.v1", "ocred.synthetic",
+                                 "fixture.b1b1.synthetic-codename.v1", "SYNTHETIC_COMMITTED"]]
+    snapshot["historicalBaseline"] = gate.historical_baseline(
+        owner, evidence, snapshot["usedAuthorization"])
+    snapshot["api"]["custody"][str(gate.API_ROOT / "data/lilith-dev.db")]["sha256"] = \
+        "e4080d47ac782dc5578c4537b8aab277e73b27546e704ee2fff6fda506f67e6c"
+    snapshot["api"]["custody"][str(gate.API_ROOT / "data/canonical-runtime.json")]["sha256"] = \
+        "65ac5077486cfe25665fc8f5815661b1653878182492a0309ec974e9394c08e7"
+    return snapshot
+
+
 def pre_fixture() -> dict:
     return {
         "profile": gate.PRE_B1B2B, "host": gate.expected_host(),
@@ -160,11 +208,73 @@ class LifecyclePolicyTests(unittest.TestCase):
         self._reject_all(mutations)
 
     def test_unaccepted_stage_ii_profile_cannot_be_selected(self):
-        self.assertEqual(gate.TRUSTED_DEV_PROFILE, gate.POST_STAGE_I)
+        self.assertEqual(gate.TRUSTED_DEV_PROFILE, gate.POST_STAGE_II_FAILED_INERT_V1)
         snapshot = post_fixture()
         snapshot["profile"] = gate.POST_STAGE_II
         with self.assertRaises(gate.LifecycleError):
             gate.validate_post(snapshot)
+
+    def test_failed_inert_exact_history_passes_and_pristine_stays_strict(self):
+        gate.validate_post(post_fixture())
+        snapshot = failed_fixture()
+        gate.validate_failed_inert(snapshot)
+        gate.validate(snapshot)
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_post(snapshot)
+        snapshot["profile"] = gate.POST_STAGE_I
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_post(snapshot)
+        self.assertEqual(snapshot["historicalBaseline"]["schemaVersion"], 1)
+        self.assertEqual(snapshot["historicalBaseline"]["authorizationId"],
+                         gate.FAILED_AUTHORIZATION_ID)
+        self.assertEqual(snapshot["historicalBaseline"]["challengeStates"],
+                         gate.FAILED_CHALLENGES)
+
+    def test_failed_inert_unknown_history_and_reused_authorization_fail(self):
+        mutations = (
+            lambda s: s["databases"]["evidence"]["evidenceRows"][0].__setitem__(1, "se.unknown"),
+            lambda s: s["databases"]["owner"]["challengeStates"].__setitem__("och.unknown", "CANCELLED"),
+            lambda s: s["databases"]["owner"]["requestDigests"].__setitem__("och.unknown", "0" * 64),
+            lambda s: s["databases"]["owner"]["claims"].append(["och.unknown"]),
+            lambda s: s["databases"]["owner"]["challengeStates"].__setitem__(
+                gate.FAILED_EXPIRED_CHALLENGE, "CANCELLED"),
+            lambda s: s.__setitem__("usedAuthorization", {}),
+            lambda s: s["usedAuthorization"].__setitem__("authorizationId", "new-id"),
+            lambda s: s["absent"].__setitem__(str(gate.CONFIG / "b1b2b-stage2-authorization.json"), False),
+            lambda s: s["usedAuthorization"].__setitem__("sha256", "0" * 64),
+        )
+        self._reject_failed(mutations)
+
+    def test_failed_inert_runtime_and_integrity_fail_closed(self):
+        mutations = (
+            lambda s: s["units"][gate.SERVICE].__setitem__("ActiveState", "active"),
+            lambda s: s["units"][gate.SERVICE].__setitem__("MainPID", "42"),
+            lambda s: s["units"][gate.SOCKET].__setitem__("ActiveState", "active"),
+            lambda s: s["units"][gate.SOCKET].__setitem__("UnitFileState", "enabled"),
+            lambda s: s["broker_uid_processes"].append(42),
+            lambda s: s["absent"].__setitem__(str(gate.RUNTIME / "owner.sock"), False),
+            lambda s: s["runtimeDirectory"]["children"].append("unexpected"),
+            lambda s: s["databases"]["owner"].__setitem__("integrity", "corrupt"),
+            lambda s: s["databases"]["owner"].__setitem__("foreignKeyViolations", 1),
+            lambda s: s["databases"]["owner"].__setitem__("fingerprint", "0" * 64),
+            lambda s: s["databases"]["evidence"].__setitem__("fingerprint", "0" * 64),
+            lambda s: s["databases"]["owner"]["sidecars"]["-wal"].__setitem__("mode", 0o644),
+            lambda s: s["files"][str(gate.OWNER_DB)].__setitem__("mode", 0o644),
+            lambda s: s["files"][str(gate.OWNER_DB)].__setitem__("sha256", "0" * 64),
+            lambda s: s["files"][str(gate.EVIDENCE_DB)].__setitem__("sha256", "0" * 64),
+            lambda s: s["databases"]["owner"].__setitem__("credentialCount", 2),
+            lambda s: s["databases"]["evidence"]["counts"].__setitem__("actor_evidence", 1),
+            lambda s: s["api"]["custody"][str(gate.API_ROOT / "data/canonical-runtime.json")].__setitem__("sha256", "0" * 64),
+        )
+        self._reject_failed(mutations)
+
+    def _reject_failed(self, mutations):
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                snapshot = failed_fixture()
+                mutation(snapshot)
+                with self.assertRaises(gate.LifecycleError):
+                    gate.validate_failed_inert(snapshot)
 
     def test_runner_and_workflow_use_trusted_source_and_compare_snapshots(self):
         root = Path(__file__).resolve().parent.parent
