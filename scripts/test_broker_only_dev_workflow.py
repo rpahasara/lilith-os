@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/deploy-dev.yml"
+SNAPSHOT_HELPER = Path(__file__).resolve().with_name("broker_candidate_dev_snapshot.py")
 
 
 def job(name: str) -> str:
@@ -59,6 +60,12 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         self.assertIn("context: 'LILITH DEV deployment'", job("deploy"))
         self.assertIn("needs.broker_preflight.result == 'success'", job("broker_candidate"))
         self.assertIn("steps.equality.outcome == 'success'", postflight)
+        self.assertNotIn("compute scp", preflight + postflight)
+        helper = SNAPSHOT_HELPER.read_text(encoding="utf-8")
+        self.assertNotIn('gcloud("scp"', helper)
+        self.assertIn('remote_action(directory, "upload"', helper)
+        self.assertIn('remote_action(directory, "read"', helper)
+        self.assertIn('remote_action(directory, cleanup_action', helper)
 
     def test_control_only_and_full_mode_routes_remain(self):
         full = job("deploy")
