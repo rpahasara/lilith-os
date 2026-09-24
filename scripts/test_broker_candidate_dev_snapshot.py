@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import copy
 import base64
+import contextlib
 import hashlib
+import io
 import json
 import os
 import secrets
 import stat
 import subprocess
 import sys
+import tempfile
+import traceback
 import unittest
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -29,6 +34,14 @@ def fixture() -> dict:
         "api": {"pid": 88740, "bootId": "a" * 36, "startTicks": 86941441},
     }
     return value
+
+
+def publish_frame(data: bytes) -> bytes:
+    return guard.PUBLISH_FRAME + json.dumps({
+        "schemaVersion": 1, "action": "TRUSTED_PAYLOAD_PUBLISH",
+        "rawSize": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+        "result": "OK",
+    }, sort_keys=True, separators=(",", ":")).encode()
 
 
 class BrokerCandidateSnapshotTests(unittest.TestCase):
@@ -118,7 +131,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
              patch.object(guard, "remote_action", side_effect=action):
             result = guard.capture("35977618907", "1", "preflight")
         self.assertEqual(result, fixture())
-        self.assertEqual(calls, [(path, "create"), (path, "upload"), (path, "snapshot"),
+        self.assertEqual(calls, [(path, "create"), (path, "publish"), (path, "snapshot"),
                                  (path, "read"), (path, "cleanup_full")])
 
     def test_remote_transport_stdout_never_becomes_staging_path(self):
@@ -132,29 +145,102 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
         self.assertIn("--ssh-flag=-T", args)
         self.assertIn(path + " create 5 ", args[6])
 
-    def test_stream_is_exact_and_transport_failures_are_bounded(self):
+    def test_packed_command_is_exact_and_transport_failures_are_bounded(self):
         path = guard.staging_path("35980507708", "3", "preflight")
         data = b"trusted protected-main bytes"
         digest = hashlib.sha256(data).hexdigest()
         with patch.object(guard.subprocess, "run", return_value=SimpleNamespace(
-                returncode=0, stdout=b"diagnostic only")) as transport:
-            guard.remote_action(path, "upload", len(data), digest, source_bytes=data)
-        self.assertEqual(transport.call_args.kwargs["input"], data)
+                returncode=0, stdout=b"diagnostic only\n" + publish_frame(data))) as transport:
+            guard.remote_action(path, "publish", len(data), digest, source_bytes=data)
+        self.assertEqual(transport.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertEqual(transport.call_args.kwargs["timeout"], 120)
         args = transport.call_args.args[0]
         self.assertNotIn(data.decode(), " ".join(args))
-        self.assertIn(path + " upload " + str(len(data)) + " " + digest, args[6])
+        self.assertIn(path + " publish " + str(len(data)) + " " + digest, args[6])
+        packed, compressed_size = guard.pack_source(data)
+        self.assertIn(" " + str(compressed_size) + " " + packed, args[6])
         for bad in (b"", data[:-1], data + b"x", b"X" + data[1:]):
             with self.subTest(bad=bad), self.assertRaises(guard.SnapshotError):
-                guard.remote_action(path, "upload", len(data), digest, source_bytes=bad)
+                guard.remote_action(path, "publish", len(data), digest, source_bytes=bad)
         with patch.object(guard.subprocess, "run", side_effect=subprocess.TimeoutExpired("gcloud", 120)):
-            with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SSH_TIMEOUT action=upload"):
-                guard.remote_action(path, "upload", len(data), digest, source_bytes=data)
+            with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SSH_TIMEOUT action=publish"):
+                guard.remote_action(path, "publish", len(data), digest, source_bytes=data)
         with patch.object(guard.subprocess, "run", return_value=SimpleNamespace(
                 returncode=7, stdout=b"", stderr=b"REMOTE_SOURCE_HASH_MISMATCH")):
             with self.assertRaisesRegex(guard.SnapshotError,
-                                        "TRUSTED_SSH_EXIT action=upload code=7 reason=REMOTE_SOURCE_HASH_MISMATCH"):
-                guard.remote_action(path, "upload", len(data), digest, source_bytes=data)
+                                        "TRUSTED_SSH_EXIT action=publish code=7 reason=REMOTE_SOURCE_HASH_MISMATCH"):
+                guard.remote_action(path, "publish", len(data), digest, source_bytes=data)
+
+    def test_protected_main_source_is_fixed_and_candidate_copy_is_ignored(self):
+        with tempfile.TemporaryDirectory() as root:
+            protected = Path(root, "protected")
+            candidate = Path(root, "candidate")
+            protected.mkdir()
+            candidate.mkdir()
+            trusted = b"fixed protected-main lifecycle source"
+            (protected / "verify_broker_dev_lifecycle.py").write_bytes(trusted)
+            (candidate / "verify_broker_dev_lifecycle.py").write_bytes(b"candidate-modified validator")
+            with patch.object(guard, "__file__", str(protected / "broker_candidate_dev_snapshot.py")):
+                self.assertEqual(guard.trusted_source_bytes(), trusted)
+            self.assertNotEqual(trusted, (candidate / "verify_broker_dev_lifecycle.py").read_bytes())
+
+    def test_pack_codec_bounds_and_command_argument_margin(self):
+        source = guard.trusted_source_bytes()
+        packed, compressed_size = guard.pack_source(source)
+        self.assertEqual(len(source), 66984)
+        self.assertEqual(hashlib.sha256(source).hexdigest(),
+                         "ba558b293e6ceba30fc3a3d373731ac05f83396a4e4bf58c3bc0bb4d6e95da9b")
+        self.assertEqual(compressed_size, len(zlib.compress(source, 9)))
+        self.assertEqual(zlib.decompress(base64.urlsafe_b64decode(packed)), source)
+        self.assertRegex(packed, r"\A[A-Za-z0-9_-]+={0,2}\Z")
+        self.assertLess(len(packed), guard.MAX_ENCODED_BYTES)
+        with patch.object(guard.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout=publish_frame(source), stderr=b"")) as transport:
+            log = io.StringIO()
+            with contextlib.redirect_stderr(log):
+                guard.remote_action(guard.staging_path("35977618907", "1", "preflight"),
+                                    "publish", len(source), hashlib.sha256(source).hexdigest(),
+                                    source_bytes=source)
+        command = transport.call_args.args[0][6].removeprefix("--command=")
+        self.assertLess(len(command.encode("ascii")), guard.MAX_REMOTE_COMMAND_BYTES)
+        self.assertLess(len(command.encode("ascii")), 32767)
+        self.assertEqual(transport.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertNotIn(packed, log.getvalue())
+        self.assertNotIn(source[:40].decode("ascii"), log.getvalue())
+        self.assertIn('"encodedSize": 23832', log.getvalue())
+        for bad in (b"", b"x" * (guard.MAX_SOURCE_BYTES + 1), os.urandom(40000)):
+            with self.subTest(size=len(bad)), self.assertRaises(guard.SnapshotError):
+                guard.pack_source(bad)
+
+    def test_publish_frame_and_injection_guards(self):
+        data = b"trusted"
+        digest = hashlib.sha256(data).hexdigest()
+        frame = publish_frame(data)
+        guard.publish_result(b"transport diagnostic\n" + frame + b"\n", len(data), digest)
+        for raw in (b"noise", frame + b"\n" + frame,
+                    frame.replace(b'"result":"OK"', b'"result":"FAIL"'),
+                    frame.replace(digest.encode(), b"0" * 64)):
+            with self.subTest(raw=raw[:60]), self.assertRaises(guard.SnapshotError):
+                guard.publish_result(raw, len(data), digest)
+        for value in ("1 2", "1\n2", "1'2", "1;2", "1$2", "1`2", "1|2",
+                      "1&2", "1/2", "1..2", "1\\2"):
+            with self.subTest(value=value), self.assertRaises(guard.SnapshotError):
+                guard.staging_path(value, "1", "preflight")
+
+    def test_transport_exception_cannot_print_packed_command(self):
+        data = b"trusted payload"
+        path = guard.staging_path("35977618907", "1", "preflight")
+        digest = hashlib.sha256(data).hexdigest()
+        for error in (subprocess.TimeoutExpired("PACKED_SOURCE_SENTINEL", 120),
+                      OSError("PACKED_SOURCE_SENTINEL")):
+            with self.subTest(error=type(error).__name__), \
+                 patch.object(guard.subprocess, "run", side_effect=error):
+                try:
+                    guard.remote_action(path, "publish", len(data), digest, source_bytes=data)
+                except guard.SnapshotError as exc:
+                    self.assertNotIn("PACKED_SOURCE_SENTINEL", "".join(traceback.format_exception(exc)))
+                else:
+                    self.fail("transport exception must fail closed")
 
     def test_framed_snapshot_rejects_chatter_as_payload_and_bad_identity(self):
         data = json.dumps(fixture()).encode()
@@ -168,17 +254,24 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                 guard.decode_snapshot_frame(raw)
 
     @unittest.skipUnless(os.name == "posix", "real remote file semantics require Linux")
-    def test_linux_remote_stream_publication_and_failure_states(self):
+    def test_linux_remote_packed_publication_and_failure_states(self):
         data = b"trusted non-candidate source\n"
         digest = hashlib.sha256(data).hexdigest()
 
-        def exercise(payload, *, expected_digest=digest, prefix="", preexisting=None,
+        def exercise(payload, *, size=len(data), expected_digest=digest, prefix="",
+                     preexisting=None, packed_override=None, compressed_override=None,
                      expect_success=False):
             run_id = str(secrets.randbelow(10**12 - 10**11) + 10**11)
             path = guard.staging_path(run_id, "1", "preflight")
-            def remote(action, incoming=b"", code=guard._REMOTE_SOURCE):
+            packed, compressed_size = guard.pack_source(payload)
+            if packed_override is not None:
+                packed = packed_override
+            if compressed_override is not None:
+                compressed_size = compressed_override
+            def remote(action, code=guard._REMOTE_SOURCE):
+                extra = [str(compressed_size), packed] if action == "publish" else []
                 return subprocess.run([sys.executable, "-B", "-c", code, path, action,
-                                       str(len(data)), expected_digest], input=incoming,
+                                       str(size), expected_digest, *extra], stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
             self.assertFalse(os.path.lexists(path))
             try:
@@ -187,11 +280,12 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                 if preexisting:
                     Path(path, preexisting).write_bytes(b"existing")
                     os.chmod(Path(path, preexisting), 0o600)
-                result = remote("upload", payload, prefix + guard._REMOTE_SOURCE)
+                result = remote("publish", prefix + guard._REMOTE_SOURCE)
                 self.assertEqual(result.returncode == 0, expect_success, result.stderr)
                 self.assertEqual(Path(path, "lifecycle.py").exists(),
                                  expect_success or preexisting == "lifecycle.py")
                 if expect_success:
+                    guard.publish_result(result.stdout, len(data), digest)
                     self.assertEqual(Path(path, "lifecycle.py").read_bytes(), data)
                     self.assertFalse(Path(path, "lifecycle.py.part").exists())
                     self.assertEqual(stat.S_IMODE(os.lstat(Path(path, "lifecycle.py")).st_mode), 0o600)
@@ -207,7 +301,8 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                     Path(path, preexisting).unlink()
                     self.assertEqual(remote("cleanup_empty").returncode, 0)
                 else:
-                    self.assertEqual(remote("cleanup_full" if expect_success else "cleanup_part").returncode, 0)
+                    self.assertEqual(remote("cleanup_full" if expect_success else
+                                            "cleanup_publish_uncertain").returncode, 0)
                 self.assertFalse(os.path.lexists(path))
             finally:
                 if os.path.lexists(path):
@@ -219,9 +314,23 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                     os.rmdir(path)
 
         exercise(data, expect_success=True)
-        exercise(data[:-1])  # short stream: .part only, never final
-        exercise(data + b"x")  # extra byte
-        exercise(b"X" + data[1:])  # wrong SHA
+        exercise(data[:-1])
+        exercise(data + b"x")
+        exercise(b"X" + data[1:])
+        exercise(data, size=len(data) - 1)
+        exercise(data, packed_override="!")
+        exercise(data, packed_override=guard.pack_source(data)[0][:-4])
+        exercise(data, packed_override=base64.urlsafe_b64encode(
+            b"\x00" * len(zlib.compress(data, 9))).decode())
+        trailing = zlib.compress(data, 9) + b"trailing"
+        exercise(data, packed_override=base64.urlsafe_b64encode(trailing).decode(),
+                 compressed_override=len(trailing))
+        bomb = zlib.compress(b"B" * (guard.MAX_SOURCE_BYTES + 1), 9)
+        exercise(data, packed_override=base64.urlsafe_b64encode(bomb).decode(),
+                 compressed_override=len(bomb))
+        empty = zlib.compress(b"", 9)
+        exercise(data, packed_override=base64.urlsafe_b64encode(empty).decode(),
+                 compressed_override=len(empty))
         exercise(data, preexisting="lifecycle.py.part")
         exercise(data, preexisting="lifecycle.py")
         exercise(data, prefix="import os\nos.rename=lambda *args: (_ for _ in ()).throw(OSError('rename'))\n")
@@ -248,6 +357,17 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
             os.symlink("/dev/null", link)
             self.assertNotEqual(remote("cleanup_full").returncode, 0)
             self.assertTrue(link.is_symlink())
+            link.unlink()
+            link.write_bytes(data)
+            os.chmod(link, 0o644)
+            self.assertNotEqual(remote("cleanup_publish_uncertain").returncode, 0)
+            self.assertTrue(link.exists())
+            os.chmod(link, 0o600)
+            other = Path(path, "hardlink")
+            os.link(link, other)
+            self.assertNotEqual(remote("cleanup_publish_uncertain").returncode, 0)
+            self.assertTrue(link.exists())
+            other.unlink()
             link.unlink()
             os.chmod(path, 0o755)
             self.assertNotEqual(remote("cleanup_full").returncode, 0)
@@ -278,13 +398,13 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
             self.fail("SCP must not be invoked")
         def action(_path, name, _size, _digest, **kwargs):
             calls.append(name)
-            if name == "upload":
-                raise guard.SnapshotError("TRUSTED_SSH_TIMEOUT action=upload")
+            if name == "publish":
+                raise guard.SnapshotError("TRUSTED_SSH_TIMEOUT action=publish")
         with patch.object(guard, "gcloud", side_effect=identity), \
              patch.object(guard, "remote_action", side_effect=action):
             with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SSH_TIMEOUT"):
                 guard.capture("35977618907", "1", "preflight")
-        self.assertEqual(calls, ["create", "upload", "cleanup_part"])
+        self.assertEqual(calls, ["create", "publish", "cleanup_publish_uncertain"])
 
     def test_uncertain_create_and_cleanup_failure_report_exact_path(self):
         path = guard.staging_path("35977618907", "1", "postflight")
@@ -296,8 +416,8 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
         def action(_path, name, _size, _digest, **kwargs):
             if name.startswith("cleanup"):
                 raise RuntimeError("unexpected contents")
-            if name == "upload":
-                raise RuntimeError("upload failed")
+            if name == "publish":
+                raise RuntimeError("publish failed")
         with patch.object(guard, "gcloud", return_value=identity), \
              patch.object(guard, "remote_action", side_effect=action):
             with self.assertRaisesRegex(guard.SnapshotError, "REMOTE_STAGING_CLEANUP_FAILED path=" + path):

@@ -63,9 +63,17 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         self.assertNotIn("compute scp", preflight + postflight)
         helper = SNAPSHOT_HELPER.read_text(encoding="utf-8")
         self.assertNotIn('gcloud("scp"', helper)
-        self.assertIn('remote_action(directory, "upload"', helper)
+        self.assertIn('remote_action(directory, "publish"', helper)
         self.assertIn('remote_action(directory, "read"', helper)
         self.assertIn('remote_action(directory, cleanup_action', helper)
+        self.assertIn('stdin=subprocess.DEVNULL', helper)
+        self.assertIn('packed, compressed_size = pack_source(source_bytes)', helper)
+        self.assertNotIn('remote_action(directory, "upload"', helper)
+        self.assertNotIn('input=source_bytes', helper)
+        self.assertIn('ref: ${{ needs.deploy.outputs.base_sha }}', preflight)
+        self.assertIn('ref: ${{ needs.deploy.outputs.base_sha }}', postflight)
+        self.assertIn('Record broker-only transport tool versions', preflight)
+        self.assertIn('Record broker-only transport tool versions', postflight)
 
     def test_control_only_and_full_mode_routes_remain(self):
         full = job("deploy")
