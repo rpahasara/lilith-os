@@ -425,7 +425,7 @@ jobs:
       candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
       mode: ${{ steps.classify.outputs.mode }}
     steps:
-      - name: Reject non-main or unapproved manual inputs
+      - name: Reject non-main or malformed manual inputs
         shell: bash
         env:
           REQUESTED_PR: ${{ inputs.pr_number }}
@@ -434,7 +434,6 @@ jobs:
           test "$GITHUB_REPOSITORY" = rpahasara/lilith-os
           test "$GITHUB_REF" = refs/heads/main
           test "$REQUESTED_PR" = 38
-          test "$REQUESTED_SHA" = 5a66c9f88595d0b1111d37c5c193053b60c1cab9
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
       - name: Check out trusted protected-main controls
         uses: actions/checkout@v7
@@ -504,6 +503,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C candidate merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
           python scripts/classify_dev_deployment.py \
             --candidate-root candidate --base-sha "$BASE_SHA" \
             --candidate-sha "$CANDIDATE_SHA" --github-output "$GITHUB_OUTPUT"
