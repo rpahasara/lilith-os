@@ -1,7 +1,9 @@
 # Slice 15B2b — trusted DEV snapshot tool foundation
 
-Status: installation-path design only. No DEV installation, workflow switch, A2
-experiment, or A2 merge is authorized by this record.
+Status: source foundation implemented, subject to Linux proof and governed
+source-only merge. No DEV installation, A2 experiment, or A2 merge is
+authorized by this record. The broker-only workflow source has been changed
+to require the installed tool and therefore fails closed before first install.
 
 ## Decision and trust boundary
 
@@ -39,13 +41,15 @@ lifecycle rules.
 Use `/opt/lilith-trusted-controls/broker-snapshot/releases/<release-id>/` with
 a root-owned `current` pointer to a reviewed release. `<release-id>` is the
 SHA-256 of the canonical `TrustedBrokerSnapshotReleaseV1` manifest, not the
-broker release or candidate SHA. The manifest binds a protected-main source
-commit, exact sorted payload list with byte lengths and SHA-256 hashes,
-dependency/runtime identity, manifest schema, supported lifecycle profile
+broker release or candidate SHA. The manifest binds the exact sorted payload
+list with byte lengths and SHA-256 hashes, dependency/runtime identity,
+manifest schema, supported lifecycle profile
 (`POST_STAGE_II_ACCEPTED_V1` only), supported output schema
-(`BrokerCandidateDevSnapshotV1` only), and the accepted baseline identity.
-The builder emits a deterministic archive plus separate hash attestation from
-an exact source commit; it rejects unknown paths, symlinks, duplicates and
+(`BrokerCandidateDevSnapshotV1` only), and fixed operation. The accepted
+baseline is enforced by the reused lifecycle validator. Source commit is
+recorded separately in the attestation so identical bytes yield the same
+release identity across commits. The builder emits a deterministic archive
+from exact committed payloads; it rejects unknown paths, symlinks, duplicates and
 noncanonical metadata. The broker release and snapshot-control release remain
 independent trust artifacts.
 
@@ -156,62 +160,63 @@ services, DBs or authorization history, and must never target PROD. An
 existing release is never overwritten. Rollback to a previously verified
 release needs a new explicit authorization, not silent fallback.
 
-The present protected-main classifier sends this design record and all
-proposed tool/builder/installer/workflow files to `DEPLOY_REQUIRED`. That
-route invokes the Core API deployment/restart, which is forbidden for this
-control transition. A narrow, protected-main-derived
-`TRUSTED_DEV_CONTROL_INSTALL` mode is therefore proposed for an exact closed
-set of snapshot-tool source, release builder, installer, tests, documentation
-and workflow controls. Unknown, deleted, mixed, symlinked, broker, Core API,
-authority, or dependency changes remain `DEPLOY_REQUIRED`. A PR in this lane
-builds and tests an exact artifact **without** installing it; its required
-status must report `DEV_MUTATION=NONE`, not falsely claim an installation.
-Only a separate protected-main, exact-release, owner-authorized action may
-install/upgrade the tool on DEV. The lane cannot select itself via candidate
-metadata, and its introducing governance PR cannot self-certify. The earlier
-one-time ruleset bypass is consumed; a fresh exact-PR/head bootstrap decision
-is required before any bypass. Pending checks must remain visibly pending in
-such a bridge. Do not broaden branch protection or reuse the old exception.
+The owner-approved minimal path does **not** add a general
+`TRUSTED_DEV_CONTROL_INSTALL` mode. The current protected-main classifier
+classifies this source/workflow change `DEPLOY_REQUIRED`, whose normal path
+restarts the accepted DEV API. This is a source-governance bootstrap conflict,
+not a reason to restart that API. The owner has authorized a one-time,
+exact-PR/head source-only bridge after independent Linux tests and final-diff
+review. Any skip must be transparent; required checks stay pending, not
+falsely green. Only the owner PR-only ruleset bypass may be added temporarily
+and must be removed immediately after that exact merge. No DEV install,
+broker/API restart, or PR #38 merge is included in the exception.
 
-Proposed reviewed path inventory (final names must be frozen before a mode is
-implemented): existing lifecycle source
-`scripts/verify_broker_dev_lifecycle.py`; new fixed CLI
-`scripts/trusted_broker_snapshot.py`, release builder
-`scripts/trusted_broker_snapshot_release.py`, installer
-`scripts/trusted_broker_snapshot_installer.py`, and their dedicated tests;
-existing lifecycle tests `scripts/test_broker_dev_lifecycle.py`; existing
-snapshot runner/parser `scripts/broker_candidate_dev_snapshot.py` and
-`scripts/test_broker_candidate_dev_snapshot.py`; workflow
-`.github/workflows/deploy-dev.yml` and
-`scripts/test_broker_only_dev_workflow.py`; classifier
-`scripts/classify_dev_deployment.py` and
-`scripts/test_classify_dev_deployment.py`; and this architecture record.
-Phase A must separately review the classifier/workflow control edits.
-Phase B admits only the frozen tool, builder, installer, and directly related
-tests/docs under the already-merged mode. Phase D admits only the frozen
-workflow/runner/parser switch under the protected-main mode, after the tool
-is installed. No wildcard admits future files by directory. The current
-classifier still classifies every one of these proposed changes as
-`DEPLOY_REQUIRED` until a governance bridge is merged.
+The implementation adds `scripts/trusted_broker_snapshot.py` (fixed CLI),
+`scripts/trusted_broker_snapshot_release.py` (deterministic builder),
+`scripts/trusted_broker_snapshot_installer.py` (first-install-only installer),
+`scripts/trusted_broker_snapshot_invocation.py` (fixed systemd confinement
+policy), focused tests, and the broker-only runner/workflow change. It reuses
+the unchanged `scripts/verify_broker_dev_lifecycle.py`. The installed release
+contains only the CLI and that validator. No candidate checkout selects any
+of those controls. The workflow's broker-only pre/post phases invoke the
+installed tool; until the separately authorized installation, they fail
+closed with a missing or mismatched release.
 
-Minimum safe phases:
+The fixed transient systemd invocation applies `ProtectSystem=strict`,
+`ProtectHome=read-only`, `NoNewPrivileges=yes`, a capability bound retaining
+only `CAP_DAC_READ_SEARCH` for broker-owned mode-0600 DB reads, `PrivateTmp`,
+`PrivateDevices`, kernel/control-group protections, and read-only `/run`.
+Network remains available because accepted-state verification reads local
+API health and instance metadata. The tool checks effective read-only mount
+state, no-new-privileges, and effective capabilities. Credential-free Linux
+CI must demonstrate reads from representative broker-owned authority data
+and denial of writes to authority, release and configuration fixtures.
+This transient unit does not alter the broker/API units or their lifecycle.
 
-1. Owner decides the narrow governance/bootstrap path; merge only the
-   independently reviewed install-mode bridge (no DEV mutation).
-2. Build/test/review the snapshot source, release builder and installer under
-   the protected-main mode; merge exact code without automatic installation.
-3. Obtain a fresh owner authorization for the exact release, then perform
-   one governed DEV-only install and verify tool self-test, accepted baseline
-   digest `abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a`,
+The narrow first installer accepts only the owner-reviewed release ID pinned
+in its source. A later authorized operator must stage the exact reviewed
+installer bundle, archive and attestation in root-controlled
+`/opt/lilith-trusted-controls/broker-snapshot/incoming/<release-id>/`; the
+installer rejects unknown files and any pre-existing release or `current`
+pointer. It verifies the archive before creating the immutable release,
+atomically selects that release, and runs the fixed confined snapshot
+self-test. It is implemented and tested here but must not run on DEV until
+`FIRST_DEV_TRUSTED_SNAPSHOT_INSTALL` is separately authorized.
+
+Safe sequence:
+
+1. Review and merge this source/workflow change through the exact one-time
+   source-only bridge if `DEPLOY_REQUIRED` would restart the API. No DEV
+   installation occurs.
+2. Stop. Obtain fresh owner authorization for the exact release and allowed
+   `/opt/lilith-trusted-controls/broker-snapshot/` first-install mutation.
+3. Install only that release, then verify self-test, accepted baseline digest,
    API PID 88740/NRestarts 0, broker PID 96650/invocation and release
    `817a83e44cec8965479fd97fc30b7a0b3ae49ab2`, 24/24/2/2 history, and
    unchanged complete snapshots. No candidate is installed.
-4. Change the broker-only workflow to invoke the pinned installed tool and
-   remove SCP, stdin and packed lifecycle-source publication, including its
-   run-bound executable staging. Prove PRE, hosted candidate, POST and exact
-   equality with no per-run executable transfer.
-5. Only then rerun PR #38 through normal checks. Do not merge A2 merely
-   because ordinary Core API checks are green.
+4. Rerun PR #38 through normal PRE, credential-free hosted candidate, POST,
+   equality and PROD-darkness checks. Do not merge A2 on ordinary Core API
+   checks alone.
 
 Required tests before Phase 2/3 cover exact manifest/payload/dependency and
 custody failures; wrong/missing release; fixed operation/host/PROD refusal;

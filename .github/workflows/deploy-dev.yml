@@ -427,15 +427,13 @@ jobs:
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Record broker-only transport tool versions
+      - name: Record installed snapshot invocation tool versions
         shell: bash
         run: |
           gcloud version
           ssh -V
           python --version
           uname -srm
-          getconf ARG_MAX
-          getconf PAGESIZE
           . /etc/os-release
           printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
       - name: Capture accepted DEV lifecycle without candidate code
@@ -444,7 +442,6 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
           python scripts/broker_candidate_dev_snapshot.py \
-            --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}' \
             --phase preflight > "${RUNNER_TEMP}/broker-preflight.json"
           python - <<'PY'
           import json, os
@@ -567,7 +564,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Record broker-only transport tool versions
+      - name: Record installed snapshot invocation tool versions
         if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
         shell: bash
         run: |
@@ -575,8 +572,6 @@ jobs:
           ssh -V
           python --version
           uname -srm
-          getconf ARG_MAX
-          getconf PAGESIZE
           . /etc/os-release
           printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
       - name: Prove complete accepted DEV snapshot equality
@@ -586,7 +581,6 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
           python scripts/broker_candidate_dev_snapshot.py \
-            --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}' \
             --phase postflight \
             --expected-snapshot-sha '${{ needs.broker_preflight.outputs.snapshot_sha }}' \
             >> "${GITHUB_STEP_SUMMARY}"
