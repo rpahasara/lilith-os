@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import os
+import json
+import signal
 import socket
 import sqlite3
+import stat
 import sys
 import tempfile
 import unittest
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 import rfc8785
 
@@ -44,6 +48,34 @@ def config_value(credential):
         "evidenceSchemaFingerprint": synthetic_evidence.schema_fingerprint(),
         "custody": {name: "ABSENT" for name in ("cognitiveDb", "privacyDb", "actorKey", "privacyKey", "containmentKey")},
     }
+
+
+def a2_arm(challenge, *, release=SHA):
+    return {
+        "schemaVersion": 1, "experimentId": dev_core.A2_EXPERIMENT_ID,
+        "stage": "B1B2B_III_A", "faultPoint": dev_core.A2_FAULT_POINT,
+        "deploymentEnvironment": "DEV", "authorityMode": "SYNTHETIC_ONLY",
+        "stateProfile": dev_config.PROFILE, "canonicalCapability": "DISABLED",
+        "logicalOwnerId": request.LOGICAL_OWNER_ID,
+        "accessIdentity": request.SYNTHETIC_ACCESS_IDENTITY,
+        "credentialRecordId": "ocred.synthetic",
+        "fixtureId": request.SYNTHETIC_FIXTURE_ID,
+        "fixtureFingerprint": dev_config.fixture_fingerprint(),
+        "instrumentedReleaseId": release,
+        "stage2AcceptedBaselineDigest": dev_core.A2_ACCEPTED_BASELINE_DIGEST,
+        "stage3AuthorizationId": "auth.stage3.fixture",
+        "challengeId": challenge.challenge_id,
+        "requestDigest": challenge.request_digest,
+        "actionDigest": challenge.action_digest,
+        "issuedAt": NOW.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "expiresAt": (NOW + timedelta(seconds=30)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "armNonce": "a" * 64,
+    }
+
+
+def parsed_a2_arm(challenge, config):
+    return dev_core.Stage3FaultArmV1.from_bytes(
+        rfc8785.dumps(a2_arm(challenge)), config=config, now=NOW)
 
 
 class DevSyntheticCase(unittest.TestCase):
@@ -130,6 +162,191 @@ class DevSyntheticCase(unittest.TestCase):
             broker.confirm_synthetic(challenge.challenge_id, b1a_fixture.assertion(challenge), fault_hook=lambda point: (_ for _ in ()).throw(RuntimeError("crash")) if point == "after_proof_consumed" else None)
         self.assertEqual(broker.recover(challenge.challenge_id)["status"], "PROOF_BURNED_NO_CLAIM")
         self.assertIsNone(evidence.find(challenge.challenge_id))
+
+    def test_a2_exact_placement_counter_recovery_and_replay(self):
+        owner, evidence, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        arm = parsed_a2_arm(challenge, self.config)
+        class BarrierReached(RuntimeError):
+            pass
+        with patch.object(dev_core, "_load_stage3_arm", return_value=arm) as loader, \
+             patch.object(dev_core, "_a2_barrier", side_effect=BarrierReached) as barrier:
+            with self.assertRaises(BarrierReached):
+                broker.confirm_synthetic(challenge.challenge_id,
+                                         b1a_fixture.assertion(challenge, counter=4))
+            self.assertEqual(owner.challenge_store.state(challenge.challenge_id), "CONSUMED")
+            with closing(sqlite3.connect(self.owner_path)) as conn:
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM owner_request_v1 WHERE challenge_id=?",
+                    (challenge.challenge_id,)).fetchone()[0], 1)
+                self.assertEqual(conn.execute(
+                    "SELECT COUNT(*) FROM synthetic_claim_v1 WHERE challenge_id=?",
+                    (challenge.challenge_id,)).fetchone()[0], 0)
+                raw = conn.execute("SELECT credential_json FROM owner_credential_v1").fetchone()[0]
+                self.assertEqual(P.OwnerCredentialV1.from_dict(json.loads(raw)).last_observed_sign_count, 4)
+            self.assertIsNone(evidence.find(challenge.challenge_id))
+            self.assertEqual(broker.recover(challenge.challenge_id)["status"],
+                             "PROOF_BURNED_NO_CLAIM")
+            with self.assertRaises(P.OwnerProofError):
+                broker.confirm_synthetic(challenge.challenge_id,
+                                         b1a_fixture.assertion(challenge, counter=4))
+            self.assertEqual(loader.call_count, 1)
+            barrier.assert_called_once_with(arm, NOW)
+
+    def test_a2_arm_cannot_trigger_unrelated_transaction(self):
+        owner, evidence, broker = self.provision()
+        x = broker.prepare_synthetic()
+        arm = parsed_a2_arm(x, self.config)
+        y = broker.prepare_synthetic()
+        with patch.object(dev_core, "_load_stage3_arm", return_value=arm), \
+             patch.object(dev_core, "_a2_barrier") as barrier:
+            result = broker.confirm_synthetic(y.challenge_id, b1a_fixture.assertion(y))
+        self.assertEqual(result["status"], "SYNTHETIC_EVIDENCE_COMMITTED")
+        self.assertEqual(owner.challenge_store.state(x.challenge_id), "PREPARED")
+        self.assertEqual(owner.challenge_store.state(y.challenge_id), "CONSUMED")
+        self.assertIsNone(evidence.find(x.challenge_id))
+        self.assertIsNotNone(evidence.find(y.challenge_id))
+        barrier.assert_not_called()
+
+    def test_a2_wrong_request_or_action_binding_never_barriers(self):
+        _, evidence, broker = self.provision()
+        for field in ("requestDigest", "actionDigest"):
+            with self.subTest(field=field):
+                challenge = broker.prepare_synthetic()
+                arm = dev_core.Stage3FaultArmV1.from_bytes(
+                    rfc8785.dumps({**a2_arm(challenge), field: "0" * 64}),
+                    config=self.config, now=NOW)
+                with patch.object(dev_core, "_load_stage3_arm", return_value=arm), \
+                     patch.object(dev_core, "_a2_barrier") as barrier:
+                    result = broker.confirm_synthetic(
+                        challenge.challenge_id, b1a_fixture.assertion(challenge))
+                self.assertEqual(result["status"], "SYNTHETIC_EVIDENCE_COMMITTED")
+                self.assertIsNotNone(evidence.find(challenge.challenge_id))
+                barrier.assert_not_called()
+
+    def test_a2_arm_closed_guards_binding_and_time(self):
+        _, _, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        valid = a2_arm(challenge)
+        cases = {
+            "schemaVersion": 2, "experimentId": "A1", "stage": "B1B2B_III_B",
+            "faultPoint": "A3_AFTER_CLAIM", "deploymentEnvironment": "PROD",
+            "authorityMode": "LIVE", "stateProfile": "UNKNOWN",
+            "canonicalCapability": "ENABLED", "logicalOwnerId": "owner.other",
+            "accessIdentity": "user:real@example.com", "credentialRecordId": "ocred.real",
+            "fixtureId": "fixture.other", "fixtureFingerprint": "0" * 64,
+            "instrumentedReleaseId": "c" * 40,
+            "stage2AcceptedBaselineDigest": "0" * 64,
+            "stage3AuthorizationId": "bad id", "armNonce": "bad",
+            "issuedAt": (NOW + timedelta(seconds=1)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "expiresAt": NOW.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        }
+        for field, wrong in cases.items():
+            with self.subTest(field=field), self.assertRaises(dev_core.DevBrokerError):
+                dev_core.Stage3FaultArmV1.from_bytes(
+                    rfc8785.dumps({**valid, field: wrong}), config=self.config, now=NOW)
+        for field, wrong in (("challengeId", "och.other"),
+                             ("requestDigest", "0" * 64), ("actionDigest", "0" * 64)):
+            altered = dev_core.Stage3FaultArmV1.from_bytes(
+                rfc8785.dumps({**valid, field: wrong}), config=self.config, now=NOW)
+            req = broker.state.request(challenge.challenge_id)
+            proof = P.OwnerProofVerificationResultV1(
+                challenge.challenge_id, "ocred.synthetic", request.SYNTHETIC_ACCESS_IDENTITY,
+                challenge.action_digest, challenge.request_digest, 0, False)
+            with self.subTest(field=field):
+                self.assertFalse(altered.matches(proof, req))
+        for raw in (b"{", b"\xff", b"{}", rfc8785.dumps({**valid, "extra": 1}),
+                    b'{"schemaVersion":1,"schemaVersion":1}'):
+            with self.subTest(raw=raw), self.assertRaises(dev_core.DevBrokerError):
+                dev_core.Stage3FaultArmV1.from_bytes(raw, config=self.config, now=NOW)
+        with self.assertRaises(dev_core.DevBrokerError):
+            dev_core.Stage3FaultArmV1.from_bytes(
+                rfc8785.dumps(valid), config=dev_config.DevConfig.from_dict(
+                    {**config_value(self.credential), "releaseSha": dev_core.A2_ACCEPTED_RELEASE}), now=NOW)
+
+    @unittest.skipUnless(os.name == "posix", "Linux-only safe-open custody checks")
+    def test_a2_fixed_safe_open_rejects_substitution_and_bad_custody(self):
+        arm_dir = self.root / "a2-arm"
+        arm_dir.mkdir(mode=0o750)
+        arm_file = arm_dir / dev_core.A2_ARM_NAME
+        _, _, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        raw = rfc8785.dumps(a2_arm(challenge))
+        arm_file.write_bytes(raw)
+        arm_file.chmod(0o640)
+        actual_fstat = os.fstat
+        def root_owned(fd):
+            item = actual_fstat(fd)
+            return SimpleNamespace(st_mode=item.st_mode, st_uid=0, st_gid=os.getgid(),
+                                   st_nlink=item.st_nlink, st_size=item.st_size)
+        with patch.object(dev_core, "A2_ARM_DIRECTORY", arm_dir), \
+             patch.object(dev_core.os, "fstat", side_effect=root_owned):
+            self.assertEqual(dev_core._load_stage3_arm(self.config, NOW),
+                             parsed_a2_arm(challenge, self.config))
+            arm_file.chmod(0o600)
+            with self.assertRaises(dev_core.DevBrokerError):
+                dev_core._load_stage3_arm(self.config, NOW)
+            arm_file.chmod(0o640)
+            def wrong_uid(fd):
+                item = root_owned(fd)
+                if stat.S_ISREG(item.st_mode):
+                    item.st_uid = 1001
+                return item
+            def wrong_gid(fd):
+                item = root_owned(fd)
+                if stat.S_ISREG(item.st_mode):
+                    item.st_gid = os.getgid() + 1
+                return item
+            with patch.object(dev_core.os, "fstat", side_effect=wrong_uid):
+                with self.assertRaises(dev_core.DevBrokerError):
+                    dev_core._load_stage3_arm(self.config, NOW)
+            with patch.object(dev_core.os, "fstat", side_effect=wrong_gid):
+                with self.assertRaises(dev_core.DevBrokerError):
+                    dev_core._load_stage3_arm(self.config, NOW)
+            arm_file.write_bytes(b"x" * (dev_core.A2_MAX_ARM_BYTES + 1))
+            with self.assertRaises(dev_core.DevBrokerError):
+                dev_core._load_stage3_arm(self.config, NOW)
+            arm_file.unlink()
+            arm_file.symlink_to(self.owner_path)
+            with self.assertRaises(OSError):
+                dev_core._load_stage3_arm(self.config, NOW)
+            arm_file.unlink()
+        with patch.object(dev_core, "A2_ARM_DIRECTORY", self.root / "absent"):
+            self.assertIsNone(dev_core._load_stage3_arm(self.config, NOW))
+
+    def test_a2_barrier_is_fixed_non_secret_event_then_sigstop(self):
+        _, _, broker = self.provision()
+        challenge = broker.prepare_synthetic()
+        arm = parsed_a2_arm(challenge, self.config)
+        class StopSubstituted(RuntimeError):
+            pass
+        expected_stop = getattr(signal, "SIGSTOP", 19)
+        with patch.object(dev_core.signal, "SIGSTOP", expected_stop, create=True), \
+             patch.object(dev_core.os, "write", return_value=1) as emit, \
+             patch.object(dev_core.os, "kill", side_effect=StopSubstituted) as stop:
+            with self.assertRaises(StopSubstituted):
+                dev_core._a2_barrier(arm, NOW)
+        self.assertEqual(emit.call_args.args[0], 2)
+        event = json.loads(emit.call_args.args[1])
+        self.assertEqual(set(event), {"eventType", "experimentId", "faultPoint", "brokerPid",
+                                      "instrumentedReleaseId", "challengeId", "requestDigest",
+                                      "actionDigest", "timestamp"})
+        self.assertEqual(event["faultPoint"], dev_core.A2_FAULT_POINT)
+        self.assertEqual(event["challengeId"], challenge.challenge_id)
+        stop.assert_called_once_with(os.getpid(), expected_stop)
+
+    def test_a2_no_ipc_arming_and_disarmed_confirmation(self):
+        _, evidence, broker = self.provision()
+        self.assertEqual(server.ALLOWED_IPC_OPERATIONS,
+                         frozenset({"HEALTH", "PREPARE_SYNTHETIC", "CONFIRM_SYNTHETIC", "CANCEL"}))
+        challenge = broker.prepare_synthetic()
+        with patch.object(dev_core, "_load_stage3_arm", return_value=None), \
+             patch.object(dev_core, "_a2_barrier") as barrier:
+            self.assertEqual(broker.confirm_synthetic(
+                challenge.challenge_id, b1a_fixture.assertion(challenge))["status"],
+                "SYNTHETIC_EVIDENCE_COMMITTED")
+        barrier.assert_not_called()
+        self.assertIsNotNone(evidence.find(challenge.challenge_id))
 
     def test_crash_after_claim_never_issues(self):
         _, evidence, broker = self.provision()
