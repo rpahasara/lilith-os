@@ -8,6 +8,16 @@ on:
       - completed
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Exact open broker-candidate PR number'
+        required: true
+        type: string
+      candidate_sha:
+        description: 'Exact current 40-character PR head SHA'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,16 +25,6 @@ permissions:
 concurrency:
   group: lilith-core-api-dev
   cancel-in-progress: false
-
-env:
-  GCP_PROJECT_ID: lilith-agent-260823-27389
-  GCP_ZONE: asia-southeast1-b
-  GCP_INSTANCE: lilith-dev-01
-  GCP_PROD_INSTANCE: lilith-01
-  GCP_PROD_INSTANCE_ID: "1332996232081478576"
-  GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
-  GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
-  HEALTH_URL: http://127.0.0.1:8765/health
 
 jobs:
   deploy:
@@ -42,6 +42,15 @@ jobs:
       id-token: write
       pull-requests: read
       statuses: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_PROD_INSTANCE: lilith-01
+      GCP_PROD_INSTANCE_ID: "1332996232081478576"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      HEALTH_URL: http://127.0.0.1:8765/health
     outputs:
       mode: ${{ steps.classify.outputs.mode }}
       base_sha: ${{ steps.classify.outputs.base_sha }}
@@ -402,35 +411,178 @@ jobs:
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
+  premerge_gate:
+    name: Verify exact open PR and source checks before manual DEV observation
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      base_sha: ${{ steps.identity.outputs.base_sha }}
+      candidate_sha: ${{ steps.identity.outputs.candidate_sha }}
+      mode: ${{ steps.classify.outputs.mode }}
+    steps:
+      - name: Reject non-main or unapproved manual inputs
+        shell: bash
+        env:
+          REQUESTED_PR: ${{ inputs.pr_number }}
+          REQUESTED_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$GITHUB_REPOSITORY" = rpahasara/lilith-os
+          test "$GITHUB_REF" = refs/heads/main
+          test "$REQUESTED_PR" = 38
+          test "$REQUESTED_SHA" = 379fe8bba45cc0a2ebc79d9aa4c266eb5ffcdc3b
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: Check out trusted protected-main controls
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify live PR identity and ruleset-required checks
+        id: identity
+        uses: actions/github-script@v8
+        env:
+          REQUESTED_SHA: ${{ inputs.candidate_sha }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const candidate = process.env.REQUESTED_SHA;
+            const branch = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+            if (context.ref !== 'refs/heads/main' || branch.commit.sha !== context.sha)
+              throw new Error('TRUSTED_MAIN_SHA_CHANGED');
+            const pr = (await github.rest.pulls.get({owner, repo, pull_number: 38})).data;
+            if (pr.state !== 'open' || pr.base.ref !== 'main' ||
+                pr.base.repo.full_name !== 'rpahasara/lilith-os' ||
+                pr.head.repo.full_name !== 'rpahasara/lilith-os' || pr.head.sha !== candidate)
+              throw new Error('FROZEN_PR_IDENTITY_CHANGED');
+            const commit = (await github.rest.repos.getCommit({owner, repo, ref: candidate})).data;
+            if (commit.sha !== candidate) throw new Error('CANDIDATE_COMMIT_MISSING');
+            const ruleset = (await github.request('GET /repos/{owner}/{repo}/rulesets/{ruleset_id}',
+              {owner, repo, ruleset_id: 23205011})).data;
+            if (ruleset.enforcement !== 'active')
+              throw new Error('PROTECTED_RULESET_NOT_ACTIVE');
+            const rules = ruleset.rules.filter(rule => rule.type === 'required_status_checks');
+            if (rules.length !== 1) throw new Error('REQUIRED_CHECK_RULE_MISSING');
+            const required = rules[0].parameters.required_status_checks;
+            if (!Array.isArray(required) || required.length === 0)
+              throw new Error('REQUIRED_CHECKS_EMPTY');
+            const checkResult = (await github.rest.checks.listForRef(
+              {owner, repo, ref: candidate, filter: 'latest', per_page: 100})).data;
+            if (checkResult.total_count > 100) throw new Error('REQUIRED_CHECK_LIST_TOO_LARGE');
+            const runs = checkResult.check_runs;
+            for (const check of required) {
+              const matches = runs.filter(run => run.name === check.context &&
+                run.app?.id === check.integration_id && run.head_sha === candidate);
+              if (matches.length !== 1 || matches[0].status !== 'completed' ||
+                  matches[0].conclusion !== 'success')
+                throw new Error(`REQUIRED_SOURCE_CHECK_NOT_GREEN:${check.context}`);
+            }
+            core.setOutput('base_sha', context.sha);
+            core.setOutput('candidate_sha', candidate);
+            core.summary.addRaw(`PR #38 head ${candidate}; ${required.length} ruleset-required checks green.\n`);
+            await core.summary.write();
+      - name: Verify protected-main checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Check out candidate as inert SHA-pinned data
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.identity.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify exact PR diff using trusted main control
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.identity.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          python scripts/classify_dev_deployment.py \
+            --candidate-root candidate --base-sha "$BASE_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" --github-output "$GITHUB_OUTPUT"
+          test "$(sed -n 's/^mode=//p' "$GITHUB_OUTPUT")" = BROKER_CANDIDATE_VALIDATE_ONLY
+
   broker_preflight:
     name: Read-only accepted DEV preflight for broker candidate
-    needs: deploy
+    needs: [deploy, premerge_gate]
     if: >-
-      needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      always() && (
+        (needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+         github.event.workflow_run.head_repository.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+         needs.premerge_gate.result == 'success' &&
+         needs.premerge_gate.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
+      pull-requests: read
+      checks: read
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
     outputs:
       snapshot_sha: ${{ steps.snapshot.outputs.snapshot_sha }}
     steps:
       - name: Check out protected-main controls
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.deploy.outputs.base_sha }}
+          ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Recheck frozen PR head immediately before manual PRE
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v8
+        env:
+          CANDIDATE_SHA: ${{ needs.premerge_gate.outputs.candidate_sha }}
+          TRUSTED_MAIN_SHA: ${{ needs.premerge_gate.outputs.base_sha }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const branch = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
+            const pr = (await github.rest.pulls.get({owner, repo, pull_number: 38})).data;
+            if (branch.commit.sha !== process.env.TRUSTED_MAIN_SHA ||
+                pr.state !== 'open' || pr.head.sha !== process.env.CANDIDATE_SHA)
+              throw new Error('FROZEN_PR_CHANGED_BEFORE_PRE');
+            const ruleset = (await github.request('GET /repos/{owner}/{repo}/rulesets/{ruleset_id}',
+              {owner, repo, ruleset_id: 23205011})).data;
+            const required = ruleset.rules.find(rule => rule.type === 'required_status_checks')
+              ?.parameters?.required_status_checks;
+            if (ruleset.enforcement !== 'active' || !Array.isArray(required) || required.length === 0)
+              throw new Error('REQUIRED_CHECK_RULE_CHANGED_BEFORE_PRE');
+            const checkResult = (await github.rest.checks.listForRef({
+              owner, repo, ref: process.env.CANDIDATE_SHA, filter: 'latest', per_page: 100
+            })).data;
+            if (checkResult.total_count > 100) throw new Error('REQUIRED_CHECK_LIST_TOO_LARGE');
+            for (const check of required) {
+              const matches = checkResult.check_runs.filter(run => run.name === check.context &&
+                run.app?.id === check.integration_id && run.head_sha === process.env.CANDIDATE_SHA);
+              if (matches.length !== 1 || matches[0].status !== 'completed' ||
+                  matches[0].conclusion !== 'success')
+                throw new Error(`REQUIRED_SOURCE_CHECK_NOT_GREEN:${check.context}`);
+            }
       - name: Authenticate for read-only DEV observation
         if: >-
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == github.event.repository.default_branch
+          (github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+           needs.premerge_gate.result == 'success')
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
@@ -453,13 +605,18 @@ jobs:
         id: snapshot
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
+          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}'
           python scripts/broker_candidate_dev_snapshot.py \
             --phase preflight > "${RUNNER_TEMP}/broker-preflight.json"
           python - <<'PY'
           import json, os
           from pathlib import Path
           result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'broker-preflight.json').read_text())
+          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
+              if (result['toolReleaseId'] != 'c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261' or
+                  result['acceptedBaselineDigest'] != 'abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a' or
+                  result['snapshotSha256'] != 'dff5ccddad5884b57f5cf895a9c86c741077fd21857d6e67de57803e6fde68e5'):
+                  raise SystemExit('FROZEN_PRE_SNAPSHOT_MISMATCH')
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('snapshot_sha=' + result['snapshotSha256'] + '\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
@@ -468,8 +625,13 @@ jobs:
 
   broker_candidate:
     name: Isolated exact-SHA broker candidate validation
-    needs: [deploy, broker_preflight]
-    if: needs.broker_preflight.result == 'success'
+    needs: [deploy, premerge_gate, broker_preflight]
+    if: >-
+      always() && needs.broker_preflight.result == 'success' &&
+      ((needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
+        github.event.workflow_run.event == 'push') ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+        needs.premerge_gate.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -478,12 +640,12 @@ jobs:
       - name: Check out protected-main validator
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.deploy.outputs.base_sha }}
+          ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
           persist-credentials: false
       - name: Check out exact CI-validated broker candidate
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.deploy.outputs.candidate_sha }}
+          ref: ${{ needs.deploy.outputs.candidate_sha || needs.premerge_gate.outputs.candidate_sha }}
           path: candidate
           fetch-depth: 0
           persist-credentials: false
@@ -491,11 +653,22 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Assert candidate has no DEV or cloud authority
+        shell: bash
+        run: |
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          test -z "${CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -z "${GCP_PROJECT_ID:-}"
+          test -z "${GCP_DEPLOY_SA:-}"
+          test ! -d "$HOME/.ssh" || test -z "$(find "$HOME/.ssh" -maxdepth 1 -type f -name 'id_*' -print -quit)"
+          echo 'CANDIDATE_AUTH=NONE DEV_ENV=NONE SSH_KEY=NONE DEV_TRANSFER=NONE' >> "$GITHUB_STEP_SUMMARY"
       - name: Build and execute transient broker candidate without cloud credentials
         shell: bash
         env:
-          BASE_SHA: ${{ needs.deploy.outputs.base_sha }}
-          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+          BASE_SHA: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha || needs.premerge_gate.outputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "${BASE_SHA}"
           test "$(git -C candidate rev-parse HEAD)" = "${CANDIDATE_SHA}"
@@ -545,47 +718,74 @@ jobs:
 
   broker_postflight:
     name: Read-only DEV postflight and required broker candidate status
-    needs: [deploy, broker_preflight, broker_candidate]
+    needs: [deploy, premerge_gate, broker_preflight, broker_candidate]
     if: >-
-      always() && needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      always() && (
+        (needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+         github.event.workflow_run.head_repository.full_name == github.repository) ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+         needs.premerge_gate.result == 'success' &&
+         needs.broker_preflight.result == 'success' &&
+         needs.broker_candidate.result != 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
+      pull-requests: read
       statuses: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
     steps:
       - name: Check out protected-main controls
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' &&
+          (needs.broker_candidate.result == 'success' ||
+           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.deploy.outputs.base_sha }}
+          ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
           persist-credentials: false
       - name: Set up Python
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' &&
+          (needs.broker_candidate.result == 'success' ||
+           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Authenticate for read-only DEV and PROD observation
+      - name: Authenticate for read-only DEV observation
         if: >-
-          needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == github.event.repository.default_branch
+          needs.broker_preflight.result == 'success' &&
+          ((needs.broker_candidate.result == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
+           (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            needs.premerge_gate.result == 'success' && needs.broker_candidate.result != 'skipped'))
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
           service_account: ${{ env.GCP_DEPLOY_SA }}
       - name: Set up Google Cloud CLI
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' &&
+          (needs.broker_candidate.result == 'success' ||
+           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
       - name: Record installed snapshot invocation tool versions
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' &&
+          (needs.broker_candidate.result == 'success' ||
+           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
         shell: bash
         run: |
           gcloud version
@@ -596,18 +796,24 @@ jobs:
           printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
       - name: Prove complete accepted DEV snapshot equality
         id: equality
-        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        if: >-
+          needs.broker_preflight.result == 'success' &&
+          (needs.broker_candidate.result == 'success' ||
+           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
+          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}'
           python scripts/broker_candidate_dev_snapshot.py \
             --phase postflight \
             --expected-snapshot-sha '${{ needs.broker_preflight.outputs.snapshot_sha }}' \
             >> "${GITHUB_STEP_SUMMARY}"
       - name: Audit pinned production darkness without mutation
         id: prod_audit
-        if: steps.equality.outcome == 'success'
+        if: steps.equality.outcome == 'success' && github.event_name == 'workflow_run'
         shell: bash
+        env:
+          GCP_PROD_INSTANCE: lilith-01
+          GCP_PROD_INSTANCE_ID: "1332996232081478576"
         run: |
           test "${GCP_PROD_INSTANCE}" = 'lilith-01'
           test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"
@@ -620,7 +826,7 @@ jobs:
             --tunnel-through-iap \
             --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
       - name: Publish same required DEV deployment status
-        if: always()
+        if: always() && github.event_name == 'workflow_run'
         uses: actions/github-script@v8
         env:
           PREFLIGHT_RESULT: ${{ needs.broker_preflight.result }}
@@ -645,3 +851,22 @@ jobs:
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
             if (!passed) core.setFailed('Broker-only DEV validation did not pass');
+      - name: Recheck frozen PR head after manual candidate attempt
+        if: always() && github.event_name == 'workflow_dispatch' && needs.broker_preflight.result == 'success'
+        uses: actions/github-script@v8
+        env:
+          CANDIDATE_SHA: ${{ needs.premerge_gate.outputs.candidate_sha }}
+        with:
+          script: |
+            const pr = (await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: 38
+            })).data;
+            if (pr.state !== 'open' || pr.head.sha !== process.env.CANDIDATE_SHA)
+              throw new Error('FROZEN_PR_CHANGED_DURING_VALIDATION');
+      - name: Require manual candidate success and exact DEV equality
+        if: always() && github.event_name == 'workflow_dispatch' && needs.broker_preflight.result == 'success'
+        shell: bash
+        run: |
+          test '${{ needs.broker_candidate.result }}' = success
+          test '${{ steps.equality.outcome }}' = success
+          echo 'PREMERGE_CANDIDATE_VALIDATED=PASS DEV_MUTATION=NONE' >> "$GITHUB_STEP_SUMMARY"

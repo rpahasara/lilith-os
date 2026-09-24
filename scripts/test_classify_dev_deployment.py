@@ -57,6 +57,17 @@ class DevGateClassifierTests(unittest.TestCase):
             gate.CONTROL_ONLY_NO_DEPLOY,
         )
 
+    def test_exact_premerge_broker_validation_control_tests_are_control_only(self):
+        self.assertEqual(self.classify(*(changed(path) for path in (
+            ".github/workflows/deploy-dev.yml",
+            "scripts/test_broker_only_dev_workflow.py",
+            "scripts/test_pr_ci_dev_separation.py",
+            "scripts/classify_dev_deployment.py",
+            "scripts/test_classify_dev_deployment.py",
+        ))), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(changed("scripts/unreviewed_broker_workflow.py")),
+                         gate.DEPLOY_REQUIRED)
+
     def test_docs_and_tests_only_need_no_application_deploy(self):
         self.assertEqual(self.classify(
             changed("docs/architecture/slice-15b2b-b1b2b-stage2-runtime-control.md"),
