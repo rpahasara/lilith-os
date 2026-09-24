@@ -20,9 +20,8 @@ RELEASE = "a" * 64
 def accepted_result() -> dict:
     snapshot = accepted_fixture()
     snapshot["api"]["MainPID"] = guard.API_PID
-    snapshot["runtimeIncarnations"] = {
-        "broker": {"pid": 96650, "bootId": "a" * 36, "startTicks": 91036598},
-        "api": {"pid": 88740, "bootId": "a" * 36, "startTicks": 86941441},
+    snapshot["runtimeIncarnations"]["api"] = {
+        "pid": 88740, "bootId": "a" * 36, "startTicks": 86941441,
     }
     return {
         "schema": tool.SCHEMA, "operation": tool.OPERATION,
