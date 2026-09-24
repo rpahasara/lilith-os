@@ -30,6 +30,7 @@ DEV_MACHINE_ID = "ae929170e6fa4c8ab9cc7b9547238d9d"
 DEV_PROJECT = "lilith-agent-260823-27389"
 DEV_ZONE = "projects/763184673487/zones/asia-southeast1-b"
 DEV_INSTANCE_ID = "7687007163730582258"
+DEV_FQDN = f"{DEV_HOST}.{DEV_ZONE.rsplit('/', 1)[-1]}.c.{DEV_PROJECT}.internal"
 BASELINE = "abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a"
 FRAME = b"LILITH_BROKER_CANDIDATE_DEV_SNAPSHOT_V1:"
 INCOMING_FILES = {
@@ -61,7 +62,7 @@ def assert_dev_host(*, hostname: str | None = None, machine_id: str | None = Non
                 ("project/project-id", "instance/zone", "instance/id", "instance/name")}
     if hostname.startswith("lilith-01") or observed["instance/name"] == "lilith-01":
         raise InstallError("PROD_HOST_FORBIDDEN")
-    if (hostname != DEV_HOST or machine_id != DEV_MACHINE_ID or observed != {
+    if (hostname not in (DEV_HOST, DEV_FQDN) or machine_id != DEV_MACHINE_ID or observed != {
         "project/project-id": DEV_PROJECT,
         "instance/zone": DEV_ZONE,
         "instance/id": DEV_INSTANCE_ID,

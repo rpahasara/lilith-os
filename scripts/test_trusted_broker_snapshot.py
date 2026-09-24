@@ -91,14 +91,43 @@ class SnapshotFoundationTests(unittest.TestCase):
             "instance/id": installer.DEV_INSTANCE_ID,
             "instance/name": installer.DEV_HOST,
         }
-        installer.assert_dev_host(hostname=installer.DEV_HOST, machine_id=installer.DEV_MACHINE_ID,
-                                  metadata=lookup.__getitem__)
-        with self.assertRaisesRegex(installer.InstallError, "PROD_HOST_FORBIDDEN"):
-            installer.assert_dev_host(hostname="lilith-01", machine_id=installer.DEV_MACHINE_ID,
-                                      metadata=lookup.__getitem__)
-        with self.assertRaisesRegex(installer.InstallError, "PINNED_DEV_IDENTITY_REQUIRED"):
-            installer.assert_dev_host(hostname="other", machine_id=installer.DEV_MACHINE_ID,
-                                      metadata=lookup.__getitem__)
+        self.assertEqual(installer.DEV_FQDN, lifecycle.DEV_HOSTNAME)
+        for hostname in (installer.DEV_HOST, installer.DEV_FQDN):
+            with self.subTest(accepted_hostname=hostname):
+                installer.assert_dev_host(hostname=hostname, machine_id=installer.DEV_MACHINE_ID,
+                                          metadata=lookup.__getitem__)
+        failures = (
+            ("wrong short", "other", lookup, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("similar prefix", installer.DEV_FQDN + ".other", lookup, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("different FQDN", "other.asia-southeast1-b.c.lilith-agent-260823-27389.internal",
+             lookup, installer.DEV_MACHINE_ID, "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("wrong instance", installer.DEV_FQDN,
+             {**lookup, "instance/id": "other"}, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("wrong instance name", installer.DEV_FQDN,
+             {**lookup, "instance/name": "other"}, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("wrong project", installer.DEV_FQDN,
+             {**lookup, "project/project-id": "other"}, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("wrong zone", installer.DEV_FQDN,
+             {**lookup, "instance/zone": "other"}, installer.DEV_MACHINE_ID,
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("wrong machine", installer.DEV_FQDN, lookup, "other",
+             "PINNED_DEV_IDENTITY_REQUIRED"),
+            ("prod hostname", "lilith-01", lookup, installer.DEV_MACHINE_ID,
+             "PROD_HOST_FORBIDDEN"),
+            ("prod instance", installer.DEV_FQDN,
+             {**lookup, "instance/name": "lilith-01"}, installer.DEV_MACHINE_ID,
+             "PROD_HOST_FORBIDDEN"),
+        )
+        for name, hostname, observed, machine_id, error in failures:
+            with self.subTest(rejected_identity=name):
+                with self.assertRaisesRegex(installer.InstallError, error):
+                    installer.assert_dev_host(hostname=hostname, machine_id=machine_id,
+                                              metadata=observed.__getitem__)
 
     def test_manifest_content_identity_is_deterministic(self):
         payloads = sources()
