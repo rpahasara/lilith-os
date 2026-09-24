@@ -47,12 +47,18 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         preflight = job("broker_preflight")
         postflight = job("broker_postflight")
         self.assertIn("broker_candidate_dev_snapshot.py", preflight)
+        self.assertIn("--run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}'", preflight)
+        self.assertIn("--phase preflight", preflight)
+        self.assertIn("--run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}'", postflight)
+        self.assertIn("--phase postflight", postflight)
         self.assertIn("--expected-snapshot-sha", postflight)
         self.assertIn("audit_core_api_production_read_only.py", postflight)
         self.assertIn("context: 'LILITH DEV deployment'", postflight)
         self.assertIn("needs: [deploy, broker_preflight, broker_candidate]", postflight)
         self.assertIn("needs.broker_candidate.result == 'success'", postflight)
         self.assertIn("context: 'LILITH DEV deployment'", job("deploy"))
+        self.assertIn("needs.broker_preflight.result == 'success'", job("broker_candidate"))
+        self.assertIn("steps.equality.outcome == 'success'", postflight)
 
     def test_control_only_and_full_mode_routes_remain(self):
         full = job("deploy")
