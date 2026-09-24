@@ -71,6 +71,33 @@ class DevGateClassifierTests(unittest.TestCase):
             "scripts/test_broker_candidate_dev_snapshot.py",
         ))), gate.CONTROL_ONLY_NO_DEPLOY)
 
+    def test_exact_snapshot_control_plane_is_control_only(self):
+        installer = "scripts/trusted_broker_snapshot_installer.py"
+        snapshot = "scripts/broker_candidate_dev_snapshot.py"
+        for path in (installer, snapshot):
+            with self.subTest(path=path):
+                self.assertEqual(self.classify(changed(path)), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(*(changed(path) for path in (
+            installer, snapshot,
+            "scripts/test_trusted_broker_snapshot.py",
+            "scripts/test_broker_candidate_dev_snapshot.py",
+            "docs/architecture/slice15b2b-trusted-snapshot-install-acceptance-contract.md",
+        ))), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(
+            changed("scripts/classify_dev_deployment.py"),
+            changed("scripts/test_classify_dev_deployment.py"),
+        ), gate.CONTROL_ONLY_NO_DEPLOY)
+        for runtime in (
+            "services/memory-broker/lilith_memory_broker/unreviewed.py",
+            "services/core-api/app.py",
+            "services/memory-broker/deploy/lilith-memory-broker.service",
+            "scripts/unreviewed_runtime.py",
+        ):
+            with self.subTest(runtime=runtime):
+                self.assertEqual(self.classify(changed(runtime)), gate.DEPLOY_REQUIRED)
+                self.assertEqual(self.classify(changed(installer), changed(runtime)),
+                                 gate.DEPLOY_REQUIRED)
+
     def test_runtime_and_unknown_paths_require_deploy(self):
         for path in (
             "services/core-api/app.py",

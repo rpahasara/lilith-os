@@ -40,13 +40,17 @@ remains historical until the new release itself reproduces it.
 ## Exact fixed transition
 
 The installer accepts only the source-pinned new release
-`36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`
+`b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055`
 with `current` pointing to the preserved, unaccepted old release
 `8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958`.
+Before installation, the release directory set must contain exactly that old
+release and the previously installed but failed/unaccepted
+`36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`.
+Both historical directories remain preserved. The new target must be absent.
 It validates the host and direct anchor, verifies the exact incoming archive
 and manifest, runtime pins and existing release/selector state, and requires
-the new release directory to be absent. It installs alongside the old
-release, then re-opens the installed directory and verifies its exact file
+the new release directory to be absent. It installs alongside both historical
+releases, then re-opens the installed directory and verifies its exact file
 set, directory/file custody, manifest identity and every payload hash before
 executing anything or changing `current`.
 
@@ -76,14 +80,16 @@ new release and verify the pointer. It runs one second snapshot through the
 normal selected invoker, checks the same contract, and requires exact first
 and second complete-digest equality. Only then may it report
 `TRUSTED_SNAPSHOT_RELEASE_ACCEPTED`, including both digests, lifecycle,
-baseline, preserved old identity and final `current` target. If the second
+baseline, preserved historical identities and final `current` target. If the second
 digest differs, it reports `SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH` and
-leaves both releases present without inventing rollback. Other second-test
+leaves all three releases present without inventing rollback. Other second-test
 failures are also selected but unaccepted. No persistent authority-state
 acceptance row is written.
 
-This repair changes only the protected source installer, focused tests and
-this architecture record. `TrustedBrokerSnapshotReleaseV1` payloads are the
+This follow-up repair changes only protected snapshot-control source, focused
+tests, the exact deployment-classifier allowlist, and this architecture record;
+it does not authorize a DEV deployment or tool installation.
+`TrustedBrokerSnapshotReleaseV1` payloads are the
 CLI, invoker and lifecycle validator; none are changed. The pre-existing
 authorized release identity therefore remains byte-identical subject to
 artifact verification at the later owner-authorized installation gate.
