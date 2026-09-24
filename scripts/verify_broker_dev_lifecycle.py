@@ -145,7 +145,7 @@ ACCEPTED_OWNER_DB_SHA = "939b5a0e4c5471bac5843f9c17de9548494ab49bfa54a062994f579
 ACCEPTED_EVIDENCE_DB_SHA = "a4ff3d076a51019a6287c2a492a44e755dae5e9a7da55c9d9e942d9b9362c785"
 ACCEPTED_SERVICE_INVOCATION = "5c1eb955e2dc44e78139c416f0c9469a"
 ACCEPTED_SERVICE_STARTED = "Thu 2026-09-24 06:51:22 UTC"
-ACCEPTED_BROKER_BOOT_ID = "24d1771de1b54e5f816dda08ad8b367a"
+ACCEPTED_BROKER_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
 ACCEPTED_BROKER_START_TICKS = 91036598
 ACCEPTED_FILES = {
     **FILE_CONTRACT,
@@ -708,10 +708,21 @@ def validate_accepted(snapshot: dict) -> None:
         "groups": [987], "ppid": 1,
         "cmdline": "/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server",
     }, "ACCEPTED_BROKER_PROCESS_IDENTITY")
-    require(snapshot.get("runtimeIncarnations", {}).get("broker") == {
+    expected_incarnation = {
         "pid": int(pid), "bootId": ACCEPTED_BROKER_BOOT_ID,
         "startTicks": ACCEPTED_BROKER_START_TICKS,
-    }, "ACCEPTED_BROKER_INCARNATION")
+    }
+    observed_incarnation = snapshot.get("runtimeIncarnations", {}).get("broker")
+    if observed_incarnation != expected_incarnation:
+        observed_summary = ({key: observed_incarnation.get(key)
+                             for key in ("pid", "bootId", "startTicks")}
+                            if isinstance(observed_incarnation, dict) else
+                            {"type": type(observed_incarnation).__name__})
+        raise LifecycleError(
+            "ACCEPTED_BROKER_INCARNATION field=runtimeIncarnations.broker expected="
+            + json.dumps(expected_incarnation, sort_keys=True, separators=(",", ":"))
+            + " observed=" + json.dumps(observed_summary, sort_keys=True, separators=(",", ":"))
+        )
     api = snapshot.get("api", {})
     require(api.get("ActiveState") == "active" and api.get("NRestarts") == "0"
             and str(api.get("MainPID", "")).isdigit() and int(api["MainPID"]) > 0

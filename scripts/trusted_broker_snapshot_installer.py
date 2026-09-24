@@ -386,9 +386,30 @@ def _diagnostics(result: subprocess.CompletedProcess) -> dict:
         value = raw[:768].decode("utf-8", "replace")
         value = re.sub(r"[A-Za-z0-9_+/=-]{40,}", "[redacted]", value)
         return "".join(ch if ch.isprintable() or ch in "\n\t" else "?" for ch in value)
-    return {"returncode": result.returncode, "stdoutBytes": len(result.stdout),
-            "stderrBytes": len(result.stderr), "stdoutExcerpt": excerpt(result.stdout),
-            "stderrExcerpt": excerpt(result.stderr)}
+    details = {"returncode": result.returncode, "stdoutBytes": len(result.stdout),
+               "stderrBytes": len(result.stderr), "stdoutExcerpt": excerpt(result.stdout),
+               "stderrExcerpt": excerpt(result.stderr), "stderrTail": excerpt(result.stderr[-768:])}
+    final_line = result.stderr[-1024:].decode("utf-8", "replace").splitlines()
+    if final_line:
+        match = re.fullmatch(
+            r"(?P<exception>[A-Za-z_][A-Za-z0-9_.]*): (?P<code>[A-Z][A-Z0-9_]+)"
+            r"(?: field=(?P<field>[A-Za-z0-9_.]+) expected=(?P<expected>\{[^\r\n]{0,256}\})"
+            r" observed=(?P<observed>\{[^\r\n]{0,256}\}))?",
+            final_line[-1],
+        )
+        if match:
+            details["exceptionType"] = match["exception"].rsplit(".", 1)[-1]
+            details["validationCode"] = match["code"]
+            if match["field"]:
+                details["failingField"] = match["field"]
+                try:
+                    details["expectedObservedSummary"] = {
+                        "expected": json.loads(match["expected"]),
+                        "observed": json.loads(match["observed"]),
+                    }
+                except ValueError:
+                    pass
+    return details
 
 
 def _snapshot_result(result: subprocess.CompletedProcess, *, direct: bool = False) -> dict:

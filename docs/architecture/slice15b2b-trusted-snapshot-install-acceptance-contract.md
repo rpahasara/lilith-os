@@ -89,7 +89,30 @@ acceptance row is written.
 This follow-up repair changes only protected snapshot-control source, focused
 tests, the exact deployment-classifier allowlist, and this architecture record;
 it does not authorize a DEV deployment or tool installation.
-`TrustedBrokerSnapshotReleaseV1` payloads are the
-CLI, invoker and lifecycle validator; none are changed. The pre-existing
-authorized release identity therefore remains byte-identical subject to
-artifact verification at the later owner-authorized installation gate.
+`TrustedBrokerSnapshotReleaseV1` payloads are the CLI, invoker and lifecycle
+validator; none were changed by that pin repair, so its release identity
+remained byte-identical at that point. The subsequent first-test diagnosis
+below supersedes its installation readiness.
+
+## B2D6 first-test diagnosis
+
+The owner-authorized `b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055`
+installation stopped at its first confined test with
+`NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED`. The installed bytes matched the
+immutable manifest. `current` remained on `8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958`;
+the historical failed `36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec`
+and new candidate remained preserved. Direct accepted-state anchors passed
+before and after the failure. No second snapshot or selector change occurred.
+
+The single confined diagnostic identified `ACCEPTED_BROKER_INCARNATION`:
+the validator compared an unhyphenated boot-ID constant with the hyphenated
+UUID returned by `/proc/sys/kernel/random/boot_id`. PID `96650` and start
+ticks `91036598` matched, as did the broker process identity. The durable
+accepted baseline remained
+`abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a`;
+the corrected boot-ID representation does not change that semantic claim.
+Because the correction changes the immutable lifecycle-validator payload,
+`b2d6a450...` remains unaccepted historical evidence. A newly built release
+and a separately reviewed exact installation target contract are required
+before any further installation authorization; this diagnosis authorizes no
+retry, selector change, or DEV cleanup.

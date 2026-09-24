@@ -534,6 +534,24 @@ class SnapshotFoundationTests(unittest.TestCase):
         self.assertLessEqual(len(caught.exception.diagnostics["stdoutExcerpt"]), 768)
         self.assertLessEqual(len(caught.exception.diagnostics["stderrExcerpt"]), 768)
 
+    def test_bounded_diagnostics_preserve_final_lifecycle_failure(self):
+        expected = {"bootId": "24d1771d-e1b5-4e5f-816d-da08ad8b367a",
+                    "pid": 96650, "startTicks": 91036598}
+        observed = {**expected, "bootId": expected["bootId"].replace("-", "")}
+        final = ("installed_lifecycle.LifecycleError: ACCEPTED_BROKER_INCARNATION "
+                 "field=runtimeIncarnations.broker expected="
+                 + json.dumps(expected, sort_keys=True, separators=(",", ":"))
+                 + " observed=" + json.dumps(observed, sort_keys=True, separators=(",", ":")))
+        stderr = ("Traceback (most recent call last):\n" + "x" * 900 + "\n" + final + "\n").encode()
+        details = installer._diagnostics(SimpleNamespace(returncode=1, stdout=b"", stderr=stderr))
+        self.assertEqual(details["exceptionType"], "LifecycleError")
+        self.assertEqual(details["validationCode"], "ACCEPTED_BROKER_INCARNATION")
+        self.assertEqual(details["failingField"], "runtimeIncarnations.broker")
+        self.assertEqual(details["expectedObservedSummary"],
+                         {"expected": expected, "observed": observed})
+        self.assertIn("ACCEPTED_BROKER_INCARNATION", details["stderrTail"])
+        self.assertNotIn("ACCEPTED_BROKER_INCARNATION", details["stderrExcerpt"])
+
 
 if __name__ == "__main__":
     unittest.main()
