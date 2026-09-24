@@ -59,9 +59,27 @@ class PrCiDevSeparationTests(unittest.TestCase):
         self.assertIn('test "$(git -C candidate rev-parse HEAD)" = "${VALIDATED_SHA}"', source)
         self.assertIn('BASE_SHA="$(git -C candidate rev-parse HEAD^)"', source)
         self.assertIn('git checkout --detach "${BASE_SHA}"', source)
-        self.assertIn("python scripts/classify_dev_deployment.py", source)
+        self.assertIn("python candidate/scripts/classify_dev_deployment.py", source)
         self.assertIn("steps.classify.outputs.mode == 'DEPLOY_REQUIRED'", source)
         self.assertIn("steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'", source)
+
+    def test_control_only_main_diff_exits_before_dev_auth_or_mutation(self):
+        source = job(DEPLOY, "deploy")
+        self.assertIn("python candidate/scripts/classify_dev_deployment.py", source)
+        for step in (
+            "Build deterministic exact-SHA Core API bundle",
+            "Authenticate to Google Cloud",
+            "Set up Google Cloud CLI",
+            "Upload DEV bootstrap and exact-SHA bundle through IAP",
+            "Bootstrap and deploy the isolated DEV service",
+        ):
+            with self.subTest(step=step):
+                section = source.split(f"      - name: {step}\n", 1)[1].split("      - name:", 1)[0]
+                self.assertIn("steps.classify.outputs.mode == 'DEPLOY_REQUIRED'", section)
+        for name in ("broker_preflight", "broker_postflight"):
+            with self.subTest(job=name):
+                guard = job(DEPLOY, name).split("    runs-on:", 1)[0]
+                self.assertIn("needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'", guard)
 
 
 if __name__ == "__main__":

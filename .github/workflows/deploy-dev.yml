@@ -97,7 +97,7 @@ jobs:
           echo "candidate_sha=${VALIDATED_SHA}" >> "${GITHUB_OUTPUT}"
           git checkout --detach "${BASE_SHA}"
 
-      - name: Classify complete effective diff using protected-main control
+      - name: Classify complete effective diff using validated protected-main candidate control
         id: classify
         shell: bash
         env:
@@ -105,8 +105,9 @@ jobs:
           CANDIDATE_SHA: ${{ steps.main-revisions.outputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          test "$(git -C candidate rev-parse HEAD)" = "${CANDIDATE_SHA}"
           git -C candidate fetch --no-tags origin "${BASE_SHA}"
-          python scripts/classify_dev_deployment.py \
+          python candidate/scripts/classify_dev_deployment.py \
             --candidate-root candidate --base-sha "${BASE_SHA}" \
             --candidate-sha "${CANDIDATE_SHA}" \
             --github-output "${GITHUB_OUTPUT}"

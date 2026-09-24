@@ -16,8 +16,8 @@ def changed(path, status="M", old="100644", new="100644"):
 
 
 class DevGateClassifierTests(unittest.TestCase):
-    def classify(self, *entries, blobs=None, ci_step_exact=False):
-        return gate.classify_entries(list(entries), blobs or {}, ci_step_exact)
+    def classify(self, *entries, blobs=None):
+        return gate.classify_entries(list(entries), blobs or {})
 
     def test_exact_stage_ii_workflow_is_control_only(self):
         self.assertEqual(
@@ -45,14 +45,31 @@ class DevGateClassifierTests(unittest.TestCase):
             self.assertEqual(self.classify(changed(path), blobs={path: pinned}), gate.CONTROL_ONLY_NO_DEPLOY)
             self.assertEqual(self.classify(changed(path), blobs={path: "0" * 40}), gate.DEPLOY_REQUIRED)
 
-    def test_ci_change_must_be_exact_stage_ii_test_addition(self):
-        self.assertEqual(self.classify(changed(gate.CI_PATH), ci_step_exact=True), gate.CONTROL_ONLY_NO_DEPLOY)
-        self.assertEqual(self.classify(changed(gate.CI_PATH)), gate.DEPLOY_REQUIRED)
-        baseline = b"name: Repository validation\n" + gate.CI_ANCHOR + b"\n  other: true\n"
-        accepted = baseline.replace(gate.CI_ANCHOR, gate.CI_ANCHOR + gate.CI_ADDITION)
-        self.assertTrue(gate.ci_change_is_exact(baseline, accepted))
-        self.assertFalse(gate.ci_change_is_exact(baseline, accepted + b"\n  weakened: true\n"))
-        self.assertFalse(gate.ci_change_is_exact(baseline, baseline))
+    def test_exact_pr_46_control_plane_surface_needs_no_application_deploy(self):
+        self.assertEqual(
+            self.classify(*(changed(path) for path in (
+                ".github/workflows/ci.yml",
+                ".github/workflows/deploy-dev.yml",
+                "scripts/test_pr_ci_dev_separation.py",
+                "scripts/classify_dev_deployment.py",
+                "scripts/test_classify_dev_deployment.py",
+            ))),
+            gate.CONTROL_ONLY_NO_DEPLOY,
+        )
+
+    def test_docs_and_tests_only_need_no_application_deploy(self):
+        self.assertEqual(self.classify(
+            changed("docs/architecture/slice-15b2b-b1b2b-stage2-runtime-control.md"),
+            changed("scripts/test_broker_dev_lifecycle.py"),
+        ), gate.CONTROL_ONLY_NO_DEPLOY)
+
+    def test_snapshot_validator_and_tests_use_separate_install_path(self):
+        self.assertEqual(self.classify(*(changed(path) for path in (
+            "scripts/verify_broker_dev_lifecycle.py",
+            "scripts/test_broker_dev_lifecycle.py",
+            "scripts/test_trusted_broker_snapshot_linux.py",
+            "scripts/test_broker_candidate_dev_snapshot.py",
+        ))), gate.CONTROL_ONLY_NO_DEPLOY)
 
     def test_runtime_and_unknown_paths_require_deploy(self):
         for path in (
@@ -64,11 +81,9 @@ class DevGateClassifierTests(unittest.TestCase):
             "scripts/memory_broker_os_release.py",
             "scripts/memory_broker_validation.py",
             "scripts/deploy_core_api_dev_remote.sh",
-            "scripts/classify_dev_deployment.py",
-            "scripts/verify_broker_dev_lifecycle.py",
             "scripts/run_memory_broker_dev_validation.sh",
             "scripts/audit_core_api_production_read_only.py",
-            ".github/workflows/deploy-dev.yml",
+            ".github/workflows/unreviewed.yml",
             ".github/changed-mode.json",
             "docs/architecture/unreviewed.md",
         ):
