@@ -91,7 +91,7 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         self.assertIn("candidate_sha:", workflow)
         self.assertIn("test \"$GITHUB_REF\" = refs/heads/main", gate)
         self.assertIn("test \"$REQUESTED_PR\" = 38", gate)
-        self.assertIn("test \"$REQUESTED_SHA\" = 379fe8bba45cc0a2ebc79d9aa4c266eb5ffcdc3b", gate)
+        self.assertIn("test \"$REQUESTED_SHA\" = 5a66c9f88595d0b1111d37c5c193053b60c1cab9", gate)
         self.assertIn("branch.commit.sha !== context.sha", gate)
         self.assertIn("pr.head.sha !== candidate", gate)
         self.assertIn("ruleset_id: 23205011", gate)

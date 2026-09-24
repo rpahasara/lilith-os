@@ -434,7 +434,7 @@ jobs:
           test "$GITHUB_REPOSITORY" = rpahasara/lilith-os
           test "$GITHUB_REF" = refs/heads/main
           test "$REQUESTED_PR" = 38
-          test "$REQUESTED_SHA" = 379fe8bba45cc0a2ebc79d9aa4c266eb5ffcdc3b
+          test "$REQUESTED_SHA" = 5a66c9f88595d0b1111d37c5c193053b60c1cab9
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
       - name: Check out trusted protected-main controls
         uses: actions/checkout@v7
