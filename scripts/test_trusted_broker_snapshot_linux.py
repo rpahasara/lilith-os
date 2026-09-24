@@ -107,8 +107,69 @@ else:
 '''
 
 
+BROKER_PROCESS_PROBE = r'''
+import errno, importlib.util, json, os, sys
+from pathlib import Path
+source, pid_text = sys.argv[1:]
+pid = int(pid_text)
+spec = importlib.util.spec_from_file_location("broker_lifecycle", source)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+# These exact reads failed on DEV without CAP_SYS_PTRACE. Prove the test has
+# reproduced that boundary before exercising the real validator functions.
+denied = []
+for name in ("exe", "cwd"):
+    try:
+        os.readlink(f"/proc/{pid}/{name}")
+    except OSError as exc:
+        if exc.errno != errno.EACCES:
+            raise
+        denied.append(name)
+    else:
+        raise SystemExit("BROKER_PTRACE_BOUNDARY_NOT_REPRODUCED:" + name)
+print(json.dumps({"denied": denied, "process": module._broker_process(pid),
+                  "incarnation": module._process_incarnation(pid)}, sort_keys=True))
+'''
+
+
 @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux systemd mount namespace")
 class LinuxConfinementTests(unittest.TestCase):
+    def test_real_broker_observation_without_ptrace_authority(self):
+        if os.geteuid() != 0:
+            self.fail("Linux broker-process proof must run as root in credential-free CI")
+        source = Path(__file__).with_name("verify_broker_dev_lifecycle.py")
+        broker = subprocess.Popen(
+            ["/usr/bin/python3", "-I", "-B", "-c", "import time; time.sleep(60)"],
+            user=65534, group=65534, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            self.assertIsNone(broker.poll())
+            command = (
+                "/usr/bin/systemd-run", "--pipe", "--wait", "--collect", "--quiet",
+                *("--property=" + item for item in invocation.PROPERTIES),
+                "--", "/usr/bin/python3", "-I", "-B", "-c", BROKER_PROCESS_PROBE,
+                str(source), str(broker.pid),
+            )
+            result = subprocess.run(command, capture_output=True, text=True, timeout=90)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            proof = json.loads(result.stdout)
+            self.assertEqual(proof["denied"], ["exe", "cwd"])
+            self.assertEqual(proof["process"]["pid"], broker.pid)
+            self.assertEqual(proof["process"]["uid"], [65534] * 4)
+            self.assertEqual(proof["process"]["gid"], [65534] * 4)
+            self.assertNotIn("exe", proof["process"])
+            self.assertNotIn("cwd", proof["process"])
+            self.assertEqual(proof["incarnation"]["pid"], broker.pid)
+            self.assertGreater(proof["incarnation"]["startTicks"], 0)
+        finally:
+            broker.terminate()
+            try:
+                broker.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                broker.kill()
+                broker.wait(timeout=5)
+
     def test_real_snapshot_cli_account_path_has_no_nested_sudo(self):
         if os.geteuid() != 0:
             self.fail("Linux account-path proof must run as root in credential-free CI")

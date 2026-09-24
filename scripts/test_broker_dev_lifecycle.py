@@ -164,8 +164,10 @@ def accepted_fixture() -> dict:
         "pid": 96650, "uid": [999] * 4, "gid": [987] * 4,
         "groups": [987], "ppid": 1,
         "cmdline": "/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server",
-        "exe": "/usr/bin/python3.12",
-        "cwd": str(gate.ROOT / "releases" / gate.RELEASE_SHA),
+    }
+    snapshot["runtimeIncarnations"] = {
+        "broker": {"pid": 96650, "bootId": gate.ACCEPTED_BROKER_BOOT_ID,
+                   "startTicks": gate.ACCEPTED_BROKER_START_TICKS},
     }
     snapshot["api"]["custody"][str(gate.API_ROOT / "data/lilith-dev.db")].update(
         {"uid": 1001, "gid": 1002, "mode": 0o644})
@@ -405,16 +407,23 @@ class LifecyclePolicyTests(unittest.TestCase):
         )
         self._reject_accepted(mutations)
 
-    def test_accepted_pid_is_observation_not_durable_identity(self):
+    def test_accepted_broker_incarnation_is_pinned_but_not_durable_identity(self):
         snapshot = accepted_fixture()
         original_digest = snapshot["stage2AcceptedBaseline"]["stage2AcceptedBaselineDigest"]
         snapshot["units"][gate.SERVICE]["MainPID"] = "96651"
         snapshot["broker_processes"] = [96651]
         snapshot["broker_uid_processes"] = [96651]
         snapshot["brokerProcess"]["pid"] = 96651
-        gate.validate_accepted(snapshot)
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_accepted(snapshot)
         self.assertEqual(gate.stage2_accepted_baseline(snapshot)["stage2AcceptedBaselineDigest"],
                          original_digest)
+
+    def test_accepted_broker_start_ticks_cannot_drift(self):
+        snapshot = accepted_fixture()
+        snapshot["runtimeIncarnations"]["broker"]["startTicks"] += 1
+        with self.assertRaises(gate.LifecycleError):
+            gate.validate_accepted(snapshot)
 
     def _reject_accepted(self, mutations):
         for mutation in mutations:

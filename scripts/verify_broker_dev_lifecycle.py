@@ -145,6 +145,8 @@ ACCEPTED_OWNER_DB_SHA = "939b5a0e4c5471bac5843f9c17de9548494ab49bfa54a062994f579
 ACCEPTED_EVIDENCE_DB_SHA = "a4ff3d076a51019a6287c2a492a44e755dae5e9a7da55c9d9e942d9b9362c785"
 ACCEPTED_SERVICE_INVOCATION = "5c1eb955e2dc44e78139c416f0c9469a"
 ACCEPTED_SERVICE_STARTED = "Thu 2026-09-24 06:51:22 UTC"
+ACCEPTED_BROKER_BOOT_ID = "24d1771de1b54e5f816dda08ad8b367a"
+ACCEPTED_BROKER_START_TICKS = 91036598
 ACCEPTED_FILES = {
     **FILE_CONTRACT,
     str(OWNER_DB): (ACCEPTED_OWNER_DB_SHA, 999, 987, 0o600),
@@ -705,9 +707,11 @@ def validate_accepted(snapshot: dict) -> None:
         "pid": int(pid), "uid": [999] * 4, "gid": [987] * 4,
         "groups": [987], "ppid": 1,
         "cmdline": "/opt/lilith-memory-broker/current/venv/bin/python -B -m lilith_memory_broker.server",
-        "exe": "/usr/bin/python3.12",
-        "cwd": str(ROOT / "releases" / RELEASE_SHA),
     }, "ACCEPTED_BROKER_PROCESS_IDENTITY")
+    require(snapshot.get("runtimeIncarnations", {}).get("broker") == {
+        "pid": int(pid), "bootId": ACCEPTED_BROKER_BOOT_ID,
+        "startTicks": ACCEPTED_BROKER_START_TICKS,
+    }, "ACCEPTED_BROKER_INCARNATION")
     api = snapshot.get("api", {})
     require(api.get("ActiveState") == "active" and api.get("NRestarts") == "0"
             and str(api.get("MainPID", "")).isdigit() and int(api["MainPID"]) > 0
@@ -1085,8 +1089,6 @@ def _broker_process(pid: int) -> dict:
         "groups": [int(x) for x in status["Groups"].split()],
         "ppid": int(status["PPid"]),
         "cmdline": (proc / "cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8").strip(),
-        "exe": os.readlink(proc / "exe"),
-        "cwd": os.readlink(proc / "cwd"),
     }
 
 
