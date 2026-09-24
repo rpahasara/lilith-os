@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import copy
 import json
 import os
 from pathlib import Path
@@ -13,12 +14,18 @@ from unittest.mock import MagicMock, patch
 import uuid
 
 from scripts import memory_broker_stage2_control as stage2
+from scripts import verify_broker_dev_lifecycle as lifecycle
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class Stage2ControlContracts(unittest.TestCase):
+    @staticmethod
+    def retry_snapshot():
+        return {"schemaVersion": 1, "historicalBaselineDigest": stage2.HISTORICAL_DIGEST,
+                "historicalAuthorizationId": stage2.HISTORICAL_AUTHORIZATION}
+
     @staticmethod
     def api_fields(pid=88740, started="Wed 2026-09-23 19:28:51 UTC"):
         return {
@@ -40,17 +47,28 @@ class Stage2ControlContracts(unittest.TestCase):
         def file_digest(path):
             return hashes.get(path, stage2.API_APP_SHA if path == stage2.API_APP
                               else stage2.API_FILES[path])
+        incarnation = {"bootId": "24d1771d-e1b5-4e5f-816d-da08ad8b367a",
+                       "startTicks": 86941441 if fields["MainPID"] == "88740" else 80000000,
+                       "executable": "/usr/bin/python3.12",
+                       "cmdline": [stage2.API_EXECUTABLE.replace("/uvicorn", "/python"),
+                                   stage2.API_EXECUTABLE, "app:app", "--host", "0.0.0.0",
+                                   "--port", "8765"]}
         with patch.object(stage2, "show", return_value=fields), \
              patch.object(stage2, "digest", side_effect=file_digest), \
-             patch.object(stage2, "api_health", return_value=health):
+             patch.object(stage2, "api_health", return_value=health), \
+             patch.object(stage2, "process_incarnation", return_value=incarnation), \
+             patch.object(stage2.socket, "getfqdn", return_value=stage2.HOSTNAME), \
+             patch.object(stage2.Path, "read_text", return_value=stage2.MACHINE_ID):
             return stage2.capture_api_runtime_baseline(captured_at="2026-09-23T19:30:00Z")
 
     def test_marker_is_closed_fresh_and_not_stage_iii(self):
         issued = datetime(2026, 9, 23, 16, 0, tzinfo=timezone.utc)
         baseline = self.api_snapshot()
-        value = stage2.marker_value(issued, "a" * 32, baseline)
-        self.assertEqual(value["schemaVersion"], 2)
+        retry = self.retry_snapshot()
+        value = stage2.marker_value(issued, "a" * 32, baseline, retry)
+        self.assertEqual(value["schemaVersion"], 3)
         self.assertEqual(value["apiRuntimeBaseline"], baseline)
+        self.assertEqual(value["retryBaselineDigest"], stage2.baseline_digest(retry))
         self.assertEqual(value["apiBaselineDigest"], stage2.baseline_digest(baseline))
         self.assertEqual(value["purpose"], stage2.PURPOSE)
         self.assertEqual(value["stage"], "B1B2B_II / ACTIVATE_AND_ISOLATION_TEST")
@@ -73,8 +91,8 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertNotEqual(stage2.baseline_digest(old), stage2.baseline_digest(new))
         self.assertEqual(new["appSha256"], stage2.API_APP_SHA)
         self.assertEqual(new["NRestarts"], 0)
-        self.assertEqual(stage2.baseline_digest(new),
-                         "6892d54c5bbdd8dda7f3378b8c8c1e22d660cac04fc902833df171458ae34316")
+        self.assertEqual(new["schemaVersion"], 2)
+        self.assertEqual(new["processIncarnation"]["startTicks"], 86941441)
         self.assertNotIn("API_PID", vars(stage2))
         self.assertNotIn("API_START", vars(stage2))
 
@@ -82,7 +100,10 @@ class Stage2ControlContracts(unittest.TestCase):
         with patch.object(stage2, "show", return_value=self.api_fields()) as selected, \
              patch.object(stage2, "digest", side_effect=lambda path: stage2.API_APP_SHA
                           if path == stage2.API_APP else stage2.API_FILES[path]), \
-             patch.object(stage2, "api_health", return_value={"status": "ok", "database": True}):
+             patch.object(stage2, "api_health", return_value={"status": "ok", "database": True}), \
+             patch.object(stage2, "process_incarnation", return_value={}), \
+             patch.object(stage2.socket, "getfqdn", return_value=stage2.HOSTNAME), \
+             patch.object(stage2.Path, "read_text", return_value=stage2.MACHINE_ID):
             stage2.capture_api_runtime_baseline(captured_at="2026-09-23T19:30:00Z")
             self.assertEqual(selected.call_args.args[0], "lilith-os-api-dev.service")
         wrong = {
@@ -104,7 +125,7 @@ class Stage2ControlContracts(unittest.TestCase):
             ({"Group": "root"}, "API_SERVICE_DRIFT"),
             ({"WorkingDirectory": "/wrong"}, "API_SERVICE_DRIFT"),
             ({"FragmentPath": "/wrong"}, "API_SERVICE_DRIFT"),
-            ({"ExecStart": "{ path=/wrong ; argv[]=/wrong ;"}, "API_SERVICE_DRIFT"),
+            ({"ExecStart": "{ path=/wrong ; argv[]=/wrong ;"}, "API_EXECSTART_MALFORMED"),
             ({"NRestarts": "1"}, "API_SERVICE_DRIFT"),
             ({"MainPID": "abc"}, "API_SERVICE_DRIFT"),
         ):
@@ -124,48 +145,246 @@ class Stage2ControlContracts(unittest.TestCase):
         with patch.object(stage2, "api_health", side_effect=stage2.Stage2Error("API_UNHEALTHY")), \
              patch.object(stage2, "show", return_value=self.api_fields()), \
              patch.object(stage2, "digest", side_effect=lambda path: stage2.API_APP_SHA
-                          if path == stage2.API_APP else stage2.API_FILES[path]):
+                          if path == stage2.API_APP else stage2.API_FILES[path]), \
+             patch.object(stage2, "process_incarnation", return_value={}), \
+             patch.object(stage2.socket, "getfqdn", return_value=stage2.HOSTNAME), \
+             patch.object(stage2.Path, "read_text", return_value=stage2.MACHINE_ID):
             with self.assertRaisesRegex(stage2.Stage2Error, "API_UNHEALTHY"):
                 stage2.capture_api_runtime_baseline()
 
     def test_authorized_baseline_detects_toctou_and_post_run_change(self):
         authorized = self.api_snapshot()
-        with patch.object(stage2, "capture_api_runtime_baseline", return_value=authorized):
+        with patch.object(stage2, "assert_host"), \
+             patch.object(stage2, "capture_api_runtime_baseline", return_value=authorized):
             self.assertEqual(stage2.require_api_baseline_unchanged(authorized), authorized)
         for changed in (
             {"MainPID": 88741}, {"ExecMainStartTimestamp": "later"},
+            {"processIncarnation": {**authorized["processIncarnation"], "startTicks": 1}},
             {"NRestarts": 1}, {"appSha256": "0" * 64},
             {"serviceUnitSha256": "0" * 64}, {"health": {"status": "fail"}},
-            {"custodySha256": {}},
+            {"custodySha256": {}}, {"configuredExecStart": {}}, {"host": {}},
         ):
             with self.subTest(changed=changed):
-                with patch.object(stage2, "capture_api_runtime_baseline",
+                with patch.object(stage2, "assert_host"), \
+                     patch.object(stage2, "capture_api_runtime_baseline",
                                   return_value={**authorized, **changed}):
                     with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
                         stage2.require_api_baseline_unchanged(authorized)
         self.assertLess(stage2.execute.__code__.co_firstlineno,
                         stage2.failure_stop.__code__.co_firstlineno)
 
+    def test_api_v2_ignores_only_execstart_bookkeeping(self):
+        before = self.api_snapshot()
+        fields = self.api_fields()
+        fields["ExecStart"] = fields["ExecStart"].replace(
+            "start_time=[Wed 2026-09-23 19:28:51 UTC]", "start_time=[n/a]").replace(
+            "pid=88740", "pid=0")
+        after = self.api_snapshot(fields)
+        self.assertEqual(before, after)
+        self.assertEqual(before["MainPID"], 88740)
+        self.assertEqual(before["processIncarnation"]["startTicks"], 86941441)
+        self.assertEqual(before["NRestarts"], 0)
+        self.assertNotIn("execStart", before)
+        for changed in ("/wrong app:app --host 0.0.0.0 --port 8765",
+                        stage2.API_EXECUTABLE + " other:app --host 0.0.0.0 --port 8765"):
+            with self.subTest(changed=changed):
+                altered = {**fields, "ExecStart": fields["ExecStart"].replace(
+                    stage2.API_COMMAND, changed)}
+                with self.assertRaisesRegex(stage2.Stage2Error,
+                                            "API_CONFIGURED_EXECSTART_DRIFT"):
+                    self.api_snapshot(altered)
+        with patch.object(stage2, "assert_host"), \
+             patch.object(stage2, "capture_api_runtime_baseline",
+                          return_value={**before, "processIncarnation":
+                                        {**before["processIncarnation"], "startTicks": 86941442}}):
+            with self.assertRaisesRegex(stage2.Stage2Error, "API_BASELINE_CHANGED"):
+                stage2.require_api_baseline_unchanged(before)
+
+    def test_actual_process_incarnation_reads_kernel_start_and_rejects_cmdline_drift(self):
+        stat_line = "88740 (uvicorn) " + " ".join(["S"] + ["0"] * 18 + ["86941441"])
+        command = [stage2.API_EXECUTABLE.replace("/uvicorn", "/python"),
+                   stage2.API_EXECUTABLE, "app:app", "--host", "0.0.0.0",
+                   "--port", "8765"]
+        def read_text(path, *_):
+            return stat_line if path.name == "stat" else \
+                "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
+        with patch.object(stage2.Path, "read_text", read_text), \
+             patch.object(stage2.Path, "read_bytes",
+                          return_value="\0".join(command).encode() + b"\0"), \
+             patch.object(stage2.os, "readlink", return_value="/usr/bin/python3.12"):
+            self.assertEqual(stage2.process_incarnation(88740)["startTicks"], 86941441)
+        with patch.object(stage2.Path, "read_text", read_text), \
+             patch.object(stage2.Path, "read_bytes", return_value=b"/wrong\0"), \
+             patch.object(stage2.os, "readlink", return_value="/usr/bin/python3.12"):
+            with self.assertRaisesRegex(stage2.Stage2Error, "API_PROCESS_COMMAND_DRIFT"):
+                stage2.process_incarnation(88740)
+
+    def test_retry_deltas_preserve_history_and_reject_unexplained_rows(self):
+        new_ids = ["och.new" + str(i) for i in range(12)]
+        states = {key: "CONSUMED" if i == 0 else "EXPIRED" if i == 2 else "CANCELLED"
+                  for i, key in enumerate(new_ids)}
+        old_claim = ["och.old", "a" * 64, "b" * 64, "ocred.synthetic",
+                     "SYNTHETIC_EVIDENCE_COMMITTED", stage2.HISTORICAL_EVIDENCE]
+        new_claim = [new_ids[0], "c" * 64, "d" * 64, "ocred.synthetic",
+                     "SYNTHETIC_EVIDENCE_COMMITTED", "se.new"]
+        old_evidence = ["och.old", stage2.HISTORICAL_EVIDENCE, "a" * 64,
+                        "b" * 64, "owner.ravindu.v1", "ocred.synthetic",
+                        "fixture.b1b1.synthetic-codename.v1", "SYNTHETIC_COMMITTED"]
+        new_evidence = [new_ids[0], "se.new", "c" * 64, "d" * 64,
+                        "owner.ravindu.v1", "ocred.synthetic",
+                        "fixture.b1b1.synthetic-codename.v1", "SYNTHETIC_COMMITTED"]
+        old_rows = {table: {"och.old": "a" * 64} for _, table in stage2.HISTORY_TABLES}
+        baseline = {"schemaVersion": 1,
+                    "historicalBaselineDigest": stage2.HISTORICAL_DIGEST,
+                    "rowHashes": old_rows,
+                    "requestDigests": {"och.old": "a" * 64},
+                    "staticRowHashes": {"broker_schema_v1": ["x"]},
+                    "schemaSqlSha256": {"owner": "x", "evidence": "y"},
+                    "counts": {"owner": stage2.HISTORICAL_OWNER_COUNTS,
+                               "evidence": stage2.HISTORICAL_EVIDENCE_COUNTS}}
+        current = {"rowHashes": {table: {"och.old": "a" * 64,
+                                      **({key: "b" * 64 for key in new_ids}
+                                         if table in ("owner_proof_challenge_v1",
+                                                      "owner_request_v1") else
+                                         {new_ids[0]: "b" * 64})}
+                                 for table in old_rows},
+                   "challengeStates": {"och.old": "CONSUMED", **states},
+                   "requestDigests": {"och.old": "a" * 64,
+                                      **{key: "c" * 64 for key in new_ids}},
+                   "claims": [old_claim, new_claim],
+                   "evidenceRows": [old_evidence, new_evidence],
+                   "staticRowHashes": baseline["staticRowHashes"],
+                   "schemaSqlSha256": baseline["schemaSqlSha256"],
+                   "counts": {"owner": {**stage2.HISTORICAL_OWNER_COUNTS,
+                                        "owner_proof_challenge_v1": 24,
+                                        "owner_request_v1": 24,
+                                        "synthetic_claim_v1": 2},
+                              "evidence": {**stage2.HISTORICAL_EVIDENCE_COUNTS,
+                                           "synthetic_evidence_v1": 2}}}
+        with patch.object(stage2, "digest", return_value=stage2.HISTORICAL_USED_SHA), \
+             patch.object(stage2, "snapshot_retry_rows", return_value=(current, {})):
+            result = stage2.verify_retry_deltas(baseline, states, new_ids[0])
+            self.assertEqual(result["historicalAttempt1"]["syntheticEvidenceId"],
+                             stage2.HISTORICAL_EVIDENCE)
+            self.assertEqual(result["currentRetry"]["evidenceAdded"], 1)
+            mutated = copy.deepcopy(current)
+            mutated["rowHashes"]["owner_request_v1"]["och.old"] = "0" * 64
+            with patch.object(stage2, "snapshot_retry_rows", return_value=(mutated, {})):
+                with self.assertRaisesRegex(stage2.Stage2Error, "HISTORICAL_ROW_MUTATION"):
+                    stage2.verify_retry_deltas(baseline, states, new_ids[0])
+            unexplained = copy.deepcopy(current)
+            unexplained["challengeStates"]["och.unexplained"] = "CANCELLED"
+            with patch.object(stage2, "snapshot_retry_rows", return_value=(unexplained, {})):
+                with self.assertRaisesRegex(stage2.Stage2Error,
+                                            "RETRY_CHALLENGE_REQUEST_DELTA"):
+                    stage2.verify_retry_deltas(baseline, states, new_ids[0])
+            relinked = copy.deepcopy(current)
+            relinked["evidenceRows"][1][1] = stage2.HISTORICAL_EVIDENCE
+            with patch.object(stage2, "snapshot_retry_rows", return_value=(relinked, {})):
+                with self.assertRaisesRegex(stage2.Stage2Error, "RETRY_EVIDENCE_DELTA"):
+                    stage2.verify_retry_deltas(baseline, states, new_ids[0])
+
+    def test_exact_failed_inert_history_is_retry_baseline_input(self):
+        snapshot = {"counts": {"owner": lifecycle.FAILED_OWNER_COUNTS,
+                               "evidence": lifecycle.FAILED_EVIDENCE_COUNTS},
+                    "challengeStates": lifecycle.FAILED_CHALLENGES,
+                    "requestDigests": lifecycle.FAILED_REQUESTS,
+                    "claims": [[lifecycle.FAILED_CONSUMED_CHALLENGE,
+                                lifecycle.FAILED_REQUEST_DIGEST,
+                                lifecycle.FAILED_ACTION_DIGEST, "ocred.synthetic",
+                                "SYNTHETIC_EVIDENCE_COMMITTED",
+                                stage2.HISTORICAL_EVIDENCE]],
+                    "evidenceRows": [[lifecycle.FAILED_CONSUMED_CHALLENGE,
+                                      stage2.HISTORICAL_EVIDENCE,
+                                      lifecycle.FAILED_REQUEST_DIGEST,
+                                      lifecycle.FAILED_ACTION_DIGEST,
+                                      "owner.ravindu.v1", "ocred.synthetic",
+                                      "fixture.b1b1.synthetic-codename.v1",
+                                      "SYNTHETIC_COMMITTED"]],
+                    "rowHashes": {}, "staticRowHashes": {}, "schemaSqlSha256": {}}
+        used = MagicMock()
+        used.lstat.return_value = os.stat_result((0o100600, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        used.read_bytes.return_value = json.dumps({
+            "authorizationId": stage2.HISTORICAL_AUTHORIZATION,
+            "schemaVersion": 2, "stage": stage2.STAGE,
+            "authorityMode": "SYNTHETIC_ONLY", "canonicalCapability": "DISABLED",
+            "releaseSha": stage2.RELEASE, "ownerActor": stage2.OWNER}).encode()
+        run = MagicMock()
+        run.lstat.return_value = os.stat_result((0o040710, 0, 0, 0, 0, 988, 0, 0, 0, 0))
+        run.iterdir.return_value = iter(())
+        def file_digest(path):
+            return {stage2.OWNER_DB: stage2.HISTORICAL_OWNER_DB_SHA,
+                    stage2.EVIDENCE_DB: stage2.HISTORICAL_EVIDENCE_DB_SHA,
+                    used: stage2.HISTORICAL_USED_SHA}[path]
+        def unit_fields(unit, *_):
+            return ({"ActiveState": "inactive", "SubState": "dead",
+                     "MainPID": "0", "UnitFileState": "static"} if unit == stage2.SERVICE else
+                    {"ActiveState": "inactive", "SubState": "dead",
+                     "UnitFileState": "disabled"})
+        with patch.object(stage2, "HISTORICAL_USED", used), \
+             patch.object(stage2, "RUN", run), \
+             patch.object(stage2, "digest", side_effect=file_digest), \
+             patch.object(stage2, "verify_historical_sidecars"), \
+             patch.object(stage2, "snapshot_retry_rows", return_value=(snapshot, {})), \
+             patch.object(stage2, "show", side_effect=unit_fields):
+            baseline = stage2.capture_retry_baseline()
+            self.assertEqual(baseline["historicalBaselineDigest"],
+                             stage2.HISTORICAL_DIGEST)
+            self.assertEqual(baseline["historicalAuthorizationId"],
+                             stage2.HISTORICAL_AUTHORIZATION)
+            tampered = copy.deepcopy(snapshot)
+            tampered["requestDigests"][lifecycle.FAILED_CONSUMED_CHALLENGE] = "0" * 64
+            with patch.object(stage2, "snapshot_retry_rows", return_value=(tampered, {})):
+                with self.assertRaisesRegex(stage2.Stage2Error, "HISTORICAL_DIGEST_DRIFT"):
+                    stage2.capture_retry_baseline()
+
+    def test_old_authorization_cannot_be_reissued(self):
+        marker = MagicMock()
+        marker.exists.return_value = marker.is_symlink.return_value = False
+        used = MagicMock()
+        used.exists.return_value = used.is_symlink.return_value = False
+        with patch.object(stage2, "preflight", return_value={
+                "apiRuntimeBaseline": self.api_snapshot(),
+                "retryBaseline": self.retry_snapshot()}), \
+             patch.object(stage2, "MARKER", marker), \
+             patch.object(stage2, "USED", used), \
+             patch.object(stage2.uuid, "uuid4", return_value=MagicMock(hex=stage2.HISTORICAL_AUTHORIZATION)), \
+             patch.object(stage2.os, "open") as opening:
+            with self.assertRaisesRegex(stage2.Stage2Error, "OLD_AUTHORIZATION_REUSE"):
+                stage2.authorize()
+            opening.assert_not_called()
+
     def test_execute_rechecks_before_marker_consumption_and_after_experiment(self):
         baseline = self.api_snapshot()
+        retry = self.retry_snapshot()
         marker = {"authorizationId": "a" * 32, "apiRuntimeBaseline": baseline,
-                  "apiBaselineDigest": stage2.baseline_digest(baseline)}
+                  "apiBaselineDigest": stage2.baseline_digest(baseline),
+                  "retryBaseline": retry,
+                  "retryBaselineDigest": stage2.baseline_digest(retry)}
         preflight = {"status": "STAGE_II_PREFLIGHT_OK",
                      "apiRuntimeBaseline": baseline,
-                     "apiBaselineDigest": stage2.baseline_digest(baseline)}
+                     "apiBaselineDigest": stage2.baseline_digest(baseline),
+                     "retryBaseline": retry,
+                     "retryBaselineDigest": stage2.baseline_digest(retry)}
         operations = []
         with patch.object(stage2, "verify_marker", return_value=marker), \
              patch.object(stage2, "preflight", return_value=preflight), \
+             patch.object(stage2, "assert_host"), \
+             patch.object(stage2, "capture_retry_baseline", return_value=retry), \
              patch.object(stage2.os, "replace", side_effect=lambda *_: operations.append("consume")), \
              patch.object(stage2, "run_fixed", side_effect=lambda *_: operations.append("mutation")), \
              patch.object(stage2, "assert_broker_hardening", return_value={}), \
              patch.object(stage2, "inspect_run_directory", return_value={}), \
              patch.object(stage2, "inspect_socket", return_value={}), \
              patch.object(stage2, "assert_unit_state", return_value=({"MainPID": "111"}, {})), \
-             patch.object(stage2, "relay", return_value={"status": "HEALTH_OK"}), \
+             patch.object(stage2, "relay", side_effect=lambda *_: operations.append("health") or
+                          {"status": "HEALTH_OK"}), \
              patch.object(stage2, "inspect_process", return_value={}), \
-             patch.object(stage2, "trace_peer_uid", return_value={}), \
-             patch.object(stage2, "negative_peer", return_value={}), \
+             patch.object(stage2, "trace_peer_uid",
+                          side_effect=lambda *_: operations.append("SO_PEERCRED") or {}), \
+             patch.object(stage2, "negative_peer", side_effect=lambda user:
+                          operations.append("negative:" + user) or
+                          {"layer": "filesystem_or_socket"}), \
              patch.object(stage2, "probe_equivalent_sandbox", return_value={}), \
              patch.object(stage2, "assert_relay_restrictions", return_value={}), \
              patch.object(stage2, "functional_tests", return_value={}), \
@@ -174,6 +393,11 @@ class Stage2ControlContracts(unittest.TestCase):
                               side_effect=lambda **_: operations.append("recheck") or baseline):
                 self.assertEqual(stage2.execute()["apiUnchanged"], True)
             self.assertEqual(operations[:3], ["recheck", "consume", "mutation"])
+            self.assertLess(operations.index("negative:lilith"), operations.index("health"))
+            self.assertLess(operations.index("negative:nobody"), operations.index("health"))
+            self.assertLess(operations.index("health"), operations.index("SO_PEERCRED"))
+            self.assertLess(operations.index("SO_PEERCRED"),
+                            operations.index("negative:lilith-memory-broker"))
             self.assertEqual(operations[-1], "recheck")
             stopped.assert_not_called()
 
@@ -194,8 +418,9 @@ class Stage2ControlContracts(unittest.TestCase):
 
     def test_marker_rejects_old_schema_and_baseline_tamper(self):
         baseline = self.api_snapshot()
+        retry = self.retry_snapshot()
         issued = datetime(2026, 9, 23, 19, 30, 1, tzinfo=timezone.utc)
-        value = stage2.marker_value(issued, "a" * 32, baseline)
+        value = stage2.marker_value(issued, "a" * 32, baseline, retry)
         marker = MagicMock()
         marker.lstat.return_value = os.stat_result((0o100600, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         used = MagicMock()
@@ -204,8 +429,11 @@ class Stage2ControlContracts(unittest.TestCase):
         with patch.object(stage2, "MARKER", marker), patch.object(stage2, "USED", used):
             marker.read_bytes.return_value = json.dumps(value).encode()
             self.assertEqual(stage2.verify_marker(now=issued), value)
-            for bad in ({**value, "schemaVersion": 1},
-                        {**value, "apiBaselineDigest": "0" * 64}):
+            for bad in ({**value, "schemaVersion": 2},
+                        {**value, "apiBaselineDigest": "0" * 64},
+                        {**value, "retryBaselineDigest": "0" * 64},
+                        {**value, "authorizationId": stage2.HISTORICAL_AUTHORIZATION},
+                        {**value, "apiRuntimeBaseline": {**baseline, "schemaVersion": 1}}):
                 marker.read_bytes.return_value = json.dumps(bad).encode()
                 with self.assertRaises(stage2.Stage2Error):
                     stage2.verify_marker(now=issued)
