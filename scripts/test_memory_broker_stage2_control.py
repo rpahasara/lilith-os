@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
+import base64
 import copy
+import gzip
+import hashlib
+import inspect
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import time
 import unittest
@@ -17,6 +23,7 @@ import uuid
 
 from scripts import memory_broker_stage2_control as stage2
 from scripts import verify_broker_dev_lifecycle as lifecycle
+from scripts.test_broker_candidate_dev_snapshot import accepted_result
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -777,7 +784,19 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertIn("failure-stop", privileged)
         self.assertIn("audit_core_api_production_read_only.py", privileged)
         self.assertNotIn("systemctl enable", workflow)
-        self.assertNotIn("Stage III", workflow)
+        stage3_install = workflow.split("\n  stage3_inactive_install:\n", 1)[1].split(
+            "\n  stage3_issue_authorization:\n", 1)[0]
+        stage3_authorize = workflow.split("\n  stage3_issue_authorization:\n", 1)[1]
+        for job in (stage3_install, stage3_authorize):
+            self.assertIn("github.event_name == 'workflow_dispatch'", job)
+            self.assertIn("github.actor == 'rpahasara'", job)
+            self.assertIn("github.ref == 'refs/heads/main'", job)
+            self.assertIn("git merge-base --is-ancestor", job)
+            self.assertIn("instances describe", job)
+        self.assertIn("stage3-install-inactive", stage3_install)
+        self.assertIn("stage3-issue-authorization", stage3_authorize)
+        self.assertNotIn("stage3-prepare-package", workflow)
+        self.assertNotIn("stage3-", registration)
         self.assertNotIn("deploy.yml", workflow)
 
     @unittest.skipUnless(os.name == "posix", "Linux systemd option check")
@@ -826,6 +845,102 @@ class Stage2ControlContracts(unittest.TestCase):
         stdout, stderr = runner.communicate(timeout=10)
         self.assertEqual(runner.returncode, 0, stderr)
         self.assertEqual(stdout, "PROBE_OK")
+
+
+class Stage3A2PreparationContracts(unittest.TestCase):
+    def test_accepted_snapshot_is_exact_and_read_only(self):
+        value = accepted_result()
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False).encode()
+        frame = (stage2.STAGE3_FRAME + str(len(raw)).encode() + b":" +
+                 hashlib.sha256(raw).hexdigest().encode() + b":" +
+                 base64.b64encode(raw) + b"\n")
+        with patch.object(stage2, "assert_host"), \
+             patch.object(stage2, "run_fixed",
+                          return_value=MagicMock(stdout=frame.decode())), \
+             patch.object(stage2, "STAGE3_ACCEPTED_SNAPSHOT_SHA",
+                          value["completeDigestSha256"]):
+            self.assertEqual(stage2.stage3_accepted_snapshot(), value)
+        with self.assertRaisesRegex(stage2.Stage2Error,
+                                    "STAGE3_SNAPSHOT_FRAME_COUNT"):
+            stage2.stage3_decode_snapshot_frame(frame + frame)
+
+    def test_archive_member_traversal_and_duplicate_are_rejected(self):
+        for names in (("../escape",), ("assets/safe", "assets/safe")):
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+                for name in names:
+                    data = b"fixed"
+                    item = tarfile.TarInfo(name)
+                    item.size = len(data)
+                    archive.addfile(item, io.BytesIO(data))
+            raw = buffer.getvalue()
+            with self.subTest(names=names), \
+                 patch.object(stage2, "STAGE3_ARCHIVE_BYTES", len(raw)), \
+                 patch.object(stage2, "STAGE3_ARCHIVE_SHA",
+                              hashlib.sha256(raw).hexdigest()):
+                with self.assertRaisesRegex(stage2.Stage2Error,
+                                            "STAGE3_UNSAFE_ARCHIVE_MEMBER"):
+                    stage2.stage3_payloads(raw)
+
+    def test_authorization_is_exact_and_precedes_short_lived_proposal(self):
+        now = datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc)
+        marker = stage2.stage3_authorization_value(now, "a" * 32)
+        self.assertEqual(marker["instrumentedReleaseId"], stage2.STAGE3_RELEASE)
+        self.assertEqual(marker["archiveSha256"], stage2.STAGE3_ARCHIVE_SHA)
+        self.assertEqual(marker["expiresAt"], "2026-09-25T10:10:00Z")
+        challenge = {
+            "ownerPrincipal": "user:synthetic-owner@example.invalid",
+            "challengeId": "challenge.a2.test", "requestDigest": "b" * 64,
+            "actionDigest": "c" * 64, "expiresAt": "2026-09-25T10:00:45Z",
+        }
+        assertion = {"credentialRecordId": "ocred.synthetic",
+                     "credentialId": "a", "clientDataJSON": "b",
+                     "authenticatorData": "c", "signature": "d"}
+        proposal = stage2.stage3_arm_proposal(
+            marker, challenge, assertion, now=now, nonce="d" * 64)
+        arm = proposal["arm"]
+        self.assertEqual(set(arm), {
+            "schemaVersion", "experimentId", "stage", "faultPoint",
+            "deploymentEnvironment", "authorityMode", "stateProfile",
+            "canonicalCapability", "logicalOwnerId", "accessIdentity",
+            "credentialRecordId", "fixtureId", "fixtureFingerprint",
+            "instrumentedReleaseId", "stage2AcceptedBaselineDigest",
+            "stage3AuthorizationId", "challengeId", "requestDigest",
+            "actionDigest", "issuedAt", "expiresAt", "armNonce",
+        })
+        self.assertEqual(arm["stage3AuthorizationId"], "a" * 32)
+        self.assertEqual(arm["challengeId"], challenge["challengeId"])
+        self.assertEqual(arm["requestDigest"], challenge["requestDigest"])
+        self.assertEqual(arm["actionDigest"], challenge["actionDigest"])
+        self.assertEqual(arm["expiresAt"], "2026-09-25T10:00:30Z")
+        self.assertFalse(proposal["armWritten"])
+        self.assertFalse(proposal["proofConsumed"])
+        with self.assertRaisesRegex(stage2.Stage2Error,
+                                    "STAGE3_PROPOSAL_WINDOW_TOO_SHORT"):
+            stage2.stage3_arm_proposal(marker, challenge, assertion,
+                                       now=now + timedelta(seconds=39))
+        with self.assertRaisesRegex(stage2.Stage2Error,
+                                    "STAGE3_PROPOSAL_CHALLENGE_BINDING"):
+            stage2.stage3_arm_proposal(marker,
+                                       {**challenge, "requestDigest": "0"},
+                                       assertion, now=now)
+        with self.assertRaisesRegex(stage2.Stage2Error,
+                                    "STAGE3_PROPOSAL_WINDOW_TOO_SHORT"):
+            stage2.stage3_arm_proposal(
+                {**marker, "archiveSha256": "0" * 64}, challenge,
+                assertion, now=now)
+
+    def test_inactive_path_has_no_activation_or_selector_write(self):
+        source = inspect.getsource(stage2.stage3_install_inactive)
+        self.assertNotIn("systemctl", source)
+        self.assertNotIn("_switch_release", source)
+        self.assertNotIn("os.symlink", source)
+        self.assertNotIn("relay(", source)
+        self.assertNotIn("STAGE3_MARKER.write", source)
+        self.assertNotIn("STAGE3_ARM.write", source)
+        self.assertNotIn("stage3-prepare-package", (ROOT /
+            ".github/workflows/memory-broker-dev-stage2-runtime.yml").read_text())
 
 
 if __name__ == "__main__":

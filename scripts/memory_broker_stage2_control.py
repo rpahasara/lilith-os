@@ -8,17 +8,21 @@ control in the broker release. No command runs without a fresh owner dispatch.
 from __future__ import annotations
 
 import argparse
+import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import socket
 import sqlite3
 import stat
 import subprocess
 import sys
+import tarfile
 import uuid
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -89,6 +93,27 @@ OPTIONAL_CUSTODY = {
     "containment_key": Path("/home/lilith/.hermes/lilith-os-dev/data/legacy_containment.key"),
 }
 META = "http://169.254.169.254/computeMetadata/v1/"
+
+# Stage III-A is a separate, dormant control surface.  In particular, none of
+# these paths or operations is used by the accepted Stage-II dispatcher.
+STAGE3_RELEASE = "4a04f2d09a2b32aecedfe777090fd2e1a27ec909"
+STAGE3_ARCHIVE_SHA = "329e286b09610c6d37dab4b343f26743afa36889870cfb6593ef44f62300b66e"
+STAGE3_MANIFEST_SHA = "784c60d39edbd67b86d670bf568c0d28a1a6eef202c5d19254ec0f6dc74da313"
+STAGE3_ATTESTATION_SHA = "5d5d7d72e9751c1ba8483c146c61be33902bf663b687a598f71816467698ad1b"
+STAGE3_ARCHIVE_BYTES = 5_200_877
+STAGE3_ACCEPTED_SNAPSHOT_SHA = "dff5ccddad5884b57f5cf895a9c86c741077fd21857d6e67de57803e6fde68e5"
+STAGE3_ACCEPTED_BASELINE = "abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a"
+STAGE3_SNAPSHOT_RELEASE = "c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261"
+STAGE3_STAGING = Path("/tmp/lilith-stage3-a2-prep-63AwxRU1")
+STAGE3_FINAL = ROOT / "releases" / STAGE3_RELEASE
+STAGE3_BUILD = ROOT / "releases" / (".stage3-a2-" + STAGE3_RELEASE + ".staging")
+STAGE3_MARKER = CONFIG / "b1b2b-stage3-a2-authorization.json"
+STAGE3_USED = CONFIG / "b1b2b-stage3-a2-authorization.used.json"
+STAGE3_ARM = Path("/run/lilith-memory-stage3/a2-arm.json")
+STAGE3_INVOKER = "/opt/lilith-trusted-controls/broker-snapshot/current/bin/lilith-broker-dev-invocation"
+STAGE3_FRAME = b"LILITH_BROKER_CANDIDATE_DEV_SNAPSHOT_V1:"
+STAGE3_EXPERIMENT = "B1B2B_III_A_A2_V1"
+STAGE3_FAULT = "A2_AFTER_PROOF_CONSUME_BEFORE_CLAIM"
 
 
 class Stage2Error(RuntimeError):
@@ -1061,6 +1086,10 @@ elif scenario=="prepare":
     challenge=value["payload"]["result"]["challenge"]
     P.OwnerMemoryChallengeV1.from_dict(challenge)
     print(json.dumps({"status":"PREPARED","challenge":challenge}))
+elif scenario=="proof":
+    challenge=json.loads(sys.argv[2])
+    P.OwnerMemoryChallengeV1.from_dict(challenge)
+    print(json.dumps({"status":"PROOF_PREPARED","assertion":assertion(challenge)}))
 elif scenario=="confirm":
     challenge=json.loads(sys.argv[2])
     variant=sys.argv[3]
@@ -1093,16 +1122,16 @@ else:
 
 def relay(scenario: str, public_challenge: dict | None = None,
           variant: str = "valid") -> dict:
-    require(scenario in {"health", "prepare", "confirm", "cancel", "forged_identity"},
+    require(scenario in {"health", "prepare", "proof", "confirm", "cancel", "forged_identity"},
             "RELAY_SCENARIO_INVALID")
     args = ["/usr/sbin/runuser", "-u", "lilith-memory-relay", "--",
             "/usr/bin/env", "LILITH_ENV=dev", "PYTHONDONTWRITEBYTECODE=1",
             "PYTHONNOUSERSITE=1",
             str(ROOT / "current/venv/bin/python"), "-B", "-", scenario]
     if public_challenge is not None:
-        require(scenario in {"confirm", "cancel"}, "RELAY_CHALLENGE_UNEXPECTED")
+        require(scenario in {"proof", "confirm", "cancel"}, "RELAY_CHALLENGE_UNEXPECTED")
         args.append(json.dumps(public_challenge, separators=(",", ":"))
-                    if scenario == "confirm" else public_challenge["challengeId"])
+                    if scenario in {"proof", "confirm"} else public_challenge["challengeId"])
     if scenario == "confirm":
         require(variant in {"valid", "origin", "rp", "challenge", "signature",
                             "credential", "up", "uv"}, "ASSERTION_VARIANT_INVALID")
@@ -1426,21 +1455,493 @@ def failure_stop() -> dict:
     return {"status": "STAGE_II_NOT_CONSUMED_NO_SHUTDOWN_NEEDED"}
 
 
+def stage3_decode_snapshot_frame(raw: bytes) -> dict:
+    """Decode only the installed, confined, read-only snapshot protocol."""
+    require(len(raw) <= 3 * 1024 * 1024, "STAGE3_SNAPSHOT_OVERSIZED")
+    frames = [line[len(STAGE3_FRAME):] for line in raw.splitlines()
+              if line.startswith(STAGE3_FRAME)]
+    require(len(frames) == 1, "STAGE3_SNAPSHOT_FRAME_COUNT")
+    try:
+        length, expected, encoded = frames[0].split(b":", 2)
+        require(re.fullmatch(rb"[1-9][0-9]{0,6}", length) is not None and
+                re.fullmatch(rb"[0-9a-f]{64}", expected) is not None,
+                "STAGE3_SNAPSHOT_FRAME_HEADER")
+        data = base64.b64decode(encoded, validate=True)
+        require(len(data) == int(length) and len(data) <= 2 * 1024 * 1024 and
+                hashlib.sha256(data).hexdigest().encode() == expected,
+                "STAGE3_SNAPSHOT_FRAME_DIGEST")
+        value = json.loads(data)
+    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise Stage2Error("STAGE3_SNAPSHOT_FRAME_INVALID") from exc
+    require(isinstance(value, dict) and
+            json.dumps(value, sort_keys=True, separators=(",", ":"),
+                       ensure_ascii=False).encode() == data,
+            "STAGE3_SNAPSHOT_NOT_CANONICAL")
+    return value
+
+
+def stage3_accepted_snapshot() -> dict:
+    """The installed trusted tool validates accepted DEV on Linux, not in a candidate."""
+    assert_host()
+    result = run_fixed("/usr/bin/python3", "-I", "-B", STAGE3_INVOKER,
+                       timeout=120)
+    value = stage3_decode_snapshot_frame(result.stdout.encode("ascii"))
+    require(set(value) == {"schema", "operation", "profile", "toolReleaseId",
+                           "manifestSha256", "acceptedBaselineDigest",
+                           "completeDigestSha256", "validation", "snapshot"} and
+            value["schema"] == "BrokerCandidateDevSnapshotV1" and
+            value["operation"] == "SNAPSHOT_ACCEPTED_STAGE2" and
+            value["profile"] == "POST_STAGE_II_ACCEPTED_V1" and
+            value["validation"] == "PASS" and
+            value["toolReleaseId"] == value["manifestSha256"] == STAGE3_SNAPSHOT_RELEASE and
+            value["acceptedBaselineDigest"] == STAGE3_ACCEPTED_BASELINE and
+            value["completeDigestSha256"] == STAGE3_ACCEPTED_SNAPSHOT_SHA and
+            isinstance(value["snapshot"], dict) and
+            value["snapshot"].get("release", {}).get("candidateSha") == RELEASE and
+            hashlib.sha256(json.dumps(value["snapshot"], sort_keys=True,
+                       separators=(",", ":"), ensure_ascii=False).encode()).hexdigest() ==
+            value["completeDigestSha256"], "STAGE3_ACCEPTED_BASELINE_CHANGED")
+    return value
+
+
+def stage3_staged_archive() -> bytes:
+    """Bind the one transferred archive before parsing any member or mutation."""
+    directory = STAGE3_STAGING.lstat()
+    require(stat.S_ISDIR(directory.st_mode) and
+            stat.S_IMODE(directory.st_mode) == 0o700,
+            "STAGE3_STAGING_CUSTODY")
+    archive = STAGE3_STAGING / "broker-release.tar.gz"
+    attestation = STAGE3_STAGING / "broker-release.attestation.json"
+    for path, limit in ((archive, STAGE3_ARCHIVE_BYTES), (attestation, 4096)):
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
+                0 < info.st_size <= limit, "STAGE3_STAGED_FILE_CUSTODY")
+    require(archive.stat().st_size == STAGE3_ARCHIVE_BYTES,
+            "STAGE3_ARCHIVE_SIZE")
+    stamp = attestation.read_bytes()
+    require(hashlib.sha256(stamp).hexdigest() == STAGE3_ATTESTATION_SHA,
+            "STAGE3_ATTESTATION_IDENTITY")
+    require(json.loads(stamp) == {
+        "schemaVersion": 1,
+        "artifactRole": "lilith-memory-broker-synthetic-dev-release-v1",
+        "candidateSha": STAGE3_RELEASE,
+        "manifestSha256": STAGE3_MANIFEST_SHA,
+        "archiveSha256": STAGE3_ARCHIVE_SHA,
+        "archiveByteSize": STAGE3_ARCHIVE_BYTES,
+    }, "STAGE3_ATTESTATION_CONTRACT")
+    data = archive.read_bytes()
+    require(len(data) == STAGE3_ARCHIVE_BYTES and
+            hashlib.sha256(data).hexdigest() == STAGE3_ARCHIVE_SHA,
+            "STAGE3_ARCHIVE_IDENTITY")
+    return data
+
+
+def stage3_payloads(data: bytes) -> tuple[dict, dict[str, bytes], bytes]:
+    """Never use tar extraction paths; validate every fixed archive member."""
+    require(len(data) == STAGE3_ARCHIVE_BYTES and
+            hashlib.sha256(data).hexdigest() == STAGE3_ARCHIVE_SHA,
+            "STAGE3_ARCHIVE_IDENTITY")
+    members: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        for item in archive:
+            name = item.name
+            require(item.isfile() and not item.issym() and not item.islnk() and
+                    0 < item.size <= 8 * 1024 * 1024 and
+                    name not in members and not name.startswith("/") and
+                    all(part not in ("", ".", "..") for part in name.split("/")),
+                    "STAGE3_UNSAFE_ARCHIVE_MEMBER")
+            stream = archive.extractfile(item)
+            require(stream is not None, "STAGE3_UNREADABLE_ARCHIVE_MEMBER")
+            content = stream.read(8 * 1024 * 1024 + 1)
+            require(len(content) == item.size, "STAGE3_ARCHIVE_MEMBER_SIZE")
+            members[name] = content
+    raw_manifest = members.pop("release-manifest.json", None)
+    require(raw_manifest is not None and len(members) == 23 and
+            hashlib.sha256(raw_manifest).hexdigest() == STAGE3_MANIFEST_SHA,
+            "STAGE3_MANIFEST_IDENTITY")
+    manifest = json.loads(raw_manifest)
+    require(isinstance(manifest, dict) and
+            raw_manifest == (json.dumps(manifest, sort_keys=True,
+                                        separators=(",", ":")) + "\n").encode() and
+            manifest.get("schemaVersion") == 1 and
+            manifest.get("artifactRole") == "lilith-memory-broker-synthetic-dev-release-v1" and
+            manifest.get("candidateSha") == STAGE3_RELEASE and
+            manifest.get("deploymentEnvironment") == "dev" and
+            manifest.get("expectedHost") == INSTANCE and
+            manifest.get("expectedMachineId") == MACHINE_ID,
+            "STAGE3_MANIFEST_CONTRACT")
+    entries = manifest.get("files")
+    require(isinstance(entries, list) and len(entries) == 23 and
+            all(isinstance(item, dict) and set(item) == {"path", "byteSize", "sha256"}
+                for item in entries) and
+            {item["path"] for item in entries} == set(members),
+            "STAGE3_MANIFEST_FILE_SET")
+    for item in entries:
+        content = members[item["path"]]
+        require(item["byteSize"] == len(content) and
+                item["sha256"] == hashlib.sha256(content).hexdigest(),
+                "STAGE3_PAYLOAD_HASH")
+    return manifest, members, raw_manifest
+
+
+def stage3_write_exclusive(path: Path, data: bytes, mode: int = 0o644) -> None:
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chown(path, 0, 0)
+    os.chmod(path, mode)
+
+
+def stage3_install_inactive() -> dict:
+    """Add only an immutable sibling release; never touch current, config or units."""
+    before = stage3_accepted_snapshot()
+    require(os.readlink(ROOT / "current") == f"releases/{RELEASE}" and
+            not STAGE3_FINAL.exists() and not STAGE3_FINAL.is_symlink() and
+            not STAGE3_BUILD.exists() and not STAGE3_BUILD.is_symlink() and
+            not STAGE3_MARKER.exists() and not STAGE3_MARKER.is_symlink() and
+            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink() and
+            not os.path.lexists(STAGE3_ARM), "STAGE3_INACTIVE_INSTALL_PRECONDITION")
+    manifest, payloads, raw_manifest = stage3_payloads(stage3_staged_archive())
+    os.mkdir(STAGE3_BUILD, 0o755)
+    os.chown(STAGE3_BUILD, 0, 0)
+    os.chmod(STAGE3_BUILD, 0o755)
+    for name, content in sorted(payloads.items()):
+        target = STAGE3_BUILD.joinpath(*name.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        stage3_write_exclusive(target, content)
+    stage3_write_exclusive(STAGE3_BUILD / "release-manifest.json", raw_manifest)
+    run_fixed("/usr/bin/python3", "-m", "venv", str(STAGE3_BUILD / "venv"),
+              timeout=120)
+    run_fixed(str(STAGE3_BUILD / "venv/bin/python"), "-m", "pip", "install",
+              "--no-index", "--no-input", "--disable-pip-version-check",
+              "--require-hashes", "--find-links", str(STAGE3_BUILD / "wheels"),
+              "-r", str(STAGE3_BUILD / "requirements.lock"), timeout=120)
+    for item in manifest["files"]:
+        target = STAGE3_BUILD.joinpath(*item["path"].split("/"))
+        info = target.lstat()
+        require(stat.S_ISREG(info.st_mode) and (info.st_uid, info.st_gid) == (0, 0)
+                and stat.S_IMODE(info.st_mode) == 0o644 and
+                target.stat().st_size == item["byteSize"] and
+                digest(target) == item["sha256"], "STAGE3_INSTALLED_PAYLOAD_DRIFT")
+    require((STAGE3_BUILD / "release-manifest.json").read_bytes() == raw_manifest and
+            (STAGE3_BUILD / "venv/bin/python").exists(), "STAGE3_INSTALL_INCOMPLETE")
+    STAGE3_BUILD.rename(STAGE3_FINAL)
+    fsync_directory(ROOT / "releases")
+    after = stage3_accepted_snapshot()
+    require(before["completeDigestSha256"] == after["completeDigestSha256"] and
+            os.readlink(ROOT / "current") == f"releases/{RELEASE}",
+            "STAGE3_INACTIVE_INSTALL_CHANGED_RUNNING_BASELINE")
+    return {"status": "STAGE3_A2_INSTALLED_INACTIVE", "candidateSha": STAGE3_RELEASE,
+            "archiveSha256": STAGE3_ARCHIVE_SHA,
+            "acceptedSnapshotSha256": after["completeDigestSha256"]}
+
+
+def stage3_inactive_preflight() -> dict:
+    stage3_accepted_snapshot()
+    require(os.readlink(ROOT / "current") == f"releases/{RELEASE}" and
+            not STAGE3_FINAL.exists() and not STAGE3_FINAL.is_symlink() and
+            not STAGE3_BUILD.exists() and not STAGE3_BUILD.is_symlink() and
+            not STAGE3_MARKER.exists() and not STAGE3_MARKER.is_symlink() and
+            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink() and
+            not os.path.lexists(STAGE3_ARM), "STAGE3_INACTIVE_PREFLIGHT_STATE")
+    stage3_payloads(stage3_staged_archive())
+    return {"status": "STAGE3_A2_INACTIVE_INSTALL_READY",
+            "candidateSha": STAGE3_RELEASE,
+            "archiveSha256": STAGE3_ARCHIVE_SHA,
+            "acceptedSnapshotSha256": STAGE3_ACCEPTED_SNAPSHOT_SHA}
+
+
+def stage3_verify_candidate_release(*, selected: bool) -> dict:
+    """Verify the installed candidate's custody and bytes in either selector state."""
+    final_info = STAGE3_FINAL.lstat()
+    require(stat.S_ISDIR(final_info.st_mode) and
+            (final_info.st_uid, final_info.st_gid,
+             stat.S_IMODE(final_info.st_mode)) == (0, 0, 0o755) and
+            os.readlink(ROOT / "current") ==
+            f"releases/{STAGE3_RELEASE if selected else RELEASE}" and
+            not STAGE3_BUILD.exists() and not STAGE3_BUILD.is_symlink(),
+            "STAGE3_CANDIDATE_CUSTODY_OR_SELECTOR")
+    manifest_path = STAGE3_FINAL / "release-manifest.json"
+    manifest_info = manifest_path.lstat()
+    require(stat.S_ISREG(manifest_info.st_mode) and
+            (manifest_info.st_uid, manifest_info.st_gid,
+             stat.S_IMODE(manifest_info.st_mode)) == (0, 0, 0o644) and
+            manifest_info.st_nlink == 1, "STAGE3_INSTALLED_MANIFEST_CUSTODY")
+    raw = manifest_path.read_bytes()
+    require(hashlib.sha256(raw).hexdigest() == STAGE3_MANIFEST_SHA,
+            "STAGE3_INSTALLED_MANIFEST_IDENTITY")
+    manifest = json.loads(raw)
+    require(manifest.get("candidateSha") == STAGE3_RELEASE and
+            manifest.get("artifactRole") ==
+            "lilith-memory-broker-synthetic-dev-release-v1" and
+            isinstance(manifest.get("files"), list) and
+            len(manifest["files"]) == 23,
+            "STAGE3_INSTALLED_MANIFEST_CONTRACT")
+    for item in manifest["files"]:
+        require(isinstance(item, dict) and
+                set(item) == {"path", "byteSize", "sha256"} and
+                isinstance(item["path"], str) and
+                all(part not in ("", ".", "..") for part in item["path"].split("/")),
+                "STAGE3_INSTALLED_FILE_SET")
+        path = STAGE3_FINAL
+        for part in item["path"].split("/")[:-1]:
+            path = path / part
+            parent = path.lstat()
+            require(stat.S_ISDIR(parent.st_mode) and
+                    (parent.st_uid, parent.st_gid,
+                     stat.S_IMODE(parent.st_mode)) == (0, 0, 0o755),
+                    "STAGE3_INSTALLED_PARENT_CUSTODY")
+        path = path / item["path"].split("/")[-1]
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and (info.st_uid, info.st_gid) == (0, 0)
+                and stat.S_IMODE(info.st_mode) == 0o644 and info.st_nlink == 1 and
+                info.st_size == item["byteSize"] and
+                digest(path) == item["sha256"], "STAGE3_INSTALLED_PAYLOAD_DRIFT")
+    require((STAGE3_FINAL / "venv/bin/python").exists(),
+            "STAGE3_INSTALLED_VENV_MISSING")
+    return manifest
+
+
+def stage3_verify_inactive_release() -> dict:
+    return stage3_verify_candidate_release(selected=False)
+
+
+def stage3_authorization_value(issued: datetime, authorization_id: str) -> dict:
+    return {
+        "schemaVersion": 1, "recordType": "Stage3A2AuthorizationV1",
+        "purpose": "B1B2B_STAGE3_A2_SINGLE_PREPARATION",
+        "stage": "B1B2B_III_A", "experimentId": STAGE3_EXPERIMENT,
+        "faultPoint": STAGE3_FAULT, "project": PROJECT, "zone": ZONE,
+        "instanceId": INSTANCE_ID, "hostname": HOSTNAME,
+        "machineId": MACHINE_ID, "ownerActor": OWNER,
+        "authorityMode": "SYNTHETIC_ONLY", "canonicalCapability": "DISABLED",
+        "acceptedBrokerRelease": RELEASE,
+        "stage2AcceptedBaselineDigest": STAGE3_ACCEPTED_BASELINE,
+        "acceptedCompleteSnapshotSha256": STAGE3_ACCEPTED_SNAPSHOT_SHA,
+        "instrumentedReleaseId": STAGE3_RELEASE,
+        "archiveSha256": STAGE3_ARCHIVE_SHA,
+        "manifestSha256": STAGE3_MANIFEST_SHA,
+        "authorizationId": authorization_id,
+        "issuedAt": issued.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "expiresAt": (issued + timedelta(minutes=10)).isoformat(
+            timespec="seconds").replace("+00:00", "Z"),
+    }
+
+
+def stage3_issue_authorization() -> dict:
+    """Owner-gated future workflow issues authority before any short-lived proof."""
+    stage3_accepted_snapshot()
+    stage3_verify_inactive_release()
+    require(not STAGE3_MARKER.exists() and not STAGE3_MARKER.is_symlink() and
+            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink() and
+            not os.path.lexists(STAGE3_ARM), "STAGE3_AUTHORIZATION_COLLISION")
+    issued = datetime.now(timezone.utc)
+    value = stage3_authorization_value(issued, uuid.uuid4().hex)
+    stage3_write_exclusive(STAGE3_MARKER,
+                           (json.dumps(value, sort_keys=True,
+                                       separators=(",", ":")) + "\n").encode(), 0o600)
+    fsync_directory(CONFIG)
+    return {"status": "STAGE3_A2_AUTHORIZED_ONLY",
+            "authorizationId": value["authorizationId"],
+            "expiresAt": value["expiresAt"]}
+
+
+def stage3_verify_authorization(*, now: datetime | None = None) -> dict:
+    info = STAGE3_MARKER.lstat()
+    require(stat.S_ISREG(info.st_mode) and
+            (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, 0, 0o600) and
+            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink(),
+            "STAGE3_AUTHORIZATION_CUSTODY")
+    raw = STAGE3_MARKER.read_bytes()
+    require(len(raw) <= 4096, "STAGE3_AUTHORIZATION_OVERSIZED")
+    value = json.loads(raw)
+    try:
+        issued = datetime.fromisoformat(value["issuedAt"].replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
+        authorization_id = value["authorizationId"]
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise Stage2Error("STAGE3_AUTHORIZATION_MALFORMED") from exc
+    moment = now or datetime.now(timezone.utc)
+    require(all(item.tzinfo is not None and item.utcoffset() == timedelta(0)
+                for item in (issued, expires, moment)) and
+            issued <= moment < expires and
+            expires == issued + timedelta(minutes=10) and
+            isinstance(authorization_id, str) and
+            re.fullmatch(r"[0-9a-f]{32}", authorization_id) is not None and
+            isinstance(value, dict) and
+            value == stage3_authorization_value(issued, authorization_id) and
+            raw == (json.dumps(value, sort_keys=True,
+                               separators=(",", ":")) + "\n").encode(),
+            "STAGE3_AUTHORIZATION_MISMATCH")
+    return value
+
+
+def stage3_claim_authorization(marker: dict) -> None:
+    """Terminalize before PREPARE; any failure burns this one authorization."""
+    require(not STAGE3_USED.exists() and not STAGE3_USED.is_symlink(),
+            "STAGE3_AUTHORIZATION_ALREADY_USED")
+    require(stage3_verify_authorization() == marker,
+            "STAGE3_AUTHORIZATION_CHANGED_BEFORE_CLAIM")
+    expected = (json.dumps(marker, sort_keys=True,
+                           separators=(",", ":")) + "\n").encode()
+    require(STAGE3_MARKER.read_bytes() == expected,
+            "STAGE3_AUTHORIZATION_CHANGED_BEFORE_CLAIM")
+    os.link(STAGE3_MARKER, STAGE3_USED, follow_symlinks=False)
+    fsync_directory(CONFIG)
+    require(STAGE3_USED.read_bytes() == expected,
+            "STAGE3_USED_AUTHORIZATION_CHANGED")
+    STAGE3_MARKER.unlink()
+    fsync_directory(CONFIG)
+    require(not STAGE3_MARKER.exists() and not STAGE3_MARKER.is_symlink() and
+            STAGE3_USED.read_bytes() == expected,
+            "STAGE3_AUTHORIZATION_NOT_TERMINAL")
+
+
+def stage3_arm_proposal(marker: dict, challenge: dict, assertion: dict,
+                        *, now: datetime | None = None,
+                        nonce: str | None = None) -> dict:
+    """Construct, but never write or activate, the exact bound arm and proof."""
+    moment = now or datetime.now(timezone.utc)
+    require(moment.tzinfo is not None and moment.utcoffset() == timedelta(0) and
+            marker.get("instrumentedReleaseId") == STAGE3_RELEASE and
+            marker.get("stage2AcceptedBaselineDigest") == STAGE3_ACCEPTED_BASELINE and
+            marker.get("recordType") == "Stage3A2AuthorizationV1",
+            "STAGE3_PROPOSAL_AUTHORITY")
+    require(isinstance(challenge, dict) and
+            challenge.get("ownerPrincipal") == "user:synthetic-owner@example.invalid" and
+            isinstance(challenge.get("challengeId"), str) and
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                         challenge["challengeId"]) is not None and
+            all(isinstance(challenge.get(key), str) and
+                re.fullmatch(r"[0-9a-f]{64}", challenge[key]) is not None
+                for key in ("requestDigest", "actionDigest")),
+            "STAGE3_PROPOSAL_CHALLENGE_BINDING")
+    require(isinstance(assertion, dict) and
+            set(assertion) == {"credentialRecordId", "credentialId",
+                               "clientDataJSON", "authenticatorData", "signature"} and
+            assertion["credentialRecordId"] == "ocred.synthetic" and
+            all(isinstance(assertion[key], str) and assertion[key]
+                for key in ("credentialId", "clientDataJSON",
+                            "authenticatorData", "signature")),
+            "STAGE3_PROPOSAL_PROOF_SHAPE")
+    try:
+        authorization_issued = datetime.fromisoformat(
+            marker["issuedAt"].replace("Z", "+00:00"))
+        challenge_expires = datetime.fromisoformat(
+            challenge["expiresAt"].replace("Z", "+00:00"))
+        authorization_expires = datetime.fromisoformat(
+            marker["expiresAt"].replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise Stage2Error("STAGE3_PROPOSAL_TIME_MALFORMED") from exc
+    issued = moment.replace(microsecond=0)
+    expires = min(challenge_expires, authorization_expires,
+                  issued + timedelta(seconds=30))
+    require(authorization_issued.tzinfo is not None and
+            authorization_issued.utcoffset() == timedelta(0) and
+            isinstance(marker.get("authorizationId"), str) and
+            re.fullmatch(r"[0-9a-f]{32}", marker["authorizationId"]) is not None and
+            marker == stage3_authorization_value(
+                authorization_issued, marker["authorizationId"]) and
+            authorization_issued <= moment < authorization_expires and
+            challenge_expires.tzinfo is not None and
+            challenge_expires.utcoffset() == timedelta(0) and
+            authorization_expires.tzinfo is not None and
+            authorization_expires.utcoffset() == timedelta(0) and
+            expires - moment >= timedelta(seconds=10),
+            "STAGE3_PROPOSAL_WINDOW_TOO_SHORT")
+    arm_nonce = nonce or secrets.token_hex(32)
+    require(re.fullmatch(r"[0-9a-f]{64}", arm_nonce) is not None,
+            "STAGE3_PROPOSAL_NONCE")
+    arm = {
+        "schemaVersion": 1, "experimentId": STAGE3_EXPERIMENT,
+        "stage": "B1B2B_III_A", "faultPoint": STAGE3_FAULT,
+        "deploymentEnvironment": "DEV", "authorityMode": "SYNTHETIC_ONLY",
+        "stateProfile": "B1B2_SYNTHETIC_DEV_V1",
+        "canonicalCapability": "DISABLED",
+        "logicalOwnerId": "owner.ravindu.v1",
+        "accessIdentity": "user:synthetic-owner@example.invalid",
+        "credentialRecordId": "ocred.synthetic",
+        "fixtureId": "fixture.b1b1.synthetic-codename.v1",
+        "fixtureFingerprint": "bc6938f276c7792c873081c8047b2172e36ca2cf936b1e6ce50fd33d731855fc",
+        "instrumentedReleaseId": STAGE3_RELEASE,
+        "stage2AcceptedBaselineDigest": STAGE3_ACCEPTED_BASELINE,
+        "stage3AuthorizationId": marker["authorizationId"],
+        "challengeId": challenge["challengeId"],
+        "requestDigest": challenge["requestDigest"],
+        "actionDigest": challenge["actionDigest"],
+        "issuedAt": issued.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "expiresAt": expires.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "armNonce": arm_nonce,
+    }
+    arm_bytes = json.dumps(arm, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False).encode()
+    require(len(arm_bytes) <= 4096, "STAGE3_PROPOSAL_OVERSIZED")
+    return {"schemaVersion": 1, "recordType": "Stage3A2ExecutionProposalV1",
+            "authorizationId": marker["authorizationId"],
+            "challenge": challenge, "assertion": assertion, "arm": arm,
+            "armSha256": hashlib.sha256(arm_bytes).hexdigest(),
+            "armWritten": False, "proofConsumed": False}
+
+
+def stage3_prepare_package() -> dict:
+    """Future JIT caller only; this is deliberately not a workflow action."""
+    assert_host()
+    marker = stage3_verify_authorization()
+    require(not os.path.lexists(STAGE3_ARM) and
+            os.readlink(ROOT / "current") == f"releases/{STAGE3_RELEASE}" and
+            not STAGE3_BUILD.exists(), "STAGE3_PREPARE_INACTIVE_OR_ARMED")
+    stage3_verify_candidate_release(selected=True)
+    config = json.loads((CONFIG / "dev.json").read_bytes())
+    require(config.get("releaseSha") == STAGE3_RELEASE and
+            config.get("authorityMode") == "SYNTHETIC_ONLY" and
+            config.get("canonicalCapability") == "DISABLED" and
+            config.get("stateProfile") == "B1B2_SYNTHETIC_DEV_V1",
+            "STAGE3_PREPARE_CONFIG_MISMATCH")
+    service = show(SERVICE, "ActiveState", "SubState", "MainPID", "NRestarts")
+    require(service.get("ActiveState") == "active" and
+            service.get("SubState") == "running" and
+            service.get("NRestarts") == "0" and
+            int(service.get("MainPID", "0")) > 1,
+            "STAGE3_PREPARE_BROKER_NOT_RUNNING")
+    require(stage3_verify_authorization() == marker,
+            "STAGE3_PREPARE_AUTHORIZATION_EXPIRED")
+    stage3_claim_authorization(marker)  # Exactly one PREPARE may follow.
+    result = relay("prepare")
+    require(result.get("status") == "PREPARED", "STAGE3_PREPARE_FAILED")
+    challenge = result["challenge"]
+    inspect_prepared(challenge)
+    proof = relay("proof", challenge)
+    require(proof.get("status") == "PROOF_PREPARED",
+            "STAGE3_PROOF_CONSTRUCTION_FAILED")
+    return stage3_arm_proposal(marker, challenge, proof["assertion"])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("operation", choices=("preflight", "authorize", "execute",
-                                               "failure-stop"))
+                                               "failure-stop", "stage3-inactive-preflight",
+                                               "stage3-install-inactive",
+                                               "stage3-issue-authorization",
+                                               "stage3-prepare-package"))
     args = parser.parse_args()
+    stage3 = args.operation.startswith("stage3-")
     try:
         result = {"preflight": preflight, "authorize": authorize,
-                  "execute": execute, "failure-stop": failure_stop}[args.operation]()
+                  "execute": execute, "failure-stop": failure_stop,
+                  "stage3-inactive-preflight": stage3_inactive_preflight,
+                  "stage3-install-inactive": stage3_install_inactive,
+                  "stage3-issue-authorization": stage3_issue_authorization,
+                  "stage3-prepare-package": stage3_prepare_package}[args.operation]()
         print(json.dumps(result, sort_keys=True))
     except Stage2Error as exc:
-        print(json.dumps({"status": "STAGE_II_FAILED", "code": str(exc)}))
+        print(json.dumps({"status": "STAGE3_A2_FAILED" if stage3 else "STAGE_II_FAILED",
+                          "code": str(exc)}))
         raise SystemExit(1) from None
     except Exception:
         # Neither a Python traceback nor child stderr may expose fixture code.
-        print(json.dumps({"status": "STAGE_II_FAILED",
+        print(json.dumps({"status": "STAGE3_A2_FAILED" if stage3 else "STAGE_II_FAILED",
                           "code": "CONTROL_EXCEPTION_REVIEW_REQUIRED"}))
         raise SystemExit(1) from None
 
