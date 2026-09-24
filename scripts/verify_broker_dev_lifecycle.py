@@ -1079,12 +1079,26 @@ def _broker_process(pid: int) -> dict:
     }
 
 
+def _process_incarnation(pid: int) -> dict:
+    """Kernel boot/start identity, kept observational and out of the durable digest."""
+    require(pid > 1, "PROCESS_INCARNATION_PID")
+    raw = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
+    marker = raw.rfind(") ")
+    require(marker > 0, "PROCESS_INCARNATION_STAT")
+    fields = raw[marker + 2:].split()
+    require(len(fields) > 19, "PROCESS_INCARNATION_FIELDS")
+    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+    require(len(boot_id) == 36, "PROCESS_INCARNATION_BOOT")
+    return {"pid": pid, "bootId": boot_id, "startTicks": int(fields[19])}
+
+
 def collect_accepted() -> dict:
     """Read-only accepted-state observation; no broker or API mutation."""
     owner = _owner_database(historical=True, accepted=True)
     evidence = _evidence_database(historical=True, accepted=True)
     units = {name: _unit(name) for name in (SERVICE, SOCKET)}
     pid = int(units[SERVICE].get("MainPID", "0"))
+    api = _api()
     snapshot = {
         "profile": POST_STAGE_II_ACCEPTED_V1,
         "host": _host(),
@@ -1104,7 +1118,11 @@ def collect_accepted() -> dict:
         "broker_processes": _broker_processes(),
         "broker_uid_processes": _broker_uid_processes(),
         "brokerProcess": _broker_process(pid) if pid > 1 else {},
-        "api": _api(),
+        "api": api,
+        "runtimeIncarnations": {
+            "broker": _process_incarnation(pid) if pid > 1 else {},
+            "api": _process_incarnation(int(api["MainPID"])),
+        },
     }
     snapshot["stage2AcceptedBaseline"] = stage2_accepted_baseline(snapshot)
     validate_accepted(snapshot)

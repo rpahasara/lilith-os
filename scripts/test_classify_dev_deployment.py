@@ -57,7 +57,12 @@ class DevGateClassifierTests(unittest.TestCase):
     def test_runtime_and_unknown_paths_require_deploy(self):
         for path in (
             "services/core-api/app.py",
-            "services/memory-broker/lilith_memory_broker/server.py",
+            "services/core-api/lilith_memory/owner_proof.py",
+            "services/core-api/requirements.txt",
+            "services/memory-broker/deploy/lilith-memory-broker.service",
+            "services/memory-broker/lilith_memory_broker/unreviewed.py",
+            "scripts/memory_broker_os_release.py",
+            "scripts/memory_broker_validation.py",
             "scripts/deploy_core_api_dev_remote.sh",
             "scripts/classify_dev_deployment.py",
             "scripts/verify_broker_dev_lifecycle.py",
@@ -69,6 +74,36 @@ class DevGateClassifierTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.classify(changed(path)), gate.DEPLOY_REQUIRED)
+
+    def test_exact_broker_source_and_test_paths_use_candidate_lane(self):
+        for path in sorted(gate.BROKER_CANDIDATE_PATHS):
+            with self.subTest(path=path):
+                self.assertEqual(self.classify(changed(path)), gate.BROKER_CANDIDATE_VALIDATE_ONLY)
+        self.assertEqual(self.classify(
+            changed("services/memory-broker/lilith_memory_broker/dev_core.py"),
+            changed("services/memory-broker/tests/test_dev_synthetic.py"),
+            changed("docs/architecture/slice15b2b-stage3-a2-fault-seam.md", "A", "000000"),
+        ), gate.BROKER_CANDIDATE_VALIDATE_ONLY)
+
+    def test_broker_mixed_or_self_modifying_diff_requires_full_deploy(self):
+        broker = changed("services/memory-broker/lilith_memory_broker/dev_core.py")
+        for other in (
+            changed("services/core-api/app.py"),
+            changed("services/core-api/lilith_memory/owner_proof.py"),
+            changed(".github/workflows/deploy-dev.yml"),
+            changed("scripts/classify_dev_deployment.py"),
+            changed("scripts/run_memory_broker_dev_validation.sh"),
+            changed("scripts/memory_broker_validation.py"),
+            changed("services/memory-broker/lilith_memory_broker/unknown.py", "A", "000000"),
+            changed("scripts/test_memory_broker_stage2_control.py"),
+        ):
+            with self.subTest(other=other):
+                self.assertEqual(self.classify(broker, other), gate.DEPLOY_REQUIRED)
+        for status, old, new in (("D", "100644", "000000"),
+                                 ("M", "100644", "120000"),
+                                 ("M", "120000", "100644")):
+            self.assertEqual(self.classify(changed(broker[0], status, old, new)),
+                             gate.DEPLOY_REQUIRED)
 
     def test_mixed_control_and_runtime_requires_deploy(self):
         self.assertEqual(

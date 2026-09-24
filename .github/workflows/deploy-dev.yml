@@ -40,6 +40,10 @@ jobs:
       id-token: write
       pull-requests: read
       statuses: write
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      base_sha: ${{ steps.classify.outputs.base_sha }}
+      candidate_sha: ${{ steps.classify.outputs.candidate_sha }}
 
     steps:
       - name: Publish pending DEV deployment status
@@ -355,7 +359,7 @@ jobs:
             --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
 
       - name: Publish successful DEV deployment status
-        if: ${{ success() }}
+        if: ${{ success() && steps.classify.outputs.mode != 'BROKER_CANDIDATE_VALIDATE_ONLY' }}
         uses: actions/github-script@v8
         with:
           script: |
@@ -391,3 +395,212 @@ jobs:
               description: 'Trusted DEV gate, validation, or health failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
+
+  broker_preflight:
+    name: Read-only accepted DEV preflight for broker candidate
+    needs: deploy
+    if: needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      snapshot_sha: ${{ steps.snapshot.outputs.snapshot_sha }}
+    steps:
+      - name: Check out protected-main controls
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.deploy.outputs.base_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate for read-only DEV observation
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Capture accepted DEV lifecycle without candidate code
+        id: snapshot
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
+          python scripts/broker_candidate_dev_snapshot.py > "${RUNNER_TEMP}/broker-preflight.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'broker-preflight.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('snapshot_sha=' + result['snapshotSha256'] + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('BROKER_CANDIDATE_VALIDATE_ONLY accepted DEV preflight: ' + json.dumps(result, sort_keys=True) + '\n')
+          PY
+
+  broker_candidate:
+    name: Isolated exact-SHA broker candidate validation
+    needs: [deploy, broker_preflight]
+    if: needs.broker_preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out protected-main validator
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.deploy.outputs.base_sha }}
+          persist-credentials: false
+      - name: Check out exact CI-validated broker candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.deploy.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up pinned Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and execute transient broker candidate without cloud credentials
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.deploy.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          test "$(git -C candidate rev-parse HEAD)" = "${CANDIDATE_SHA}"
+          mkdir -p deployment-output/broker-wheels
+          python scripts/memory_broker_validation.py build \
+            --source-root candidate \
+            --archive deployment-output/broker-validation.tar.gz \
+            --attestation deployment-output/broker-validation.attestation.json \
+            --candidate-sha "${CANDIDATE_SHA}"
+          python -m pip download --disable-pip-version-check --no-deps \
+            --only-binary=:all: --platform manylinux2014_x86_64 \
+            --python-version 3.12 --implementation cp --abi cp312 \
+            --dest deployment-output/broker-wheels \
+            cffi==2.1.1 cryptography==50.0.1 fido2==2.2.1 \
+            pycparser==3.0 rfc8785==0.1.4
+          python scripts/memory_broker_os_release.py build \
+            --source-root candidate --wheelhouse deployment-output/broker-wheels \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --archive deployment-output/broker-release.tar.gz \
+            --attestation deployment-output/broker-release.attestation.json
+          python scripts/memory_broker_os_release.py verify \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --archive deployment-output/broker-release.tar.gz \
+            --attestation deployment-output/broker-release.attestation.json
+          python -m venv "${RUNNER_TEMP}/broker-venv"
+          "${RUNNER_TEMP}/broker-venv/bin/python" -m pip install --disable-pip-version-check \
+            --no-index --find-links deployment-output/broker-wheels fido2==2.2.1 rfc8785==0.1.4
+          python scripts/memory_broker_validation.py verify-run \
+            --archive deployment-output/broker-validation.tar.gz \
+            --attestation deployment-output/broker-validation.attestation.json \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --python "${RUNNER_TEMP}/broker-venv/bin/python"
+          python - <<'PY'
+          import json, os, tarfile
+          from pathlib import Path
+          root = Path('deployment-output')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              for name in ('broker-validation.attestation.json', 'broker-release.attestation.json'):
+                  summary.write(name + ': ' + json.dumps(json.loads((root / name).read_text()), sort_keys=True) + '\n')
+              with tarfile.open(root / 'broker-release.tar.gz', 'r:gz') as archive:
+                  member = archive.extractfile('release-manifest.json')
+                  if member is None:
+                      raise RuntimeError('RELEASE_MANIFEST_MISSING')
+                  summary.write('release-manifest.json: ' + json.dumps(json.load(member), sort_keys=True) + '\n')
+              summary.write('Candidate executed only on this credential-free hosted runner; no DEV upload or install.\n')
+          PY
+
+  broker_postflight:
+    name: Read-only DEV postflight and required broker candidate status
+    needs: [deploy, broker_preflight, broker_candidate]
+    if: always() && needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      statuses: write
+    steps:
+      - name: Check out protected-main controls
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.deploy.outputs.base_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate for read-only DEV and PROD observation
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+      - name: Set up Google Cloud CLI
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Prove complete accepted DEV snapshot equality
+        id: equality
+        if: needs.broker_preflight.result == 'success' && needs.broker_candidate.result == 'success'
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha }}'
+          python scripts/broker_candidate_dev_snapshot.py \
+            --expected-snapshot-sha '${{ needs.broker_preflight.outputs.snapshot_sha }}' \
+            >> "${GITHUB_STEP_SUMMARY}"
+      - name: Audit pinned production darkness without mutation
+        id: prod_audit
+        if: steps.equality.outcome == 'success'
+        shell: bash
+        run: |
+          test "${GCP_PROD_INSTANCE}" = 'lilith-01'
+          test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"
+          test "$(gcloud compute instances describe "${GCP_PROD_INSTANCE}" \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            --format='value(id)')" = "${GCP_PROD_INSTANCE_ID}"
+          AUDIT_SOURCE="$(base64 -w0 scripts/audit_core_api_production_read_only.py)"
+          gcloud compute ssh "${GCP_PROD_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
+      - name: Publish same required DEV deployment status
+        if: always()
+        uses: actions/github-script@v8
+        env:
+          PREFLIGHT_RESULT: ${{ needs.broker_preflight.result }}
+          CANDIDATE_RESULT: ${{ needs.broker_candidate.result }}
+          EQUALITY_OUTCOME: ${{ steps.equality.outcome }}
+          PROD_OUTCOME: ${{ steps.prod_audit.outcome }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        with:
+          script: |
+            const passed = process.env.PREFLIGHT_RESULT === 'success' &&
+              process.env.CANDIDATE_RESULT === 'success' &&
+              process.env.EQUALITY_OUTCOME === 'success' &&
+              process.env.PROD_OUTCOME === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.CANDIDATE_SHA,
+              state: passed ? 'success' : 'failure',
+              context: 'LILITH DEV deployment',
+              description: passed ? 'BROKER_CANDIDATE_VALIDATE_ONLY: accepted DEV unchanged' :
+                'Broker candidate validation or accepted DEV equality failed',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            if (!passed) core.setFailed('Broker-only DEV validation did not pass');

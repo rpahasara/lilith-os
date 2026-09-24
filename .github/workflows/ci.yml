@@ -58,6 +58,9 @@ jobs:
       - name: Validate protected-main DEV gate classification and bypass resistance
         run: python -m unittest scripts/test_classify_dev_deployment.py
 
+      - name: Validate broker-only DEV gate and accepted-state equality contracts
+        run: python -m unittest scripts/test_broker_candidate_dev_snapshot.py scripts/test_broker_only_dev_workflow.py
+
       - name: Validate trusted broker lifecycle and production absence gates
         run: python -m unittest scripts/test_broker_dev_lifecycle.py
 
