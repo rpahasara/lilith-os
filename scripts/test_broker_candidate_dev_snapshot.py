@@ -75,7 +75,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
         self.assertEqual(calls[1][:2], ("ssh", guard.INSTANCE))
         command = calls[1][-1]
         self.assertEqual(command, "--command=" + invocation.ssh_command())
-        self.assertIn(invocation.TOOL, command)
+        self.assertIn(invocation.INVOKER, command)
         self.assertNotIn("lifecycle.py", command)
         self.assertNotIn("candidate", command.lower().replace("/lilith-broker-dev-snapshot", ""))
 

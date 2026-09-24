@@ -20,6 +20,7 @@ OPERATION = "SNAPSHOT_ACCEPTED_STAGE2"
 OUTPUT_SCHEMA = "BrokerCandidateDevSnapshotV1"
 SOURCE_MAP = {
     "scripts/trusted_broker_snapshot.py": "bin/lilith-broker-dev-snapshot",
+    "scripts/trusted_broker_snapshot_invocation.py": "bin/lilith-broker-dev-invocation",
     "scripts/verify_broker_dev_lifecycle.py": "lib/verify_broker_dev_lifecycle.py",
 }
 RUNTIME = {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import copy
 import json
 import os
 import shutil
@@ -17,6 +19,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts import trusted_broker_snapshot as tool
+from scripts import trusted_broker_snapshot_invocation as invocation
 from scripts import trusted_broker_snapshot_installer as installer
 from scripts import trusted_broker_snapshot_release as release
 from scripts import verify_broker_dev_lifecycle as lifecycle
@@ -49,6 +52,17 @@ def fixture_release(parent: Path) -> tuple[Path, str]:
     return folder, release_id
 
 
+def sudo_entries() -> list[dict]:
+    return [{"account": name, "argv": ["/usr/bin/sudo", "-n", "-l", "-U", name],
+             "returncode": 1, "stdout": f"User {name} is not allowed to run sudo on {lifecycle.DEV_INSTANCE}.\n",
+             "stderr": ""} for name in tool.SUDO_ACCOUNTS]
+
+
+def encode_sudo(entries: list[dict]) -> str:
+    return base64.urlsafe_b64encode(tool.canonical({"schema": tool.SUDO_SCHEMA,
+                                                   "accounts": entries})).decode("ascii")
+
+
 class SnapshotFoundationTests(unittest.TestCase):
     def test_cli_operation_is_closed(self):
         with patch.object(sys, "argv", ["snapshot", "anything"]):
@@ -75,7 +89,8 @@ class SnapshotFoundationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             folder, release_id = fixture_release(Path(temp))
             snapshot = accepted_fixture()
-            mock = SimpleNamespace(collect_accepted=lambda: snapshot, validate_accepted=lambda value: None)
+            mock = SimpleNamespace(collect_accepted=lambda observation: snapshot,
+                                   validate_accepted=lambda value: None)
             with patch.object(tool, "_lifecycle", return_value=mock):
                 value = tool.collect(folder, enforce_host_custody=False)
             self.assertEqual(value["schema"], tool.SCHEMA)
@@ -138,6 +153,69 @@ class SnapshotFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "PAYLOAD_SET"):
             release.make_manifest({**payloads, "unknown": b"x"})
 
+    def test_closed_sudo_observation_contract(self):
+        entries = sudo_entries()
+        decoded = tool.decode_sudo_observation(encode_sudo(entries))
+        self.assertEqual(set(decoded), set(tool.SUDO_ACCOUNTS))
+        for changed in (None, "not-base64!", base64.urlsafe_b64encode(b"{").decode()):
+            with self.subTest(changed=changed), self.assertRaises(tool.SnapshotError):
+                tool.decode_sudo_observation(changed)
+        mutations = []
+        for field, value in (("account", "wrong-account"), ("account", tool.SUDO_ACCOUNTS[1]),
+                             ("argv", ["/usr/bin/true"]), ("stdout", "x" * (tool.MAX_SUDO_TEXT + 1)),
+                             ("stderr", "x" * (tool.MAX_SUDO_TEXT + 1)),
+                             ("returncode", True)):
+            changed = copy.deepcopy(entries)
+            changed[0][field] = value
+            mutations.append(changed)
+        mutations.extend((entries[:1], entries + [entries[0]]))
+        for changed in mutations:
+            with self.subTest(changed=changed), self.assertRaises(tool.SnapshotError):
+                tool.decode_sudo_observation(encode_sudo(changed))
+
+    def test_root_invoker_uses_only_fixed_sudo_queries(self):
+        results = [SimpleNamespace(returncode=1, stdout=item["stdout"].encode(), stderr=b"")
+                   for item in sudo_entries()]
+        with patch.object(invocation.os, "name", "posix"), \
+             patch.object(invocation.os, "geteuid", return_value=0, create=True), \
+             patch.object(invocation.subprocess, "run", side_effect=results) as query:
+            encoded = invocation.observe_sudo()
+        self.assertEqual(set(tool.decode_sudo_observation(encoded)), set(tool.SUDO_ACCOUNTS))
+        self.assertEqual([call.args[0] for call in query.call_args_list],
+                         [tuple(item["argv"]) for item in sudo_entries()])
+        self.assertIn("--setenv=" + invocation.SUDO_ENV + "=" + encoded,
+                      invocation.command(encoded))
+        self.assertEqual(invocation.command(encoded)[-5:],
+                         ("/usr/bin/python3", "-I", "-B", invocation.TOOL, invocation.OPERATION))
+
+    def test_external_and_direct_account_sudo_share_exact_decision(self):
+        name = tool.SUDO_ACCOUNTS[0]
+        user = SimpleNamespace(pw_uid=999, pw_gid=999, pw_dir="/nonexistent", pw_shell="/usr/sbin/nologin")
+        def read_text(path, **kwargs):
+            return (name + ":x:999:999::/nonexistent:/usr/sbin/nologin\n" if str(path) == "/etc/passwd"
+                    else name + ":!:0:0:99999:7:::\n")
+        with patch.object(lifecycle, "pwd", SimpleNamespace(getpwnam=lambda _: user)), \
+             patch.object(lifecycle.Path, "read_text", read_text), \
+             patch.object(lifecycle.Path, "exists", return_value=False), \
+             patch.object(lifecycle.os, "getgrouplist", return_value=[999], create=True):
+            valid = tool.decode_sudo_observation(encode_sudo(sudo_entries()))
+            with patch.object(lifecycle.subprocess, "run", side_effect=AssertionError("nested sudo")):
+                self.assertEqual(lifecycle._account(name, valid)["uid"], 999)
+            with patch.object(lifecycle.subprocess, "run", return_value=SimpleNamespace(
+                    returncode=1, stdout=valid[name]["stdout"], stderr="")) as direct:
+                self.assertEqual(lifecycle._account(name)["uid"], 999)
+                direct.assert_called_once_with(("/usr/bin/sudo", "-n", "-l", "-U", name),
+                                               capture_output=True, text=True, timeout=10)
+            for stdout, stderr in (("User has privileges", ""), (valid[name]["stdout"], "error")):
+                bad = copy.deepcopy(valid)
+                bad[name]["stdout"], bad[name]["stderr"] = stdout, stderr
+                with self.assertRaisesRegex(lifecycle.LifecycleError, "ACCOUNT_SUDO_PRIVILEGE"):
+                    lifecycle._account(name, bad)
+                with patch.object(lifecycle.subprocess, "run", return_value=SimpleNamespace(
+                        returncode=1, stdout=stdout, stderr=stderr)):
+                    with self.assertRaisesRegex(lifecycle.LifecycleError, "ACCOUNT_SUDO_PRIVILEGE"):
+                        lifecycle._account(name)
+
     def test_immutable_query_only_sqlite_reader_preserves_db_wal_shm(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp, "owner_control.db")
@@ -190,7 +268,7 @@ class SnapshotFoundationTests(unittest.TestCase):
                 release.verify(archive, attestation)
 
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
-    def test_installer_first_install_only_fixture(self):
+    def test_installer_only_known_old_unaccepted_transition(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             control = root / "broker-snapshot"
@@ -198,6 +276,12 @@ class SnapshotFoundationTests(unittest.TestCase):
             incoming.mkdir(parents=True)
             for path in (root, control, incoming):
                 path.chmod(0o755)
+            releases = control / "releases"
+            old = releases / installer.KNOWN_OLD_UNACCEPTED
+            old.mkdir(parents=True)
+            releases.chmod(0o755)
+            old.chmod(0o755)
+            (control / "current").symlink_to("releases/" + installer.KNOWN_OLD_UNACCEPTED)
             source = root / "source"
             source.mkdir()
             subprocess.run(("git", "init", "-q", str(source)), check=True)
@@ -221,11 +305,12 @@ class SnapshotFoundationTests(unittest.TestCase):
                           staged / "snapshot-release.attestation.json")
             for path in staged.iterdir():
                 path.chmod(0o600)
-            with patch.object(installer, "APPROVED_FIRST_RELEASE", release_id):
+            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
                 result = installer.install(control, release_id, root_custody=False,
                                            self_test=lambda: {"acceptedBaselineDigest": installer.BASELINE})
                 self.assertEqual(result["releaseId"], release_id)
                 self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
+                self.assertTrue(old.is_dir())
                 with self.assertRaisesRegex(installer.InstallError, "INSTALL_EXISTING"):
                     installer.install(control, release_id, root_custody=False,
                                       self_test=lambda: {"acceptedBaselineDigest": installer.BASELINE})
