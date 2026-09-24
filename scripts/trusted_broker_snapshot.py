@@ -23,7 +23,13 @@ SCHEMA = "BrokerCandidateDevSnapshotV1"
 RELEASE_SCHEMA = "TrustedBrokerSnapshotReleaseV1"
 MAX_OUTPUT = 2 * 1024 * 1024
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")
-PAYLOADS = {"bin/lilith-broker-dev-snapshot", "lib/verify_broker_dev_lifecycle.py"}
+PAYLOADS = {"bin/lilith-broker-dev-snapshot", "bin/lilith-broker-dev-invocation",
+            "lib/verify_broker_dev_lifecycle.py"}
+SUDO_ENV = "LILITH_TRUSTED_SUDO_OBSERVATION_V1"
+SUDO_SCHEMA = "TrustedSudoPrivilegeObservationV1"
+SUDO_ACCOUNTS = ("lilith-memory-broker", "lilith-memory-relay")
+MAX_SUDO_TEXT = 4096
+MAX_SUDO_EVIDENCE = 16384
 RUNTIME_KEYS = {
     "pythonExecutable", "pythonVersion", "pythonSha256", "sqliteVersion",
     "sqliteModuleSha256", "sqliteExtensionSha256", "pythonPackage", "sqlitePackage",
@@ -78,7 +84,7 @@ def verify_release(release_dir: Path, *, root_custody: bool = True) -> tuple[str
     expected = {"release-manifest.json", "bin", "lib"}
     if {p.name for p in release_dir.iterdir()} != expected:
         raise SnapshotError("SNAPSHOT_RELEASE_FILE_SET")
-    if {p.name for p in (release_dir / "bin").iterdir()} != {"lilith-broker-dev-snapshot"} or \
+    if {p.name for p in (release_dir / "bin").iterdir()} != {"lilith-broker-dev-snapshot", "lilith-broker-dev-invocation"} or \
             {p.name for p in (release_dir / "lib").iterdir()} != {"verify_broker_dev_lifecycle.py"}:
         raise SnapshotError("SNAPSHOT_RELEASE_FILE_SET")
     manifest_bytes = _regular(release_dir / "release-manifest.json", 0o644, root_custody=root_custody)
@@ -94,7 +100,7 @@ def verify_release(release_dir: Path, *, root_custody: bool = True) -> tuple[str
             manifest["schema"] != RELEASE_SCHEMA or manifest["operation"] != OPERATION or
             manifest["lifecycleProfile"] != PROFILE or manifest["outputSchema"] != SCHEMA or
             not isinstance(manifest["runtime"], dict) or set(manifest["runtime"]) != RUNTIME_KEYS or
-            not isinstance(manifest["payloads"], list) or len(manifest["payloads"]) != 2):
+            not isinstance(manifest["payloads"], list) or len(manifest["payloads"]) != 3):
         raise SnapshotError("SNAPSHOT_MANIFEST_SCHEMA")
     actual = []
     for path in sorted(PAYLOADS):
@@ -144,7 +150,40 @@ def _lifecycle(release_dir: Path):
     return module
 
 
-def collect(release_dir: Path, *, enforce_host_custody: bool = True) -> dict:
+def decode_sudo_observation(encoded: str | None) -> dict:
+    if not isinstance(encoded, str) or not encoded or len(encoded) > MAX_SUDO_EVIDENCE * 2:
+        raise SnapshotError("SNAPSHOT_SUDO_OBSERVATION_MISSING_OR_SIZE")
+    try:
+        raw = base64.b64decode(encoded.encode("ascii"), altchars=b"-_", validate=True)
+        if len(raw) > MAX_SUDO_EVIDENCE or base64.urlsafe_b64encode(raw).decode("ascii") != encoded:
+            raise ValueError("noncanonical or oversized")
+        value = json.loads(raw)
+        if not isinstance(value, dict) or canonical(value) != raw or set(value) != {"schema", "accounts"} or \
+                value["schema"] != SUDO_SCHEMA or not isinstance(value["accounts"], list) or \
+                len(value["accounts"]) != len(SUDO_ACCOUNTS):
+            raise ValueError("schema")
+        accounts = {}
+        for item in value["accounts"]:
+            if not isinstance(item, dict) or set(item) != {"account", "argv", "returncode", "stdout", "stderr"}:
+                raise ValueError("entry schema")
+            name = item["account"]
+            if not isinstance(name, str) or name not in SUDO_ACCOUNTS or name in accounts or \
+                    item["argv"] != ["/usr/bin/sudo", "-n", "-l", "-U", name] or \
+                    type(item["returncode"]) is not int or not -255 <= item["returncode"] <= 255 or \
+                    not isinstance(item["stdout"], str) or not isinstance(item["stderr"], str) or \
+                    len(item["stdout"].encode("utf-8")) > MAX_SUDO_TEXT or \
+                    len(item["stderr"].encode("utf-8")) > MAX_SUDO_TEXT:
+                raise ValueError("entry identity or bounds")
+            accounts[name] = item
+        if set(accounts) != set(SUDO_ACCOUNTS):
+            raise ValueError("account set")
+        return accounts
+    except (UnicodeError, ValueError, TypeError, KeyError) as exc:
+        raise SnapshotError("SNAPSHOT_SUDO_OBSERVATION_INVALID") from exc
+
+
+def collect(release_dir: Path, *, enforce_host_custody: bool = True,
+            sudo_observation: dict | None = None) -> dict:
     if enforce_host_custody:
         verify_confinement()
     release_id, manifest = verify_release(release_dir, root_custody=enforce_host_custody)
@@ -153,7 +192,7 @@ def collect(release_dir: Path, *, enforce_host_custody: bool = True) -> dict:
     lifecycle = _lifecycle(release_dir)
     if enforce_host_custody and lifecycle._host() != lifecycle.expected_host():
         raise SnapshotError("SNAPSHOT_DEV_HOST_ONLY")
-    snapshot = lifecycle.collect_accepted()
+    snapshot = lifecycle.collect_accepted(sudo_observation)
     lifecycle.validate_accepted(snapshot)
     snapshot_bytes = canonical(snapshot)
     if len(snapshot_bytes) > MAX_OUTPUT // 2:
@@ -197,7 +236,8 @@ def main() -> None:
     release_dir = CONTROL / target
     if Path(__file__).resolve() != release_dir / "bin/lilith-broker-dev-snapshot":
         raise SnapshotError("SNAPSHOT_EXECUTABLE_NOT_SELECTED")
-    sys.stdout.buffer.write(frame(collect(release_dir)))
+    observation = decode_sudo_observation(os.environ.get(SUDO_ENV))
+    sys.stdout.buffer.write(frame(collect(release_dir, sudo_observation=observation)))
 
 
 if __name__ == "__main__":

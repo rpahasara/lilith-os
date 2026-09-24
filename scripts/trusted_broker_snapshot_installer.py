@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""First-install-only DEV installer for TrustedBrokerSnapshotReleaseV1."""
+"""Exact known-old-unaccepted to reviewed-repair DEV snapshot transition."""
 
 from __future__ import annotations
 
@@ -24,7 +24,8 @@ else:
 
 
 CONTROL = Path("/opt/lilith-trusted-controls/broker-snapshot")
-APPROVED_FIRST_RELEASE = "8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958"
+KNOWN_OLD_UNACCEPTED = "8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958"
+APPROVED_REPAIRED_RELEASE = "36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec"
 DEV_HOST = "lilith-dev-01"
 DEV_MACHINE_ID = "ae929170e6fa4c8ab9cc7b9547238d9d"
 DEV_PROJECT = "lilith-agent-260823-27389"
@@ -116,7 +117,7 @@ def _fsync_dir(path: Path) -> None:
 
 
 def _self_test() -> dict:
-    result = subprocess.run(invocation.command(), stdin=subprocess.DEVNULL,
+    result = subprocess.run(("/usr/bin/python3", "-I", "-B", invocation.INVOKER), stdin=subprocess.DEVNULL,
                             capture_output=True, timeout=120)
     if result.returncode != 0:
         raise InstallError("SNAPSHOT_SELF_TEST_FAILED")
@@ -129,7 +130,7 @@ def _self_test() -> dict:
         if len(data) != int(size) or hashlib.sha256(data).hexdigest().encode() != sha:
             raise ValueError("digest")
         value = json.loads(data)
-        if (value.get("toolReleaseId") != APPROVED_FIRST_RELEASE or
+        if (value.get("toolReleaseId") != APPROVED_REPAIRED_RELEASE or
                 value.get("acceptedBaselineDigest") != BASELINE or
                 value.get("validation") != "PASS"):
             raise ValueError("accepted state")
@@ -140,8 +141,8 @@ def _self_test() -> dict:
 
 def install(control: Path, release_id: str, *, root_custody: bool = True,
             self_test=None) -> dict:
-    if not release.SHA64.fullmatch(release_id) or release_id != APPROVED_FIRST_RELEASE:
-        raise InstallError("UNAPPROVED_FIRST_RELEASE")
+    if not release.SHA64.fullmatch(release_id) or release_id != APPROVED_REPAIRED_RELEASE:
+        raise InstallError("UNAPPROVED_REPAIRED_RELEASE")
     if root_custody:
         if not hasattr(os, "geteuid") or os.geteuid() != 0:
             raise InstallError("ROOT_REQUIRED")
@@ -160,19 +161,23 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
     evidence, payloads = release.verify(archive, attestation)
     if evidence["releaseId"] != release_id:
         raise InstallError("RELEASE_ID_MISMATCH")
+    if hashlib.sha256((incoming / "trusted_broker_snapshot_invocation.py").read_bytes()).hexdigest() != \
+            hashlib.sha256(payloads["bin/lilith-broker-dev-invocation"]).hexdigest():
+        raise InstallError("INVOKER_SOURCE_MISMATCH")
     releases = control / "releases"
     current = control / "current"
     final = releases / release_id
     staging = releases / (release_id + ".staging")
-    if current.exists() or current.is_symlink() or final.exists() or final.is_symlink() or \
-            staging.exists() or staging.is_symlink():
-        raise InstallError("INSTALL_EXISTING_RELEASE_OR_POINTER")
-    if releases.exists() or releases.is_symlink():
-        _directory(releases, 0o755, root_custody=root_custody)
-        if any(releases.iterdir()):
-            raise InstallError("INSTALL_UNEXPECTED_RELEASE")
-    else:
-        _mkdir(releases, 0o755, root_custody=root_custody)
+    _directory(releases, 0o755, root_custody=root_custody)
+    if final.exists() or final.is_symlink() or staging.exists() or staging.is_symlink():
+        raise InstallError("INSTALL_EXISTING_RELEASE")
+    if {p.name for p in releases.iterdir()} != {KNOWN_OLD_UNACCEPTED}:
+        raise InstallError("INSTALL_UNEXPECTED_RELEASE")
+    _directory(releases / KNOWN_OLD_UNACCEPTED, 0o755, root_custody=root_custody)
+    pointer = current.lstat()
+    if not stat.S_ISLNK(pointer.st_mode) or os.readlink(current) != "releases/" + KNOWN_OLD_UNACCEPTED or \
+            (root_custody and (pointer.st_uid, pointer.st_gid) != (0, 0)):
+        raise InstallError("INSTALL_UNEXPECTED_CURRENT")
     _mkdir(staging, 0o755, root_custody=root_custody)
     for name in ("bin", "lib"):
         _mkdir(staging / name, 0o755, root_custody=root_custody)
@@ -187,6 +192,10 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
     temporary = control / (".current-" + release_id)
     if temporary.exists() or temporary.is_symlink():
         raise InstallError("INSTALL_POINTER_COLLISION")
+    pointer = current.lstat()
+    if not stat.S_ISLNK(pointer.st_mode) or os.readlink(current) != "releases/" + KNOWN_OLD_UNACCEPTED or \
+            (root_custody and (pointer.st_uid, pointer.st_gid) != (0, 0)):
+        raise InstallError("INSTALL_UNEXPECTED_CURRENT")
     os.symlink("releases/" + release_id, temporary)
     os.replace(temporary, current)
     _fsync_dir(control)

@@ -5,6 +5,44 @@ source-only merge. No DEV installation, A2 experiment, or A2 merge is
 authorized by this record. The broker-only workflow source has been changed
 to require the installed tool and therefore fails closed before first install.
 
+## Nested-sudo repair of the selected, unaccepted first release
+
+The first selected immutable snapshot release
+`8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958`
+is **unaccepted**: its validator attempts `sudo -n -l -U` from within the
+read-only transient service, where sudo cannot open `/etc/sudoers`
+(`Operation not permitted`). This establishes an application-level
+incompatibility. The precise kernel source of EPERM remains unproven and is
+intentionally not needed for the repair. No confinement property or capability
+is relaxed, and the old release is neither modified nor deleted.
+
+The repaired release includes a fixed root-side invocation payload alongside
+the CLI and lifecycle validator. The protected-main SSH command selects only
+that root-owned, immutable invoker. Immediately before creating the existing
+confined transient unit, it runs exactly two read-only sudo policy queries for
+`lilith-memory-broker` and `lilith-memory-relay`. Each bounded observation
+records the exact argv, account, return code, stdout, and stderr. Canonical
+JSON is URL-safe-base64 encoded and passed through one fixed `systemd-run
+--setenv` value; no file, IPC, database, or network evidence channel is added.
+The confined CLI rejects missing, malformed, oversized, duplicate, unknown,
+or incomplete observations and passes the validated account map explicitly to
+`collect_accepted()`. The ordinary standalone lifecycle validator continues
+to call sudo directly. Both routes use the same exact no-privilege stdout and
+empty-stderr assertion; the existing decision does not depend on sudo's exit
+code. Raw sudo output does not enter `BrokerCandidateDevSnapshotV1`, and the
+accepted baseline digest remains a state property, not a collection-plumbing
+property.
+
+The repair installer is restricted to one transition: `current` must still
+select exactly the old unaccepted release, the release set must contain only
+that old release, and the new immutable release must not already exist. It
+verifies the new archive and staged invoker identity, creates the new release
+beside the old, atomically switches `current`, then runs the corrected confined
+self-test. Acceptance requires that self-test to pass. Source merge/build do
+not authorize this installation; until separately approved, a protected-main
+expected-release pin for the new release will intentionally produce
+`TRUSTED_SNAPSHOT_RELEASE_MISMATCH` against DEV's still-selected old release.
+
 ## Decision and trust boundary
 
 The broker-only lane will no longer transfer executable trusted lifecycle source

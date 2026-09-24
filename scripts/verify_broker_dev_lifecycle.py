@@ -785,7 +785,14 @@ def _file(path: Path) -> dict:
             "gid": meta.st_gid, "mode": stat.S_IMODE(meta.st_mode)}
 
 
-def _account(name: str) -> dict | None:
+def _sudo_assertion(name: str, stdout: str, stderr: str) -> None:
+    # sudo -l commonly exits nonzero for an account with no privileges. The
+    # accepted contract checks its exact policy text and empty stderr, not rc.
+    require(stdout.strip() == f"User {name} is not allowed to run sudo on {DEV_INSTANCE}."
+            and not stderr.strip(), "ACCOUNT_SUDO_PRIVILEGE:" + name)
+
+
+def _account(name: str, sudo_observation: dict | None = None) -> dict | None:
     try:
         user = pwd.getpwnam(name)
     except KeyError:
@@ -798,23 +805,27 @@ def _account(name: str) -> dict | None:
             "ACCOUNT_NOT_LOCAL_OR_LOCKED:" + name)
     require(not Path("/home", name).exists() and not Path("/etc/ssh/authorized_keys", name).exists(),
             "ACCOUNT_HOME_OR_SSH_PRESENT:" + name)
-    sudo = subprocess.run(("/usr/bin/sudo", "-n", "-l", "-U", name),
-                          capture_output=True, text=True, timeout=10)
-    require(sudo.stdout.strip() == f"User {name} is not allowed to run sudo on {DEV_INSTANCE}."
-            and not sudo.stderr.strip(), "ACCOUNT_SUDO_PRIVILEGE:" + name)
+    if sudo_observation is None:
+        sudo = subprocess.run(("/usr/bin/sudo", "-n", "-l", "-U", name),
+                              capture_output=True, text=True, timeout=10)
+        stdout, stderr = sudo.stdout, sudo.stderr
+    else:
+        require(name in sudo_observation, "ACCOUNT_SUDO_OBSERVATION_MISSING:" + name)
+        stdout, stderr = sudo_observation[name]["stdout"], sudo_observation[name]["stderr"]
+    _sudo_assertion(name, stdout, stderr)
     return {"uid": user.pw_uid, "gid": user.pw_gid, "home": user.pw_dir,
             "shell": user.pw_shell, "groups": sorted(set(os.getgrouplist(name, user.pw_gid)))}
 
 
-def _accounts() -> dict:
+def _accounts(sudo_observation: dict | None = None) -> dict:
     ipc = None
     try:
         group = grp.getgrnam("lilith-memory-ipc")
         ipc = {"gid": group.gr_gid, "members": sorted(group.gr_mem)}
     except KeyError:
         pass
-    return {"broker": _account("lilith-memory-broker"),
-            "relay": _account("lilith-memory-relay"), "ipc": ipc}
+    return {"broker": _account("lilith-memory-broker", sudo_observation),
+            "relay": _account("lilith-memory-relay", sudo_observation), "ipc": ipc}
 
 
 def _groups() -> dict:
@@ -1092,7 +1103,7 @@ def _process_incarnation(pid: int) -> dict:
     return {"pid": pid, "bootId": boot_id, "startTicks": int(fields[19])}
 
 
-def collect_accepted() -> dict:
+def collect_accepted(sudo_observation: dict | None = None) -> dict:
     """Read-only accepted-state observation; no broker or API mutation."""
     owner = _owner_database(historical=True, accepted=True)
     evidence = _evidence_database(historical=True, accepted=True)
@@ -1102,7 +1113,7 @@ def collect_accepted() -> dict:
     snapshot = {
         "profile": POST_STAGE_II_ACCEPTED_V1,
         "host": _host(),
-        "accounts": _accounts(),
+        "accounts": _accounts(sudo_observation),
         "groups": _groups(),
         "directories": {str(path): _directory(path) for path in (
             ROOT, ROOT / "releases", CONFIG, STATE, STATE / "owner-control", STATE / "state")},
