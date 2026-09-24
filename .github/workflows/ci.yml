@@ -61,6 +61,12 @@ jobs:
       - name: Validate broker-only DEV gate and accepted-state equality contracts
         run: python -m unittest scripts/test_broker_candidate_dev_snapshot.py scripts/test_broker_only_dev_workflow.py
 
+      - name: Validate fixed trusted snapshot source, release, and installer contracts
+        run: python -m unittest scripts/test_trusted_broker_snapshot.py
+
+      - name: Prove Linux trusted snapshot read/write confinement
+        run: sudo -n /usr/bin/python3 -B -m unittest scripts/test_trusted_broker_snapshot_linux.py
+
       - name: Validate trusted broker lifecycle and production absence gates
         run: python -m unittest scripts/test_broker_dev_lifecycle.py
 
