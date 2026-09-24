@@ -33,6 +33,9 @@ def accepted_result() -> dict:
 
 
 class BrokerCandidateSnapshotTests(unittest.TestCase):
+    def test_exact_repaired_release_pin(self):
+        self.assertEqual(RELEASE, "c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261")
+
     def test_one_frame_and_closed_schema(self):
         value = accepted_result()
         frame = tool.frame(value)

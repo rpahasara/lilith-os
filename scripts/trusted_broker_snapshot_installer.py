@@ -29,7 +29,8 @@ else:
 CONTROL = Path("/opt/lilith-trusted-controls/broker-snapshot")
 KNOWN_OLD_UNACCEPTED = "8b4dbee055f5ca6b8e899d9cab8130ed4a6cbd9abb27fa71b7bbee88c41c6958"
 KNOWN_FAILED_UNACCEPTED = "36a3c93e5cb3556f5f2deb00bd4e4e0f72b71146b9f182f820b04bfa03db1aec"
-APPROVED_REPAIRED_RELEASE = "b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055"
+KNOWN_BOOT_ID_FAILED_UNACCEPTED = "b2d6a45094d74e23c18a92d171e439ef52527c31f0369ac46ea85c72bf3e0055"
+APPROVED_REPAIRED_RELEASE = "c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261"
 DEV_HOST = "lilith-dev-01"
 DEV_MACHINE_ID = "ae929170e6fa4c8ab9cc7b9547238d9d"
 DEV_PROJECT = "lilith-agent-260823-27389"
@@ -490,10 +491,12 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
     _directory(releases, 0o755, root_custody=root_custody)
     if final.exists() or final.is_symlink() or staging.exists() or staging.is_symlink():
         raise InstallError("INSTALL_EXISTING_RELEASE")
-    if {p.name for p in releases.iterdir()} != {KNOWN_OLD_UNACCEPTED, KNOWN_FAILED_UNACCEPTED}:
+    if {p.name for p in releases.iterdir()} != {KNOWN_OLD_UNACCEPTED, KNOWN_FAILED_UNACCEPTED,
+                                                  KNOWN_BOOT_ID_FAILED_UNACCEPTED}:
         raise InstallError("INSTALL_UNEXPECTED_RELEASE")
     _directory(releases / KNOWN_OLD_UNACCEPTED, 0o755, root_custody=root_custody)
     _directory(releases / KNOWN_FAILED_UNACCEPTED, 0o755, root_custody=root_custody)
+    _directory(releases / KNOWN_BOOT_ID_FAILED_UNACCEPTED, 0o755, root_custody=root_custody)
     pointer = current.lstat()
     if not stat.S_ISLNK(pointer.st_mode) or os.readlink(current) != "releases/" + KNOWN_OLD_UNACCEPTED or \
             (root_custody and (pointer.st_uid, pointer.st_gid) != (0, 0)):
@@ -562,6 +565,7 @@ def install(control: Path, release_id: str, *, root_custody: bool = True,
         "result": "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED", "releaseId": release_id,
         "oldPreservedReleaseId": KNOWN_OLD_UNACCEPTED,
         "failedPreservedReleaseId": KNOWN_FAILED_UNACCEPTED,
+        "bootIdFailedPreservedReleaseId": KNOWN_BOOT_ID_FAILED_UNACCEPTED,
         "currentTarget": "releases/" + release_id,
         "selfTestResult": "PASS", "selfTestReleaseId": release_id,
         "selfTestLifecycleProfile": first["profile"],
