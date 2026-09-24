@@ -14,7 +14,7 @@ from scripts import trusted_broker_snapshot_invocation as invocation
 from scripts.test_broker_dev_lifecycle import accepted_fixture
 
 
-RELEASE = "a" * 64
+RELEASE = guard.EXPECTED_RELEASE
 
 
 def accepted_result() -> dict:
@@ -41,23 +41,23 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
         for raw in (b"", frame + frame, frame[:-2] + b"!\n"):
             with self.subTest(raw=raw[:30]), self.assertRaises(guard.SnapshotError):
                 guard.decode_frame(raw)
-        with patch.object(guard, "EXPECTED_RELEASE", RELEASE):
-            self.assertEqual(guard.validate_result(value)["snapshotSha256"], value["completeDigestSha256"])
-            modified = {**value, "unknown": True}
-            with self.assertRaisesRegex(guard.SnapshotError, "SCHEMA"):
-                guard.validate_result(modified)
+        self.assertEqual(guard.validate_result(value)["snapshotSha256"], value["completeDigestSha256"])
+        modified = {**value, "unknown": True}
+        with self.assertRaisesRegex(guard.SnapshotError, "SCHEMA"):
+            guard.validate_result(modified)
 
     def test_release_mismatch_and_digest_drift_fail_closed(self):
         value = accepted_result()
-        with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_RELEASE_MISMATCH"):
-            guard.validate_result(value)
-        with patch.object(guard, "EXPECTED_RELEASE", RELEASE):
-            bad = {**value, "completeDigestSha256": "0" * 64}
-            with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_DIGEST"):
-                guard.validate_result(bad)
-            bad = {**value, "acceptedBaselineDigest": "0" * 64}
-            with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_RESULT"):
-                guard.validate_result(bad)
+        for key in ("toolReleaseId", "manifestSha256"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_RELEASE_MISMATCH"):
+                    guard.validate_result({**value, key: "a" * 64})
+        bad = {**value, "completeDigestSha256": "0" * 64}
+        with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_DIGEST"):
+            guard.validate_result(bad)
+        bad = {**value, "acceptedBaselineDigest": "0" * 64}
+        with self.assertRaisesRegex(guard.SnapshotError, "TRUSTED_SNAPSHOT_RESULT"):
+            guard.validate_result(bad)
 
     def test_only_fixed_installed_command_reaches_dev(self):
         value = accepted_result()
@@ -68,8 +68,7 @@ class BrokerCandidateSnapshotTests(unittest.TestCase):
                 return json.dumps({"name": guard.INSTANCE, "id": guard.INSTANCE_ID,
                                    "status": "RUNNING"}).encode()
             return tool.frame(value)
-        with patch.object(guard, "_gcloud", side_effect=cloud), \
-             patch.object(guard, "EXPECTED_RELEASE", RELEASE):
+        with patch.object(guard, "_gcloud", side_effect=cloud):
             self.assertEqual(guard.capture()["toolReleaseId"], RELEASE)
         self.assertEqual(calls[1][:2], ("ssh", guard.INSTANCE))
         command = calls[1][-1]

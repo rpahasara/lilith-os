@@ -36,6 +36,10 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/test_broker_dev_lifecycle.py",
         "scripts/test_trusted_broker_snapshot_linux.py",
         "scripts/test_broker_candidate_dev_snapshot.py",
+        "scripts/trusted_broker_snapshot_installer.py",
+        "scripts/broker_candidate_dev_snapshot.py",
+        "scripts/test_trusted_broker_snapshot.py",
+        "docs/architecture/slice15b2b-trusted-snapshot-install-acceptance-contract.md",
         "docs/architecture/slice-15b2b-b1b2b-stage2-runtime-control.md",
     }
 )

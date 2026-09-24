@@ -117,8 +117,11 @@ def installer_fixture(root: Path) -> tuple[Path, Path, str]:
     releases = control / "releases"
     old = releases / installer.KNOWN_OLD_UNACCEPTED
     old.mkdir(parents=True)
+    failed = releases / installer.KNOWN_FAILED_UNACCEPTED
+    failed.mkdir()
     releases.chmod(0o755)
     old.chmod(0o755)
+    failed.chmod(0o755)
     (control / "current").symlink_to("releases/" + installer.KNOWN_OLD_UNACCEPTED)
     source = root / "source"
     source.mkdir()
@@ -147,6 +150,10 @@ def installer_fixture(root: Path) -> tuple[Path, Path, str]:
 
 
 class SnapshotFoundationTests(unittest.TestCase):
+    def test_installer_rejects_arbitrary_release_before_file_access(self):
+        with self.assertRaisesRegex(installer.InstallError, "UNAPPROVED_REPAIRED_RELEASE"):
+            installer.install(Path("/nonexistent-control"), "a" * 64, root_custody=False)
+
     def test_cli_operation_is_closed(self):
         with patch.object(sys, "argv", ["snapshot", "anything"]):
             with self.assertRaisesRegex(tool.SnapshotError, "FIXED_SNAPSHOT_OPERATION_ONLY"):
@@ -354,27 +361,57 @@ class SnapshotFoundationTests(unittest.TestCase):
     def test_installer_only_known_old_unaccepted_transition(self):
         with tempfile.TemporaryDirectory() as temp:
             control, old, release_id = installer_fixture(Path(temp))
+            self.assertEqual(release_id, installer.APPROVED_REPAIRED_RELEASE)
+            failed = control / "releases" / installer.KNOWN_FAILED_UNACCEPTED
             calls = []
             def check(*, direct):
                 target = os.readlink(control / "current")
                 calls.append((direct, target))
                 if direct:
+                    self.assertEqual({p.name for p in (control / "releases").iterdir()},
+                                     {installer.KNOWN_OLD_UNACCEPTED,
+                                      installer.KNOWN_FAILED_UNACCEPTED, release_id})
                     installer._installed_bytes(control / "releases" / release_id,
                                                release_id, sources(), root_custody=False)
                 return accepted_snapshot(release_id)
-            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
-                result = installer.install(control, release_id, root_custody=False, self_test=check)
-                self.assertEqual(result["releaseId"], release_id)
-                self.assertEqual(result["result"], "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED")
-                self.assertEqual(result["selfTestCompleteSnapshotDigest"],
-                                 result["secondCompleteSnapshotDigest"])
-                self.assertEqual(calls, [
-                    (True, "releases/" + installer.KNOWN_OLD_UNACCEPTED),
-                    (False, "releases/" + release_id)])
-                self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
-                self.assertTrue(old.is_dir())
-                with self.assertRaisesRegex(installer.InstallError, "INSTALL_EXISTING"):
-                    installer.install(control, release_id, root_custody=False, self_test=check)
+            result = installer.install(control, release_id, root_custody=False, self_test=check)
+            self.assertEqual(result["releaseId"], release_id)
+            self.assertEqual(result["result"], "TRUSTED_SNAPSHOT_RELEASE_ACCEPTED")
+            self.assertEqual(result["failedPreservedReleaseId"], installer.KNOWN_FAILED_UNACCEPTED)
+            self.assertEqual(result["selfTestCompleteSnapshotDigest"],
+                             result["secondCompleteSnapshotDigest"])
+            self.assertEqual(calls, [
+                (True, "releases/" + installer.KNOWN_OLD_UNACCEPTED),
+                (False, "releases/" + release_id)])
+            self.assertEqual(os.readlink(control / "current"), "releases/" + release_id)
+            self.assertTrue(old.is_dir())
+            self.assertTrue(failed.is_dir())
+            with self.assertRaisesRegex(installer.InstallError, "INSTALL_EXISTING"):
+                installer.install(control, release_id, root_custody=False, self_test=check)
+
+    @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
+    def test_installer_rejects_unapproved_release_topology(self):
+        for variant in ("missing_old", "missing_failed", "extra", "wrong_current", "target_present"):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temp:
+                control, _, release_id = installer_fixture(Path(temp))
+                releases = control / "releases"
+                if variant == "missing_old":
+                    (releases / installer.KNOWN_OLD_UNACCEPTED).rmdir()
+                elif variant == "missing_failed":
+                    (releases / installer.KNOWN_FAILED_UNACCEPTED).rmdir()
+                elif variant == "extra":
+                    (releases / ("f" * 64)).mkdir(mode=0o755)
+                elif variant == "wrong_current":
+                    (control / "current").unlink()
+                    (control / "current").symlink_to("releases/" + installer.KNOWN_FAILED_UNACCEPTED)
+                else:
+                    (releases / release_id).mkdir(mode=0o755)
+                with self.assertRaisesRegex(installer.InstallError,
+                                            "INSTALL_EXISTING_RELEASE" if variant == "target_present"
+                                            else "INSTALL_UNEXPECTED_RELEASE" if variant != "wrong_current"
+                                            else "INSTALL_UNEXPECTED_CURRENT"):
+                    installer.install(control, release_id, root_custody=False,
+                                      self_test=lambda **_: self.fail("unexpected self-test"))
 
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
     def test_failed_first_self_test_leaves_old_selected(self):
@@ -384,10 +421,9 @@ class SnapshotFoundationTests(unittest.TestCase):
             def fail(*, direct):
                 calls.append(direct)
                 raise installer.InstallError("SNAPSHOT_SELF_TEST_FAILED", {"stderrExcerpt": "fixture"})
-            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
-                with self.assertRaisesRegex(installer.InstallError,
-                                            "NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED") as caught:
-                    installer.install(control, release_id, root_custody=False, self_test=fail)
+            with self.assertRaisesRegex(installer.InstallError,
+                                        "NEW_RELEASE_INSTALLED_UNSELECTED_UNACCEPTED") as caught:
+                installer.install(control, release_id, root_custody=False, self_test=fail)
             self.assertEqual(calls, [True])
             self.assertEqual(caught.exception.diagnostics["diagnostics"]["stderrExcerpt"], "fixture")
             self.assertEqual(caught.exception.diagnostics["selfTestResult"], "FAIL")
@@ -395,6 +431,7 @@ class SnapshotFoundationTests(unittest.TestCase):
             self.assertEqual(os.readlink(control / "current"),
                              "releases/" + installer.KNOWN_OLD_UNACCEPTED)
             self.assertTrue(old.is_dir())
+            self.assertTrue((control / "releases" / installer.KNOWN_FAILED_UNACCEPTED).is_dir())
             self.assertTrue((control / "releases" / release_id).is_dir())
 
     @unittest.skipUnless(os.name == "posix", "real installer file modes require Linux")
@@ -403,8 +440,7 @@ class SnapshotFoundationTests(unittest.TestCase):
             control, old, release_id = installer_fixture(Path(temp))
             def forbidden(*, direct):
                 self.fail("self-test ran before installed-byte verification")
-            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id), \
-                 patch.object(installer, "_installed_bytes",
+            with patch.object(installer, "_installed_bytes",
                               side_effect=installer.InstallError("INSTALLED_PAYLOAD_MISMATCH")):
                 with self.assertRaisesRegex(installer.InstallError, "INSTALLED_PAYLOAD_MISMATCH"):
                     installer.install(control, release_id, root_custody=False, self_test=forbidden)
@@ -421,10 +457,9 @@ class SnapshotFoundationTests(unittest.TestCase):
             def check(*, direct):
                 calls.append(direct)
                 return accepted_snapshot(release_id, variant="first" if direct else "second")
-            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
-                with self.assertRaisesRegex(installer.InstallError,
-                                            "SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH") as caught:
-                    installer.install(control, release_id, root_custody=False, self_test=check)
+            with self.assertRaisesRegex(installer.InstallError,
+                                        "SELECTED_BUT_UNACCEPTED_DIGEST_MISMATCH") as caught:
+                installer.install(control, release_id, root_custody=False, self_test=check)
             self.assertEqual(calls, [True, False])
             self.assertNotEqual(caught.exception.diagnostics["firstCompleteSnapshotDigest"],
                                 caught.exception.diagnostics["secondCompleteSnapshotDigest"])
@@ -442,10 +477,9 @@ class SnapshotFoundationTests(unittest.TestCase):
                 if direct:
                     return accepted_snapshot(release_id)
                 raise installer.InstallError("SNAPSHOT_SELF_TEST_FAILED", {"stderrExcerpt": "fixture"})
-            with patch.object(installer, "APPROVED_REPAIRED_RELEASE", release_id):
-                with self.assertRaisesRegex(installer.InstallError,
-                                            "SELECTED_BUT_UNACCEPTED_SECOND_SNAPSHOT_FAILED") as caught:
-                    installer.install(control, release_id, root_custody=False, self_test=check)
+            with self.assertRaisesRegex(installer.InstallError,
+                                        "SELECTED_BUT_UNACCEPTED_SECOND_SNAPSHOT_FAILED") as caught:
+                installer.install(control, release_id, root_custody=False, self_test=check)
             details = caught.exception.diagnostics
             self.assertEqual(details["firstCompleteSnapshotDigest"],
                              accepted_snapshot(release_id)["completeDigestSha256"])
