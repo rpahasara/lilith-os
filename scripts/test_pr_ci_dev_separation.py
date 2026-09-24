@@ -50,7 +50,12 @@ class PrCiDevSeparationTests(unittest.TestCase):
                 self.assertIn("github.event.workflow_run.head_repository.full_name == github.repository", guard)
                 self.assertNotIn("github.event.workflow_run.event == 'pull_request'", guard)
                 auth = source.index("uses: google-github-actions/auth@v3")
-                self.assertIn("github.event.workflow_run.event == 'push'", source[auth - 350:auth])
+                auth_step = source[:auth].rsplit("      - name:", 1)[-1]
+                self.assertIn("github.event.workflow_run.event == 'push'", auth_step)
+                self.assertNotIn("github.event.workflow_run.event == 'pull_request'", auth_step)
+                if name != "deploy":
+                    self.assertIn("github.ref == 'refs/heads/main'", auth_step)
+                    self.assertIn("needs.premerge_gate.result == 'success'", auth_step)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", job(DEPLOY, "deploy"))
 
     def test_main_candidate_is_exact_and_classified_against_first_parent(self):
@@ -80,6 +85,28 @@ class PrCiDevSeparationTests(unittest.TestCase):
             with self.subTest(job=name):
                 guard = job(DEPLOY, name).split("    runs-on:", 1)[0]
                 self.assertIn("needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'", guard)
+
+    def test_manual_entrypoint_cannot_use_candidate_workflow_or_deployment_steps(self):
+        gate = job(DEPLOY, "premerge_gate")
+        deploy = job(DEPLOY, "deploy")
+        candidate = job(DEPLOY, "broker_candidate")
+        post = job(DEPLOY, "broker_postflight")
+        self.assertIn("  workflow_dispatch:\n", DEPLOY)
+        self.assertIn("test \"$GITHUB_REF\" = refs/heads/main", gate)
+        self.assertIn("branch.commit.sha !== context.sha", gate)
+        self.assertIn("pr.head.sha !== candidate", gate)
+        self.assertIn("ruleset_id: 23205011", gate)
+        self.assertIn("checks.listForRef", gate)
+        self.assertIn("python scripts/classify_dev_deployment.py", gate)
+        self.assertIn("github.event.workflow_run.event == 'push'", deploy.split("    runs-on:", 1)[0])
+        self.assertNotIn("github.event_name == 'workflow_dispatch'", deploy.split("    runs-on:", 1)[0])
+        self.assertIn("contents: read", candidate)
+        self.assertNotIn("id-token: write", candidate)
+        self.assertNotIn("google-github-actions/auth", candidate)
+        self.assertNotIn("compute ssh", candidate)
+        self.assertNotIn("compute scp", candidate)
+        self.assertIn("steps.equality.outcome == 'success' && github.event_name == 'workflow_run'", post)
+        self.assertIn("if: always() && github.event_name == 'workflow_run'", post)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/test_memory_broker_os_controls.py",
         "scripts/test_memory_broker_stage2_control.py",
         "scripts/test_pr_ci_dev_separation.py",
+        "scripts/test_broker_only_dev_workflow.py",
         "scripts/verify_broker_dev_lifecycle.py",
         "scripts/test_broker_dev_lifecycle.py",
         "scripts/test_trusted_broker_snapshot_linux.py",
