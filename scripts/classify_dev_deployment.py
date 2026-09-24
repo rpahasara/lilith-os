@@ -15,6 +15,7 @@ from pathlib import Path
 
 DEPLOY_REQUIRED = "DEPLOY_REQUIRED"
 CONTROL_ONLY_NO_DEPLOY = "CONTROL_ONLY_NO_DEPLOY"
+BROKER_CANDIDATE_VALIDATE_ONLY = "BROKER_CANDIDATE_VALIDATE_ONLY"
 
 # Exact reviewed Stage-II control surface. No directory globs are accepted.
 CONTROL_ONLY_PATHS = frozenset(
@@ -35,6 +36,27 @@ CONTROL_ONLY_PATHS = frozenset(
 PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
 }
+
+# Exact broker-owned source/test surface. No shared Core API module, installer,
+# release builder, deployment control, unit, or broad directory glob qualifies.
+# A future A2 PR may use the one architecture record named here.
+BROKER_CANDIDATE_PATHS = frozenset({
+    "services/memory-broker/lilith_memory_broker/__init__.py",
+    "services/memory-broker/lilith_memory_broker/request.py",
+    "services/memory-broker/lilith_memory_broker/protocol.py",
+    "services/memory-broker/lilith_memory_broker/state.py",
+    "services/memory-broker/lilith_memory_broker/dev_config.py",
+    "services/memory-broker/lilith_memory_broker/dev_state.py",
+    "services/memory-broker/lilith_memory_broker/synthetic_evidence.py",
+    "services/memory-broker/lilith_memory_broker/dev_core.py",
+    "services/memory-broker/lilith_memory_broker/server.py",
+    "services/memory-broker/tests/test_broker_foundation.py",
+    "services/memory-broker/tests/test_dev_synthetic.py",
+    "services/memory-broker/tests/test_server_adapter.py",
+    "services/memory-broker/tests/test_deploy_assets.py",
+    "services/memory-broker/tests/owner_request_golden.json",
+    "docs/architecture/slice15b2b-stage3-a2-fault-seam.md",
+})
 CI_PATH = ".github/workflows/ci.yml"
 CI_ANCHOR = b"      - name: Validate inert broker release and installer controls\n        run: python -m unittest scripts/test_memory_broker_os_controls.py\n"
 CI_ADDITION = b"\n      - name: Validate Stage-II control-only and Linux isolation harness contracts\n        run: python -m unittest scripts/test_memory_broker_stage2_control.py\n"
@@ -83,9 +105,8 @@ def classify_entries(
 ) -> str:
     if not entries:
         return DEPLOY_REQUIRED
+    mode = None
     for path, status, old_mode, new_mode in entries:
-        if path not in CONTROL_ONLY_PATHS:
-            return DEPLOY_REQUIRED
         if status not in ("A", "M", "D"):
             return DEPLOY_REQUIRED
         if old_mode not in ("000000", "100644", "100755"):
@@ -94,11 +115,20 @@ def classify_entries(
             return DEPLOY_REQUIRED
         if new_mode == "000000" or status == "D":
             return DEPLOY_REQUIRED
-        if path in PINNED_CANDIDATE_BLOBS and candidate_blobs.get(path) != PINNED_CANDIDATE_BLOBS[path]:
+        if path in CONTROL_ONLY_PATHS:
+            if path in PINNED_CANDIDATE_BLOBS and candidate_blobs.get(path) != PINNED_CANDIDATE_BLOBS[path]:
+                return DEPLOY_REQUIRED
+            if path == CI_PATH and not ci_step_exact:
+                return DEPLOY_REQUIRED
+            current = CONTROL_ONLY_NO_DEPLOY
+        elif path in BROKER_CANDIDATE_PATHS:
+            current = BROKER_CANDIDATE_VALIDATE_ONLY
+        else:
             return DEPLOY_REQUIRED
-        if path == CI_PATH and not ci_step_exact:
+        if mode is not None and current != mode:
             return DEPLOY_REQUIRED
-    return CONTROL_ONLY_NO_DEPLOY
+        mode = current
+    return mode or DEPLOY_REQUIRED
 
 
 def ci_change_is_exact(original: bytes, proposed: bytes) -> bool:
