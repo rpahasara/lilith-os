@@ -32,9 +32,11 @@ Every later journal record is exclusive, root-only, canonical JSON, chained to
 the previous record's SHA-256, and fsynced with its containing directory.
 Neither a second `INTENT` nor an automatic replay/resume is allowed.
 
-After both units are stopped and no broker-UID process remains, the original
-owner and evidence stores (including WAL and SHM sidecars) must hash exactly as
-they did before quiescence. Their directories are renamed into the root-only
+After both units are stopped and no broker-UID process remains, both service and
+socket are runtime-masked **before** any candidate store, configuration, or
+selector binding changes. The original owner and evidence stores (including
+WAL and SHM sidecars) must hash exactly as they did before quiescence. Their
+directories are renamed into the root-only
 vault. No SQLite connection is opened on those accepted originals. The
 experimental fork is copied from their bytes and verified against the original
 physical hashes. Only the **fork** receives the candidate release binding in
@@ -53,6 +55,23 @@ health, and unchanged DEV API baseline are checked before the state is marked
 `CANDIDATE_ACTIVE`. The V2 marker must still be fresh at that point. The
 existing ten-minute lifetime is not extended.
 
+Before either unit can be unmasked or started, the controller installs the
+exact root-owned runtime `lilith-stage3-a2-guard.service` and exact drop-ins on
+**both** `lilith-memory-broker.service` and `.socket`. The guard is a
+non-restarting `Type=notify` service, tied to this controller's boot ID,
+process-start ticks, and Linux pidfd. Its worker checks the closed DEV,
+synthetic-only, candidate, authorization, selector, and journal binding, then
+fsyncs a persistent exclusive claim before reporting readiness. Both broker
+units have `BindsTo=` and `After=` on the guard, so guard termination is an
+OS/service-manager dependency event for **both** activation paths. The claim
+prevents a later start request from silently rearming the guard. The worker
+has no service-control API and receives no variable unit or command input.
+The `LIVENESS_BOUND` journal phase precedes candidate startup. A controller
+death during construction leaves both units runtime-masked; after startup,
+the pidfd event terminates the guard and the dependencies make both units
+inert without Python exception handling. The journal, claim, fork, and
+experiment evidence remain on persistent storage.
+
 ## Crash evidence and restoration
 
 The future final experiment controller must independently establish the exact
@@ -64,9 +83,10 @@ candidate, restarted invocation, unchanged inherited rows, and exactly one new
 consumed challenge/request with no new claim or synthetic evidence. An
 unverifiable record stops broker and socket; it cannot unlock restoration.
 
-`restore()` requires sealed evidence. It stops both units, retains the entire
-experimental state fork in the vault, and *copies* the accepted originals back
-to active paths, leaving the originals in the root-only vault. It restores the
+`restore()` requires sealed evidence. It stops and runtime-masks both units,
+retains the entire experimental state fork in the vault, and *copies* the
+accepted originals back to active paths, leaving the originals in the root-only
+vault. It restores the
 original configuration bytes and accepted selector, then restarts and verifies
 health, exact accepted state-file hashes, original configuration hash, unchanged
 DEV API baseline, terminal V2 marker, absent arm, and a **new** broker
@@ -74,7 +94,10 @@ invocation. The separate `POST_STAGE_III_A_RESTORED_V1` contract does not reuse
 the historical `POST_STAGE_II_ACCEPTED_V1` invocation/start-time assertion or
 claim that the old complete snapshot digest still describes the new runtime.
 Experimental stores, phase journal, provenance, and completed evidence remain
-retained for review.
+retained for review. Only after accepted bytes/configuration/selector have
+been re-established while both units are masked does the controller remove
+the exact two runtime drop-ins, stop the guard, unmask and restart the accepted
+units. The guard claim and source/unit artifacts remain forensic and one-shot.
 
 Any uncertainty after `INTENT` triggers a stop of both units and a terminal
 `FAILED_INERT` record. If containment itself cannot be verified, the control
@@ -90,8 +113,8 @@ must bind the final controller's independently verified barrier/kill/recovery/
 replay evidence to `Stage3A2CompletedEvidenceV1`, validate the exact runtime
 environment and state-fork behavior on an isolated synthetic test host, and
 authorize any DEV deployment and execution explicitly. In particular, the
-final controller must provide an OS-enforced liveness dependency that stops
-*both* broker and socket if the root controller process dies after candidate
-startup; Python exception containment alone cannot cover an uncatchable
-controller termination. The dormant transition source is not an operational
-go-ahead until that dependency is reviewed and tested.
+new OS-enforced dependency must pass an isolated **systemd** integration test
+covering unexpected controller exit at pre-binding, guard startup, candidate
+active, and restoration phases. Local source tests and a Linux pidfd test do
+not substitute for that service-manager test. This dormant source is not an
+operational go-ahead until that test and protected review are complete.

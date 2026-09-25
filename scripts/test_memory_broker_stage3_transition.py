@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from scripts import memory_broker_stage2_control as stage2
 from scripts import memory_broker_stage3_transition as transition
+from scripts import memory_broker_stage3_liveness as liveness
 from scripts.test_broker_candidate_dev_snapshot import accepted_result
 
 
@@ -271,6 +272,7 @@ class Stage3TransitionContracts(unittest.TestCase):
                  patch.object(stage2, "assert_unit_state"), \
                  patch.object(stage2, "show", return_value={"InvocationID": "second"}), \
                  patch.object(stage2, "stage3_verify_candidate_release"), \
+                 patch.object(liveness, "verify"), \
                  patch.object(transition.os, "readlink",
                               return_value=f"releases/{stage2.STAGE3_RELEASE}"):
                 with closing(sqlite3.connect(evidence_path)) as db:
@@ -297,7 +299,7 @@ class Stage3TransitionContracts(unittest.TestCase):
         self.assertNotIn("SIGKILL", source)
         self.assertNotIn("stage3-transition", inspect.getsource(stage2.main))
         self.assertLess(source.index("self.journal.create(intent)"),
-                        source.index("stopped()\n            require(tree_fingerprints"))
+                        source.index("stopped()\n            liveness.mask_for_transition()"))
 
 
 if __name__ == "__main__":

@@ -141,7 +141,11 @@ class DevGateClassifierTests(unittest.TestCase):
     def test_stage3_transition_is_control_only_and_not_a_dev_deployment(self):
         for path in (
             "scripts/memory_broker_stage3_transition.py",
+            "scripts/memory_broker_stage3_liveness.py",
+            "scripts/memory_broker_stage3_guard_worker.py",
             "scripts/test_memory_broker_stage3_transition.py",
+            "scripts/test_memory_broker_stage3_liveness.py",
+            "scripts/test_memory_broker_stage3_guard_linux.py",
             "docs/architecture/slice15b2b-stage3-a2-reversible-transition.md",
         ):
             with self.subTest(path=path):

@@ -19,6 +19,7 @@ import sqlite3
 import stat
 
 from scripts import memory_broker_stage2_control as control
+from scripts import memory_broker_stage3_liveness as liveness
 
 
 PROFILE_ACTIVE = "STAGE_III_A_EXPERIMENTAL_V1"
@@ -292,7 +293,8 @@ class Journal:
 
     def append(self, phase: str, record: dict) -> None:
         require(phase in {"INTENT", "QUIESCED", "ACCEPTED_VAULTED", "FORK_READY",
-                          "BINDINGS_SWITCHED", "CANDIDATE_ACTIVE", "EVIDENCE_SEALED",
+            "BINDINGS_SWITCHED", "LIVENESS_BOUND", "CANDIDATE_ACTIVE",
+            "EVIDENCE_SEALED",
                           "RESTORE_QUIESCED", "EXPERIMENT_PRESERVED",
                           "ACCEPTED_REBOUND", "RESTORED", "FAILED_INERT"},
                 "STAGE3_JOURNAL_PHASE")
@@ -308,7 +310,8 @@ class Journal:
             "QUIESCED": ("ACCEPTED_VAULTED", "FAILED_INERT"),
             "ACCEPTED_VAULTED": ("FORK_READY", "FAILED_INERT"),
             "FORK_READY": ("BINDINGS_SWITCHED", "FAILED_INERT"),
-            "BINDINGS_SWITCHED": ("CANDIDATE_ACTIVE", "FAILED_INERT"),
+            "BINDINGS_SWITCHED": ("LIVENESS_BOUND", "FAILED_INERT"),
+            "LIVENESS_BOUND": ("CANDIDATE_ACTIVE", "FAILED_INERT"),
             "CANDIDATE_ACTIVE": ("EVIDENCE_SEALED", "FAILED_INERT"),
             "EVIDENCE_SEALED": ("RESTORE_QUIESCED", "FAILED_INERT"),
             "RESTORE_QUIESCED": ("EXPERIMENT_PRESERVED", "FAILED_INERT"),
@@ -358,8 +361,16 @@ class Journal:
 
 def stopped() -> None:
     for name in (control.SOCKET, control.SERVICE):
-        control.run_fixed("/usr/bin/systemctl", "stop", name)
-    control.assert_unit_state(socket_active=False, service_active=False)
+        if control.show(name, "ActiveState").get("ActiveState") != "inactive":
+            control.run_fixed("/usr/bin/systemctl", "stop", name)
+    for name, allowed in ((control.SOCKET, {"disabled", "masked-runtime"}),
+                          (control.SERVICE, {"static", "masked-runtime"})):
+        observed = control.show(name, "ActiveState", "SubState", "MainPID",
+                                "UnitFileState")
+        require(observed.get("ActiveState") == "inactive" and
+                observed.get("MainPID") == "0" and
+                observed.get("UnitFileState") in allowed,
+                "STAGE3_UNIT_NOT_INERT")
     # No broker-UID process can retain the SQLite stores after service stop.
     if os.name != "nt":
         for entry in Path("/proc").iterdir():
@@ -431,6 +442,7 @@ class TransitionController:
     def __init__(self, paths: Paths = Paths()):
         self.paths = paths
         self.journal = Journal(paths.vault)
+        self.guard = liveness.Paths(vault=paths.vault)
 
     def activate(self) -> dict:
         """One-shot accepted -> experimental transition; no A2 proof or signal."""
@@ -464,6 +476,7 @@ class TransitionController:
         self.journal.create(intent)  # Durable one-shot claim before first mutation.
         try:
             stopped()
+            liveness.mask_for_transition()
             require(tree_fingerprints(p) == before and
                     sha(regular(p.dev_config, uid=0, gid=987, mode=0o640)) ==
                     intent["configSha256"], "STAGE3_QUIESCE_CHANGED_ACCEPTED_BYTES")
@@ -508,9 +521,12 @@ class TransitionController:
                         "STAGE3_CANDIDATE_EVIDENCE_BINDING")
             require(control.stage3_verify_authorization() == marker,
                     "STAGE3_AUTHORIZATION_EXPIRED_DURING_TRANSITION")
+            guard = liveness.install(self.guard, marker["authorizationId"])
+            self.journal.append("LIVENESS_BOUND", guard)
             control.run_fixed("/usr/bin/systemctl", "start", control.SOCKET)
             control.run_fixed("/usr/bin/systemctl", "start", control.SERVICE)
             incarnation = active()
+            liveness.verify(self.guard, marker["authorizationId"])
             require(control.relay("health").get("status") == "HEALTH_OK",
                     "STAGE3_CANDIDATE_STARTUP_REJECTED")
             require(row_fingerprints(p.active("owner") / OWNER_FILES[0],
@@ -584,6 +600,7 @@ class TransitionController:
         control.stage3_verify_candidate_release(selected=True)
         intent = json.loads(regular(p.vault / "000-INTENT.json"))["record"]
         used = json.loads(regular(control.STAGE3_USED, uid=0, gid=0, mode=0o600))
+        liveness.verify(self.guard, intent["authorizationId"])
         require(used.get("authorizationId") == intent["authorizationId"] and
                 os.readlink(p.current) == f"releases/{control.STAGE3_RELEASE}",
                 "STAGE3_EVIDENCE_AUTHORIZATION_OR_SELECTOR")
@@ -653,7 +670,11 @@ class TransitionController:
                     intent["configSha256"] and
                     os.readlink(p.current) == f"releases/{control.STAGE3_RELEASE}",
                     "STAGE3_RESTORE_ACCEPTED_CUSTODY")
+            liveness.verify(self.guard, intent["authorizationId"])
             stopped()
+            control.run_fixed("/usr/bin/systemctl", "mask", "--runtime",
+                              control.SOCKET, control.SERVICE)
+            liveness.require_inert(masked=True)
             self.journal.append("RESTORE_QUIESCED", {})
             experimental = tree_fingerprints(p, experimental=True)
             for kind in ("owner", "evidence"):
@@ -680,6 +701,7 @@ class TransitionController:
             require(tree_fingerprints(p) == intent["stateHashes"],
                     "STAGE3_RESTORE_BYTES_CHANGED")
             self.journal.append("ACCEPTED_REBOUND", {"stateHashes": intent["stateHashes"]})
+            liveness.release(self.guard, intent["authorizationId"])
             restart_count = control.show(control.SERVICE, "NRestarts")["NRestarts"]
             control.run_fixed("/usr/bin/systemctl", "start", control.SOCKET)
             control.run_fixed("/usr/bin/systemctl", "start", control.SERVICE)
@@ -691,6 +713,7 @@ class TransitionController:
                     incarnation["invocationId"] != intent["acceptedInvocationId"],
                     "STAGE3_RESTORED_STATE_DRIFT")
             control.require_api_baseline_unchanged(intent["apiBaseline"])
+            liveness.require_dependencies(self.guard, present=False)
             observed = {
                 "profile": PROFILE_RESTORED,
                 "acceptedRelease": control.RELEASE,
