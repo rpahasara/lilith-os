@@ -37,6 +37,7 @@ class Stage3LivenessContracts(unittest.TestCase):
     def test_unit_dependencies_cover_service_and_socket_without_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = guard.Paths(systemd=Path(directory) / "systemd",
+                                drop_root=Path(directory) / "etc",
                                 runtime=Path(directory) / "runtime",
                                 vault=Path(directory) / "vault")
             unit = guard.guard_unit_bytes(paths).decode()
@@ -47,6 +48,12 @@ class Stage3LivenessContracts(unittest.TestCase):
             self.assertEqual(guard.DROPIN.count("BindsTo="), 1)
             self.assertIn("BindsTo=" + guard.GUARD, guard.DROPIN)
             self.assertIn("After=" + guard.GUARD, guard.DROPIN)
+            self.assertIn("AssertPathExists=" + guard.Paths().ready.as_posix(),
+                          guard.DROPIN)
+            self.assertEqual(guard.ORIGINAL_UNITS[stage2.SERVICE],
+                             Path("/etc/systemd/system/lilith-memory-broker.service"))
+            self.assertEqual(guard.ORIGINAL_UNITS[stage2.SOCKET],
+                             Path("/etc/systemd/system/lilith-memory-broker.socket"))
             self.assertEqual(paths.drop(stage2.SERVICE).name, guard.DROP_NAME)
             self.assertEqual(paths.drop(stage2.SOCKET).name, guard.DROP_NAME)
             with self.assertRaisesRegex(guard.LivenessError, "GUARD_UNIT_SCOPE"):
@@ -54,9 +61,10 @@ class Stage3LivenessContracts(unittest.TestCase):
 
     def test_observed_socket_dependency_must_match_service_dependency(self):
         with tempfile.TemporaryDirectory() as directory:
-            paths = guard.Paths(systemd=Path(directory))
+            paths = guard.Paths(systemd=Path(directory) / "systemd",
+                                drop_root=Path(directory) / "etc")
             for unit in (stage2.SERVICE, stage2.SOCKET):
-                paths.drop_directory(unit).mkdir()
+                paths.drop_directory(unit).mkdir(parents=True)
                 paths.drop(unit).write_bytes(guard.DROPIN.encode())
 
             def observed(unit):
@@ -74,44 +82,54 @@ class Stage3LivenessContracts(unittest.TestCase):
     def test_local_install_and_release_order_preserve_one_shot_files(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
-            paths = guard.Paths(systemd=base / "systemd", runtime=base / "runtime",
+            paths = guard.Paths(systemd=base / "systemd", drop_root=base / "etc",
+                                runtime=base / "runtime",
                                 vault=base / "vault")
             paths.systemd.mkdir()
+            paths.drop_root.mkdir()
             paths.vault.mkdir()
             commands = []
+
+            def record(*args):
+                if args == ("/usr/bin/systemctl", "start", guard.GUARD):
+                    self.assertFalse(paths.ready.exists())
+                commands.append(args)
+
             with patch.object(stage2, "assert_host"), \
                  patch.object(guard, "require_inert"), \
                  patch.object(guard, "require_dependencies"), \
                  patch.object(guard, "source_bytes", return_value=b"reviewed-worker"), \
+                 patch.object(guard, "original_unit_hashes",
+                              return_value={"service": "unchanged", "socket": "unchanged"}), \
                  patch.object(guard, "config_value", return_value={"test": "fixed"}), \
                  patch.object(guard, "regular",
                               side_effect=lambda path, **_: path.read_bytes()), \
-                 patch.object(guard, "verify_guard", return_value={"guardPid": 7}), \
+                 patch.object(guard, "verify_guard",
+                              return_value={"guardPid": 7, "claimSha256": "c" * 64}), \
                  patch.object(guard, "verify", return_value={"guardPid": 7}), \
-                 patch.object(stage2, "run_fixed",
-                              side_effect=lambda *args: commands.append(args)), \
+                 patch.object(stage2, "run_fixed", side_effect=record), \
                  patch.object(stage2, "show", return_value={"ActiveState": "inactive"}):
-                guard.mask_for_transition()
+                guard.prepare_inert(paths)
                 result = guard.install(paths, "a" * 32)
-                self.assertEqual(result, {"guardPid": 7})
+                self.assertEqual(result["guardPid"], 7)
                 self.assertEqual(paths.worker.read_bytes(), b"reviewed-worker")
                 self.assertEqual(paths.drop(stage2.SERVICE).read_text(), guard.DROPIN)
                 self.assertEqual(paths.drop(stage2.SOCKET).read_text(), guard.DROPIN)
-                self.assertLess(commands.index(("/usr/bin/systemctl", "mask", "--runtime",
-                                               stage2.SOCKET, stage2.SERVICE)),
+                self.assertLess(commands.index(("/usr/bin/systemctl", "daemon-reload")),
                                 commands.index(("/usr/bin/systemctl", "start", guard.GUARD)))
-                self.assertLess(commands.index(("/usr/bin/systemctl", "start", guard.GUARD)),
-                                commands.index(("/usr/bin/systemctl", "unmask", "--runtime",
-                                               stage2.SOCKET, stage2.SERVICE)))
+                self.assertTrue(paths.ready.is_file())
+                guard.close_gate(paths)
+                self.assertFalse(paths.ready.exists())
                 commands.clear()
                 guard.release(paths, "a" * 32)
             self.assertFalse(paths.drop(stage2.SERVICE).exists())
             self.assertFalse(paths.drop(stage2.SOCKET).exists())
             self.assertTrue(paths.guard_unit.exists())  # Retained, not reusable.
             self.assertTrue(paths.worker.exists())
-            self.assertLess(commands.index(("/usr/bin/systemctl", "stop", guard.GUARD)),
-                            commands.index(("/usr/bin/systemctl", "unmask", "--runtime",
-                                           stage2.SOCKET, stage2.SERVICE)))
+            self.assertLess(commands.index(("/usr/bin/systemctl", "daemon-reload")),
+                            commands.index(("/usr/bin/systemctl", "stop", guard.GUARD)))
+            self.assertFalse(any("mask" in call or "unmask" in call
+                                 for call in commands))
 
     def test_phase_journal_requires_guard_before_candidate_start(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,13 +146,13 @@ class Stage3LivenessContracts(unittest.TestCase):
             journal.append("CANDIDATE_ACTIVE", {"invocationId": "synthetic"})
             self.assertEqual(journal.last()[0], "CANDIDATE_ACTIVE")
 
-    def test_activation_masks_before_any_candidate_binding_change(self):
+    def test_activation_closes_both_paths_before_candidate_binding_change(self):
         source = Path(transition.__file__).read_text(encoding="utf-8")
         activate = source.split("    def activate(self) -> dict:", 1)[1].split(
             "    def seal_evidence", 1)[0]
-        self.assertLess(activate.index("liveness.mask_for_transition()"),
+        self.assertLess(activate.index("liveness.prepare_inert(self.guard)"),
                         activate.index("exclusive(p.vault / \"accepted-dev.json\""))
-        self.assertLess(activate.index("liveness.mask_for_transition()"),
+        self.assertLess(activate.index("liveness.prepare_inert(self.guard)"),
                         activate.index("replace_selector(p.current"))
         self.assertLess(activate.index("liveness.install(self.guard"),
                         activate.index("\"start\", control.SOCKET"))

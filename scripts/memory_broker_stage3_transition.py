@@ -429,10 +429,22 @@ def validate_restored_state(intent: dict, observed: dict) -> None:
             "STAGE3_RESTORED_PROFILE_MISMATCH")
 
 
-def contain_failure(journal: Journal, reason: str) -> None:
+def contain_failure(journal: Journal, guard: liveness.Paths, reason: str) -> None:
     """A containment failure is terminal and must be visible, never swallowed."""
+    def stop_guard() -> None:
+        if os.path.lexists(guard.guard_unit) and control.show(
+                liveness.GUARD, "ActiveState").get("ActiveState") == "active":
+            control.run_fixed("/usr/bin/systemctl", "stop", liveness.GUARD)
+
+    failures = []
+    for action in (lambda: liveness.close_gate(guard), stop_guard, stopped):
+        try:
+            action()
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise TransitionError("STAGE3_CONTAINMENT_UNVERIFIED") from failures[0]
     try:
-        stopped()
         journal.append("FAILED_INERT", {"reason": reason})
     except Exception as exc:
         raise TransitionError("STAGE3_CONTAINMENT_UNVERIFIED") from exc
@@ -476,11 +488,12 @@ class TransitionController:
         self.journal.create(intent)  # Durable one-shot claim before first mutation.
         try:
             stopped()
-            liveness.mask_for_transition()
+            original_units = liveness.prepare_inert(self.guard)
             require(tree_fingerprints(p) == before and
                     sha(regular(p.dev_config, uid=0, gid=987, mode=0o640)) ==
                     intent["configSha256"], "STAGE3_QUIESCE_CHANGED_ACCEPTED_BYTES")
-            self.journal.append("QUIESCED", {"stateHashes": before})
+            self.journal.append("QUIESCED", {"stateHashes": before,
+                                            "originalUnitHashes": original_units})
             exclusive(p.vault / "accepted-dev.json", config_raw)
             for kind in ("owner", "evidence"):
                 require(not os.path.lexists(p.saved(kind)), "STAGE3_VAULT_TARGET_COLLISION")
@@ -540,7 +553,7 @@ class TransitionController:
             return {"profile": PROFILE_ACTIVE, "candidateRelease": control.STAGE3_RELEASE,
                     "invocationId": incarnation["invocationId"]}
         except BaseException:
-            contain_failure(self.journal, "ACTIVATION_REVIEW_REQUIRED")
+            contain_failure(self.journal, self.guard, "ACTIVATION_REVIEW_REQUIRED")
             raise
 
     def seal_evidence(self, evidence: dict) -> None:
@@ -548,7 +561,7 @@ class TransitionController:
         try:
             self._seal_evidence(evidence)
         except BaseException:
-            contain_failure(self.journal, "EVIDENCE_REVIEW_REQUIRED")
+            contain_failure(self.journal, self.guard, "EVIDENCE_REVIEW_REQUIRED")
             raise
 
     def _seal_evidence(self, evidence: dict) -> None:
@@ -672,9 +685,8 @@ class TransitionController:
                     "STAGE3_RESTORE_ACCEPTED_CUSTODY")
             liveness.verify(self.guard, intent["authorizationId"])
             stopped()
-            control.run_fixed("/usr/bin/systemctl", "mask", "--runtime",
-                              control.SOCKET, control.SERVICE)
-            liveness.require_inert(masked=True)
+            liveness.close_gate(self.guard)
+            liveness.require_inert()
             self.journal.append("RESTORE_QUIESCED", {})
             experimental = tree_fingerprints(p, experimental=True)
             for kind in ("owner", "evidence"):
@@ -741,5 +753,5 @@ class TransitionController:
                     "acceptedRelease": control.RELEASE,
                     "invocationId": incarnation["invocationId"]}
         except BaseException:
-            contain_failure(self.journal, "RESTORATION_REVIEW_REQUIRED")
+            contain_failure(self.journal, self.guard, "RESTORATION_REVIEW_REQUIRED")
             raise

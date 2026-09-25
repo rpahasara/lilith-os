@@ -11,7 +11,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from scripts import memory_broker_stage2_control as stage2
 from scripts import memory_broker_stage3_transition as transition
@@ -299,7 +299,22 @@ class Stage3TransitionContracts(unittest.TestCase):
         self.assertNotIn("SIGKILL", source)
         self.assertNotIn("stage3-transition", inspect.getsource(stage2.main))
         self.assertLess(source.index("self.journal.create(intent)"),
-                        source.index("stopped()\n            liveness.mask_for_transition()"))
+                        source.index("stopped()\n            original_units = "
+                                     "liveness.prepare_inert(self.guard)"))
+
+    def test_containment_still_stops_guard_and_units_if_gate_close_fails(self):
+        journal = MagicMock()
+        with patch.object(liveness, "close_gate", side_effect=OSError("synthetic")), \
+             patch.object(transition.os.path, "lexists", return_value=True), \
+             patch.object(stage2, "show", return_value={"ActiveState": "active"}), \
+             patch.object(stage2, "run_fixed") as run, \
+             patch.object(transition, "stopped") as stop, \
+             self.assertRaisesRegex(transition.TransitionError,
+                                    "STAGE3_CONTAINMENT_UNVERIFIED"):
+            transition.contain_failure(journal, liveness.Paths(), "SYNTHETIC")
+        run.assert_called_once_with("/usr/bin/systemctl", "stop", liveness.GUARD)
+        stop.assert_called_once()
+        journal.append.assert_not_called()
 
 
 if __name__ == "__main__":

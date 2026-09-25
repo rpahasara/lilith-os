@@ -1,9 +1,10 @@
 """Exact runtime systemd liveness binding for dormant DEV-only Stage-III A2.
 
-The two broker units are runtime-masked during construction and teardown.
-While experimental, both have BindsTo=/After= on a non-restarting, one-shot
-Type=notify guard whose main process watches the controller's kernel pidfd.
-There is no generalized unit name, command, or service-control input.
+The accepted /etc unit files remain byte-for-byte untouched. Exact persistent
+drop-ins put an AssertPathExists gate and BindsTo=/After= on both units. Their
+closed gate survives reboot if experimental bindings survive but /run does not.
+The gate opens only after a non-restarting, one-shot Type=notify pidfd guard
+is active; it closes before restoration. No generic service-control input exists.
 """
 
 from __future__ import annotations
@@ -23,6 +24,10 @@ from scripts import memory_broker_stage2_control as control
 GUARD = "lilith-stage3-a2-guard.service"
 GUARD_WORKER_SHA = "cdb933cd1ea9170d533a39d1cb5379f6834621f6911bc6afa3ff34057261feb2"
 DROP_NAME = "90-stage3-a2-liveness.conf"
+ORIGINAL_UNITS = {
+    control.SERVICE: Path("/etc/systemd/system/lilith-memory-broker.service"),
+    control.SOCKET: Path("/etc/systemd/system/lilith-memory-broker.socket"),
+}
 GUARD_UNIT = """[Unit]
 Description=LILITH DEV synthetic Stage-III A2 one-shot controller pidfd guard
 
@@ -55,6 +60,7 @@ ReadWritePaths=/var/lib/.lilith-memory-broker-stage3-a2
 DROPIN = """[Unit]
 BindsTo=lilith-stage3-a2-guard.service
 After=lilith-stage3-a2-guard.service
+AssertPathExists=/run/lilith-stage3-a2/activation.ready
 """
 
 
@@ -121,6 +127,7 @@ def exclusive(path: Path, data: bytes, mode: int) -> None:
 @dataclass(frozen=True)
 class Paths:
     systemd: Path = Path("/run/systemd/system")
+    drop_root: Path = Path("/etc/systemd/system")
     runtime: Path = Path("/run/lilith-stage3-a2")
     vault: Path = Path("/var/lib/.lilith-memory-broker-stage3-a2")
     worker_source: Path = Path(__file__).with_name(
@@ -142,9 +149,13 @@ class Paths:
     def claim(self) -> Path:
         return self.vault / "guard.claim.json"
 
+    @property
+    def ready(self) -> Path:
+        return self.runtime / "activation.ready"
+
     def drop_directory(self, unit: str) -> Path:
         require(unit in (control.SERVICE, control.SOCKET), "GUARD_UNIT_SCOPE")
-        return self.systemd / (unit + ".d")
+        return self.drop_root / (unit + ".d")
 
     def drop(self, unit: str) -> Path:
         return self.drop_directory(unit) / DROP_NAME
@@ -195,18 +206,33 @@ def source_bytes(paths: Paths) -> bytes:
     return raw
 
 
+def trusted_directory(path: Path) -> bool:
+    info = path.lstat()
+    return (stat.S_ISDIR(info.st_mode) and not path.is_symlink() and
+            (os.name == "nt" or (info.st_uid == info.st_gid == 0 and
+             not info.st_mode & 0o022)))
+
+
 def unit_state(unit: str) -> dict:
     return control.show(unit, "ActiveState", "SubState", "MainPID",
                         "UnitFileState", "BindsTo", "After", "DropInPaths")
 
 
-def require_inert(*, masked: bool) -> None:
+def original_unit_hashes() -> dict[str, str]:
+    result = {}
+    for unit, path in ORIGINAL_UNITS.items():
+        digest = sha(regular(path, mode=0o644))
+        require(digest == control.HASHES[path], "GUARD_ORIGINAL_UNIT_DRIFT")
+        result[unit] = digest
+    return result
+
+
+def require_inert() -> None:
     for unit in (control.SERVICE, control.SOCKET):
         value = unit_state(unit)
         require(value.get("ActiveState") == "inactive" and
                 value.get("MainPID", "0") == "0" and
                 value.get("UnitFileState") == (
-                    "masked-runtime" if masked else
                     "static" if unit == control.SERVICE else "disabled"),
                 "GUARD_UNITS_NOT_INERT")
 
@@ -257,37 +283,35 @@ def verify_guard(paths: Paths, authorization_id: str) -> dict:
 
 def verify(paths: Paths, authorization_id: str) -> dict:
     control.assert_host()
+    original_unit_hashes()
     require_dependencies(paths, present=True)
+    require(regular(paths.ready, mode=0o600) == canonical({
+        "schema": "Stage3A2ActivationGateV1",
+        "authorizationId": authorization_id,
+        "claimSha256": sha(regular(paths.claim, mode=0o600)),
+    }), "GUARD_ACTIVATION_GATE_DRIFT")
     return verify_guard(paths, authorization_id)
 
 
-def mask_for_transition() -> None:
-    """Close both activation paths before any accepted binding is changed."""
+def prepare_inert(paths: Paths) -> dict[str, str]:
+    """Load a closed gate on both exact /etc units before binding changes."""
     control.assert_host()
-    require_inert(masked=False)
-    require_dependencies(Paths(), present=False)
-    control.run_fixed("/usr/bin/systemctl", "mask", "--runtime",
-                      control.SOCKET, control.SERVICE)
-    require_inert(masked=True)
-
-
-def install(paths: Paths, authorization_id: str) -> dict:
-    control.assert_host()
-    require_inert(masked=True)
-    require(paths.systemd.is_dir() and not paths.systemd.is_symlink() and
-            paths.vault.is_dir() and not paths.vault.is_symlink() and
+    require_inert()
+    require_dependencies(paths, present=False)
+    originals = original_unit_hashes()
+    require(trusted_directory(paths.systemd) and
+            trusted_directory(paths.drop_root) and
+            trusted_directory(paths.vault) and
             not any(os.path.lexists(item) for item in (
                 paths.runtime, paths.guard_unit, paths.claim,
                 paths.drop(control.SERVICE), paths.drop(control.SOCKET))) and
             all(not os.path.lexists(paths.drop_directory(unit)) for unit in
                 (control.SERVICE, control.SOCKET)),
-            "GUARD_INSTALL_COLLISION")
+            "GUARD_PREPARE_COLLISION")
     worker = source_bytes(paths)
-    config = canonical(config_value(authorization_id))
     paths.runtime.mkdir(mode=0o700)
     fsync_dir(paths.runtime.parent)
     exclusive(paths.worker, worker, 0o600)
-    exclusive(paths.config, config, 0o600)
     exclusive(paths.guard_unit, guard_unit_bytes(paths), 0o644)
     for unit in (control.SERVICE, control.SOCKET):
         folder = paths.drop_directory(unit)
@@ -295,20 +319,48 @@ def install(paths: Paths, authorization_id: str) -> dict:
         fsync_dir(folder.parent)
         exclusive(paths.drop(unit), DROPIN.encode(), 0o644)
     control.run_fixed("/usr/bin/systemctl", "daemon-reload")
-    require_inert(masked=True)
+    require_inert()
+    require(not os.path.lexists(paths.ready), "GUARD_GATE_OPEN_EARLY")
+    require_dependencies(paths, present=True)
+    require(original_unit_hashes() == originals, "GUARD_ORIGINAL_UNIT_DRIFT")
+    return originals
+
+
+def install(paths: Paths, authorization_id: str) -> dict:
+    control.assert_host()
+    require_inert()
+    original_unit_hashes()
+    require_dependencies(paths, present=True)
+    require(not any(os.path.lexists(item) for item in
+                    (paths.config, paths.claim, paths.ready)),
+            "GUARD_INSTALL_COLLISION")
+    config = canonical(config_value(authorization_id))
+    exclusive(paths.config, config, 0o600)
     control.run_fixed("/usr/bin/systemctl", "start", GUARD)
     bound = verify_guard(paths, authorization_id)
-    control.run_fixed("/usr/bin/systemctl", "unmask", "--runtime",
-                      control.SOCKET, control.SERVICE)
-    require_inert(masked=False)
-    require_dependencies(paths, present=True)
+    exclusive(paths.ready, canonical({
+        "schema": "Stage3A2ActivationGateV1",
+        "authorizationId": authorization_id,
+        "claimSha256": bound["claimSha256"],
+    }), 0o600)
+    require_inert()
     verify(paths, authorization_id)
     return bound
 
 
+def close_gate(paths: Paths) -> None:
+    if os.path.lexists(paths.ready):
+        regular(paths.ready, mode=0o600)
+        paths.ready.unlink()
+        fsync_dir(paths.runtime)
+    require(not os.path.lexists(paths.ready), "GUARD_GATE_REMAINS_OPEN")
+
+
 def release(paths: Paths, authorization_id: str) -> None:
     control.assert_host()
-    require_inert(masked=True)
+    require_inert()
+    require(not os.path.lexists(paths.ready), "GUARD_RELEASE_GATE_OPEN")
+    original_unit_hashes()
     verify_guard(paths, authorization_id)
     for unit in (control.SERVICE, control.SOCKET):
         path = paths.drop(unit)
@@ -317,13 +369,12 @@ def release(paths: Paths, authorization_id: str) -> None:
         path.unlink()
         fsync_dir(path.parent)
         path.parent.rmdir()  # Fails closed if another drop-in appeared.
-        fsync_dir(paths.systemd)
+        fsync_dir(paths.drop_root)
     control.run_fixed("/usr/bin/systemctl", "daemon-reload")
     control.run_fixed("/usr/bin/systemctl", "stop", GUARD)
     require(control.show(GUARD, "ActiveState").get("ActiveState") == "inactive",
             "GUARD_NOT_STOPPED")
-    control.run_fixed("/usr/bin/systemctl", "unmask", "--runtime",
-                      control.SOCKET, control.SERVICE)
-    require_inert(masked=False)
+    require_inert()
     require_dependencies(paths, present=False)
+    original_unit_hashes()
     # Retain the one-shot claim and guard unit/source as forensic evidence.

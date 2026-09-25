@@ -32,9 +32,13 @@ Every later journal record is exclusive, root-only, canonical JSON, chained to
 the previous record's SHA-256, and fsynced with its containing directory.
 Neither a second `INTENT` nor an automatic replay/resume is allowed.
 
-After both units are stopped and no broker-UID process remains, both service and
-socket are runtime-masked **before** any candidate store, configuration, or
-selector binding changes. The original owner and evidence stores (including
+After both units are stopped and no broker-UID process remains, a closed
+`AssertPathExists=/run/lilith-stage3-a2/activation.ready` gate is installed
+as an exact persistent drop-in on **both** the service and socket, before any
+candidate store, configuration, or selector binding changes. The original
+unit files under `/etc/systemd/system` are checked against their accepted
+SHA-256 and root-owned `0644` custody before and after the gate; their bytes
+are never moved or rewritten. The original owner and evidence stores (including
 WAL and SHM sidecars) must hash exactly as they did before quiescence. Their
 directories are renamed into the root-only
 vault. No SQLite connection is opened on those accepted originals. The
@@ -55,9 +59,8 @@ health, and unchanged DEV API baseline are checked before the state is marked
 `CANDIDATE_ACTIVE`. The V2 marker must still be fresh at that point. The
 existing ten-minute lifetime is not extended.
 
-Before either unit can be unmasked or started, the controller installs the
-exact root-owned runtime `lilith-stage3-a2-guard.service` and exact drop-ins on
-**both** `lilith-memory-broker.service` and `.socket`. The guard is a
+The exact persistent drop-ins also bind both units to the root-owned runtime
+`lilith-stage3-a2-guard.service` with `BindsTo=` and `After=`. The guard is a
 non-restarting `Type=notify` service, tied to this controller's boot ID,
 process-start ticks, and Linux pidfd. Its worker checks the closed DEV,
 synthetic-only, candidate, authorization, selector, and journal binding, then
@@ -66,11 +69,16 @@ units have `BindsTo=` and `After=` on the guard, so guard termination is an
 OS/service-manager dependency event for **both** activation paths. The claim
 prevents a later start request from silently rearming the guard. The worker
 has no service-control API and receives no variable unit or command input.
-The `LIVENESS_BOUND` journal phase precedes candidate startup. A controller
-death during construction leaves both units runtime-masked; after startup,
-the pidfd event terminates the guard and the dependencies make both units
-inert without Python exception handling. The journal, claim, fork, and
-experiment evidence remain on persistent storage.
+Only after guard readiness and claim verification does the controller fsync
+the exact `activation.ready` marker and allow either broker unit to start.
+The `LIVENESS_BOUND` journal phase precedes candidate startup. Controller
+death during construction leaves the gate closed; after startup, the pidfd
+event terminates the guard and the dependencies stop both units without
+Python exception handling. The persistent drop-ins survive a host restart
+while the runtime guard and marker disappear, so experimental bindings remain
+non-executable. The journal, claim, fork, and experiment evidence remain on
+persistent storage. An exceptional Python path attempts gate closure, guard
+stop, and broker/socket stop independently before declaring containment.
 
 ## Crash evidence and restoration
 
@@ -83,7 +91,7 @@ candidate, restarted invocation, unchanged inherited rows, and exactly one new
 consumed challenge/request with no new claim or synthetic evidence. An
 unverifiable record stops broker and socket; it cannot unlock restoration.
 
-`restore()` requires sealed evidence. It stops and runtime-masks both units,
+`restore()` requires sealed evidence. It stops both units and closes the gate,
 retains the entire experimental state fork in the vault, and *copies* the
 accepted originals back to active paths, leaving the originals in the root-only
 vault. It restores the
@@ -95,9 +103,35 @@ the historical `POST_STAGE_II_ACCEPTED_V1` invocation/start-time assertion or
 claim that the old complete snapshot digest still describes the new runtime.
 Experimental stores, phase journal, provenance, and completed evidence remain
 retained for review. Only after accepted bytes/configuration/selector have
-been re-established while both units are masked does the controller remove
-the exact two runtime drop-ins, stop the guard, unmask and restart the accepted
-units. The guard claim and source/unit artifacts remain forensic and one-shot.
+been re-established while both units are gate-closed does the controller remove
+the exact two persistent drop-ins, reload systemd, stop the guard, and restart
+the accepted units. The original unit files are rechecked byte-for-byte and
+for custody; the guard claim and source/unit artifacts remain forensic and
+one-shot.
+
+## Real-systemd correction evidence
+
+The first isolated Ubuntu 24.04 WSL2 test demonstrated that
+`systemctl mask --runtime` created `/run/systemd/system/*.service` and
+`*.socket` links to `/dev/null` but did **not** mask the broker units installed
+under `/etc/systemd/system`; systemd reported both as `static`. The old
+source stopped at its mask-state check before any synthetic controller or
+broker started. Moving the fixture unit files to a lower-priority search
+directory would not model the DEV install and was rejected.
+
+The corrected test used real systemd as PID 1, no Windows-drive mount, exact
+broker service/socket/guard unit names, and only synthetic controller,
+process, socket, journal, claim, and evidence. It verified: closed-gate
+socket-start rejection with the exact gate loaded on both `/etc` units;
+independent direct service and socket start rejection while the guard was
+already active but the marker was absent; guard readiness followed by normal
+synthetic activation; controller `SIGKILL` causing guard failure and both
+broker units to become inactive; one-shot restart rejection; unchanged
+original unit hashes and synthetic evidence; gate persistence and blocked
+activation after WSL restart; and exact drop-in removal followed by normal
+synthetic accepted-unit restart. No LILITH broker release, authority, owner
+proof, database, or DEV host participated. These tests validate systemd
+semantics, not the complete A2 experiment controller or DEV runtime.
 
 Any uncertainty after `INTENT` triggers a stop of both units and a terminal
 `FAILED_INERT` record. If containment itself cannot be verified, the control
@@ -112,9 +146,8 @@ yet an A2 experiment controller. Before any operational use, a separate review
 must bind the final controller's independently verified barrier/kill/recovery/
 replay evidence to `Stage3A2CompletedEvidenceV1`, validate the exact runtime
 environment and state-fork behavior on an isolated synthetic test host, and
-authorize any DEV deployment and execution explicitly. In particular, the
-new OS-enforced dependency must pass an isolated **systemd** integration test
-covering unexpected controller exit at pre-binding, guard startup, candidate
-active, and restoration phases. Local source tests and a Linux pidfd test do
-not substitute for that service-manager test. This dormant source is not an
-operational go-ahead until that test and protected review are complete.
+authorize any DEV deployment and execution explicitly. The isolated systemd
+tests above cover the liveness and gate lifecycle, but do not validate actual
+DEV configuration, candidate startup acceptance, or the final execution
+controller. The dormant source still requires normal protected review and
+separate authorization before any DEV contact or A2 execution.
