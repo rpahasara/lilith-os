@@ -370,32 +370,89 @@ jobs:
             '{grantType:"urn:ietf:params:oauth:grant-type:token-exchange",audience:$a,scope:"https://www.googleapis.com/auth/cloud-platform",requestedTokenType:"urn:ietf:params:oauth:token-type:access_token",subjectTokenType:"urn:ietf:params:oauth:token-type:jwt",subjectToken:$t}' \
             | curl -sSf https://sts.googleapis.com/v1/token -H 'Content-Type: application/json' -d @- | jq -r .access_token)"
           echo "::add-mask::${federated}"
-          mint() {
-            curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${federated}" \
-              -H 'Content-Type: application/json' -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"]}' \
-              "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/$1:generateAccessToken"
+          # Each call records the HTTP status explicitly (no curl -f): an expected
+          # 403 is denial evidence, a transport error is its own failure, and no
+          # token or response body is ever printed.
+          resp="$(mktemp)"
+          trap 'rm -f "${resp}"' EXIT
+          fail=0
+          call() {  # call <bearer> <url> <json>; sets code (HTTP status or TRANSPORT)
+            if ! code="$(curl -sS -o "${resp}" -w '%{http_code}' -X POST -H "Authorization: Bearer $1" \
+                -H 'Content-Type: application/json' -d "$3" "$2")"; then
+              code=TRANSPORT
+            fi
           }
-          dev_code="$(mint "${GCP_DEPLOY_SA}")"
-          legacy_code="$(mint "${GCP_LEGACY_PRIVILEGED_SA}")"
-          echo "DEV_IDENTITY_MINT=${dev_code} LEGACY_PRIVILEGED_MINT=${legacy_code}"
-          test "${dev_code}" = 200
-          test "${legacy_code}" = 403
+          verdict() {  # verdict <label> <kind>; kinds: mint-allowed, mint-denied, prod-denied
+            if ! python3 - "$1" "$2" "${code}" "${resp}" <<'PY'
+          import json, sys
+          label, kind, code, path = sys.argv[1:]
+          NON_AUTHZ = {"SERVICE_DISABLED", "API_DISABLED", "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+                       "RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED", "accessNotConfigured",
+                       "rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"}
+          def out(ok, why):
+              print(f"{'PASS' if ok else 'FAIL'} {label} kind={kind} http={code} {why}")
+              sys.exit(0 if ok else 1)
+          if code == "TRANSPORT":
+              out(False, "transport-failure")
+          try:
+              body = json.load(open(path, encoding="utf-8"))
+          except Exception:
+              out(False, "malformed-response")
+          if not isinstance(body, dict):
+              out(False, "malformed-response")
+          def permission_denied():
+              err = body.get("error")
+              if not isinstance(err, dict) or err.get("code") != 403:
+                  return False, "not-a-403-error-body"
+              reasons = {d.get("reason") for d in err.get("details", []) if isinstance(d, dict)}
+              reasons |= {e.get("reason") for e in err.get("errors", []) if isinstance(e, dict)}
+              reasons.discard(None)
+              if reasons & NON_AUTHZ:
+                  return False, "non-authorization-403=" + ",".join(sorted(reasons & NON_AUTHZ))
+              return True, f"permission-denied status={err.get('status', '-')} reasons={','.join(sorted(reasons)) or '-'}"
+          if kind == "mint-allowed":
+              token = body.get("accessToken")
+              out(code == "200" and isinstance(token, str) and token != "",
+                  "token-issued" if code == "200" else "expected-200")
+          if kind == "mint-denied":
+              if code != "403":
+                  out(False, "expected-403" + (" LEGACY-IDENTITY-OBTAINED" if code == "200" else ""))
+              out(*permission_denied())
+          if kind == "prod-denied":
+              if code == "200":
+                  granted = body.get("permissions", [])
+                  out(granted == [], "granted=" + json.dumps(granted))
+              if code == "403":
+                  out(*permission_denied())
+              out(False, "unexpected-status")
+          out(False, "unknown-kind")
+          PY
+            then
+              fail=1
+            fi
+            : > "${resp}"
+          }
+          mint_body='{"scope":["https://www.googleapis.com/auth/cloud-platform"]}'
+          call "${federated}" "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${GCP_DEPLOY_SA}:generateAccessToken" "${mint_body}"
+          verdict DEV_IDENTITY_MINT mint-allowed
+          call "${federated}" "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${GCP_LEGACY_PRIVILEGED_SA}:generateAccessToken" "${mint_body}"
+          verdict LEGACY_PRIVILEGED_MINT mint-denied
           access="$(gcloud auth print-access-token)"
           echo "::add-mask::${access}"
-          probe() {
-            curl -sSf -X POST -H "Authorization: Bearer ${access}" -H 'Content-Type: application/json' -d "$2" "$1" \
-              | jq -c '.permissions // []'
-          }
-          prod_compute="$(probe "https://compute.googleapis.com/compute/v1/projects/${GCP_PROJECT_ID}/zones/${GCP_ZONE}/instances/lilith-01/testIamPermissions" \
-            '{"permissions":["compute.instances.osLogin","compute.instances.osAdminLogin","compute.instances.setMetadata"]}')"
-          prod_iap="$(probe "https://iap.googleapis.com/v1/projects/763184673487/iap_tunnel/zones/${GCP_ZONE}/instances/lilith-01:testIamPermissions" \
-            '{"permissions":["iap.tunnelInstances.accessViaIAP"]}')"
-          prod_sa="$(probe "https://iam.googleapis.com/v1/projects/${GCP_PROJECT_ID}/serviceAccounts/lilith-vm@${GCP_PROJECT_ID}.iam.gserviceaccount.com:testIamPermissions" \
-            '{"permissions":["iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken"]}')"
-          echo "PROD_COMPUTE=${prod_compute} PROD_IAP=${prod_iap} PROD_SA=${prod_sa}"
-          test "${prod_compute}" = '[]'
-          test "${prod_iap}" = '[]'
-          test "${prod_sa}" = '[]'
+          call "${access}" "https://compute.googleapis.com/compute/v1/projects/${GCP_PROJECT_ID}/zones/${GCP_ZONE}/instances/lilith-01/testIamPermissions" \
+            '{"permissions":["compute.instances.osLogin","compute.instances.osAdminLogin","compute.instances.setMetadata"]}'
+          verdict PROD_COMPUTE prod-denied
+          call "${access}" "https://iap.googleapis.com/v1/projects/763184673487/iap_tunnel/zones/${GCP_ZONE}/instances/lilith-01:testIamPermissions" \
+            '{"permissions":["iap.tunnelInstances.accessViaIAP"]}'
+          verdict PROD_IAP prod-denied
+          call "${access}" "https://iam.googleapis.com/v1/projects/${GCP_PROJECT_ID}/serviceAccounts/lilith-vm@${GCP_PROJECT_ID}.iam.gserviceaccount.com:testIamPermissions" \
+            '{"permissions":["iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken"]}'
+          verdict PROD_SA prod-denied
+          if [ "${fail}" != 0 ]; then
+            echo "FEDERATION_BOUNDARY=FAIL"
+            exit 1
+          fi
+          echo "FEDERATION_BOUNDARY=PASS"
           echo 'PROD_AUTHORITY=NONE LEGACY_PRIVILEGED_IDENTITY=UNOBTAINABLE' >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Publish successful DEV deployment status

@@ -60,10 +60,11 @@ class RoutineWorkflowAuthorityTests(unittest.TestCase):
         self.assertIn("GCP_INSTANCE: lilith-dev-01", WORKFLOW)
 
     def test_every_deploy_proves_the_boundary(self):
-        self.assertIn('test "${legacy_code}" = 403', WORKFLOW)
-        self.assertIn('test "${dev_code}" = 200', WORKFLOW)
-        for name in ("prod_compute", "prod_iap", "prod_sa"):
-            self.assertIn(f"test \"${{{name}}}\" = '[]'", WORKFLOW)
+        # Status semantics are exercised by test_federation_proof_step.py.
+        for wired in ("verdict DEV_IDENTITY_MINT mint-allowed", "verdict LEGACY_PRIVILEGED_MINT mint-denied",
+                      "verdict PROD_COMPUTE prod-denied", "verdict PROD_IAP prod-denied",
+                      "verdict PROD_SA prod-denied", 'echo "FEDERATION_BOUNDARY=FAIL"'):
+            self.assertIn(wired, WORKFLOW)
         for probe in ("deny sudo -n true", "deny sudo -n bash -c true",
                       "deny sudo -n /usr/bin/python3 -c 0",
                       "/etc/lilith-memory-broker/b1b2b-stage3-a2-authorization.json",

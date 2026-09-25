@@ -16,6 +16,9 @@ set -Eeuo pipefail
 umask 077
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export LC_ALL=C
+# sudo/runuser keep the caller's cwd (the deployer's private OS Login home),
+# which the application user cannot traverse. Run everything from /.
+cd /
 
 readonly APP_USER="lilith"
 readonly APP_ROOT="/home/lilith/.hermes/lilith-os-dev"
@@ -29,8 +32,20 @@ readonly VERIFIER="${LIB_DIR}/verify_core_api_bundle.py"
 readonly PROBE="${LIB_DIR}/run_core_api_dev_durability_probe.py"
 readonly MAX_PAYLOAD_BYTES=$((64 * 1024 * 1024))
 readonly LOCK_PATH="/run/lilith-dev-deploy.lock"
+readonly WORK_PARENT="/var/tmp"
 readonly BUNDLE_NAME="lilith-core-api.tar.gz"
 readonly ATTESTATION_NAME="lilith-core-api.attestation.json"
+
+# Deployment state is global and initialized here: the EXIT trap runs after
+# function locals are gone, so it must never depend on them.
+CANDIDATE_SHA=""
+STAGING=""
+WORK=""
+PREVIOUS_RELEASE=""
+SWITCHED=0
+RESTARTED=0
+PROBE_PREPARED=0
+COMPLETED=0
 
 die() {
   echo "lilith-dev-deploy: $*" >&2
@@ -58,136 +73,147 @@ status() {
   echo "bundleSha256=$(as_app cat "${CURRENT_LINK}/.bundle-sha256")"
 }
 
+# Restore the previous release link. The service is restarted (or stopped when
+# there is no previous release) only if this run already restarted it; before
+# that, the running process still executes the previous release.
+rollback() {
+  echo "--- DEV BUNDLE ROLLBACK ---"
+  if [[ -n "${PREVIOUS_RELEASE}" ]] && as_app test -d "${PREVIOUS_RELEASE}"; then
+    local rollback_link="${APP_ROOT}/.current.rollback.$$"
+    as_app ln -s "${PREVIOUS_RELEASE}" "${rollback_link}"
+    as_app mv -Tf "${rollback_link}" "${CURRENT_LINK}"
+    if [[ "${RESTARTED}" == 1 ]]; then
+      systemctl restart "${SERVICE_NAME}"
+      sleep 3
+      as_app curl -fsS "${HEALTH_URL}"
+      echo
+    fi
+  elif [[ "${RESTARTED}" == 1 ]]; then
+    systemctl stop "${SERVICE_NAME}"
+  fi
+  SWITCHED=0
+}
+
+cleanup() {
+  local status=$?
+  set +e
+  if [[ "${COMPLETED}" != 1 && "${SWITCHED}" == 1 ]]; then
+    rollback
+  fi
+  if [[ "${PROBE_PREPARED}" == 1 ]]; then
+    as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup --candidate-sha "${CANDIDATE_SHA}"
+  fi
+  if [[ -n "${STAGING}" ]]; then
+    as_app rm -rf --one-file-system -- "${STAGING}"
+  fi
+  if [[ -n "${WORK}" ]]; then
+    rm -rf --one-file-system -- "${WORK}"
+  fi
+  exit "${status}"
+}
+
 deploy() {
-  local candidate_sha="$1"
-  local release_dir="${RELEASES_DIR}/${candidate_sha}"
-  local staging="${RELEASES_DIR}/.${candidate_sha}.staging.$$"
-  local work="" previous_release="" probe_prepared=0 size pre_pid post_pid next_link
+  local release_dir size pre_pid post_pid next_link
+  CANDIDATE_SHA="$1"
+  release_dir="${RELEASES_DIR}/${CANDIDATE_SHA}"
 
   exec 9>"${LOCK_PATH}"
   flock -n 9 || die "another DEV deployment is running"
+  trap cleanup EXIT
 
   test -x "${VENV_DIR}/bin/python" || die "DEV runtime is not bootstrapped"
   test -d "${RELEASES_DIR}" || die "DEV release root is missing"
   test -f "${VERIFIER}" -a -f "${PROBE}" || die "pinned deployment controls are missing"
   test "$(systemctl is-enabled "${SERVICE_NAME}")" = enabled || die "DEV service is not enabled"
 
-  rollback() {
-    echo "--- DEV BUNDLE ROLLBACK ---"
-    if [[ -n "${previous_release}" ]] && as_app test -d "${previous_release}"; then
-      local rollback_link="${APP_ROOT}/.current.rollback.$$"
-      as_app ln -s "${previous_release}" "${rollback_link}"
-      as_app mv -Tf "${rollback_link}" "${CURRENT_LINK}"
-      systemctl restart "${SERVICE_NAME}" || true
-      sleep 3
-      as_app curl -fsS "${HEALTH_URL}" || true
-      echo
-    else
-      systemctl stop "${SERVICE_NAME}" || true
-    fi
-  }
-
-  cleanup() {
-    if [[ "${probe_prepared}" == 1 ]]; then
-      as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup \
-        --candidate-sha "${candidate_sha}" || true
-    fi
-    as_app rm -rf --one-file-system -- "${staging}" || true
-    if [[ -n "${work}" ]]; then
-      rm -rf --one-file-system -- "${work}" || true
-    fi
-  }
-  trap cleanup EXIT
+  echo "--- REMOVE STALE ARTIFACTS OF ABORTED RUNS (UNDER LOCK) ---"
+  as_app find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d -name '.*.staging.*' \
+    -exec rm -rf --one-file-system -- {} +
+  find "${WORK_PARENT}" -mindepth 1 -maxdepth 1 -type d -user root -name 'lilith-dev-deploy.*' \
+    -exec rm -rf --one-file-system -- {} +
 
   if as_app test -L "${CURRENT_LINK}"; then
-    previous_release="$(as_app readlink -f "${CURRENT_LINK}")"
+    PREVIOUS_RELEASE="$(as_app readlink -f "${CURRENT_LINK}")"
   fi
 
   echo "--- RECEIVE BOUNDED PAYLOAD ---"
-  work="$(mktemp -d /var/tmp/lilith-dev-deploy.XXXXXXXX)"
-  head -c "$((MAX_PAYLOAD_BYTES + 1))" > "${work}/payload.tar"
-  size="$(stat -c %s -- "${work}/payload.tar")"
+  WORK="$(mktemp -d "${WORK_PARENT}/lilith-dev-deploy.XXXXXXXX")"
+  head -c "$((MAX_PAYLOAD_BYTES + 1))" > "${WORK}/payload.tar"
+  size="$(stat -c %s -- "${WORK}/payload.tar")"
   (( size > 0 && size <= MAX_PAYLOAD_BYTES )) || die "payload size ${size} is outside bounds"
 
   echo "--- UNPACK PAYLOAD AS ${APP_USER} ---"
-  as_app mkdir -m 700 -- "${staging}" "${staging}/in" "${staging}/release"
-  as_app tar -x -f - -C "${staging}/in" --no-same-owner --no-same-permissions \
-    -- "${BUNDLE_NAME}" "${ATTESTATION_NAME}" < "${work}/payload.tar"
-  test "$(as_app find "${staging}/in" -mindepth 1 -printf '%y %f\n' | sort | tr '\n' ' ')" = \
+  STAGING="${RELEASES_DIR}/.${CANDIDATE_SHA}.staging.$$"
+  as_app mkdir -m 700 -- "${STAGING}" "${STAGING}/in" "${STAGING}/release"
+  as_app tar -x -f - -C "${STAGING}/in" --no-same-owner --no-same-permissions \
+    -- "${BUNDLE_NAME}" "${ATTESTATION_NAME}" < "${WORK}/payload.tar"
+  test "$(as_app find "${STAGING}/in" -mindepth 1 -printf '%y %f\n' | sort | tr '\n' ' ')" = \
     "f ${ATTESTATION_NAME} f ${BUNDLE_NAME} " || die "payload must contain exactly the bundle and attestation"
 
   echo "--- VERIFY AND EXTRACT EXACT-SHA BUNDLE ---"
   as_app "${VENV_DIR}/bin/python" "${VERIFIER}" \
-    --archive "${staging}/in/${BUNDLE_NAME}" \
-    --attestation "${staging}/in/${ATTESTATION_NAME}" \
-    --destination "${staging}/release" \
-    --expected-sha "${candidate_sha}"
+    --archive "${STAGING}/in/${BUNDLE_NAME}" \
+    --attestation "${STAGING}/in/${ATTESTATION_NAME}" \
+    --destination "${STAGING}/release" \
+    --expected-sha "${CANDIDATE_SHA}"
 
   echo "--- PRE-INSTALL VALIDATION ---"
-  test "$(manifest_sha "${staging}/release/deployment-manifest.json")" = "${candidate_sha}"
-  as_app "${VENV_DIR}/bin/python" -m compileall -q "${staging}/release/app.py" "${staging}/release/lilith_memory"
+  test "$(manifest_sha "${STAGING}/release/deployment-manifest.json")" = "${CANDIDATE_SHA}"
+  as_app "${VENV_DIR}/bin/python" -m compileall -q "${STAGING}/release/app.py" "${STAGING}/release/lilith_memory"
 
   echo "--- INSTALL DEV PYTHON DEPENDENCIES ---"
   as_app "${VENV_DIR}/bin/python" -m pip install --disable-pip-version-check \
-    -r "${staging}/release/requirements.txt"
+    -r "${STAGING}/release/requirements.txt"
 
   echo "--- RUN ISOLATED DEV SYNTHETIC TESTS ---"
   as_app LILITH_ENV=test "${VENV_DIR}/bin/python" -m unittest discover \
-    -s "${staging}/release/tests" -p 'test_*.py'
+    -s "${STAGING}/release/tests" -p 'test_*.py'
 
   if as_app test -d "${release_dir}"; then
     echo "--- VERIFY EXISTING IMMUTABLE RELEASE ---"
-    as_app cmp -s "${staging}/release/deployment-manifest.json" "${release_dir}/deployment-manifest.json"
-    as_app cmp -s "${staging}/release/.bundle-sha256" "${release_dir}/.bundle-sha256"
+    as_app cmp -s "${STAGING}/release/deployment-manifest.json" "${release_dir}/deployment-manifest.json"
+    as_app cmp -s "${STAGING}/release/.bundle-sha256" "${release_dir}/.bundle-sha256"
   else
-    as_app find "${staging}/release" -type d -exec chmod 750 {} +
-    as_app find "${staging}/release" -type f -exec chmod 640 {} +
-    as_app mv -T -- "${staging}/release" "${release_dir}"
+    echo "--- INSTALL IMMUTABLE RELEASE ---"
+    as_app find "${STAGING}/release" -type d -exec chmod 750 {} +
+    as_app find "${STAGING}/release" -type f -exec chmod 640 {} +
+    as_app mv -T -- "${STAGING}/release" "${release_dir}"
   fi
 
   echo "--- ATOMIC DEV RELEASE SWITCH ---"
-  next_link="${APP_ROOT}/.current.${candidate_sha}.$$"
+  pre_pid="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
+  [[ "${pre_pid}" =~ ^[1-9][0-9]*$ ]] || die "DEV service has no pre-restart PID"
+  next_link="${APP_ROOT}/.current.${CANDIDATE_SHA}.$$"
   as_app ln -s "${release_dir}" "${next_link}"
+  SWITCHED=1
   as_app mv -Tf "${next_link}" "${CURRENT_LINK}"
 
   echo "--- PREPARE PERSISTENT DEV CANONICAL DURABILITY PROBE ---"
-  pre_pid="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
-  if [[ ! "${pre_pid}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "DEV service has no pre-restart PID." >&2
-    rollback
-    exit 1
-  fi
   systemctl show "${SERVICE_NAME}" \
     --property=MainPID,NRestarts,ActiveState,SubState,ActiveEnterTimestamp --no-pager
+  PROBE_PREPARED=1
   as_app LILITH_ENV=dev "${VENV_DIR}/bin/python" "${PROBE}" prepare \
-    --candidate-sha "${candidate_sha}" --pre-restart-pid "${pre_pid}"
-  probe_prepared=1
+    --candidate-sha "${CANDIDATE_SHA}" --pre-restart-pid "${pre_pid}"
 
   echo "--- RESTART DEV SERVICE ---"
-  if ! systemctl restart "${SERVICE_NAME}"; then
-    echo "DEV service restart failed." >&2
-    rollback
-    exit 1
-  fi
+  RESTARTED=1
+  systemctl restart "${SERVICE_NAME}"
   sleep 3
 
   echo "--- VERIFY DEV SERVICE AND HEALTH ---"
   if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
     journalctl -u "${SERVICE_NAME}" -n 50 --no-pager || true
-    rollback
     exit 1
   fi
   if ! as_app curl -fsS "${HEALTH_URL}"; then
     echo
     journalctl -u "${SERVICE_NAME}" -n 50 --no-pager || true
-    rollback
     exit 1
   fi
   echo
   post_pid="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
   if [[ ! "${post_pid}" =~ ^[1-9][0-9]*$ || "${post_pid}" == "${pre_pid}" ]]; then
     echo "DEV service restart did not establish a new process." >&2
-    rollback
     exit 1
   fi
   systemctl show "${SERVICE_NAME}" \
@@ -195,17 +221,18 @@ deploy() {
 
   echo "--- VERIFY PERSISTENT DEV CANONICAL DURABILITY IN NEW PROCESS ---"
   as_app LILITH_ENV=dev "${VENV_DIR}/bin/python" "${PROBE}" verify \
-    --candidate-sha "${candidate_sha}" --post-restart-pid "${post_pid}"
+    --candidate-sha "${CANDIDATE_SHA}" --post-restart-pid "${post_pid}"
 
   echo "--- CLEAN UP SYNTHETIC DEV DURABILITY ENVIRONMENT ---"
-  as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup --candidate-sha "${candidate_sha}"
-  probe_prepared=0
+  as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup --candidate-sha "${CANDIDATE_SHA}"
+  PROBE_PREPARED=0
 
   echo "--- POST-INSTALL IDENTITY READBACK ---"
   test "$(as_app readlink -f "${CURRENT_LINK}")" = "${release_dir}"
-  test "$(manifest_sha "${CURRENT_LINK}/deployment-manifest.json")" = "${candidate_sha}"
+  test "$(manifest_sha "${CURRENT_LINK}/deployment-manifest.json")" = "${CANDIDATE_SHA}"
   as_app cat "${CURRENT_LINK}/deployment-manifest.json"
   as_app cat "${CURRENT_LINK}/.bundle-sha256"
+  COMPLETED=1
   echo "--- DEV DEPLOYMENT COMPLETE ---"
 }
 
