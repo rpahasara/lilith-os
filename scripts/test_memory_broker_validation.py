@@ -212,16 +212,18 @@ class BrokerControlTests(unittest.TestCase):
         self.assertIn("Check out the exact commit validated by CI", workflow)
         self.assertIn("Build deterministic exact-SHA Core API bundle", workflow)
         self.assertIn("Build separate exact-SHA broker validation artifact", workflow)
-        self.assertIn("Validate broker transiently on DEV", workflow)
-        self.assertLess(workflow.index("Validate broker transiently on DEV"), workflow.index("Audit production darkness on the pinned production VM"))
-        self.assertIn("Confirm broker validation upload cleanup", workflow)
+        # 15B2b-B1c: broker validation runs on the runner before any cloud
+        # authentication; routine DEV deployment has no broker or PROD reach.
+        step = "Validate broker candidate transiently before any cloud authentication"
+        self.assertIn(step, workflow)
+        self.assertLess(workflow.index(step), workflow.index("uses: google-github-actions/auth@v3"))
+        self.assertIn("memory_broker_validation.py verify-run", workflow)
+        self.assertNotIn("Audit production darkness", workflow)
+        self.assertNotIn("/runner.sh", workflow)
         self.assertIn("Publish successful DEV deployment status", workflow)
-        self.assertIn("'/usr/bin/python3'", workflow)
-        self.assertNotIn("api-venv/bin/python'\"", workflow)
         self.assertIn('"$SYSTEM_PYTHON" -m venv "$VENV_DIR"', runner)
         self.assertIn("'fido2==2.2.1' 'rfc8785==0.1.4'", runner)
         self.assertIn('rm -rf -- "$VENV_DIR"', runner)
-        self.assertIn('scripts/verify_broker_dev_lifecycle.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/lifecycle.py"', workflow)
         for marker in ("trap cleanup EXIT", "rmdir -- \"$WORKSPACE\"", "lifecycle.py", "cognitive_memory.dev.db", "privacy_governance.dev.db", 'test "$BEFORE_LIFECYCLE" = "$AFTER_LIFECYCLE"', 'test "$BEFORE_CUSTODY" = "$AFTER_CUSTODY"'):
             self.assertIn(marker, runner)
 
