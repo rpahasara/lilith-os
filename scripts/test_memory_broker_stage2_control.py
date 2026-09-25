@@ -784,17 +784,16 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertIn("failure-stop", privileged)
         self.assertIn("audit_core_api_production_read_only.py", privileged)
         self.assertNotIn("systemctl enable", workflow)
-        stage3_install = workflow.split("\n  stage3_inactive_install:\n", 1)[1].split(
-            "\n  stage3_issue_authorization:\n", 1)[0]
-        stage3_authorize = workflow.split("\n  stage3_issue_authorization:\n", 1)[1]
-        for job in (stage3_install, stage3_authorize):
-            self.assertIn("github.event_name == 'workflow_dispatch'", job)
-            self.assertIn("github.actor == 'rpahasara'", job)
-            self.assertIn("github.ref == 'refs/heads/main'", job)
-            self.assertIn("git merge-base --is-ancestor", job)
-            self.assertIn("instances describe", job)
+        stage3_install = workflow.split("\n  stage3_inactive_install:\n", 1)[1]
+        for required in ("github.event_name == 'workflow_dispatch'",
+                         "github.actor == 'rpahasara'",
+                         "github.ref == 'refs/heads/main'",
+                         "git merge-base --is-ancestor", "instances describe"):
+            self.assertIn(required, stage3_install)
         self.assertIn("stage3-install-inactive", stage3_install)
-        self.assertIn("stage3-issue-authorization", stage3_authorize)
+        self.assertNotIn("stage3_issue_authorization:", workflow)
+        self.assertNotIn("B1B2B_III_A_AUTHORIZATION", workflow)
+        self.assertNotIn("stage3-issue-authorization", workflow)
         self.assertNotIn("stage3-prepare-package", workflow)
         self.assertNotIn("stage3-", registration)
         self.assertNotIn("deploy.yml", workflow)
@@ -886,8 +885,19 @@ class Stage3A2PreparationContracts(unittest.TestCase):
     def test_authorization_is_exact_and_precedes_short_lived_proposal(self):
         now = datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc)
         marker = stage2.stage3_authorization_value(now, "a" * 32)
+        self.assertEqual(marker["schemaVersion"], 2)
+        self.assertEqual(marker["recordType"], "Stage3A2AuthorizationV2")
         self.assertEqual(marker["instrumentedReleaseId"], stage2.STAGE3_RELEASE)
         self.assertEqual(marker["archiveSha256"], stage2.STAGE3_ARCHIVE_SHA)
+        self.assertEqual(marker["logicalOwnerId"], stage2.STAGE3_OWNER_ID)
+        self.assertEqual(marker["accessIdentity"], stage2.STAGE3_ACCESS_IDENTITY)
+        self.assertEqual(marker["credentialRecordId"], stage2.STAGE3_CREDENTIAL_RECORD_ID)
+        self.assertEqual(marker["credentialId"], stage2.STAGE3_CREDENTIAL_ID)
+        self.assertEqual(marker["credentialFingerprint"], stage2.STAGE3_CREDENTIAL_FINGERPRINT)
+        self.assertEqual(marker["fixtureId"], stage2.STAGE3_FIXTURE_ID)
+        self.assertEqual(marker["fixtureFingerprint"], stage2.STAGE3_FIXTURE_FINGERPRINT)
+        self.assertEqual(marker["deploymentEnvironment"], "DEV")
+        self.assertEqual(marker["stateProfile"], stage2.STAGE3_PROFILE)
         self.assertEqual(marker["expiresAt"], "2026-09-25T10:10:00Z")
         challenge = {
             "ownerPrincipal": "user:synthetic-owner@example.invalid",
@@ -895,7 +905,7 @@ class Stage3A2PreparationContracts(unittest.TestCase):
             "actionDigest": "c" * 64, "expiresAt": "2026-09-25T10:00:45Z",
         }
         assertion = {"credentialRecordId": "ocred.synthetic",
-                     "credentialId": "a", "clientDataJSON": "b",
+                     "credentialId": stage2.STAGE3_CREDENTIAL_ID, "clientDataJSON": "b",
                      "authenticatorData": "c", "signature": "d"}
         proposal = stage2.stage3_arm_proposal(
             marker, challenge, assertion, now=now, nonce="d" * 64)
@@ -910,6 +920,9 @@ class Stage3A2PreparationContracts(unittest.TestCase):
             "actionDigest", "issuedAt", "expiresAt", "armNonce",
         })
         self.assertEqual(arm["stage3AuthorizationId"], "a" * 32)
+        for key in ("logicalOwnerId", "accessIdentity", "credentialRecordId",
+                    "fixtureId", "fixtureFingerprint", "stateProfile"):
+            self.assertEqual(arm[key], marker[key])
         self.assertEqual(arm["challengeId"], challenge["challengeId"])
         self.assertEqual(arm["requestDigest"], challenge["requestDigest"])
         self.assertEqual(arm["actionDigest"], challenge["actionDigest"])
@@ -930,6 +943,52 @@ class Stage3A2PreparationContracts(unittest.TestCase):
             stage2.stage3_arm_proposal(
                 {**marker, "archiveSha256": "0" * 64}, challenge,
                 assertion, now=now)
+        with self.assertRaisesRegex(stage2.Stage2Error,
+                                    "STAGE3_PROPOSAL_PROOF_SHAPE"):
+            stage2.stage3_arm_proposal(
+                marker, challenge, {**assertion, "credentialId": "other"}, now=now)
+
+    def test_closed_authorization_rejects_drift_v1_and_expiry(self):
+        issued = datetime(2026, 9, 25, 10, 0, tzinfo=timezone.utc)
+        marker = stage2.stage3_authorization_value(issued, "a" * 32)
+        encode = lambda value: (json.dumps(value, sort_keys=True,
+                                           separators=(",", ":")) + "\n").encode()
+        self.assertEqual(stage2.stage3_validate_authorization_value(
+            encode(marker), now=issued), marker)
+        for field, changed in (
+            ("schemaVersion", 1), ("recordType", "Stage3A2AuthorizationV1"),
+            ("logicalOwnerId", "owner.other"), ("accessIdentity", "user:other"),
+            ("credentialRecordId", "ocred.other"), ("credentialId", "other"),
+            ("credentialFingerprint", "0" * 64), ("fixtureId", "fixture.other"),
+            ("fixtureFingerprint", "0" * 64), ("stateProfile", "OTHER"),
+            ("deploymentEnvironment", "PROD"),
+        ):
+            with self.subTest(field=field), self.assertRaises(stage2.Stage2Error):
+                stage2.stage3_validate_authorization_value(
+                    encode({**marker, field: changed}), now=issued)
+        for changed in ({key: value for key, value in marker.items()
+                         if key != "credentialFingerprint"},
+                        {**marker, "unexpected": True}):
+            with self.assertRaises(stage2.Stage2Error):
+                stage2.stage3_validate_authorization_value(encode(changed), now=issued)
+        for raw, moment in ((json.dumps(marker).encode(), issued),
+                            (encode(marker), issued - timedelta(seconds=1)),
+                            (encode(marker), issued + timedelta(minutes=10)),
+                            (b"not json", issued)):
+            with self.assertRaises(stage2.Stage2Error):
+                stage2.stage3_validate_authorization_value(raw, now=moment)
+
+    def test_public_credential_binding_matches_released_fixture(self):
+        credential = json.loads((ROOT /
+            "services/memory-broker/deploy/public-synthetic-credential.json").read_text())
+        stage2.stage3_validate_synthetic_credential(credential)
+        for key, replacement in (("credentialId", "other"),
+                                 ("recordId", "ocred.other"),
+                                 ("publicKeyCose", "other"),
+                                 ("ownerPrincipal", "user:other")):
+            with self.subTest(key=key), self.assertRaises(stage2.Stage2Error):
+                stage2.stage3_validate_synthetic_credential(
+                    {**credential, key: replacement})
 
     def test_inactive_path_has_no_activation_or_selector_write(self):
         source = inspect.getsource(stage2.stage3_install_inactive)
@@ -937,10 +996,21 @@ class Stage3A2PreparationContracts(unittest.TestCase):
         self.assertNotIn("_switch_release", source)
         self.assertNotIn("os.symlink", source)
         self.assertNotIn("relay(", source)
+        self.assertNotIn("stage3_issue_authorization", source)
         self.assertNotIn("STAGE3_MARKER.write", source)
         self.assertNotIn("STAGE3_ARM.write", source)
         self.assertNotIn("stage3-prepare-package", (ROOT /
             ".github/workflows/memory-broker-dev-stage2-runtime.yml").read_text())
+        self.assertNotIn("stage3-issue-authorization", inspect.getsource(stage2.main))
+        issuer = inspect.getsource(stage2.stage3_issue_authorization)
+        self.assertLess(issuer.index("stage3_accepted_snapshot()"),
+                        issuer.index("stage3_verify_inactive_release()"))
+        self.assertLess(issuer.index("stage3_verify_inactive_release()"),
+                        issuer.index("stage3_verify_synthetic_credential()"))
+        self.assertLess(issuer.index("stage3_verify_synthetic_credential()"),
+                        issuer.index("stage3_write_exclusive("))
+        self.assertNotIn("systemctl", issuer)
+        self.assertNotIn("relay(", issuer)
 
 
 if __name__ == "__main__":

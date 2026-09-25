@@ -114,6 +114,15 @@ STAGE3_INVOKER = "/opt/lilith-trusted-controls/broker-snapshot/current/bin/lilit
 STAGE3_FRAME = b"LILITH_BROKER_CANDIDATE_DEV_SNAPSHOT_V1:"
 STAGE3_EXPERIMENT = "B1B2B_III_A_A2_V1"
 STAGE3_FAULT = "A2_AFTER_PROOF_CONSUME_BEFORE_CLAIM"
+STAGE3_PROFILE = "B1B2_SYNTHETIC_DEV_V1"
+STAGE3_OWNER_ID = "owner.ravindu.v1"
+STAGE3_ACCESS_IDENTITY = "user:synthetic-owner@example.invalid"
+STAGE3_CREDENTIAL_RECORD_ID = "ocred.synthetic"
+STAGE3_CREDENTIAL_ID = "VEVTVF9PTkxZX0NSRURFTlRJQUxfSURfMDAwMDE"
+STAGE3_CREDENTIAL_FINGERPRINT = "d030138a32a4470f7f7945e35cf67cbd9532639d8ab03075aff7c53285785e69"
+STAGE3_FIXTURE_ID = "fixture.b1b1.synthetic-codename.v1"
+STAGE3_FIXTURE_FINGERPRINT = "bc6938f276c7792c873081c8047b2172e36ca2cf936b1e6ce50fd33d731855fc"
+STAGE3_RP_ID = "owner.lilith.invalid"
 
 
 class Stage2Error(RuntimeError):
@@ -1708,15 +1717,50 @@ def stage3_verify_inactive_release() -> dict:
     return stage3_verify_candidate_release(selected=False)
 
 
+def stage3_validate_synthetic_credential(value: dict) -> None:
+    """Check the accepted immutable public identity, never a private scalar."""
+    require(isinstance(value, dict) and
+            value.get("recordId") == STAGE3_CREDENTIAL_RECORD_ID and
+            value.get("credentialId") == STAGE3_CREDENTIAL_ID and
+            value.get("ownerPrincipal") == STAGE3_ACCESS_IDENTITY and
+            value.get("rpId") == STAGE3_RP_ID and
+            value.get("status") == "ACTIVE" and
+            value.get("revokedAt") is None and
+            all(key in value for key in (
+                "publicKeyCose", "algorithm", "createdAt")),
+            "STAGE3_SYNTHETIC_CREDENTIAL_MISMATCH")
+    immutable = {key: value[key] for key in (
+        "recordId", "ownerPrincipal", "credentialId", "publicKeyCose",
+        "algorithm", "rpId", "createdAt")}
+    require(hashlib.sha256(json.dumps(immutable, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest() ==
+            STAGE3_CREDENTIAL_FINGERPRINT,
+            "STAGE3_SYNTHETIC_CREDENTIAL_FINGERPRINT")
+
+
+def stage3_verify_synthetic_credential() -> None:
+    """Bind the installed release's public credential to the closed authorization."""
+    path = STAGE3_FINAL / "assets/public-synthetic-credential.json"
+    stage3_validate_synthetic_credential(json.loads(path.read_bytes()))
+
+
 def stage3_authorization_value(issued: datetime, authorization_id: str) -> dict:
     return {
-        "schemaVersion": 1, "recordType": "Stage3A2AuthorizationV1",
+        "schemaVersion": 2, "recordType": "Stage3A2AuthorizationV2",
         "purpose": "B1B2B_STAGE3_A2_SINGLE_PREPARATION",
         "stage": "B1B2B_III_A", "experimentId": STAGE3_EXPERIMENT,
         "faultPoint": STAGE3_FAULT, "project": PROJECT, "zone": ZONE,
         "instanceId": INSTANCE_ID, "hostname": HOSTNAME,
         "machineId": MACHINE_ID, "ownerActor": OWNER,
-        "authorityMode": "SYNTHETIC_ONLY", "canonicalCapability": "DISABLED",
+        "deploymentEnvironment": "DEV", "authorityMode": "SYNTHETIC_ONLY",
+        "stateProfile": STAGE3_PROFILE, "canonicalCapability": "DISABLED",
+        "logicalOwnerId": STAGE3_OWNER_ID,
+        "accessIdentity": STAGE3_ACCESS_IDENTITY,
+        "credentialRecordId": STAGE3_CREDENTIAL_RECORD_ID,
+        "credentialId": STAGE3_CREDENTIAL_ID,
+        "credentialFingerprint": STAGE3_CREDENTIAL_FINGERPRINT,
+        "fixtureId": STAGE3_FIXTURE_ID,
+        "fixtureFingerprint": STAGE3_FIXTURE_FINGERPRINT,
         "acceptedBrokerRelease": RELEASE,
         "stage2AcceptedBaselineDigest": STAGE3_ACCEPTED_BASELINE,
         "acceptedCompleteSnapshotSha256": STAGE3_ACCEPTED_SNAPSHOT_SHA,
@@ -1731,32 +1775,32 @@ def stage3_authorization_value(issued: datetime, authorization_id: str) -> dict:
 
 
 def stage3_issue_authorization() -> dict:
-    """Owner-gated future workflow issues authority before any short-lived proof."""
+    """Future final-execution controller only: JIT before activation or proof."""
     stage3_accepted_snapshot()
     stage3_verify_inactive_release()
+    stage3_verify_synthetic_credential()
     require(not STAGE3_MARKER.exists() and not STAGE3_MARKER.is_symlink() and
             not STAGE3_USED.exists() and not STAGE3_USED.is_symlink() and
             not os.path.lexists(STAGE3_ARM), "STAGE3_AUTHORIZATION_COLLISION")
     issued = datetime.now(timezone.utc)
     value = stage3_authorization_value(issued, uuid.uuid4().hex)
-    stage3_write_exclusive(STAGE3_MARKER,
-                           (json.dumps(value, sort_keys=True,
-                                       separators=(",", ":")) + "\n").encode(), 0o600)
+    raw = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    require(stage3_validate_authorization_value(raw, now=issued) == value,
+            "STAGE3_AUTHORIZATION_CONSTRUCTION")
+    stage3_write_exclusive(STAGE3_MARKER, raw, 0o600)
     fsync_directory(CONFIG)
     return {"status": "STAGE3_A2_AUTHORIZED_ONLY",
             "authorizationId": value["authorizationId"],
             "expiresAt": value["expiresAt"]}
 
 
-def stage3_verify_authorization(*, now: datetime | None = None) -> dict:
-    info = STAGE3_MARKER.lstat()
-    require(stat.S_ISREG(info.st_mode) and
-            (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, 0, 0o600) and
-            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink(),
-            "STAGE3_AUTHORIZATION_CUSTODY")
-    raw = STAGE3_MARKER.read_bytes()
-    require(len(raw) <= 4096, "STAGE3_AUTHORIZATION_OVERSIZED")
-    value = json.loads(raw)
+def stage3_validate_authorization_value(raw: bytes, *, now: datetime | None = None) -> dict:
+    """Pure closed-schema check shared by issuance, verification, and tests."""
+    require(0 < len(raw) <= 4096, "STAGE3_AUTHORIZATION_SIZE")
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise Stage2Error("STAGE3_AUTHORIZATION_MALFORMED") from exc
     try:
         issued = datetime.fromisoformat(value["issuedAt"].replace("Z", "+00:00"))
         expires = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
@@ -1776,6 +1820,15 @@ def stage3_verify_authorization(*, now: datetime | None = None) -> dict:
                                separators=(",", ":")) + "\n").encode(),
             "STAGE3_AUTHORIZATION_MISMATCH")
     return value
+
+
+def stage3_verify_authorization(*, now: datetime | None = None) -> dict:
+    info = STAGE3_MARKER.lstat()
+    require(stat.S_ISREG(info.st_mode) and
+            (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, 0, 0o600) and
+            not STAGE3_USED.exists() and not STAGE3_USED.is_symlink(),
+            "STAGE3_AUTHORIZATION_CUSTODY")
+    return stage3_validate_authorization_value(STAGE3_MARKER.read_bytes(), now=now)
 
 
 def stage3_claim_authorization(marker: dict) -> None:
@@ -1807,10 +1860,10 @@ def stage3_arm_proposal(marker: dict, challenge: dict, assertion: dict,
     require(moment.tzinfo is not None and moment.utcoffset() == timedelta(0) and
             marker.get("instrumentedReleaseId") == STAGE3_RELEASE and
             marker.get("stage2AcceptedBaselineDigest") == STAGE3_ACCEPTED_BASELINE and
-            marker.get("recordType") == "Stage3A2AuthorizationV1",
+            marker.get("recordType") == "Stage3A2AuthorizationV2",
             "STAGE3_PROPOSAL_AUTHORITY")
     require(isinstance(challenge, dict) and
-            challenge.get("ownerPrincipal") == "user:synthetic-owner@example.invalid" and
+            challenge.get("ownerPrincipal") == marker["accessIdentity"] and
             isinstance(challenge.get("challengeId"), str) and
             re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
                          challenge["challengeId"]) is not None and
@@ -1821,7 +1874,8 @@ def stage3_arm_proposal(marker: dict, challenge: dict, assertion: dict,
     require(isinstance(assertion, dict) and
             set(assertion) == {"credentialRecordId", "credentialId",
                                "clientDataJSON", "authenticatorData", "signature"} and
-            assertion["credentialRecordId"] == "ocred.synthetic" and
+            assertion["credentialRecordId"] == marker["credentialRecordId"] and
+            assertion["credentialId"] == marker["credentialId"] and
             all(isinstance(assertion[key], str) and assertion[key]
                 for key in ("credentialId", "clientDataJSON",
                             "authenticatorData", "signature")),
@@ -1858,13 +1912,13 @@ def stage3_arm_proposal(marker: dict, challenge: dict, assertion: dict,
         "schemaVersion": 1, "experimentId": STAGE3_EXPERIMENT,
         "stage": "B1B2B_III_A", "faultPoint": STAGE3_FAULT,
         "deploymentEnvironment": "DEV", "authorityMode": "SYNTHETIC_ONLY",
-        "stateProfile": "B1B2_SYNTHETIC_DEV_V1",
+        "stateProfile": marker["stateProfile"],
         "canonicalCapability": "DISABLED",
-        "logicalOwnerId": "owner.ravindu.v1",
-        "accessIdentity": "user:synthetic-owner@example.invalid",
-        "credentialRecordId": "ocred.synthetic",
-        "fixtureId": "fixture.b1b1.synthetic-codename.v1",
-        "fixtureFingerprint": "bc6938f276c7792c873081c8047b2172e36ca2cf936b1e6ce50fd33d731855fc",
+        "logicalOwnerId": marker["logicalOwnerId"],
+        "accessIdentity": marker["accessIdentity"],
+        "credentialRecordId": marker["credentialRecordId"],
+        "fixtureId": marker["fixtureId"],
+        "fixtureFingerprint": marker["fixtureFingerprint"],
         "instrumentedReleaseId": STAGE3_RELEASE,
         "stage2AcceptedBaselineDigest": STAGE3_ACCEPTED_BASELINE,
         "stage3AuthorizationId": marker["authorizationId"],
@@ -1923,7 +1977,6 @@ def main() -> None:
     parser.add_argument("operation", choices=("preflight", "authorize", "execute",
                                                "failure-stop", "stage3-inactive-preflight",
                                                "stage3-install-inactive",
-                                               "stage3-issue-authorization",
                                                "stage3-prepare-package"))
     args = parser.parse_args()
     stage3 = args.operation.startswith("stage3-")
@@ -1932,7 +1985,6 @@ def main() -> None:
                   "execute": execute, "failure-stop": failure_stop,
                   "stage3-inactive-preflight": stage3_inactive_preflight,
                   "stage3-install-inactive": stage3_install_inactive,
-                  "stage3-issue-authorization": stage3_issue_authorization,
                   "stage3-prepare-package": stage3_prepare_package}[args.operation]()
         print(json.dumps(result, sort_keys=True))
     except Stage2Error as exc:
