@@ -42,6 +42,8 @@ class Stage3TransitionContracts(unittest.TestCase):
                                     "STAGE3_ACCEPTED_SNAPSHOT_BYTE_DRIFT"):
             transition.bind_accepted_bytes(accepted, changed, config_sha)
 
+    @unittest.skipIf(os.name != "nt" and os.geteuid() != 0,
+                     "positive custody fixture requires root-owned journal")
     def test_journal_is_one_shot_ordered_fsynced_and_tamper_evident(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)

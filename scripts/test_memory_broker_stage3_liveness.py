@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -98,6 +99,7 @@ class Stage3LivenessContracts(unittest.TestCase):
             with patch.object(stage2, "assert_host"), \
                  patch.object(guard, "require_inert"), \
                  patch.object(guard, "require_dependencies"), \
+                 patch.object(guard, "trusted_directory", return_value=True), \
                  patch.object(guard, "source_bytes", return_value=b"reviewed-worker"), \
                  patch.object(guard, "original_unit_hashes",
                               return_value={"service": "unchanged", "socket": "unchanged"}), \
@@ -131,6 +133,8 @@ class Stage3LivenessContracts(unittest.TestCase):
             self.assertFalse(any("mask" in call or "unmask" in call
                                  for call in commands))
 
+    @unittest.skipIf(os.name != "nt" and os.geteuid() != 0,
+                     "positive custody fixture requires root-owned journal")
     def test_phase_journal_requires_guard_before_candidate_start(self):
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
