@@ -1,4 +1,4 @@
-#!/usr/bin/python3 -I -S
+#!/usr/bin/python3 -IS
 """LILITH 15B2b-B1c-1A canonical activation acceptance verifier (DEV).
 
 Accepted canonical LTM activation on DEV is defined as the result of THIS

@@ -72,7 +72,7 @@ likes. Nothing outside it distinguished that from genuine activation.
 
 Definition: canonical LTM activation on DEV is **ACCEPTED** only when the
 owner-installed verifier `/usr/local/sbin/lilith-activation-verify`
-(`#!/usr/bin/python3 -I -S`, stdlib only, no arguments or environment, no
+(`#!/usr/bin/python3 -IS`, stdlib only, no arguments or environment, no
 import of Core API code) prints `ACTIVATION=ACCEPTED`. It requires:
 
 - `/etc/lilith-os-dev/activation/{grant.json,grant.json.sig,allowed-signers}`,

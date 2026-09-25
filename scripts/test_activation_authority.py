@@ -42,7 +42,8 @@ CAPABILITY = "canonical_memory.project_codename.mutate"
 
 class StaticActivationBoundaryTests(unittest.TestCase):
     def test_verifier_is_isolated_from_replaceable_code_and_caller_input(self):
-        self.assertTrue(VERIFIER_SOURCE.startswith("#!/usr/bin/python3 -I -S\n"))
+        # Linux passes the whole shebang tail as ONE argument: flags must be combined.
+        self.assertTrue(VERIFIER_SOURCE.startswith("#!/usr/bin/python3 -IS\n"))
         for forbidden in ("lilith_memory", "os.environ", "getenv", "argparse", "sys.path"):
             self.assertNotIn(forbidden, VERIFIER_SOURCE)
         self.assertEqual(V.AUTHORITY_DIR, Path("/etc/lilith-os-dev/activation"))
@@ -69,6 +70,25 @@ class StaticActivationBoundaryTests(unittest.TestCase):
         # The replaceable loader never names the authority directory, so no app
         # change can be mistaken for the enforcement point.
         self.assertNotIn("/etc/lilith-os-dev/activation", CONFIG)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and os.path.exists("/usr/bin/python3"),
+                     "needs Linux /usr/bin/python3")
+class InstalledExecutableTests(unittest.TestCase):
+    def test_verifier_executes_through_its_real_shebang_and_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = Path(tmp) / "lilith-activation-verify"
+            shutil.copyfile(VERIFIER_PATH, installed)
+            os.chmod(installed, 0o755)
+            result = subprocess.run([str(installed)], capture_output=True, text=True, timeout=20,
+                                    env={"PATH": "/usr/bin:/bin"}, stdin=subprocess.DEVNULL)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertRegex(result.stdout, r"^ACTIVATION=NOT_ACCEPTED reason=[A-Z_]+ advisoryConfigEnabled=")
+            if not Path("/etc/lilith-os-dev").exists():
+                self.assertIn("reason=AUTHORITY_DIRECTORY_ABSENT", result.stdout)
+            rejected = subprocess.run([str(installed), "--authority-dir", tmp], capture_output=True,
+                                      text=True, timeout=20, stdin=subprocess.DEVNULL)
+            self.assertEqual(rejected.returncode, 2)
 
 
 @unittest.skipUnless(sys.platform.startswith("linux") and SSH_KEYGEN, "needs Linux ssh-keygen")
