@@ -7,8 +7,8 @@
 #   sudo bash install_dev_deployer_boundary.sh <sa_POSIX_USER> <SOURCE_DIR>
 #
 # SOURCE_DIR holds lilith-dev-deploy, sudoers-lilith-dev-deployer.in,
-# verify_core_api_bundle.py and run_core_api_dev_durability_probe.py from the
-# reviewed commit. The installer never enables canonical LTM, never restarts a
+# lilith_activation_verify.py, verify_core_api_bundle.py and
+# run_core_api_dev_durability_probe.py from the reviewed commit. The installer never enables canonical LTM, never restarts a
 # service, and never touches the Memory Broker, owner services, or Stage III.
 set -Eeuo pipefail
 umask 022
@@ -25,6 +25,8 @@ SUDOERS="/etc/sudoers.d/lilith-dev-deployer"
 ACTIVATION_DIR="/etc/lilith-os-dev"
 ACTIVATION_FILE="${ACTIVATION_DIR}/canonical-runtime.json"
 LEGACY_ACTIVATION_FILE="/home/lilith/.hermes/lilith-os-dev/data/canonical-runtime.json"
+AUTHORITY_DIR="${ACTIVATION_DIR}/activation"
+VERIFIER="/usr/local/sbin/lilith-activation-verify"
 UNIT="/etc/systemd/system/lilith-os-api-dev.service"
 VENV_DIR="/home/lilith/.hermes/lilith-os-dev/api-venv"
 DARK='{"activeCapabilities":[],"canonicalLtmEnabled":false,"schemaVersion":1}'
@@ -67,6 +69,18 @@ fi
 test "$(stat -c '%U:%G %a' -- "${ACTIVATION_DIR}")" = "root:root 755"
 test "$(stat -c '%U:%G %a' -- "${ACTIVATION_FILE}")" = "root:lilith 640"
 
+echo "--- INSTALL NON-REPLACEABLE ACTIVATION ACCEPTANCE VERIFIER ---"
+# Accepted activation requires an owner-signed grant verified by this program.
+# No signer and no grant are installed here: activation is a separate owner
+# ceremony, and until it happens every verification is NOT_ACCEPTED.
+install -d -o root -g root -m 0755 "${AUTHORITY_DIR}"
+install -o root -g root -m 0755 "${SOURCE_DIR}/lilith_activation_verify.py" "${VERIFIER}"
+test "$(stat -c '%U:%G %a' -- "${AUTHORITY_DIR}")" = "root:root 755"
+if "${VERIFIER}"; then
+  echo "activation unexpectedly ACCEPTED during boundary install" >&2
+  exit 1
+fi
+
 echo "--- POINT THE DEV SERVICE AT ROOT-OWNED ACTIVATION ---"
 if ! grep -qxF "Environment=\"LILITH_CANONICAL_CONFIG_FILE=${ACTIVATION_FILE}\"" "${UNIT}"; then
   grep -qxF "Environment=\"LILITH_CANONICAL_CONFIG_FILE=${LEGACY_ACTIVATION_FILE}\"" "${UNIT}"
@@ -81,7 +95,7 @@ echo "--- RETURN THE APPLICATION VENV TO THE APPLICATION USER ---"
 chown -R lilith:lilith "${VENV_DIR}"
 
 echo "--- INSTALLED BOUNDARY ---"
-stat -c '%A %U:%G %n' "${HELPER}" "${LIB_DIR}" "${LIB_DIR}"/* "${SUDOERS}" "${ACTIVATION_DIR}" "${ACTIVATION_FILE}"
-sha256sum "${HELPER}" "${LIB_DIR}"/* "${SUDOERS}"
+stat -c '%A %U:%G %n' "${HELPER}" "${LIB_DIR}" "${LIB_DIR}"/* "${SUDOERS}" "${ACTIVATION_DIR}" "${ACTIVATION_FILE}" "${AUTHORITY_DIR}" "${VERIFIER}"
+sha256sum "${HELPER}" "${LIB_DIR}"/* "${SUDOERS}" "${VERIFIER}"
 sudo -n -l -U "${DEPLOYER}"
 echo "Service restart deferred to the next helper deployment."

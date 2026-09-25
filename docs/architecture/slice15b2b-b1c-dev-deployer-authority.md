@@ -57,6 +57,58 @@ in the root-owned unit. The installer only carries forward a dark config, never
 enables canonical LTM, and deletes the old lilith-owned file. The durability
 probe fails any deploy whose activation file or parent is replaceable.
 
+## Activation authority (B1c-1A)
+
+Before this change, "canonical LTM active" was decided only inside the
+replaceable Core API: `lilith_memory.config.load()` reads
+`LILITH_CANONICAL_CONFIG_FILE`, and `MemoryStore.production` and
+`CanonicalMemoryStoreV2._prevalidate` (`CAPABILITY_INACTIVE`) consume it. The
+later gates (actor HMAC authority, policy, consent) run in the same process
+with secrets the process itself provisions (`create_owner_only_secret`). The
+broker is synthetic (`canonicalCapability: DISABLED`) and `owner_proof` has no
+canonical-memory connection. Replaced code could therefore ignore the config,
+write canonical rows into lilith-owned databases, and emit any evidence it
+likes. Nothing outside it distinguished that from genuine activation.
+
+Definition: canonical LTM activation on DEV is **ACCEPTED** only when the
+owner-installed verifier `/usr/local/sbin/lilith-activation-verify`
+(`#!/usr/bin/python3 -I -S`, stdlib only, no arguments or environment, no
+import of Core API code) prints `ACTIVATION=ACCEPTED`. It requires:
+
+- `/etc/lilith-os-dev/activation/{grant.json,grant.json.sig,allowed-signers}`,
+  each root-owned, not group/other-writable, not a symlink, beneath root-owned
+  parents;
+- a grant `lilith.canonical-activation-grant.v1` for `environment=dev`, this
+  host's `/etc/machine-id`, allowed capabilities only, and a current time window;
+- an `ssh-keygen -Y verify` signature by identity `lilith-owner` in namespace
+  `lilith-canonical-activation`, against the pinned public key.
+
+The owner private key never exists on the host. `canonical-runtime.json` stays
+advisory application configuration. It is reported (`advisoryConfigEnabled`)
+but is never an input to acceptance. Any rows, behavior, or evidence produced
+by application code without an accepted grant are, by definition, not accepted
+activation. B1c installs the verifier and an empty authority directory, but no
+signer and no grant. Activation is a separate future owner ceremony, and every
+routine deploy asserts `ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT`.
+
+Remaining routes to ACCEPTED are all non-routine: the owner key; DEV root
+(owner break-glass only once the legacy federation is narrowed); or a
+reviewed change to the verifier followed by an owner reinstall.
+
+## Exact federation claims
+
+GitHub builds `workflow_ref` as `{repository}/{workflow path}@{ref}`, naming the
+top-level workflow. The provider condition `assertion.ref == 'refs/heads/main'`
+already admitted DEV `workflow_run` run 36010169102 and PROD `push` run
+35855324422, which empirically fixes `ref` for both event types. The expected
+values are therefore:
+
+- DEV: `rpahasara/lilith-os/.github/workflows/deploy-dev.yml@refs/heads/main`
+- PROD: `rpahasara/lilith-os/.github/workflows/deploy.yml@refs/heads/main`
+
+The literal `workflow_ref` has not yet been observed. The DEV workflow records
+the OIDC claims before authentication, so a mismatch is visible and fails closed.
+
 PROD: the routine DEV workflow no longer logs into PROD. Each deploy asserts,
 via `testIamPermissions` only, that the DEV identity has no PROD login, IAP or
 service-account permission. PROD darkness remains worth proving, but only as a
@@ -115,7 +167,7 @@ gcloud iam service-accounts add-iam-policy-binding $NEW --project=$P --role=role
 
 ```bash
 gcloud compute ssh lilith-dev-01 --zone=$Z --project=$P --tunnel-through-iap --command='umask 077; mkdir /tmp/b1c'
-gcloud compute scp --zone=$Z --project=$P --tunnel-through-iap scripts/dev_deployer/lilith-dev-deploy scripts/dev_deployer/sudoers-lilith-dev-deployer.in scripts/dev_deployer/install_dev_deployer_boundary.sh scripts/verify_core_api_bundle.py scripts/run_core_api_dev_durability_probe.py lilith-dev-01:/tmp/b1c/
+gcloud compute scp --zone=$Z --project=$P --tunnel-through-iap scripts/dev_deployer/lilith-dev-deploy scripts/dev_deployer/sudoers-lilith-dev-deployer.in scripts/dev_deployer/install_dev_deployer_boundary.sh scripts/dev_deployer/lilith_activation_verify.py scripts/verify_core_api_bundle.py scripts/run_core_api_dev_durability_probe.py lilith-dev-01:/tmp/b1c/
 gcloud compute ssh lilith-dev-01 --zone=$Z --project=$P --tunnel-through-iap --command='sudo bash /tmp/b1c/install_dev_deployer_boundary.sh sa_112096412008414111981 /tmp/b1c; rm -rf /tmp/b1c'
 ```
 

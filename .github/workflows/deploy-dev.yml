@@ -228,6 +228,17 @@ jobs:
             --archive deployment-output/lilith-broker-inert-release.tar.gz \
             --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
+      - name: Record GitHub OIDC claims presented to DEV federation
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://iam.googleapis.com/${GCP_WIF_PROVIDER}" | jq -r .value)"
+          echo "::add-mask::${oidc}"
+          python3 -c 'import base64,json,sys; p=sys.argv[1].split(".")[1]; c=json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))); print("OIDC_CLAIMS=" + json.dumps({k:c.get(k) for k in ("repository","ref","workflow_ref","job_workflow_ref","event_name")}, sort_keys=True))' "${oidc}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+
       - name: Authenticate to Google Cloud
         if: >-
           steps.classify.outputs.mode == 'DEPLOY_REQUIRED' &&
@@ -326,6 +337,16 @@ jobs:
             deny test -r "$path"
           done
           deny test -x /run/lilith-memory
+          for path in /etc/lilith-os-dev/activation /etc/lilith-os-dev/activation/grant.json \
+              /etc/lilith-os-dev/activation/allowed-signers /usr/local/sbin/lilith-activation-verify; do
+            deny test -w "$path"
+          done
+          activation="$(/usr/local/sbin/lilith-activation-verify)" || true
+          echo "$activation"
+          case "$activation" in
+            "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT "*) ;;
+            *) echo "UNEXPECTED ACCEPTED-ACTIVATION STATE"; fail=1 ;;
+          esac
           exit "$fail"
           REMOTE
 
