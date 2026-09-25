@@ -132,8 +132,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "${BASE_SHA}"
           cd candidate
           python scripts/validate_repository.py
-          python -m compileall -q scripts/memory_broker_stage2_control.py scripts/memory_broker_stage3_transition.py scripts/memory_broker_stage3_liveness.py scripts/memory_broker_stage3_guard_worker.py scripts/memory_broker_stage3_adapters.py scripts/memory_broker_os_installer.py
-          python -m unittest scripts/test_memory_broker_os_controls.py scripts/test_memory_broker_stage2_control.py scripts/test_memory_broker_stage3_transition.py scripts/test_memory_broker_stage3_liveness.py scripts/test_memory_broker_stage3_guard_linux.py scripts/test_memory_broker_stage3_adapters.py
+          python -m compileall -q scripts/memory_broker_stage2_control.py scripts/memory_broker_stage3_transition.py scripts/memory_broker_stage3_liveness.py scripts/memory_broker_stage3_guard_worker.py scripts/memory_broker_stage3_adapters.py scripts/memory_broker_stage3_final.py scripts/memory_broker_os_installer.py
+          python -m unittest scripts/test_memory_broker_os_controls.py scripts/test_memory_broker_stage2_control.py scripts/test_memory_broker_stage3_transition.py scripts/test_memory_broker_stage3_liveness.py scripts/test_memory_broker_stage3_guard_linux.py scripts/test_memory_broker_stage3_adapters.py scripts/test_memory_broker_stage3_final.py
           ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' \
             .github/workflows/ci.yml .github/workflows/memory-broker-dev-stage2-runtime.yml
           bash -n scripts/run_memory_broker_dev_validation.sh
