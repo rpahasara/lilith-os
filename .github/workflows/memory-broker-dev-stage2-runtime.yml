@@ -4,17 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       approved_stage:
-        description: "Only B1B2B_II / ACTIVATE_AND_ISOLATION_TEST"
+        description: "Exact owner-gated Stage II or Stage III-A preparation operation"
         required: true
         type: choice
         options:
           - B1B2B_II
+          - B1B2B_III_A_INACTIVE_INSTALL
+          - B1B2B_III_A_AUTHORIZATION
       approved_release_sha:
-        description: "Exact accepted Stage-I release SHA"
+        description: "Exact release SHA for the selected operation"
         required: true
         type: string
       owner_confirmation:
-        description: "Enter: I AUTHORIZE B1B2B_II ACTIVATE_AND_ISOLATION_TEST"
+        description: "Enter the exact operation-specific owner confirmation"
         required: true
         type: string
   push:
@@ -157,4 +159,131 @@ jobs:
           gcloud compute ssh "$GCP_INSTANCE" --quiet \
             --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
             --command="sudo -n /usr/bin/python3 -B - failure-stop" \
+            < scripts/memory_broker_stage2_control.py
+
+  stage3_inactive_install:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'rpahasara' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.approved_stage == 'B1B2B_III_A_INACTIVE_INSTALL' &&
+      inputs.approved_release_sha == '4a04f2d09a2b32aecedfe777090fd2e1a27ec909' &&
+      inputs.owner_confirmation == 'I AUTHORIZE B1B2B_III_A INACTIVE_INSTALL ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_INSTANCE_ID: "7687007163730582258"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      RELEASE_SHA: "4a04f2d09a2b32aecedfe777090fd2e1a27ec909"
+    steps:
+      - name: Check out trusted protected main only
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind trusted source and exact merged A2 ancestor
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          git cat-file -e "${RELEASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Authenticate to existing DEV deployer
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Pin DEV instance identity independently
+        shell: bash
+        run: |
+          identity="$(gcloud compute instances describe "$GCP_INSTANCE" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --format='value(id,name,status)')"
+          test "$identity" = "$GCP_INSTANCE_ID"$'\t'"$GCP_INSTANCE"$'\t'RUNNING
+      - name: Verify accepted baseline and exact staged archive without mutation
+        shell: bash
+        run: |
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="sudo -n /usr/bin/python3 -B - stage3-inactive-preflight" \
+            < scripts/memory_broker_stage2_control.py
+      - name: Install exact candidate as inactive immutable sibling only
+        shell: bash
+        run: |
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="sudo -n /usr/bin/python3 -B - stage3-install-inactive" \
+            < scripts/memory_broker_stage2_control.py
+
+  stage3_issue_authorization:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'rpahasara' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.approved_stage == 'B1B2B_III_A_AUTHORIZATION' &&
+      inputs.approved_release_sha == '4a04f2d09a2b32aecedfe777090fd2e1a27ec909' &&
+      inputs.owner_confirmation == 'I AUTHORIZE B1B2B_III_A ISSUE_AUTHORIZATION_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_INSTANCE_ID: "7687007163730582258"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      RELEASE_SHA: "4a04f2d09a2b32aecedfe777090fd2e1a27ec909"
+    steps:
+      - name: Check out trusted protected main only
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind trusted source and exact merged A2 ancestor
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          git cat-file -e "${RELEASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$RELEASE_SHA" "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Authenticate to existing DEV deployer
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Pin DEV instance identity independently
+        shell: bash
+        run: |
+          identity="$(gcloud compute instances describe "$GCP_INSTANCE" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --format='value(id,name,status)')"
+          test "$identity" = "$GCP_INSTANCE_ID"$'\t'"$GCP_INSTANCE"$'\t'RUNNING
+      - name: Issue one short-lived authorization before challenge or proof
+        shell: bash
+        run: |
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command="sudo -n /usr/bin/python3 -B - stage3-issue-authorization" \
             < scripts/memory_broker_stage2_control.py
