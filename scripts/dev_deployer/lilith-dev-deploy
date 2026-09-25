@@ -1,0 +1,224 @@
+#!/bin/bash
+# LILITH 15B2b-B1c fixed DEV Core API deployment helper.
+#
+# Installed by the owner (break-glass) as root:root 0755 at
+# /usr/local/sbin/lilith-dev-deploy. The routine DEV deployer may run exactly
+# this program through sudo. It accepts no path, command, interpreter, unit, or
+# environment input. The bundle arrives on stdin as a tar containing exactly
+# lilith-core-api.tar.gz and lilith-core-api.attestation.json.
+#
+# Root is used only to buffer stdin, drop to the application user, and
+# restart lilith-os-api-dev.service. Every bundle byte is parsed, verified,
+# tested, and installed as the application user. It never touches the Memory
+# Broker, owner services, identities, authorizations, Stage III, activation
+# configuration, or PROD.
+set -Eeuo pipefail
+umask 077
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+
+readonly APP_USER="lilith"
+readonly APP_ROOT="/home/lilith/.hermes/lilith-os-dev"
+readonly RELEASES_DIR="${APP_ROOT}/releases"
+readonly CURRENT_LINK="${APP_ROOT}/current"
+readonly VENV_DIR="${APP_ROOT}/api-venv"
+readonly SERVICE_NAME="lilith-os-api-dev.service"
+readonly HEALTH_URL="http://127.0.0.1:8765/health"
+readonly LIB_DIR="/usr/local/lib/lilith-dev-deploy"
+readonly VERIFIER="${LIB_DIR}/verify_core_api_bundle.py"
+readonly PROBE="${LIB_DIR}/run_core_api_dev_durability_probe.py"
+readonly MAX_PAYLOAD_BYTES=$((64 * 1024 * 1024))
+readonly LOCK_PATH="/run/lilith-dev-deploy.lock"
+readonly BUNDLE_NAME="lilith-core-api.tar.gz"
+readonly ATTESTATION_NAME="lilith-core-api.attestation.json"
+
+die() {
+  echo "lilith-dev-deploy: $*" >&2
+  exit 2
+}
+
+usage() {
+  die "usage: lilith-dev-deploy deploy <40-hex-sha> < payload.tar | lilith-dev-deploy status"
+}
+
+as_app() {
+  runuser -u "${APP_USER}" -- env -i \
+    PATH=/usr/bin:/bin HOME=/home/lilith LC_ALL=C PYTHONDONTWRITEBYTECODE=1 "$@"
+}
+
+manifest_sha() {
+  as_app "${VENV_DIR}/bin/python" -c \
+    'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidateSha"])' "$1"
+}
+
+status() {
+  systemctl is-active "${SERVICE_NAME}"
+  echo "current=$(as_app readlink -f "${CURRENT_LINK}")"
+  echo "candidateSha=$(manifest_sha "${CURRENT_LINK}/deployment-manifest.json")"
+  echo "bundleSha256=$(as_app cat "${CURRENT_LINK}/.bundle-sha256")"
+}
+
+deploy() {
+  local candidate_sha="$1"
+  local release_dir="${RELEASES_DIR}/${candidate_sha}"
+  local staging="${RELEASES_DIR}/.${candidate_sha}.staging.$$"
+  local work="" previous_release="" probe_prepared=0 size pre_pid post_pid next_link
+
+  exec 9>"${LOCK_PATH}"
+  flock -n 9 || die "another DEV deployment is running"
+
+  test -x "${VENV_DIR}/bin/python" || die "DEV runtime is not bootstrapped"
+  test -d "${RELEASES_DIR}" || die "DEV release root is missing"
+  test -f "${VERIFIER}" -a -f "${PROBE}" || die "pinned deployment controls are missing"
+  test "$(systemctl is-enabled "${SERVICE_NAME}")" = enabled || die "DEV service is not enabled"
+
+  rollback() {
+    echo "--- DEV BUNDLE ROLLBACK ---"
+    if [[ -n "${previous_release}" ]] && as_app test -d "${previous_release}"; then
+      local rollback_link="${APP_ROOT}/.current.rollback.$$"
+      as_app ln -s "${previous_release}" "${rollback_link}"
+      as_app mv -Tf "${rollback_link}" "${CURRENT_LINK}"
+      systemctl restart "${SERVICE_NAME}" || true
+      sleep 3
+      as_app curl -fsS "${HEALTH_URL}" || true
+      echo
+    else
+      systemctl stop "${SERVICE_NAME}" || true
+    fi
+  }
+
+  cleanup() {
+    if [[ "${probe_prepared}" == 1 ]]; then
+      as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup \
+        --candidate-sha "${candidate_sha}" || true
+    fi
+    as_app rm -rf --one-file-system -- "${staging}" || true
+    if [[ -n "${work}" ]]; then
+      rm -rf --one-file-system -- "${work}" || true
+    fi
+  }
+  trap cleanup EXIT
+
+  if as_app test -L "${CURRENT_LINK}"; then
+    previous_release="$(as_app readlink -f "${CURRENT_LINK}")"
+  fi
+
+  echo "--- RECEIVE BOUNDED PAYLOAD ---"
+  work="$(mktemp -d /var/tmp/lilith-dev-deploy.XXXXXXXX)"
+  head -c "$((MAX_PAYLOAD_BYTES + 1))" > "${work}/payload.tar"
+  size="$(stat -c %s -- "${work}/payload.tar")"
+  (( size > 0 && size <= MAX_PAYLOAD_BYTES )) || die "payload size ${size} is outside bounds"
+
+  echo "--- UNPACK PAYLOAD AS ${APP_USER} ---"
+  as_app mkdir -m 700 -- "${staging}" "${staging}/in" "${staging}/release"
+  as_app tar -x -f - -C "${staging}/in" --no-same-owner --no-same-permissions \
+    -- "${BUNDLE_NAME}" "${ATTESTATION_NAME}" < "${work}/payload.tar"
+  test "$(as_app find "${staging}/in" -mindepth 1 -printf '%y %f\n' | sort | tr '\n' ' ')" = \
+    "f ${ATTESTATION_NAME} f ${BUNDLE_NAME} " || die "payload must contain exactly the bundle and attestation"
+
+  echo "--- VERIFY AND EXTRACT EXACT-SHA BUNDLE ---"
+  as_app "${VENV_DIR}/bin/python" "${VERIFIER}" \
+    --archive "${staging}/in/${BUNDLE_NAME}" \
+    --attestation "${staging}/in/${ATTESTATION_NAME}" \
+    --destination "${staging}/release" \
+    --expected-sha "${candidate_sha}"
+
+  echo "--- PRE-INSTALL VALIDATION ---"
+  test "$(manifest_sha "${staging}/release/deployment-manifest.json")" = "${candidate_sha}"
+  as_app "${VENV_DIR}/bin/python" -m compileall -q "${staging}/release/app.py" "${staging}/release/lilith_memory"
+
+  echo "--- INSTALL DEV PYTHON DEPENDENCIES ---"
+  as_app "${VENV_DIR}/bin/python" -m pip install --disable-pip-version-check \
+    -r "${staging}/release/requirements.txt"
+
+  echo "--- RUN ISOLATED DEV SYNTHETIC TESTS ---"
+  as_app LILITH_ENV=test "${VENV_DIR}/bin/python" -m unittest discover \
+    -s "${staging}/release/tests" -p 'test_*.py'
+
+  if as_app test -d "${release_dir}"; then
+    echo "--- VERIFY EXISTING IMMUTABLE RELEASE ---"
+    as_app cmp -s "${staging}/release/deployment-manifest.json" "${release_dir}/deployment-manifest.json"
+    as_app cmp -s "${staging}/release/.bundle-sha256" "${release_dir}/.bundle-sha256"
+  else
+    as_app find "${staging}/release" -type d -exec chmod 750 {} +
+    as_app find "${staging}/release" -type f -exec chmod 640 {} +
+    as_app mv -T -- "${staging}/release" "${release_dir}"
+  fi
+
+  echo "--- ATOMIC DEV RELEASE SWITCH ---"
+  next_link="${APP_ROOT}/.current.${candidate_sha}.$$"
+  as_app ln -s "${release_dir}" "${next_link}"
+  as_app mv -Tf "${next_link}" "${CURRENT_LINK}"
+
+  echo "--- PREPARE PERSISTENT DEV CANONICAL DURABILITY PROBE ---"
+  pre_pid="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
+  if [[ ! "${pre_pid}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "DEV service has no pre-restart PID." >&2
+    rollback
+    exit 1
+  fi
+  systemctl show "${SERVICE_NAME}" \
+    --property=MainPID,NRestarts,ActiveState,SubState,ActiveEnterTimestamp --no-pager
+  as_app LILITH_ENV=dev "${VENV_DIR}/bin/python" "${PROBE}" prepare \
+    --candidate-sha "${candidate_sha}" --pre-restart-pid "${pre_pid}"
+  probe_prepared=1
+
+  echo "--- RESTART DEV SERVICE ---"
+  if ! systemctl restart "${SERVICE_NAME}"; then
+    echo "DEV service restart failed." >&2
+    rollback
+    exit 1
+  fi
+  sleep 3
+
+  echo "--- VERIFY DEV SERVICE AND HEALTH ---"
+  if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
+    journalctl -u "${SERVICE_NAME}" -n 50 --no-pager || true
+    rollback
+    exit 1
+  fi
+  if ! as_app curl -fsS "${HEALTH_URL}"; then
+    echo
+    journalctl -u "${SERVICE_NAME}" -n 50 --no-pager || true
+    rollback
+    exit 1
+  fi
+  echo
+  post_pid="$(systemctl show --property=MainPID --value "${SERVICE_NAME}")"
+  if [[ ! "${post_pid}" =~ ^[1-9][0-9]*$ || "${post_pid}" == "${pre_pid}" ]]; then
+    echo "DEV service restart did not establish a new process." >&2
+    rollback
+    exit 1
+  fi
+  systemctl show "${SERVICE_NAME}" \
+    --property=MainPID,NRestarts,ActiveState,SubState,ActiveEnterTimestamp --no-pager
+
+  echo "--- VERIFY PERSISTENT DEV CANONICAL DURABILITY IN NEW PROCESS ---"
+  as_app LILITH_ENV=dev "${VENV_DIR}/bin/python" "${PROBE}" verify \
+    --candidate-sha "${candidate_sha}" --post-restart-pid "${post_pid}"
+
+  echo "--- CLEAN UP SYNTHETIC DEV DURABILITY ENVIRONMENT ---"
+  as_app "${VENV_DIR}/bin/python" "${PROBE}" cleanup --candidate-sha "${candidate_sha}"
+  probe_prepared=0
+
+  echo "--- POST-INSTALL IDENTITY READBACK ---"
+  test "$(as_app readlink -f "${CURRENT_LINK}")" = "${release_dir}"
+  test "$(manifest_sha "${CURRENT_LINK}/deployment-manifest.json")" = "${candidate_sha}"
+  as_app cat "${CURRENT_LINK}/deployment-manifest.json"
+  as_app cat "${CURRENT_LINK}/.bundle-sha256"
+  echo "--- DEV DEPLOYMENT COMPLETE ---"
+}
+
+case "${1:-}" in
+  deploy)
+    [[ "$#" -eq 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || usage
+    deploy "$2"
+    ;;
+  status)
+    [[ "$#" -eq 1 ]] || usage
+    status
+    ;;
+  *)
+    usage
+    ;;
+esac

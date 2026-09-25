@@ -23,11 +23,10 @@ def job(name: str) -> str:
 class BrokerOnlyWorkflowTests(unittest.TestCase):
     def test_broker_lane_is_separate_from_full_api_deployment(self):
         full = job("deploy")
-        broker = "\n".join(job(name) for name in
-                           ("broker_preflight", "broker_candidate", "broker_postflight"))
+        broker = "\n".join(job(name) for name in ("broker_candidate", "broker_postflight"))
         self.assertIn("if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'", full)
-        self.assertIn("deploy_core_api_dev_remote.sh", full)
-        self.assertNotIn("deploy_core_api_dev_remote.sh", broker)
+        self.assertIn("sudo -n /usr/local/sbin/lilith-dev-deploy deploy ${VALIDATED_SHA}", full)
+        self.assertNotIn("lilith-dev-deploy", broker)
         self.assertNotIn("systemctl restart", broker)
         self.assertNotIn("bootstrap_core_api_dev", broker)
         self.assertNotIn("memory_broker_os_installer.py", broker)
@@ -49,31 +48,25 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
         self.assertNotIn("      GCP_PROJECT_ID:", candidate)
         self.assertNotIn("      GCP_DEPLOY_SA:", candidate)
 
-    def test_preflight_postflight_and_same_required_context(self):
-        preflight = job("broker_preflight")
+    def test_postflight_publishes_same_required_context_without_dev_authority(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
         postflight = job("broker_postflight")
-        self.assertIn("broker_candidate_dev_snapshot.py", preflight)
-        self.assertIn("--phase preflight", preflight)
-        self.assertIn("--phase postflight", postflight)
-        self.assertIn("--expected-snapshot-sha", postflight)
-        self.assertIn("audit_core_api_production_read_only.py", postflight)
+        self.assertNotRegex(workflow, r"(?m)^  broker_preflight:\n")
         self.assertIn("context: 'LILITH DEV deployment'", postflight)
-        self.assertIn("needs: [deploy, premerge_gate, broker_preflight, broker_candidate]", postflight)
-        self.assertIn("needs.broker_candidate.result == 'success'", postflight)
         self.assertIn("context: 'LILITH DEV deployment'", job("deploy"))
-        self.assertIn("needs.broker_preflight.result == 'success'", job("broker_candidate"))
-        self.assertIn("steps.equality.outcome == 'success'", postflight)
-        self.assertNotIn("compute scp", preflight + postflight)
+        self.assertIn("needs: [deploy, premerge_gate, broker_candidate]", postflight)
+        self.assertIn("needs: [deploy, premerge_gate]", job("broker_candidate"))
+        self.assertIn("process.env.CANDIDATE_RESULT === 'success'", postflight)
+        for forbidden in ("id-token: write", "google-github-actions/auth", "gcloud ", "compute ssh",
+                          "compute scp", "broker_candidate_dev_snapshot.py", "audit_core_api_production",
+                          "lilith-01", "GCP_DEPLOY_SA"):
+            self.assertNotIn(forbidden, postflight)
         helper = SNAPSHOT_HELPER.read_text(encoding="utf-8")
         self.assertIn('invocation.ssh_command()', helper)
         self.assertIn('TRUSTED_SNAPSHOT_RELEASE_MISMATCH', helper)
         for retired in ('remote_action(', 'pack_source(', 'trusted_source_bytes(',
                         'lifecycle.py.part', 'lifecycle.py', 'source_bytes'):
             self.assertNotIn(retired, helper)
-        self.assertIn('ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}', preflight)
-        self.assertIn('ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}', postflight)
-        self.assertIn('Record installed snapshot invocation tool versions', preflight)
-        self.assertIn('Record installed snapshot invocation tool versions', postflight)
 
     def test_control_only_and_full_mode_routes_remain(self):
         full = job("deploy")
@@ -85,7 +78,6 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
     def test_manual_gate_is_protected_main_only_and_fails_before_pre(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         gate = job("premerge_gate")
-        preflight = job("broker_preflight")
         self.assertIn("  workflow_dispatch:\n", workflow)
         self.assertIn("pr_number:", workflow)
         self.assertIn("candidate_sha:", workflow)
@@ -109,27 +101,18 @@ class BrokerOnlyWorkflowTests(unittest.TestCase):
                         gate.index('python scripts/classify_dev_deployment.py'))
         self.assertNotIn("id-token: write", gate)
         self.assertNotIn("google-github-actions/auth", gate)
-        self.assertIn("Recheck frozen PR head immediately before manual PRE", preflight)
-        self.assertIn("branch.commit.sha !== process.env.TRUSTED_MAIN_SHA", preflight)
-        self.assertIn("pr.head.sha !== process.env.CANDIDATE_SHA", preflight)
-        self.assertLess(preflight.index("Recheck frozen PR head immediately before manual PRE"),
-                        preflight.index("Authenticate for read-only DEV observation"))
 
-    def test_manual_pre_post_are_exactly_two_accepted_read_only_observations(self):
-        preflight = job("broker_preflight")
+    def test_manual_candidate_lane_has_no_dev_observation_or_mutation(self):
         candidate = job("broker_candidate")
         postflight = job("broker_postflight")
-        self.assertIn("dff5ccddad5884b57f5cf895a9c86c741077fd21857d6e67de57803e6fde68e5", preflight)
-        self.assertIn("needs.premerge_gate.result == 'success'", preflight)
-        self.assertIn("needs.broker_candidate.result == 'failure'", postflight)
-        self.assertIn("--expected-snapshot-sha", postflight)
+        self.assertIn("needs.broker_candidate.result != 'skipped'", postflight)
         self.assertIn("github.event_name == 'workflow_run'", postflight)
-        self.assertIn("steps.equality.outcome == 'success' && github.event_name == 'workflow_run'", postflight)
         self.assertIn("github.event_name == 'workflow_dispatch'", candidate)
+        self.assertIn("pr.head.sha !== process.env.CANDIDATE_SHA", postflight)
         self.assertNotIn("broker_candidate_dev_snapshot.py", candidate)
         for forbidden in ("systemctl restart", "compute scp", "memory_broker_os_installer.py",
                           "Stage3FaultArmV1", "a2-arm.json"):
-            self.assertNotIn(forbidden, preflight + candidate + postflight)
+            self.assertNotIn(forbidden, candidate + postflight)
 
 
 if __name__ == "__main__":

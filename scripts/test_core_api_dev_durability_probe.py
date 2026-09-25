@@ -151,23 +151,28 @@ class DurabilityProbeEvidenceSafetyTests(unittest.TestCase):
         self.assertIsNone(probe.SHA_RE.fullmatch("not-a-sha"))
 
 class DurabilityProbeTrustedWiringTests(unittest.TestCase):
-    def test_workflow_uploads_probe_through_iap_and_passes_exact_sha(self) -> None:
+    def test_probe_is_owner_pinned_and_workflow_passes_exact_sha(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("scripts/run_core_api_dev_durability_probe.py", workflow)
-        self.assertIn("--tunnel-through-iap", workflow)
-        self.assertIn("'${VALIDATED_SHA}' '${REMOTE_VERIFIER}' '${REMOTE_DURABILITY_PROBE}'", workflow)
-        self.assertNotIn("service_account_key", workflow)
-
-    def test_remote_control_prepares_before_restart_and_verifies_after(self) -> None:
-        deploy = (ROOT / "scripts" / "deploy_core_api_dev_remote.sh").read_text(
+        installer = (ROOT / "scripts" / "dev_deployer" / "install_dev_deployer_boundary.sh").read_text(
             encoding="utf-8"
         )
-        prepare = deploy.index('"${TRUSTED_DURABILITY_PROBE}" prepare')
-        restart = deploy.index('systemctl restart "${SERVICE_NAME}"', prepare)
-        verify = deploy.index('"${TRUSTED_DURABILITY_PROBE}" verify')
-        cleanup = deploy.index('"${TRUSTED_DURABILITY_PROBE}" cleanup', verify)
+        # 15B2b-B1c: the probe is installed root-owned by the owner, never uploaded.
+        self.assertNotIn("scripts/run_core_api_dev_durability_probe.py", workflow)
+        self.assertIn('"${LIB_DIR}/run_core_api_dev_durability_probe.py"', installer)
+        self.assertIn("--tunnel-through-iap", workflow)
+        self.assertIn("sudo -n /usr/local/sbin/lilith-dev-deploy deploy ${VALIDATED_SHA}", workflow)
+        self.assertNotIn("service_account_key", workflow)
+
+    def test_helper_prepares_before_restart_and_verifies_after(self) -> None:
+        helper = (ROOT / "scripts" / "dev_deployer" / "lilith-dev-deploy").read_text(
+            encoding="utf-8"
+        )
+        prepare = helper.index('"${PROBE}" prepare')
+        restart = helper.index('systemctl restart "${SERVICE_NAME}"', prepare)
+        verify = helper.index('"${PROBE}" verify')
+        cleanup = helper.index('"${PROBE}" cleanup', verify)
         self.assertLess(prepare, restart)
         self.assertLess(restart, verify)
         self.assertLess(verify, cleanup)
@@ -186,20 +191,15 @@ class DurabilityProbeTrustedWiringTests(unittest.TestCase):
         self.assertNotIn("_atomic_json(DEFAULT_CONFIG_PATH", source)
         self.assertNotIn("_atomic_json(PRODUCTION_CONFIG_PATH", source)
 
-    def test_production_audit_uses_a_distinct_pinned_host(self) -> None:
+    def test_routine_dev_workflow_has_no_production_login(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "deploy-dev.yml").read_text(
             encoding="utf-8"
         )
-        audit = workflow.split("- name: Audit production darkness", 1)[1].split(
-            "- name: Publish successful DEV", 1
-        )[0]
-        self.assertIn("GCP_PROD_INSTANCE: lilith-01", workflow)
-        self.assertIn('test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"', audit)
-        self.assertIn("compute instances describe", audit)
-        self.assertIn('gcloud compute ssh "${GCP_PROD_INSTANCE}"', audit)
-        self.assertNotIn('gcloud compute ssh "${GCP_INSTANCE}"', audit)
-        self.assertNotIn("compute scp", audit)
-        self.assertNotIn("systemctl restart", audit)
+        # 15B2b-B1c: PROD darkness is a future separately governed read-only proof.
+        self.assertNotIn("Audit production darkness", workflow)
+        self.assertNotIn("GCP_PROD_INSTANCE", workflow)
+        self.assertNotIn('gcloud compute ssh "${GCP_PROD', workflow)
+        self.assertNotIn("audit_core_api_production_read_only.py", workflow)
 
 
 class DurabilityProbeCleanupTests(unittest.TestCase):

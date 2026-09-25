@@ -1,0 +1,3 @@
+# LILITH 15B2b-B1c: the routine DEV deployer may run only the fixed DEV Core API
+# deployment helper. No shell, interpreter, systemctl, broker, or Stage III rule.
+@DEPLOYER@ ALL=(root) NOPASSWD: /usr/local/sbin/lilith-dev-deploy deploy *, /usr/local/sbin/lilith-dev-deploy status

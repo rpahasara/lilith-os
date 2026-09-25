@@ -41,7 +41,7 @@ class PrCiDevSeparationTests(unittest.TestCase):
 
     def test_dev_jobs_reject_pr_origin_before_credentials(self):
         self.assertIn("    branches:\n      - main\n", DEPLOY)
-        for name in ("deploy", "broker_preflight", "broker_postflight"):
+        for name in ("deploy", "broker_postflight"):
             source = job(DEPLOY, name)
             guard = source.split("    runs-on:", 1)[0]
             with self.subTest(job=name):
@@ -49,13 +49,12 @@ class PrCiDevSeparationTests(unittest.TestCase):
                 self.assertIn("github.event.workflow_run.head_branch == github.event.repository.default_branch", guard)
                 self.assertIn("github.event.workflow_run.head_repository.full_name == github.repository", guard)
                 self.assertNotIn("github.event.workflow_run.event == 'pull_request'", guard)
-                auth = source.index("uses: google-github-actions/auth@v3")
-                auth_step = source[:auth].rsplit("      - name:", 1)[-1]
-                self.assertIn("github.event.workflow_run.event == 'push'", auth_step)
-                self.assertNotIn("github.event.workflow_run.event == 'pull_request'", auth_step)
-                if name != "deploy":
-                    self.assertIn("github.ref == 'refs/heads/main'", auth_step)
-                    self.assertIn("needs.premerge_gate.result == 'success'", auth_step)
+        source = job(DEPLOY, "deploy")
+        auth = source.index("uses: google-github-actions/auth@v3")
+        auth_step = source[:auth].rsplit("      - name:", 1)[-1]
+        self.assertIn("github.event.workflow_run.event == 'push'", auth_step)
+        self.assertNotIn("github.event.workflow_run.event == 'pull_request'", auth_step)
+        self.assertEqual(DEPLOY.count("uses: google-github-actions/auth@v3"), 1)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", job(DEPLOY, "deploy"))
 
     def test_main_candidate_is_exact_and_classified_against_first_parent(self):
@@ -75,13 +74,15 @@ class PrCiDevSeparationTests(unittest.TestCase):
             "Build deterministic exact-SHA Core API bundle",
             "Authenticate to Google Cloud",
             "Set up Google Cloud CLI",
-            "Upload DEV bootstrap and exact-SHA bundle through IAP",
-            "Bootstrap and deploy the isolated DEV service",
+            "Package exact-SHA bundle for the fixed DEV helper",
+            "Deploy through the fixed root-owned DEV helper",
+            "Prove the routine DEV deployer has no root, broker, or Stage III reach",
+            "Prove routine DEV federation cannot obtain PROD or the legacy privileged identity",
         ):
             with self.subTest(step=step):
                 section = source.split(f"      - name: {step}\n", 1)[1].split("      - name:", 1)[0]
                 self.assertIn("steps.classify.outputs.mode == 'DEPLOY_REQUIRED'", section)
-        for name in ("broker_preflight", "broker_postflight"):
+        for name in ("broker_candidate", "broker_postflight"):
             with self.subTest(job=name):
                 guard = job(DEPLOY, name).split("    runs-on:", 1)[0]
                 self.assertIn("needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'", guard)
@@ -105,7 +106,8 @@ class PrCiDevSeparationTests(unittest.TestCase):
         self.assertNotIn("google-github-actions/auth", candidate)
         self.assertNotIn("compute ssh", candidate)
         self.assertNotIn("compute scp", candidate)
-        self.assertIn("steps.equality.outcome == 'success' && github.event_name == 'workflow_run'", post)
+        self.assertNotIn("google-github-actions/auth", post)
+        self.assertNotIn("id-token: write", post)
         self.assertIn("if: always() && github.event_name == 'workflow_run'", post)
 
 

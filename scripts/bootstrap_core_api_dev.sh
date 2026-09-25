@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Owner break-glass DEV runtime bootstrap (15B2b-B1c). Never run from routine
+# GitHub deployment: the routine deployer has no root and cannot execute it.
 set -Eeuo pipefail
 
 APP_USER="lilith"
@@ -13,7 +15,8 @@ DATA_DIR="${APP_ROOT}/data"
 DB_PATH="${DATA_DIR}/lilith-dev.db"
 COGNITIVE_DB_PATH="${DATA_DIR}/cognitive_memory.dev.db"
 PRIVACY_DB_PATH="${DATA_DIR}/privacy_governance.dev.db"
-CANONICAL_CONFIG_PATH="${DATA_DIR}/canonical-runtime.json"
+ACTIVATION_DIR="/etc/lilith-os-dev"
+CANONICAL_CONFIG_PATH="${ACTIVATION_DIR}/canonical-runtime.json"
 
 SERVICE_NAME="lilith-os-api-dev.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
@@ -36,13 +39,13 @@ install -d -o "${APP_USER}" -g "${APP_GROUP}" -m 700 \
   "${RELEASES_DIR}" \
   "${DATA_DIR}"
 
+echo "--- CREATE ROOT-OWNED DARK ACTIVATION CONFIG ---"
+install -d -o root -g root -m 755 "${ACTIVATION_DIR}"
 if [[ ! -e "${CANONICAL_CONFIG_PATH}" ]]; then
-  install -o "${APP_USER}" -g "${APP_GROUP}" -m 600 /dev/null "${CANONICAL_CONFIG_PATH}"
+  install -o root -g "${APP_GROUP}" -m 640 /dev/null "${CANONICAL_CONFIG_PATH}"
   cat > "${CANONICAL_CONFIG_PATH}" <<'EOF'
 {"activeCapabilities":[],"canonicalLtmEnabled":false,"schemaVersion":1}
 EOF
-  chown "${APP_USER}:${APP_GROUP}" "${CANONICAL_CONFIG_PATH}"
-  chmod 600 "${CANONICAL_CONFIG_PATH}"
 fi
 
 echo "--- CREATE PYTHON VENV ---"

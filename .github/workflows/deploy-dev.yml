@@ -46,10 +46,11 @@ jobs:
       GCP_PROJECT_ID: lilith-agent-260823-27389
       GCP_ZONE: asia-southeast1-b
       GCP_INSTANCE: lilith-dev-01
-      GCP_PROD_INSTANCE: lilith-01
-      GCP_PROD_INSTANCE_ID: "1332996232081478576"
       GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
-      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      # 15B2b-B1c: DEV-only non-admin OS Login identity, federated only for this
+      # exact workflow file on protected main. It has no PROD binding and no root.
+      GCP_DEPLOY_SA: github-lilith-dev-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      GCP_LEGACY_PRIVILEGED_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
       HEALTH_URL: http://127.0.0.1:8765/health
     outputs:
       mode: ${{ steps.classify.outputs.mode }}
@@ -180,6 +181,23 @@ jobs:
             --attestation deployment-output/lilith-memory-broker-validation.attestation.json \
             --candidate-sha "${VALIDATED_SHA}"
 
+      - name: Validate broker candidate transiently before any cloud authentication
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          test -z "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+          python -m venv "${RUNNER_TEMP}/broker-venv"
+          "${RUNNER_TEMP}/broker-venv/bin/python" -m pip install --no-input --no-cache-dir \
+            --disable-pip-version-check 'fido2==2.2.1' 'rfc8785==0.1.4'
+          python scripts/memory_broker_validation.py verify-run \
+            --archive deployment-output/lilith-memory-broker-validation.tar.gz \
+            --attestation deployment-output/lilith-memory-broker-validation.attestation.json \
+            --candidate-sha "${VALIDATED_SHA}" \
+            --python "${RUNNER_TEMP}/broker-venv/bin/python"
+          echo 'BROKER_VALIDATION=RUNNER_ONLY DEV_BROKER_REACH=NONE' >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Set up pinned Python for inert broker release validation
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PERSISTENT_CANDIDATE == 'true'
         uses: actions/setup-python@v5
@@ -210,6 +228,17 @@ jobs:
             --archive deployment-output/lilith-broker-inert-release.tar.gz \
             --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
+      - name: Record GitHub OIDC claims presented to DEV federation
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://iam.googleapis.com/${GCP_WIF_PROVIDER}" | jq -r .value)"
+          echo "::add-mask::${oidc}"
+          python3 -c 'import base64,json,sys; p=sys.argv[1].split(".")[1]; c=json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))); print("OIDC_CLAIMS=" + json.dumps({k:c.get(k) for k in ("repository","ref","workflow_ref","job_workflow_ref","event_name")}, sort_keys=True))' "${oidc}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+
       - name: Authenticate to Google Cloud
         if: >-
           steps.classify.outputs.mode == 'DEPLOY_REQUIRED' &&
@@ -237,71 +266,81 @@ jobs:
             --zone="${GCP_ZONE}" \
             --format="value(name,status)"
 
-      - name: Upload DEV bootstrap and exact-SHA bundle through IAP
+      # Runs BEFORE deployment: this first login materializes the OS Login
+      # identity, and the deploy proceeds only if its effective privilege is
+      # exactly the fixed helper.
+      - name: Prove the routine DEV deployer has no root, broker, or Stage III reach
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
-        env:
-          REMOTE_BUNDLE: /tmp/lilith-dev-bundle-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
-          REMOTE_ATTESTATION: /tmp/lilith-dev-attestation-${{ github.run_id }}-${{ github.run_attempt }}.json
-          REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
-          REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
-          REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
-          REMOTE_DURABILITY_PROBE: /tmp/lilith-dev-durability-${{ github.run_id }}-${{ github.run_attempt }}.py
-        run: |
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            deployment-output/lilith-core-api.tar.gz \
-            "${GCP_INSTANCE}:${REMOTE_BUNDLE}"
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            deployment-output/lilith-core-api.attestation.json \
-            "${GCP_INSTANCE}:${REMOTE_ATTESTATION}"
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            scripts/bootstrap_core_api_dev.sh \
-            "${GCP_INSTANCE}:${REMOTE_BOOTSTRAP}"
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            scripts/deploy_core_api_dev_remote.sh \
-            "${GCP_INSTANCE}:${REMOTE_DEPLOY}"
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            scripts/verify_core_api_bundle.py \
-            "${GCP_INSTANCE}:${REMOTE_VERIFIER}"
-          gcloud compute scp --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            scripts/run_core_api_dev_durability_probe.py \
-            "${GCP_INSTANCE}:${REMOTE_DURABILITY_PROBE}"
-
-      - name: Bootstrap and deploy the isolated DEV service
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
-        shell: bash
-        env:
-          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
-          REMOTE_BUNDLE: /tmp/lilith-dev-bundle-${{ github.run_id }}-${{ github.run_attempt }}.tar.gz
-          REMOTE_ATTESTATION: /tmp/lilith-dev-attestation-${{ github.run_id }}-${{ github.run_attempt }}.json
-          REMOTE_BOOTSTRAP: /tmp/lilith-dev-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}.sh
-          REMOTE_DEPLOY: /tmp/lilith-dev-deploy-${{ github.run_id }}-${{ github.run_attempt }}.sh
-          REMOTE_VERIFIER: /tmp/lilith-dev-verify-${{ github.run_id }}-${{ github.run_attempt }}.py
-          REMOTE_DURABILITY_PROBE: /tmp/lilith-dev-durability-${{ github.run_id }}-${{ github.run_attempt }}.py
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            --command="set -e; trap 'rm -f ${REMOTE_BUNDLE} ${REMOTE_ATTESTATION} ${REMOTE_BOOTSTRAP} ${REMOTE_DEPLOY} ${REMOTE_VERIFIER} ${REMOTE_DURABILITY_PROBE}' EXIT; sudo bash '${REMOTE_BOOTSTRAP}'; sudo bash '${REMOTE_DEPLOY}' '${REMOTE_BUNDLE}' '${REMOTE_ATTESTATION}' '${VALIDATED_SHA}' '${REMOTE_VERIFIER}' '${REMOTE_DURABILITY_PROBE}'"
+            --ssh-key-expire-after=2h \
+            --ssh-flag=-T \
+            --command="bash -s" <<'REMOTE'
+          set -u
+          fail=0
+          deny() { if "$@" >/dev/null 2>&1; then echo "ALLOWED(unexpected): $*"; fail=1; else echo "DENIED: $*"; fi; }
+          id
+          if ! . /usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh; then
+            echo "SUDO_EFFECTIVE_PROOF=FAIL reason=PROOF_CONTROL_MISSING"
+            exit 1
+          fi
+          lilith_dev_effective_sudo_proof sa_112096412008414111981 self || fail=1
+          deny sudo -n true
+          deny sudo -n bash -c true
+          deny sudo -n /usr/bin/python3 -c 0
+          deny sudo -n /usr/bin/systemctl restart lilith-memory-broker.service
+          deny sudo -n -u lilith true
+          for path in /opt/lilith-memory-broker /opt/lilith-memory-broker/current /etc/lilith-memory-broker \
+              /etc/systemd/system /etc/systemd/system/lilith-memory-broker.service /etc/sudoers.d \
+              /var/lib/lilith-memory-broker /etc/lilith-os-dev /etc/lilith-os-dev/canonical-runtime.json \
+              /usr/local/sbin/lilith-dev-deploy /usr/local/lib/lilith-dev-deploy; do
+            deny test -w "$path"
+          done
+          for path in /etc/lilith-memory-broker/identities.json /etc/lilith-memory-broker/dev.json \
+              /etc/lilith-memory-broker/b1b2b-stage3-a2-authorization.json /var/lib/lilith-memory-broker \
+              /var/lib/.lilith-memory-broker-stage3-a2 /run/lilith-memory/owner.sock /home/lilith; do
+            deny test -r "$path"
+          done
+          deny test -x /run/lilith-memory
+          for path in /etc/lilith-os-dev/activation /etc/lilith-os-dev/activation/grant.json \
+              /etc/lilith-os-dev/activation/allowed-signers /usr/local/sbin/lilith-activation-verify; do
+            deny test -w "$path"
+          done
+          activation="$(/usr/local/sbin/lilith-activation-verify)" || true
+          echo "$activation"
+          case "$activation" in
+            "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT "*) ;;
+            *) echo "UNEXPECTED ACCEPTED-ACTIVATION STATE"; fail=1 ;;
+          esac
+          exit "$fail"
+          REMOTE
+
+      - name: Package exact-SHA bundle for the fixed DEV helper
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          tar -C deployment-output -cf deployment-output/lilith-dev-payload.tar \
+            lilith-core-api.tar.gz lilith-core-api.attestation.json
+          sha256sum deployment-output/lilith-dev-payload.tar
+
+      - name: Deploy through the fixed root-owned DEV helper
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          [[ "${VALIDATED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --ssh-flag=-T \
+            --command="sudo -n /usr/local/sbin/lilith-dev-deploy deploy ${VALIDATED_SHA}" \
+            < deployment-output/lilith-dev-payload.tar
 
       - name: Verify DEV service health
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
@@ -313,65 +352,51 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
-            --command="sudo systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && test \"\$(sudo -u lilith python3 -c 'import json; print(json.load(open(\"/home/lilith/.hermes/lilith-os-dev/current/deployment-manifest.json\"))[\"candidateSha\"])')\" = '${VALIDATED_SHA}' && sudo -u lilith cat /home/lilith/.hermes/lilith-os-dev/current/.bundle-sha256"
+            --ssh-flag=-T \
+            --command="systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && sudo -n /usr/local/sbin/lilith-dev-deploy status" \
+            < /dev/null | tee "${RUNNER_TEMP}/dev-status.txt"
+          grep -qxF "candidateSha=${VALIDATED_SHA}" "${RUNNER_TEMP}/dev-status.txt"
 
-      - name: Upload separate broker validation artifact through IAP
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
-        shell: bash
-        env:
-          REMOTE_BROKER_DIR: /tmp/lilith-broker-validation-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="umask 077; mkdir -m 700 '${REMOTE_BROKER_DIR}'"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            deployment-output/lilith-memory-broker-validation.tar.gz "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/archive.tar.gz"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            deployment-output/lilith-memory-broker-validation.attestation.json "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/attestation.json"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            scripts/memory_broker_validation.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/validator.py"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            scripts/run_memory_broker_dev_validation.sh "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/runner.sh"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            scripts/verify_broker_dev_lifecycle.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/lifecycle.py"
-
-      - name: Validate broker transiently on DEV and prove no operational state
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
-        shell: bash
-        env:
-          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
-          REMOTE_BROKER_DIR: /tmp/lilith-broker-validation-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="bash '${REMOTE_BROKER_DIR}/runner.sh' '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${VALIDATED_SHA}' '${REMOTE_BROKER_DIR}/validator.py' '/usr/bin/python3' '${REMOTE_BROKER_DIR}/lifecycle.py'"
-
-      - name: Confirm broker validation upload cleanup
-        if: always() && steps.classify.outputs.mode == 'DEPLOY_REQUIRED' && env.BROKER_PRESENT == 'PRESENT'
-        shell: bash
-        env:
-          REMOTE_BROKER_DIR: /tmp/lilith-broker-validation-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap \
-            --command="if test -d '${REMOTE_BROKER_DIR}'; then rm -f -- '${REMOTE_BROKER_DIR}/archive.tar.gz' '${REMOTE_BROKER_DIR}/attestation.json' '${REMOTE_BROKER_DIR}/validator.py' '${REMOTE_BROKER_DIR}/lifecycle.py' '${REMOTE_BROKER_DIR}/runner.sh'; rmdir -- '${REMOTE_BROKER_DIR}'; fi; test ! -e '${REMOTE_BROKER_DIR}'"
-
-      - name: Audit production darkness on the pinned production VM
+      - name: Prove routine DEV federation cannot obtain PROD or the legacy privileged identity
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
         run: |
-          test "${GCP_PROD_INSTANCE}" = "lilith-01"
-          test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"
-          test "$(gcloud compute instances describe "${GCP_PROD_INSTANCE}" \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --format='value(id)')" = "${GCP_PROD_INSTANCE_ID}"
-          AUDIT_SOURCE="$(base64 -w0 scripts/audit_core_api_production_read_only.py)"
-          gcloud compute ssh "${GCP_PROD_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
+          set -euo pipefail
+          oidc="$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://iam.googleapis.com/${GCP_WIF_PROVIDER}" | jq -r .value)"
+          echo "::add-mask::${oidc}"
+          python3 -c 'import base64,json,sys; p=sys.argv[1].split(".")[1]; c=json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))); print(json.dumps({k:c.get(k) for k in ("repository","ref","workflow_ref","event_name")}))' "${oidc}"
+          federated="$(jq -n --arg t "${oidc}" --arg a "//iam.googleapis.com/${GCP_WIF_PROVIDER}" \
+            '{grantType:"urn:ietf:params:oauth:grant-type:token-exchange",audience:$a,scope:"https://www.googleapis.com/auth/cloud-platform",requestedTokenType:"urn:ietf:params:oauth:token-type:access_token",subjectTokenType:"urn:ietf:params:oauth:token-type:jwt",subjectToken:$t}' \
+            | curl -sSf https://sts.googleapis.com/v1/token -H 'Content-Type: application/json' -d @- | jq -r .access_token)"
+          echo "::add-mask::${federated}"
+          mint() {
+            curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${federated}" \
+              -H 'Content-Type: application/json' -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"]}' \
+              "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/$1:generateAccessToken"
+          }
+          dev_code="$(mint "${GCP_DEPLOY_SA}")"
+          legacy_code="$(mint "${GCP_LEGACY_PRIVILEGED_SA}")"
+          echo "DEV_IDENTITY_MINT=${dev_code} LEGACY_PRIVILEGED_MINT=${legacy_code}"
+          test "${dev_code}" = 200
+          test "${legacy_code}" = 403
+          access="$(gcloud auth print-access-token)"
+          echo "::add-mask::${access}"
+          probe() {
+            curl -sSf -X POST -H "Authorization: Bearer ${access}" -H 'Content-Type: application/json' -d "$2" "$1" \
+              | jq -c '.permissions // []'
+          }
+          prod_compute="$(probe "https://compute.googleapis.com/compute/v1/projects/${GCP_PROJECT_ID}/zones/${GCP_ZONE}/instances/lilith-01/testIamPermissions" \
+            '{"permissions":["compute.instances.osLogin","compute.instances.osAdminLogin","compute.instances.setMetadata"]}')"
+          prod_iap="$(probe "https://iap.googleapis.com/v1/projects/763184673487/iap_tunnel/zones/${GCP_ZONE}/instances/lilith-01:testIamPermissions" \
+            '{"permissions":["iap.tunnelInstances.accessViaIAP"]}')"
+          prod_sa="$(probe "https://iam.googleapis.com/v1/projects/${GCP_PROJECT_ID}/serviceAccounts/lilith-vm@${GCP_PROJECT_ID}.iam.gserviceaccount.com:testIamPermissions" \
+            '{"permissions":["iam.serviceAccounts.actAs","iam.serviceAccounts.getAccessToken"]}')"
+          echo "PROD_COMPUTE=${prod_compute} PROD_IAP=${prod_iap} PROD_SA=${prod_sa}"
+          test "${prod_compute}" = '[]'
+          test "${prod_iap}" = '[]'
+          test "${prod_sa}" = '[]'
+          echo 'PROD_AUTHORITY=NONE LEGACY_PRIVILEGED_IDENTITY=UNOBTAINABLE' >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Publish successful DEV deployment status
         if: ${{ success() && steps.classify.outputs.mode != 'BROKER_CANDIDATE_VALIDATE_ONLY' }}
@@ -509,127 +534,15 @@ jobs:
             --candidate-sha "$CANDIDATE_SHA" --github-output "$GITHUB_OUTPUT"
           test "$(sed -n 's/^mode=//p' "$GITHUB_OUTPUT")" = BROKER_CANDIDATE_VALIDATE_ONLY
 
-  broker_preflight:
-    name: Read-only accepted DEV preflight for broker candidate
-    needs: [deploy, premerge_gate]
-    if: >-
-      always() && (
-        (needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
-         github.event.workflow_run.event == 'push' &&
-         github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-         github.event.workflow_run.head_repository.full_name == github.repository) ||
-        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-         needs.premerge_gate.result == 'success' &&
-         needs.premerge_gate.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      pull-requests: read
-      checks: read
-    env:
-      GCP_PROJECT_ID: lilith-agent-260823-27389
-      GCP_ZONE: asia-southeast1-b
-      GCP_INSTANCE: lilith-dev-01
-      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
-      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
-    outputs:
-      snapshot_sha: ${{ steps.snapshot.outputs.snapshot_sha }}
-    steps:
-      - name: Check out protected-main controls
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Recheck frozen PR head immediately before manual PRE
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/github-script@v8
-        env:
-          CANDIDATE_SHA: ${{ needs.premerge_gate.outputs.candidate_sha }}
-          TRUSTED_MAIN_SHA: ${{ needs.premerge_gate.outputs.base_sha }}
-        with:
-          script: |
-            const {owner, repo} = context.repo;
-            const branch = (await github.rest.repos.getBranch({owner, repo, branch: 'main'})).data;
-            const pr = (await github.rest.pulls.get({owner, repo, pull_number: 38})).data;
-            if (branch.commit.sha !== process.env.TRUSTED_MAIN_SHA ||
-                pr.state !== 'open' || pr.head.sha !== process.env.CANDIDATE_SHA)
-              throw new Error('FROZEN_PR_CHANGED_BEFORE_PRE');
-            const ruleset = (await github.request('GET /repos/{owner}/{repo}/rulesets/{ruleset_id}',
-              {owner, repo, ruleset_id: 23205011})).data;
-            const required = ruleset.rules.find(rule => rule.type === 'required_status_checks')
-              ?.parameters?.required_status_checks;
-            if (ruleset.enforcement !== 'active' || !Array.isArray(required) || required.length === 0)
-              throw new Error('REQUIRED_CHECK_RULE_CHANGED_BEFORE_PRE');
-            const checkResult = (await github.rest.checks.listForRef({
-              owner, repo, ref: process.env.CANDIDATE_SHA, filter: 'latest', per_page: 100
-            })).data;
-            if (checkResult.total_count > 100) throw new Error('REQUIRED_CHECK_LIST_TOO_LARGE');
-            for (const check of required) {
-              const matches = checkResult.check_runs.filter(run => run.name === check.context &&
-                run.app?.id === check.integration_id && run.head_sha === process.env.CANDIDATE_SHA);
-              if (matches.length !== 1 || matches[0].status !== 'completed' ||
-                  matches[0].conclusion !== 'success')
-                throw new Error(`REQUIRED_SOURCE_CHECK_NOT_GREEN:${check.context}`);
-            }
-      - name: Authenticate for read-only DEV observation
-        if: >-
-          (github.event.workflow_run.event == 'push' &&
-           github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
-          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-           needs.premerge_gate.result == 'success')
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SA }}
-      - name: Set up Google Cloud CLI
-        uses: google-github-actions/setup-gcloud@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Record installed snapshot invocation tool versions
-        shell: bash
-        run: |
-          gcloud version
-          ssh -V
-          python --version
-          uname -srm
-          . /etc/os-release
-          printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
-      - name: Capture accepted DEV lifecycle without candidate code
-        id: snapshot
-        shell: bash
-        run: |
-          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}'
-          python scripts/broker_candidate_dev_snapshot.py \
-            --phase preflight > "${RUNNER_TEMP}/broker-preflight.json"
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          result = json.loads((Path(os.environ['RUNNER_TEMP']) / 'broker-preflight.json').read_text())
-          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
-              if (result['toolReleaseId'] != 'c4d60b9c19debc9fcfece256641a9f83ca82b15b5343cd15cb81a1988c1c6261' or
-                  result['acceptedBaselineDigest'] != 'abc33ebf8d43e8805f43ff11e663a4757bf558d9b62eda9669dabecbb7c9839a' or
-                  result['snapshotSha256'] != 'dff5ccddad5884b57f5cf895a9c86c741077fd21857d6e67de57803e6fde68e5'):
-                  raise SystemExit('FROZEN_PRE_SNAPSHOT_MISMATCH')
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write('snapshot_sha=' + result['snapshotSha256'] + '\n')
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write('BROKER_CANDIDATE_VALIDATE_ONLY accepted DEV preflight: ' + json.dumps(result, sort_keys=True) + '\n')
-          PY
-
   broker_candidate:
     name: Isolated exact-SHA broker candidate validation
-    needs: [deploy, premerge_gate, broker_preflight]
+    needs: [deploy, premerge_gate]
     if: >-
-      always() && needs.broker_preflight.result == 'success' &&
+      always() &&
       ((needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
-        github.event.workflow_run.event == 'push') ||
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
         needs.premerge_gate.result == 'success'))
     runs-on: ubuntu-latest
@@ -717,8 +630,8 @@ jobs:
           PY
 
   broker_postflight:
-    name: Read-only DEV postflight and required broker candidate status
-    needs: [deploy, premerge_gate, broker_preflight, broker_candidate]
+    name: Required broker candidate status without DEV or PROD authority
+    needs: [deploy, premerge_gate, broker_candidate]
     if: >-
       always() && (
         (needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY' &&
@@ -727,132 +640,39 @@ jobs:
          github.event.workflow_run.head_repository.full_name == github.repository) ||
         (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
          needs.premerge_gate.result == 'success' &&
-         needs.broker_preflight.result == 'success' &&
          needs.broker_candidate.result != 'skipped'))
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write
       pull-requests: read
       statuses: write
-    env:
-      GCP_PROJECT_ID: lilith-agent-260823-27389
-      GCP_ZONE: asia-southeast1-b
-      GCP_INSTANCE: lilith-dev-01
-      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
-      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
     steps:
-      - name: Check out protected-main controls
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          (needs.broker_candidate.result == 'success' ||
-           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}
-          persist-credentials: false
-      - name: Set up Python
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          (needs.broker_candidate.result == 'success' ||
-           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Authenticate for read-only DEV observation
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          ((needs.broker_candidate.result == 'success' &&
-            github.event.workflow_run.event == 'push' &&
-            github.event.workflow_run.head_branch == github.event.repository.default_branch) ||
-           (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            needs.premerge_gate.result == 'success' && needs.broker_candidate.result != 'skipped'))
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
-          service_account: ${{ env.GCP_DEPLOY_SA }}
-      - name: Set up Google Cloud CLI
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          (needs.broker_candidate.result == 'success' ||
-           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
-        uses: google-github-actions/setup-gcloud@v3
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Record installed snapshot invocation tool versions
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          (needs.broker_candidate.result == 'success' ||
-           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
-        shell: bash
-        run: |
-          gcloud version
-          ssh -V
-          python --version
-          uname -srm
-          . /etc/os-release
-          printf 'runner_os=%s %s\n' "$ID" "$VERSION_ID"
-      - name: Prove complete accepted DEV snapshot equality
-        id: equality
-        if: >-
-          needs.broker_preflight.result == 'success' &&
-          (needs.broker_candidate.result == 'success' ||
-           (github.event_name == 'workflow_dispatch' && needs.broker_candidate.result == 'failure'))
-        shell: bash
-        run: |
-          test "$(git rev-parse HEAD)" = '${{ needs.deploy.outputs.base_sha || needs.premerge_gate.outputs.base_sha }}'
-          python scripts/broker_candidate_dev_snapshot.py \
-            --phase postflight \
-            --expected-snapshot-sha '${{ needs.broker_preflight.outputs.snapshot_sha }}' \
-            >> "${GITHUB_STEP_SUMMARY}"
-      - name: Audit pinned production darkness without mutation
-        id: prod_audit
-        if: steps.equality.outcome == 'success' && github.event_name == 'workflow_run'
-        shell: bash
-        env:
-          GCP_PROD_INSTANCE: lilith-01
-          GCP_PROD_INSTANCE_ID: "1332996232081478576"
-        run: |
-          test "${GCP_PROD_INSTANCE}" = 'lilith-01'
-          test "${GCP_PROD_INSTANCE}" != "${GCP_INSTANCE}"
-          test "$(gcloud compute instances describe "${GCP_PROD_INSTANCE}" \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
-            --format='value(id)')" = "${GCP_PROD_INSTANCE_ID}"
-          AUDIT_SOURCE="$(base64 -w0 scripts/audit_core_api_production_read_only.py)"
-          gcloud compute ssh "${GCP_PROD_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            --command="cd /tmp && sudo -u lilith python3 -B -c 'import base64,sys;exec(base64.b64decode(sys.argv[1]))' '${AUDIT_SOURCE}'"
+      # 15B2b-B1c: accepted-DEV broker snapshot equality needs root and is now
+      # owner break-glass evidence only. Routine DEV automation cannot mutate
+      # the broker, so it neither observes nor claims broker state here.
       - name: Publish same required DEV deployment status
         if: always() && github.event_name == 'workflow_run'
         uses: actions/github-script@v8
         env:
-          PREFLIGHT_RESULT: ${{ needs.broker_preflight.result }}
           CANDIDATE_RESULT: ${{ needs.broker_candidate.result }}
-          EQUALITY_OUTCOME: ${{ steps.equality.outcome }}
-          PROD_OUTCOME: ${{ steps.prod_audit.outcome }}
           CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
         with:
           script: |
-            const passed = process.env.PREFLIGHT_RESULT === 'success' &&
-              process.env.CANDIDATE_RESULT === 'success' &&
-              process.env.EQUALITY_OUTCOME === 'success' &&
-              process.env.PROD_OUTCOME === 'success';
+            const passed = process.env.CANDIDATE_RESULT === 'success';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: process.env.CANDIDATE_SHA,
               state: passed ? 'success' : 'failure',
               context: 'LILITH DEV deployment',
-              description: passed ? 'BROKER_CANDIDATE_VALIDATE_ONLY: accepted DEV unchanged' :
-                'Broker candidate validation or accepted DEV equality failed',
+              description: passed ? 'BROKER_CANDIDATE_VALIDATE_ONLY: runner-only validation; DEV untouched' :
+                'Broker candidate validation failed',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
             if (!passed) core.setFailed('Broker-only DEV validation did not pass');
       - name: Recheck frozen PR head after manual candidate attempt
-        if: always() && github.event_name == 'workflow_dispatch' && needs.broker_preflight.result == 'success'
+        if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/github-script@v8
         env:
           CANDIDATE_SHA: ${{ needs.premerge_gate.outputs.candidate_sha }}
@@ -863,10 +683,9 @@ jobs:
             })).data;
             if (pr.state !== 'open' || pr.head.sha !== process.env.CANDIDATE_SHA)
               throw new Error('FROZEN_PR_CHANGED_DURING_VALIDATION');
-      - name: Require manual candidate success and exact DEV equality
-        if: always() && github.event_name == 'workflow_dispatch' && needs.broker_preflight.result == 'success'
+      - name: Require manual candidate success
+        if: always() && github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           test '${{ needs.broker_candidate.result }}' = success
-          test '${{ steps.equality.outcome }}' = success
-          echo 'PREMERGE_CANDIDATE_VALIDATED=PASS DEV_MUTATION=NONE' >> "$GITHUB_STEP_SUMMARY"
+          echo 'PREMERGE_CANDIDATE_VALIDATED=PASS DEV_MUTATION=NONE DEV_AUTH=NONE' >> "$GITHUB_STEP_SUMMARY"

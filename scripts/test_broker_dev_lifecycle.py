@@ -449,8 +449,10 @@ class LifecyclePolicyTests(unittest.TestCase):
         self.assertIn('BEFORE_LIFECYCLE="$(sudo -n /usr/bin/python3 -B "$LIFECYCLE" snapshot)"', runner)
         self.assertIn('AFTER_LIFECYCLE="$(sudo -n /usr/bin/python3 -B "$LIFECYCLE" snapshot)"', runner)
         self.assertIn('test "$BEFORE_LIFECYCLE" = "$AFTER_LIFECYCLE"', runner)
-        self.assertIn('scripts/verify_broker_dev_lifecycle.py "${GCP_INSTANCE}:${REMOTE_BROKER_DIR}/lifecycle.py"', workflow)
-        self.assertNotIn('candidate/scripts/verify_broker_dev_lifecycle.py', workflow)
+        # 15B2b-B1c: the root lifecycle snapshot is owner break-glass only; the
+        # routine DEV workflow no longer uploads or runs it.
+        self.assertNotIn('verify_broker_dev_lifecycle.py', workflow)
+        self.assertNotIn("/runner.sh", workflow)
         self.assertNotIn('systemctl start', runner)
 
     def _reject_all(self, mutations):

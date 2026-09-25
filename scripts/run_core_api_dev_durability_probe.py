@@ -41,7 +41,9 @@ DEV_HERMES_ROOT = Path("/home/lilith/.hermes-dev")
 DATA_DIR = APP_ROOT / "data"
 COGNITIVE_DB = DATA_DIR / "cognitive_memory.dev.db"
 PRIVACY_DB = DATA_DIR / "privacy_governance.dev.db"
-DEFAULT_CONFIG_PATH = DATA_DIR / "canonical-runtime.json"
+# 15B2b-B1c: activation lives beneath a root-owned parent that deployable
+# code (running as lilith) can read but never write, unlink, or replace.
+DEFAULT_CONFIG_PATH = Path("/etc/lilith-os-dev/canonical-runtime.json")
 PRODUCTION_COGNITIVE_DB = Path(
     "/home/lilith/.hermes/lilith-os/data/cognitive_memory.db"
 )
@@ -366,8 +368,12 @@ def _default_config_evidence() -> dict:
     if raw != expected:
         raise ProbeError("default DEV canonical configuration is not dark")
     evidence = _file_metadata(DEFAULT_CONFIG_PATH)
-    if os.name != "nt" and evidence["mode"] != "0600":
-        raise ProbeError("default DEV canonical configuration is not mode 0600")
+    if os.name != "nt":
+        if (evidence["owner"], evidence["group"], evidence["mode"]) != ("root", "lilith", "0640"):
+            raise ProbeError("default DEV canonical configuration is not root:lilith 0640")
+        parent = DEFAULT_CONFIG_PATH.parent.stat()
+        if parent.st_uid != 0 or parent.st_mode & 0o022:
+            raise ProbeError("default DEV canonical configuration parent is replaceable")
     return evidence
 
 
