@@ -56,7 +56,7 @@ jobs:
         run: python -m unittest scripts/test_memory_broker_stage2_control.py
 
       - name: Validate dormant Stage-III reversible transition contracts
-        run: python -m unittest scripts/test_memory_broker_stage3_transition.py scripts/test_memory_broker_stage3_liveness.py scripts/test_memory_broker_stage3_guard_linux.py
+        run: python -m unittest scripts/test_memory_broker_stage3_transition.py scripts/test_memory_broker_stage3_liveness.py scripts/test_memory_broker_stage3_guard_linux.py scripts/test_memory_broker_stage3_adapters.py
 
       - name: Validate protected-main DEV gate classification and bypass resistance
         run: python -m unittest scripts/test_classify_dev_deployment.py
