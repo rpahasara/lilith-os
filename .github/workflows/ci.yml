@@ -166,6 +166,11 @@ jobs:
       - name: Compile and test governed memory broker when present
         run: python scripts/memory_broker_validation.py ci --source-root .
 
+      - name: Compile and test TEST-only accepted-memory contracts and verifier
+        run: |
+          python -m compileall -q services/owner-memory-control/lilith_owner_memory
+          python -m unittest discover -s services/owner-memory-control/tests -p "test_*.py"
+
       - name: Run Slice 8-15 architecture regressions
         run: python scripts/run_cognitive_regressions.py
 

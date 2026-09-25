@@ -1,0 +1,55 @@
+{
+  "challengeV2": [
+    {
+      "canonicalBytes": "{\"actionDigest\":\"a2fbeb340c488a9dc29bf25f73d202c43112fdec70172de3fb0667b21c83ef4e\",\"authorityDomain\":\"authority.synthetic.memory\",\"challengeId\":\"och.synthetic-create\",\"deploymentEnvironment\":\"test\",\"expectedActiveRevisionId\":null,\"expiresAt\":\"2026-09-26T12:01:00Z\",\"issuedAt\":\"2026-09-26T12:00:00Z\",\"ledgerEpoch\":\"0123456789abcdef0123456789abcdef\",\"logicalOwnerId\":\"owner.synthetic.v1\",\"memoryClass\":\"PROJECT_CODENAME_FACT\",\"memoryItemId\":null,\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"operation\":\"CREATE\",\"ownerPrincipal\":\"user:synthetic-owner@example.invalid\",\"payloadDigest\":\"eb10c72a5d514d6ead6e5dbaf35e95c449ce6959bf3b5db00dec6b137712a6de\",\"policyVersion\":\"policy.synthetic.v1\",\"privacyNoticeVersion\":\"privacy.synthetic.v1\",\"protocol\":\"LILITH_OWNER_MEMORY_PROOF\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"registryTupleVersion\":\"registry.synthetic.v1\",\"requestDigest\":\"e72c4e48d1a00f3bd3472d6559138cf14a1e0c24c032adcfe6b241c0388ce2ad\",\"restoreTargetDigest\":null,\"restoreTargetRevisionId\":null,\"rpId\":\"owner.lilith.invalid\",\"schemaVersion\":2,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.homelab\"}",
+      "operation": "CREATE",
+      "webauthnChallengeSha256": "03c761e9edc32e64a36926e6895db399fd96ded064e110139a1c5b1c14b9d57f"
+    },
+    {
+      "canonicalBytes": "{\"actionDigest\":\"d46386637ef1da9c61a6674ac8bc5781f3b91791679c7bbfb8f7fb96554aefee\",\"authorityDomain\":\"authority.synthetic.memory\",\"challengeId\":\"och.synthetic-supersede\",\"deploymentEnvironment\":\"test\",\"expectedActiveRevisionId\":\"mrev.synthetic-current\",\"expiresAt\":\"2026-09-26T12:01:00Z\",\"issuedAt\":\"2026-09-26T12:00:00Z\",\"ledgerEpoch\":\"0123456789abcdef0123456789abcdef\",\"logicalOwnerId\":\"owner.synthetic.v1\",\"memoryClass\":\"PROJECT_CODENAME_FACT\",\"memoryItemId\":\"mitem.synthetic\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"operation\":\"SUPERSEDE\",\"ownerPrincipal\":\"user:synthetic-owner@example.invalid\",\"payloadDigest\":\"eb10c72a5d514d6ead6e5dbaf35e95c449ce6959bf3b5db00dec6b137712a6de\",\"policyVersion\":\"policy.synthetic.v1\",\"privacyNoticeVersion\":\"privacy.synthetic.v1\",\"protocol\":\"LILITH_OWNER_MEMORY_PROOF\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"registryTupleVersion\":\"registry.synthetic.v1\",\"requestDigest\":\"d380d7b4500dfccd1976e910ab136f341425eae93798660f667774ec66b49b04\",\"restoreTargetDigest\":null,\"restoreTargetRevisionId\":null,\"rpId\":\"owner.lilith.invalid\",\"schemaVersion\":2,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.homelab\"}",
+      "operation": "SUPERSEDE",
+      "webauthnChallengeSha256": "fdf83e60442cb223f93687f348976d94a1857ff4b88ece0a83b1940cfd9dbb97"
+    },
+    {
+      "canonicalBytes": "{\"actionDigest\":\"a171bd937301bf0f500cd502dc90115a7aea40f85414a0d1c167171879f155ea\",\"authorityDomain\":\"authority.synthetic.memory\",\"challengeId\":\"och.synthetic-restore\",\"deploymentEnvironment\":\"test\",\"expectedActiveRevisionId\":\"mrev.synthetic-current\",\"expiresAt\":\"2026-09-26T12:01:00Z\",\"issuedAt\":\"2026-09-26T12:00:00Z\",\"ledgerEpoch\":\"0123456789abcdef0123456789abcdef\",\"logicalOwnerId\":\"owner.synthetic.v1\",\"memoryClass\":\"PROJECT_CODENAME_FACT\",\"memoryItemId\":\"mitem.synthetic\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"operation\":\"RESTORE\",\"ownerPrincipal\":\"user:synthetic-owner@example.invalid\",\"payloadDigest\":\"d64ae9eb0709599d4710cf2a7328db2efbc5ee740943f92dc1336a55ee0ebbff\",\"policyVersion\":\"policy.synthetic.v1\",\"privacyNoticeVersion\":\"privacy.synthetic.v1\",\"protocol\":\"LILITH_OWNER_MEMORY_PROOF\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"registryTupleVersion\":\"registry.synthetic.v1\",\"requestDigest\":\"090bea5da67e358b4b04e7285b063554642a631bbda76e25b2a85823784ed1f7\",\"restoreTargetDigest\":\"d64ae9eb0709599d4710cf2a7328db2efbc5ee740943f92dc1336a55ee0ebbff\",\"restoreTargetRevisionId\":\"mrev.synthetic-history\",\"rpId\":\"owner.lilith.invalid\",\"schemaVersion\":2,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.homelab\"}",
+      "operation": "RESTORE",
+      "webauthnChallengeSha256": "db2c496bcee5eb9cd1b4bf8bfbaf8381ea2c996c6fcf79986ddb62014dbf48fe"
+    },
+    {
+      "canonicalBytes": "{\"actionDigest\":\"48bffc59c35dbdef386d0760eed1493654ed6155b86878937c6208639160810a\",\"authorityDomain\":\"authority.synthetic.memory\",\"challengeId\":\"och.synthetic-forget\",\"deploymentEnvironment\":\"test\",\"expectedActiveRevisionId\":null,\"expiresAt\":\"2026-09-26T12:01:00Z\",\"issuedAt\":\"2026-09-26T12:00:00Z\",\"ledgerEpoch\":\"0123456789abcdef0123456789abcdef\",\"logicalOwnerId\":\"owner.synthetic.v1\",\"memoryClass\":\"PROJECT_CODENAME_FACT\",\"memoryItemId\":\"mitem.synthetic\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"operation\":\"FORGET\",\"ownerPrincipal\":\"user:synthetic-owner@example.invalid\",\"payloadDigest\":\"eb10c72a5d514d6ead6e5dbaf35e95c449ce6959bf3b5db00dec6b137712a6de\",\"policyVersion\":\"policy.synthetic.v1\",\"privacyNoticeVersion\":\"privacy.synthetic.v1\",\"protocol\":\"LILITH_OWNER_MEMORY_PROOF\",\"purpose\":\"LONG_TERM_PERSONAL_PROJECT_RECALL\",\"registryTupleVersion\":\"registry.synthetic.v1\",\"requestDigest\":\"522e1012c35f29fb52381e08169d518c9c82ee5e5352d765e764768423335284\",\"restoreTargetDigest\":null,\"restoreTargetRevisionId\":null,\"rpId\":\"owner.lilith.invalid\",\"schemaVersion\":2,\"subjectKey\":\"codename\",\"subjectNamespace\":\"project.homelab\"}",
+      "operation": "FORGET",
+      "webauthnChallengeSha256": "1e13f9db47d7a83c2ce40ea0266eb74602be07c160ff94b16bb8dbd6d1e04600"
+    }
+  ],
+  "evidenceV1": [
+    {
+      "brokerPublicKey": "Wp4BvO_AYJK1-fMhrRm7M5TA8v-tej0-2WsJD2xJlRw",
+      "envelope": {
+        "actionDigest": "930321815c9230043b7909685da3a77a7d1f3bd75a508b84d35756bdccfffaea",
+        "assertionDigest": "6fdb15a8bb02baa62fa755a7204386d7c40a087b5b2a6b74586ac6a392322c73",
+        "authorityDomain": "authority.synthetic.memory",
+        "brokerKeyId": "bkey.synthetic-1",
+        "brokerRelease": "6783ee8a643936a7f7ad740a7a34dae1d6c33387",
+        "challengeDigest": "ad03cec9d5727d4dc551e44bb884f9a36d403a9cf9e28e60f63e3e7d29bc3e82",
+        "challengeId": "och.golden",
+        "credentialRecordId": "ocred.synthetic",
+        "deploymentEnvironment": "test",
+        "epistemicBasis": "USER_ASSERTED",
+        "evidenceId": "bev.golden",
+        "evidenceNonce": "och.golden",
+        "issuedAt": "2026-09-26T12:00:21Z",
+        "ledgerEpoch": "0123456789abcdef0123456789abcdef",
+        "logicalOwnerId": "owner.synthetic.v1",
+        "payloadDigest": "fb5acad69e2654f938c70263d4d29f7e579d211c87b19396d161546e54d5def3",
+        "policyVersion": "policy.synthetic.v1",
+        "proposalRefId": "proposal-ref.golden",
+        "protocol": "LILITH_BROKER_MEMORY_EVIDENCE",
+        "registryTupleVersion": "registry.synthetic.v1",
+        "requestDigest": "cce8f123f529c47cd6765bc5752a1c9a7e87f86b7ce6b6389837fa5bbe05412f",
+        "schemaVersion": 1,
+        "signature": "Fc99jAaycGDyn4NEK-99lMVm1CWGxedNld_F5uJkBxNtA-z3XTh-7PccJkuKBweAA4tEVu_qs3d_gr9sV-x6Bg"
+      },
+      "evidenceDigest": "f23e72b1cb9a0df89dfe293d81883a3077d0668c87ba776d1def75284dfcdba2"
+    }
+  ]
+}
