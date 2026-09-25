@@ -138,6 +138,16 @@ class DevGateClassifierTests(unittest.TestCase):
             changed("docs/architecture/slice15b2b-stage3-a2-fault-seam.md", "A", "000000"),
         ), gate.BROKER_CANDIDATE_VALIDATE_ONLY)
 
+    def test_stage3_transition_is_control_only_and_not_a_dev_deployment(self):
+        for path in (
+            "scripts/memory_broker_stage3_transition.py",
+            "scripts/test_memory_broker_stage3_transition.py",
+            "docs/architecture/slice15b2b-stage3-a2-reversible-transition.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(self.classify(changed(path, "A", "000000")),
+                                 gate.CONTROL_ONLY_NO_DEPLOY)
+
     def test_broker_mixed_or_self_modifying_diff_requires_full_deploy(self):
         broker = changed("services/memory-broker/lilith_memory_broker/dev_core.py")
         for other in (
