@@ -40,6 +40,8 @@ class RoutineWorkflowAuthorityTests(unittest.TestCase):
             re.compile(r"sudo -n /usr/local/sbin/lilith-dev-deploy (deploy \$\{VALIDATED_SHA\}|status)"),
             re.compile(r"^\s*sudo -n -l$"),
             re.compile(r"^\s*deny sudo -n "),
+            re.compile(r"^\s*if ! \. /usr/local/lib/lilith-dev-deploy/effective_sudo_proof\.sh; then$"),
+            re.compile(r"^\s*lilith_dev_effective_sudo_proof sa_112096412008414111981 self \|\| fail=1$"),
         )
         for line in WORKFLOW.splitlines():
             if "sudo" in line.replace("/etc/sudoers.d", ""):

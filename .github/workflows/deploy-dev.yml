@@ -266,45 +266,9 @@ jobs:
             --zone="${GCP_ZONE}" \
             --format="value(name,status)"
 
-      - name: Package exact-SHA bundle for the fixed DEV helper
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
-        shell: bash
-        run: |
-          tar -C deployment-output -cf deployment-output/lilith-dev-payload.tar \
-            lilith-core-api.tar.gz lilith-core-api.attestation.json
-          sha256sum deployment-output/lilith-dev-payload.tar
-
-      - name: Deploy through the fixed root-owned DEV helper
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
-        shell: bash
-        env:
-          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          [[ "${VALIDATED_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            --ssh-key-expire-after=2h \
-            --ssh-flag=-T \
-            --command="sudo -n /usr/local/sbin/lilith-dev-deploy deploy ${VALIDATED_SHA}" \
-            < deployment-output/lilith-dev-payload.tar
-
-      - name: Verify DEV service health
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
-        shell: bash
-        env:
-          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
-            --project="${GCP_PROJECT_ID}" \
-            --zone="${GCP_ZONE}" \
-            --tunnel-through-iap \
-            --ssh-flag=-T \
-            --command="systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && sudo -n /usr/local/sbin/lilith-dev-deploy status" \
-            < /dev/null | tee "${RUNNER_TEMP}/dev-status.txt"
-          grep -qxF "candidateSha=${VALIDATED_SHA}" "${RUNNER_TEMP}/dev-status.txt"
-
+      # Runs BEFORE deployment: this first login materializes the OS Login
+      # identity, and the deploy proceeds only if its effective privilege is
+      # exactly the fixed helper.
       - name: Prove the routine DEV deployer has no root, broker, or Stage III reach
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
@@ -313,13 +277,18 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --zone="${GCP_ZONE}" \
             --tunnel-through-iap \
+            --ssh-key-expire-after=2h \
             --ssh-flag=-T \
             --command="bash -s" <<'REMOTE'
           set -u
           fail=0
           deny() { if "$@" >/dev/null 2>&1; then echo "ALLOWED(unexpected): $*"; fail=1; else echo "DENIED: $*"; fi; }
           id
-          sudo -n -l
+          if ! . /usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh; then
+            echo "SUDO_EFFECTIVE_PROOF=FAIL reason=PROOF_CONTROL_MISSING"
+            exit 1
+          fi
+          lilith_dev_effective_sudo_proof sa_112096412008414111981 self || fail=1
           deny sudo -n true
           deny sudo -n bash -c true
           deny sudo -n /usr/bin/python3 -c 0
@@ -349,6 +318,44 @@ jobs:
           esac
           exit "$fail"
           REMOTE
+
+      - name: Package exact-SHA bundle for the fixed DEV helper
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          tar -C deployment-output -cf deployment-output/lilith-dev-payload.tar \
+            lilith-core-api.tar.gz lilith-core-api.attestation.json
+          sha256sum deployment-output/lilith-dev-payload.tar
+
+      - name: Deploy through the fixed root-owned DEV helper
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          [[ "${VALIDATED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --ssh-flag=-T \
+            --command="sudo -n /usr/local/sbin/lilith-dev-deploy deploy ${VALIDATED_SHA}" \
+            < deployment-output/lilith-dev-payload.tar
+
+      - name: Verify DEV service health
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --ssh-flag=-T \
+            --command="systemctl is-active lilith-os-api-dev.service && curl -fsS '${HEALTH_URL}' && echo && sudo -n /usr/local/sbin/lilith-dev-deploy status" \
+            < /dev/null | tee "${RUNNER_TEMP}/dev-status.txt"
+          grep -qxF "candidateSha=${VALIDATED_SHA}" "${RUNNER_TEMP}/dev-status.txt"
 
       - name: Prove routine DEV federation cannot obtain PROD or the legacy privileged identity
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'

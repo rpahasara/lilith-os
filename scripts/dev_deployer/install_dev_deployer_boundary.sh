@@ -7,7 +7,7 @@
 #   sudo bash install_dev_deployer_boundary.sh <sa_POSIX_USER> <SOURCE_DIR>
 #
 # SOURCE_DIR holds lilith-dev-deploy, sudoers-lilith-dev-deployer.in,
-# lilith_activation_verify.py, verify_core_api_bundle.py and
+# effective_sudo_proof.sh, lilith_activation_verify.py, verify_core_api_bundle.py and
 # run_core_api_dev_durability_probe.py from the reviewed commit. The installer never enables canonical LTM, never restarts a
 # service, and never touches the Memory Broker, owner services, or Stage III.
 set -Eeuo pipefail
@@ -20,6 +20,7 @@ SOURCE_DIR="${2:?source directory required}"
 test "$(id -u)" = 0
 
 LIB_DIR="/usr/local/lib/lilith-dev-deploy"
+SUDO_PROOF="${LIB_DIR}/effective_sudo_proof.sh"
 HELPER="/usr/local/sbin/lilith-dev-deploy"
 SUDOERS="/etc/sudoers.d/lilith-dev-deployer"
 ACTIVATION_DIR="/etc/lilith-os-dev"
@@ -41,8 +42,10 @@ echo "--- INSTALL FIXED HELPER AND PINNED CONTROLS ---"
 install -d -o root -g root -m 0755 "${LIB_DIR}"
 install -o root -g root -m 0644 "${SOURCE_DIR}/verify_core_api_bundle.py" "${LIB_DIR}/verify_core_api_bundle.py"
 install -o root -g root -m 0644 "${SOURCE_DIR}/run_core_api_dev_durability_probe.py" "${LIB_DIR}/run_core_api_dev_durability_probe.py"
+install -o root -g root -m 0644 "${SOURCE_DIR}/effective_sudo_proof.sh" "${SUDO_PROOF}"
 install -o root -g root -m 0755 "${SOURCE_DIR}/lilith-dev-deploy" "${HELPER}"
 bash -n "${HELPER}"
+bash -n "${SUDO_PROOF}"
 
 echo "--- INSTALL EXACT SUDOERS RULE ---"
 rendered="$(mktemp)"
@@ -51,6 +54,14 @@ sed "s/@DEPLOYER@/${DEPLOYER}/g" "${SOURCE_DIR}/sudoers-lilith-dev-deployer.in" 
 visudo -cf "${rendered}"
 install -o root -g root -m 0440 "${rendered}" "${SUDOERS}"
 visudo -c
+cmp -s -- "${rendered}" "${SUDOERS}"
+test "$(stat -c '%U:%G %a' -- "${SUDOERS}")" = "root:root 440"
+test "$(grep -v '^#' "${SUDOERS}" | grep -v '^$')" = \
+  "${DEPLOYER} ALL=(root) NOPASSWD: /usr/local/sbin/lilith-dev-deploy deploy *, /usr/local/sbin/lilith-dev-deploy status"
+if grep -rlw -- "${DEPLOYER}" /etc/sudoers /etc/sudoers.d | grep -vqxF "${SUDOERS}"; then
+  echo "another sudoers entry names the deployer" >&2
+  exit 1
+fi
 
 echo "--- MOVE ACTIVATION BEYOND DEPLOYABLE REACH ---"
 install -d -o root -g root -m 0755 "${ACTIVATION_DIR}"
@@ -97,5 +108,12 @@ chown -R lilith:lilith "${VENV_DIR}"
 echo "--- INSTALLED BOUNDARY ---"
 stat -c '%A %U:%G %n' "${HELPER}" "${LIB_DIR}" "${LIB_DIR}"/* "${SUDOERS}" "${ACTIVATION_DIR}" "${ACTIVATION_FILE}" "${AUTHORITY_DIR}" "${VERIFIER}"
 sha256sum "${HELPER}" "${LIB_DIR}"/* "${SUDOERS}" "${VERIFIER}"
-sudo -n -l -U "${DEPLOYER}"
+
+echo "--- EFFECTIVE SUDO PROOF ---"
+# A never-logged-in OS Login user is not resolvable yet: that state is reported
+# as DEFERRED (nothing created or granted); the first routine deploy proves it
+# as the logged-in identity before deploying. Any other mismatch fails.
+# shellcheck source=effective_sudo_proof.sh
+. "${SUDO_PROOF}"
+lilith_dev_effective_sudo_proof "${DEPLOYER}" owner
 echo "Service restart deferred to the next helper deployment."

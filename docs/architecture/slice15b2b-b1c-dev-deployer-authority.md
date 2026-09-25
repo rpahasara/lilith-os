@@ -50,6 +50,18 @@ tested, installed and switched as `lilith`. The verifier and durability probe
 are pinned root-owned copies in `/usr/local/lib/lilith-dev-deploy`, not uploads.
 Bootstrap (users, packages, unit files) is owner break-glass only.
 
+Effective sudo proof: one shared function (`effective_sudo_proof.sh`, installed
+root-owned in the helper library) is used by the installer (`owner` mode,
+`sudo -l -U`), the pre-merge gate, and the routine workflow (`self` mode,
+`sudo -l`). The effective rules must be exactly the fixed helper. An OS Login
+user that has never logged in is not resolvable. The installer reports that
+single state as `SUDO_EFFECTIVE_PROOF=DEFERRED reason=OSLOGIN_USER_NOT_MATERIALIZED`
+and creates or grants nothing; the exact sudoers file, ownership, mode and
+`visudo` checks remain mandatory. The routine workflow's first login
+materializes the identity, and it proves `self` mode BEFORE deploying. It fails
+closed if the identity is unresolvable, is not `sa_112096412008414111981`, or
+has any rule beyond the helper.
+
 Activation: `/etc/lilith-os-dev/canonical-runtime.json`, `root:lilith 0640`,
 parent `root:root 0755`. `lilith` can read it but cannot write, unlink, rename
 or replace it. The service reads it only through `LILITH_CANONICAL_CONFIG_FILE`
@@ -167,7 +179,7 @@ gcloud iam service-accounts add-iam-policy-binding $NEW --project=$P --role=role
 
 ```bash
 gcloud compute ssh lilith-dev-01 --zone=$Z --project=$P --tunnel-through-iap --command='umask 077; mkdir /tmp/b1c'
-gcloud compute scp --zone=$Z --project=$P --tunnel-through-iap scripts/dev_deployer/lilith-dev-deploy scripts/dev_deployer/sudoers-lilith-dev-deployer.in scripts/dev_deployer/install_dev_deployer_boundary.sh scripts/dev_deployer/lilith_activation_verify.py scripts/verify_core_api_bundle.py scripts/run_core_api_dev_durability_probe.py lilith-dev-01:/tmp/b1c/
+gcloud compute scp --zone=$Z --project=$P --tunnel-through-iap scripts/dev_deployer/lilith-dev-deploy scripts/dev_deployer/sudoers-lilith-dev-deployer.in scripts/dev_deployer/install_dev_deployer_boundary.sh scripts/dev_deployer/effective_sudo_proof.sh scripts/dev_deployer/lilith_activation_verify.py scripts/verify_core_api_bundle.py scripts/run_core_api_dev_durability_probe.py lilith-dev-01:/tmp/b1c/
 gcloud compute ssh lilith-dev-01 --zone=$Z --project=$P --tunnel-through-iap --command='sudo bash /tmp/b1c/install_dev_deployer_boundary.sh sa_112096412008414111981 /tmp/b1c; rm -rf /tmp/b1c'
 ```
 
