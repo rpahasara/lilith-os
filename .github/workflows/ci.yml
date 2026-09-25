@@ -58,6 +58,9 @@ jobs:
       - name: Validate dormant Stage-III reversible transition contracts
         run: python -m unittest scripts/test_memory_broker_stage3_transition.py scripts/test_memory_broker_stage3_liveness.py scripts/test_memory_broker_stage3_guard_linux.py scripts/test_memory_broker_stage3_adapters.py scripts/test_memory_broker_stage3_final.py scripts/test_memory_broker_stage3_wiring.py
 
+      - name: Validate manual-only Stage-III DEV transport and dispatch contract
+        run: python -m unittest scripts/test_memory_broker_stage3_dev_transport.py
+
       - name: Validate protected-main DEV gate classification and bypass resistance
         run: python -m unittest scripts/test_classify_dev_deployment.py
 
@@ -68,7 +71,7 @@ jobs:
         run: python -m unittest scripts/test_pr_ci_dev_separation.py
 
       - name: Parse PR and DEV workflow YAML
-        run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' .github/workflows/ci.yml .github/workflows/deploy-dev.yml
+        run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' .github/workflows/ci.yml .github/workflows/deploy-dev.yml .github/workflows/memory-broker-dev-stage3-a2-final.yml
 
       - name: Validate fixed trusted snapshot source, release, and installer contracts
         run: python -m unittest scripts/test_trusted_broker_snapshot.py
