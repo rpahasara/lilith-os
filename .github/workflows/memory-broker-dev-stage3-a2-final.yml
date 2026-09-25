@@ -1,0 +1,145 @@
+name: Memory Broker DEV Stage III A2 fixed control (owner invoked)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Separate fixed control installation from the one-shot experiment"
+        required: true
+        type: choice
+        options:
+          - INSTALL_CONTROL_ONLY
+          - DISPATCH_ONCE
+      approved_main_sha:
+        description: "Exact protected-main SHA separately approved for this operation"
+        required: true
+        type: string
+      owner_confirmation:
+        description: "Exact operation-specific owner confirmation"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lilith-memory-broker-dev-stage3-a2-final
+  cancel-in-progress: false
+
+jobs:
+  fixed_owner_operation:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_INSTANCE_ID: "7687007163730582258"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      APPROVED_MAIN_SHA: ${{ inputs.approved_main_sha }}
+      OPERATION: ${{ inputs.operation }}
+      OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+    steps:
+      - name: Check out exact protected main without retained credentials
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail closed before DEV authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTOR" = rpahasara
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$APPROVED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$APPROVED_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$APPROVED_MAIN_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          git merge-base --is-ancestor 1e9cde512e2e3d2cd527fc0277b3bae7b9d9bfe3 "$APPROVED_MAIN_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          case "$OPERATION:$OWNER_CONFIRMATION" in
+            'INSTALL_CONTROL_ONLY:I AUTHORIZE STAGE3_A2_FINAL CONTROL_INSTALL_ONLY') ;;
+            'DISPATCH_ONCE:I AUTHORIZE STAGE3_A2_FINAL ONE_SHOT_DISPATCH') ;;
+            *) exit 1 ;;
+          esac
+          python3 scripts/memory_broker_stage3_dev_transport.py verify-source
+
+      - name: Authenticate using the existing DEV deployer identity only
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Independently pin the existing DEV VM identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="$(gcloud compute instances describe "$GCP_INSTANCE" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --format='value(id,name,status)')"
+          test "$identity" = "$GCP_INSTANCE_ID"$'\t'"$GCP_INSTANCE"$'\t'RUNNING
+
+      - name: Create exclusive unprivileged inbound custody for install only
+        if: inputs.operation == 'INSTALL_CONTROL_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command='umask 077 && mkdir -m 700 -- /tmp/lilith-stage3-a2-final-control-inbound'
+
+      - name: Transfer only the eight byte-pinned protected-main sources
+        if: inputs.operation == 'INSTALL_CONTROL_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            memory_broker_stage2_control.py \
+            memory_broker_stage3_transition.py \
+            memory_broker_stage3_liveness.py \
+            memory_broker_stage3_guard_worker.py \
+            memory_broker_stage3_adapters.py \
+            memory_broker_stage3_final.py \
+            memory_broker_stage3_dispatch.py \
+            memory_broker_stage3_wiring_install.py; do
+            gcloud compute scp --quiet \
+              --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+              "scripts/$name" "$GCP_INSTANCE:/tmp/lilith-stage3-a2-final-control-inbound/$name"
+          done
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command='chmod 0600 /tmp/lilith-stage3-a2-final-control-inbound/*.py'
+
+      - name: Stage root-owned exact bytes and invoke the fixed inactive installer once
+        if: inputs.operation == 'INSTALL_CONTROL_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command='sudo -n /usr/bin/python3 -I -B - install-control' \
+            < scripts/memory_broker_stage3_dev_transport.py
+
+      - name: Invoke only the fixed one-shot systemd dispatch
+        if: inputs.operation == 'DISPATCH_ONCE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command='sudo -n /usr/bin/python3 -I -B - dispatch-once' \
+            < scripts/memory_broker_stage3_dev_transport.py

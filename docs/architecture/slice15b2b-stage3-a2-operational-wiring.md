@@ -83,3 +83,45 @@ failure state were removed afterwards. Neither these tests nor this source
 work ran a LILITH service, issued owner authority, or contacted DEV. The
 isolated fixture does not substitute for later DEV baseline/installation
 review or authorize a live service start.
+
+## Protected-main DEV transport and dispatch entrypoint
+
+The later source-only workflow
+`.github/workflows/memory-broker-dev-stage3-a2-final.yml` is **manual only**.
+It has no push, merge, timer, or workflow-run trigger. It accepts only two
+operation choices, `INSTALL_CONTROL_ONLY` and `DISPATCH_ONCE`, each with a
+different exact owner confirmation and a separately approved protected-main
+commit SHA. It rejects a non-owner actor, non-main ref, dirty or mismatched
+checkout, changed byte-pinned sources, and GitHub job reruns **before** cloud
+authentication. The two operations are separately dispatched; installing the
+control release never launches it. A source merge does not contact DEV.
+
+The workflow reuses the existing GitHub OIDC provider, deployer service
+account, DEV instance identity, zone, and IAP SSH/SCP mechanism. It adds no
+credential or IAM action. Failure to authenticate, inspect the pinned VM, or
+obtain the existing narrow SSH/sudo access is terminal for that run and must
+be reviewed rather than repaired by widening IAM. The exact eight protected
+sources are transferred into an exclusive, unprivileged `0700` inbound
+directory. The fixed transport helper rejects extra members, symlinks,
+non-regular files, wrong custody, and any digest drift before creating the
+root-owned installer and seven-file staging directory. It validates the
+accepted snapshot before staging, invokes only the fixed `--install-fixed`
+installer, and independently rechecks installed bytes, manifest, and static
+inactive unit. A partial transfer or installation is left for review; there
+is no automatic cleanup or retry.
+
+`DISPATCH_ONCE` requires an independently accepted DEV snapshot, the exact
+inactive candidate release, the byte-pinned installed control, the unchanged
+static/inactive unit, and absent one-shot markers before issuing exactly one
+`systemctl start lilith-stage3-a2-final.service`. It accepts no alternate
+unit, script, release, database, or signal input. The helper only observes the
+result afterwards; it never starts again, restarts, stops, or performs
+recovery. A successful systemd result and sealed restored report are required
+to report success. Uncertain transport or runtime state is a terminal review
+condition; the existing controller and OS liveness dependency remain
+responsible for fail-inert containment and evidence preservation.
+
+This entrypoint is dormant until separately owner-dispatched after protected
+review. Its source validation cannot prove the live cloud identity's current
+permissions or substitute for the later accepted-baseline and installed-byte
+checks on DEV.
