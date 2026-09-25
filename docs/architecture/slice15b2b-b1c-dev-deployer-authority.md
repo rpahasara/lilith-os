@@ -1,6 +1,8 @@
 # 15B2b-B1c: routine DEV deployer authority separation
 
-Status: source complete; live cutover pending owner action.
+Status: COMPLETE / ACCEPTED. See the
+[15B2b-B1c acceptance record](slice-15b2b-b1c-acceptance-record.md). The owner
+cutover runbook below is retained as historical procedure and rollback reference.
 Base: protected main `8c13fdf74abe14eea4226f8bf387e549886db2b2`.
 
 ## Invariant
