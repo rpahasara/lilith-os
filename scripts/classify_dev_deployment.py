@@ -26,6 +26,7 @@ CONTROL_ONLY_PATHS = frozenset(
         ".github/workflows/deploy-dev.yml",
         ".github/workflows/memory-broker-dev-stage2-runtime.yml",
         ".github/workflows/memory-broker-dev-stage3-a2-final.yml",
+        ".github/workflows/memory-broker-dev-stage3-a2-forensics.yml",
         "scripts/classify_dev_deployment.py",
         "scripts/memory_broker_os_installer.py",
         "scripts/memory_broker_stage2_control.py",
@@ -37,6 +38,7 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/memory_broker_stage3_dispatch.py",
         "scripts/memory_broker_stage3_wiring_install.py",
         "scripts/memory_broker_stage3_dev_transport.py",
+        "scripts/memory_broker_stage3_forensics.py",
         "scripts/test_classify_dev_deployment.py",
         "scripts/test_memory_broker_os_controls.py",
         "scripts/test_memory_broker_stage2_control.py",
@@ -47,6 +49,7 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/test_memory_broker_stage3_final.py",
         "scripts/test_memory_broker_stage3_wiring.py",
         "scripts/test_memory_broker_stage3_dev_transport.py",
+        "scripts/test_memory_broker_stage3_forensics.py",
         "scripts/test_pr_ci_dev_separation.py",
         "scripts/test_broker_only_dev_workflow.py",
         "scripts/verify_broker_dev_lifecycle.py",
@@ -62,6 +65,7 @@ CONTROL_ONLY_PATHS = frozenset(
         "docs/architecture/slice15b2b-stage3-a2-control-adapters.md",
         "docs/architecture/slice15b2b-stage3-a2-final-controller.md",
         "docs/architecture/slice15b2b-stage3-a2-operational-wiring.md",
+        "docs/architecture/slice15b2b-stage3-a2-consumed-run-forensics.md",
     }
 )
 

@@ -1,0 +1,90 @@
+name: Memory Broker DEV Stage III A2 consumed-run forensics (manual read only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_main_sha:
+        description: "Exact protected-main SHA separately approved for this read-only inspection"
+        required: true
+        type: string
+      owner_confirmation:
+        description: "Confirm fixed forensic inspection of consumed run 36145190507"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lilith-memory-broker-dev-stage3-a2-forensics
+  cancel-in-progress: false
+
+jobs:
+  inspect_consumed_dispatch:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: lilith-agent-260823-27389
+      GCP_ZONE: asia-southeast1-b
+      GCP_INSTANCE: lilith-dev-01
+      GCP_INSTANCE_ID: "7687007163730582258"
+      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
+      GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
+      APPROVED_MAIN_SHA: ${{ inputs.approved_main_sha }}
+      OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+    steps:
+      - name: Check out exact protected main without retained credentials
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail closed before DEV authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTOR" = rpahasara
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git branch --show-current)" = main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$APPROVED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$APPROVED_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$APPROVED_MAIN_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          git merge-base --is-ancestor a38d3c9e49ce1ee2d8215356aa8ba295b0b9e7ab "$APPROVED_MAIN_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$OWNER_CONFIRMATION" = 'I AUTHORIZE STAGE3_A2 READ_ONLY_FORENSICS RUN_36145190507'
+
+      - name: Authenticate using the existing DEV deployer identity only
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Independently pin the existing DEV VM identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity="$(gcloud compute instances describe "$GCP_INSTANCE" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --format='value(id,name,status)')"
+          test "$identity" = "$GCP_INSTANCE_ID"$'\t'"$GCP_INSTANCE"$'\t'RUNNING
+
+      - name: Inspect only fixed consumed-run evidence without DEV mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$GCP_INSTANCE" --quiet \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap \
+            --command='sudo -n /usr/bin/python3 -I -B -' \
+            < scripts/memory_broker_stage3_forensics.py
