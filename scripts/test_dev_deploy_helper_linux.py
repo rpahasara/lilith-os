@@ -28,7 +28,15 @@ NEW_SHA = "b9aae0f693825b64fc203a4c85ec51cd47e58f19"
 OLD_SHA = "4c450633895667e5aaa7ef70561222d2c94eaa09"
 
 STUBS = {
-    "runuser": 'while [ "$1" != "--" ]; do shift; done; shift; exec "$@"',
+    # The helper drops to the app user via `env -i PATH=/usr/bin:/bin ...`. The
+    # stub keeps that clean environment but re-adds the sandbox variables and
+    # puts the stubs first on the dropped PATH, so curl etc. stay stubbed.
+    "runuser": '''while [ "$1" != "--" ]; do shift; done; shift
+[ "$1" = env ] && [ "$2" = -i ] || { echo "as_app must use env -i: $*" >&2; exit 97; }
+shift 2
+args=()
+for a in "$@"; do case "$a" in PATH=*) args+=("PATH=$SANDBOX/bin:${a#PATH=}") ;; *) args+=("$a") ;; esac; done
+exec env -i SANDBOX="$SANDBOX" STUB_PREPARE_RC="${STUB_PREPARE_RC:-0}" STUB_HEALTH_RC="${STUB_HEALTH_RC:-0}" "${args[@]}"''',
     "flock": "exit 0",
     "journalctl": "exit 0",
     "curl": 'echo "curl $*" >> "$SANDBOX/log"; [ "${STUB_HEALTH_RC:-0}" = 0 ] && echo ok',
