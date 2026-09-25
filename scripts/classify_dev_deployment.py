@@ -28,9 +28,15 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/classify_dev_deployment.py",
         "scripts/memory_broker_os_installer.py",
         "scripts/memory_broker_stage2_control.py",
+        "scripts/memory_broker_stage3_transition.py",
+        "scripts/memory_broker_stage3_liveness.py",
+        "scripts/memory_broker_stage3_guard_worker.py",
         "scripts/test_classify_dev_deployment.py",
         "scripts/test_memory_broker_os_controls.py",
         "scripts/test_memory_broker_stage2_control.py",
+        "scripts/test_memory_broker_stage3_transition.py",
+        "scripts/test_memory_broker_stage3_liveness.py",
+        "scripts/test_memory_broker_stage3_guard_linux.py",
         "scripts/test_pr_ci_dev_separation.py",
         "scripts/test_broker_only_dev_workflow.py",
         "scripts/verify_broker_dev_lifecycle.py",
@@ -42,6 +48,7 @@ CONTROL_ONLY_PATHS = frozenset(
         "scripts/test_trusted_broker_snapshot.py",
         "docs/architecture/slice15b2b-trusted-snapshot-install-acceptance-contract.md",
         "docs/architecture/slice-15b2b-b1b2b-stage2-runtime-control.md",
+        "docs/architecture/slice15b2b-stage3-a2-reversible-transition.md",
     }
 )
 
