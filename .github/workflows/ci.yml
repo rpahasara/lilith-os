@@ -76,7 +76,7 @@ jobs:
       - name: Validate routine DEV deployer authority boundary
         env:
           LILITH_EPHEMERAL_RUNNER_ROOT_TESTS: "1"
-        run: python -m unittest scripts/test_dev_deployer_boundary.py scripts/test_activation_authority.py scripts/test_effective_sudo_proof.py
+        run: python -m unittest scripts/test_dev_deployer_boundary.py scripts/test_activation_authority.py scripts/test_effective_sudo_proof.py scripts/test_dev_deploy_helper_linux.py
 
       - name: Parse PR and DEV workflow YAML
         run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' .github/workflows/ci.yml .github/workflows/deploy-dev.yml .github/workflows/memory-broker-dev-stage3-a2-final.yml .github/workflows/memory-broker-dev-stage3-a2-forensics.yml
