@@ -36,7 +36,8 @@ out=""; url=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift ;;
-    -w|-d|-H|-X) shift ;;
+    -d) [ "$2" = "@-" ] && cat > /dev/null; shift ;;  # like curl, consume a piped body
+    -w|-H|-X) shift ;;
     http*) url="$1" ;;
   esac
   shift
