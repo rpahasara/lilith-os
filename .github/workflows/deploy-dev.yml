@@ -228,8 +228,14 @@ jobs:
             --archive deployment-output/lilith-broker-inert-release.tar.gz \
             --attestation deployment-output/lilith-broker-inert-release.attestation.json
 
+      # READ_ONLY SECURITY OBSERVATION != APPLICATION DEPLOYMENT. From here to the
+      # authority-custody proof, steps also run for CONTROL_ONLY_NO_DEPLOY, so a
+      # control-only protected-main generation re-proves the routine-deployer
+      # boundary on DEV (read-only, as the existing deployer) after an
+      # out-of-band owner ceremony. Package, Deploy, Health, and the federation
+      # proof stay DEPLOY_REQUIRED-only; control-only runs keep DEV_MUTATION=NONE.
       - name: Record GitHub OIDC claims presented to DEV federation
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         shell: bash
         run: |
           set -euo pipefail
@@ -241,7 +247,8 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: >-
-          steps.classify.outputs.mode == 'DEPLOY_REQUIRED' &&
+          (steps.classify.outputs.mode == 'DEPLOY_REQUIRED' ||
+           steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY') &&
           github.event.workflow_run.event == 'push' &&
           github.event.workflow_run.head_branch == github.event.repository.default_branch
         uses: google-github-actions/auth@v3
@@ -251,13 +258,13 @@ jobs:
           service_account: ${{ env.GCP_DEPLOY_SA }}
 
       - name: Set up Google Cloud CLI
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Verify DEV deployment identity and target
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         shell: bash
         run: |
           gcloud auth list --filter=status:ACTIVE --format="value(account)"
@@ -270,7 +277,7 @@ jobs:
       # identity, and the deploy proceeds only if its effective privilege is
       # exactly the fixed helper.
       - name: Prove the routine DEV deployer has no root, broker, or Stage III reach
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         shell: bash
         run: |
           gcloud compute ssh "${GCP_INSTANCE}" --quiet \
@@ -335,7 +342,7 @@ jobs:
       # workflow file (no file is copied to DEV). It must print the exact PASS
       # line; anything else stops the deployment here.
       - name: Prove the routine DEV deployer has no authority-custody reach
-        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         shell: bash
         run: |
           set -o pipefail
@@ -497,9 +504,9 @@ jobs:
               throw new Error('No trusted classification completed');
             }
             const description = mode === 'CONTROL_ONLY_NO_DEPLOY'
-              ? 'MODE=CONTROL_ONLY_NO_DEPLOY DEV_MUTATION=NONE'
+              ? 'MODE=CONTROL_ONLY_NO_DEPLOY DEV_MUTATION=NONE DEV_READ_ONLY_BOUNDARY_PROOF=PASS (no deployment)'
               : 'MODE=DEPLOY_REQUIRED DEV deployment and health passed';
-            await core.summary.addRaw(`MODE=${mode}\nDEV_MUTATION=${mode === 'CONTROL_ONLY_NO_DEPLOY' ? 'NONE' : 'TRUSTED_DEPLOY'}\nBASE_SHA=${{ steps.classify.outputs.base_sha }}\nCANDIDATE_SHA=${{ steps.classify.outputs.candidate_sha }}\n`).write();
+            await core.summary.addRaw(`MODE=${mode}\nDEV_MUTATION=${mode === 'CONTROL_ONLY_NO_DEPLOY' ? 'NONE' : 'TRUSTED_DEPLOY'}\n${mode === 'CONTROL_ONLY_NO_DEPLOY' ? 'DEV_READ_ONLY_BOUNDARY_PROOF=PASS\n' : ''}BASE_SHA=${{ steps.classify.outputs.base_sha }}\nCANDIDATE_SHA=${{ steps.classify.outputs.candidate_sha }}\n`).write();
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
