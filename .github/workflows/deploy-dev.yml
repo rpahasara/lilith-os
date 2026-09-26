@@ -348,7 +348,7 @@ jobs:
             --ssh-flag=-T \
             --command="bash -s" \
             < "${proof}" | tee "${RUNNER_TEMP}/authority-boundary.txt"
-          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" | grep -Eq '^AUTHORITY_BOUNDARY_PROOF=PASS maturity=(PRE_L1A|L1a|L1b\.1|L1b\.2|L1c\.1|L1c\.3|L2a|L2b\.1)$'
+          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" | grep -Eq '^AUTHORITY_BOUNDARY_PROOF=PASS maturity=(PRE_L1A|L1a|L1b\.1|L1b\.2|L1c\.1|L1c\.3)$'
           tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Package exact-SHA bundle for the fixed DEV helper

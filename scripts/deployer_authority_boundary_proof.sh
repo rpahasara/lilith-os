@@ -17,8 +17,18 @@
 #   PATH_ABSENT != ACCESS_DENIED. An absent object is DEFERRED_UNTIL_OBJECT_EXISTS
 #   unless the ladder says it must exist, in which case its absence is a FAIL.
 #
-#   Ladder maturity is derived from the root-owned objects the owner ceremony
-#   steps themselves create (docs/architecture/slice-15b2b-b1b3d-l2-custody-preparation.md).
+#   Ladder maturity is derived only from LILITH-specific root-owned objects
+#   that the owner ceremony steps themselves create
+#   (docs/architecture/slice-15b2b-b1b3d-l2-custody-preparation.md).
+#
+#   AMBIENT HOST PREREQUISITE != LILITH CEREMONY ARTIFACT != LILITH MATURITY
+#   EVIDENCE. /etc/credstore.encrypted and /var/lib/systemd/credential.secret
+#   are generic systemd infrastructure that may pre-exist (run 36264031829
+#   inferred a false maturity from the first). They are reported as HOST_PREREQ
+#   ABSENT | PRESENT_SECURE | PRESENT_UNSAFE and never advance maturity. The
+#   LILITH K-ACT blob inside the 0700 credstore is unobservable by the deployer
+#   by design, so deployer-observed maturity ends at L1c.3; later custody
+#   state is checked only by the root-run installer status.
 #   The deployer cannot forge them: this proof shows, in the same run, that
 #   it cannot write any parent directory they live in. No marker, flag, or
 #   "accepted" state is introduced. Once any object of a ladder step exists,
@@ -45,7 +55,6 @@ readonly AB_UNIT_VERBS="start stop restart reload try-restart reload-or-restart 
 readonly AB_KEYGEN="/usr/local/sbin/lilith-authority-keygen-dev"
 readonly AB_OPT="/opt/lilith-authority-dev"
 readonly AB_CREDSTORE="/etc/credstore.encrypted"
-readonly AB_HOST_KEY="/var/lib/systemd/credential.secret"
 # Existing root-owned parents that govern creation of every ladder object.
 readonly AB_PARENTS="/opt /etc /etc/systemd/system /etc/tmpfiles.d /usr/local/sbin /var/lib/systemd /etc/needrestart/conf.d /usr/local/lib/lilith-dev-deploy"
 # Existing root-owned files whose integrity the maturity rule and this proof rely on.
@@ -60,10 +69,13 @@ L1c.1|/etc/systemd/system/lilith-authority-dev.service|regular file|644|
 L1c.1|/etc/systemd/system/lilith-authority-dev.socket|regular file|644|
 L1c.1|/etc/tmpfiles.d/lilith-authority-dev.conf|regular file|644|
 L1c.3|/usr/local/sbin/lilith-authority-keygen-dev|regular file|755|
-L2a|/var/lib/systemd/credential.secret|regular file|400|-r
-L2b.1|/etc/credstore.encrypted|directory|700|-r -x
 "
-readonly AB_STEPS="PRE_L1A L1a L1b.1 L1b.2 L1c.1 L1c.3 L2a L2b.1"
+readonly AB_STEPS="PRE_L1A L1a L1b.1 L1b.2 L1c.1 L1c.3"
+# Generic host prerequisites: path|kind|mode|denials. Never maturity evidence.
+readonly AB_HOST_PREREQS="
+/var/lib/systemd/credential.secret|regular file|400|-r -w
+/etc/credstore.encrypted|directory|700|-r -w -x
+"
 # Later authority state (L3 onward). Denied whenever present; not ladder-required here.
 readonly AB_LATER="/etc/lilith-authority-dev /var/lib/lilith-authority-dev /run/lilith-authority-dev /run/credentials/lilith-authority-dev.service /var/lib/lilith-recovery-witness /run/lilith-recovery-witness"
 
@@ -280,10 +292,32 @@ ab_check_ladder() {
   else
     ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: sudo ${AB_KEYGEN} (the effective-sudo proof still applies)"
   fi
-  if [ "${max}" -ge "$(ab_step_index L2b.1)" ]; then
-    ab_say "UNOBSERVABLE_BY_DESIGN: ${AB_CREDSTORE}/lilith-authority-dev.owner-actor.cred (parent is not traversable by the deployer; covered by the parent -x/-r denial)"
+}
+
+ab_check_host_prereqs() {  # ABSENT | PRESENT_SECURE | PRESENT_UNSAFE; never maturity
+  local path kind mode denies meta op observed_kind uid gid observed_mode
+  while IFS='|' read -r path kind mode denies; do
+    [ -n "${path}" ] || continue
+    meta="$(ab_stat "${path}")"
+    if [ -z "${meta}" ]; then
+      ab_say "HOST_PREREQ: ${path} ABSENT (no maturity meaning; not counted as a denial)"
+      continue
+    fi
+    IFS='|' read -r observed_kind uid gid observed_mode <<< "${meta}"
+    if [ "${observed_kind}" != "${kind}" ] || [ "${uid}" != 0 ] || [ "${gid}" != 0 ] \
+        || [ "${observed_mode}" != "${mode}" ]; then
+      ab_fail "HOST_PREREQ_UNSAFE ${path} observed=${meta} expected=${kind}|0|0|${mode}"
+      continue
+    fi
+    ab_say "HOST_PREREQ: ${path} PRESENT_SECURE (no maturity meaning)"
+    for op in ${denies}; do
+      ab_deny "${op}" "${path}"
+    done
+  done <<< "${AB_HOST_PREREQS}"
+  if [ -n "$(ab_stat "${AB_CREDSTORE}")" ]; then
+    ab_say "UNOBSERVABLE_BY_DESIGN: ${AB_CREDSTORE}/lilith-authority-dev.owner-actor.cred (the deployer cannot traverse the credstore; blob presence and custody consistency are checked only by the root-run installer status)"
   else
-    ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: ${AB_CREDSTORE}/lilith-authority-dev.owner-actor.cred (L2b.2)"
+    ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: ${AB_CREDSTORE}/lilith-authority-dev.owner-actor.cred (credstore absent)"
   fi
 }
 
@@ -310,6 +344,7 @@ ab_main() {
   ab_check_service_control
   ab_ladder_maturity
   ab_check_ladder
+  ab_check_host_prereqs
   ab_check_later_state
   if [ "${AB_FAILED}" -eq 0 ]; then
     ab_say "AUTHORITY_BOUNDARY_PROOF=PASS maturity=${AB_MATURITY}"
