@@ -3,8 +3,9 @@
 The adapter never binds a socket. It accepts exactly one listener FD from
 `lilith-authority-dev.socket` (`/run/lilith-authority-dev/owner.sock`,
 `root:root 0600` in a `root:root 0700` directory, design §15), and it serves
-only a kernel `SO_PEERCRED` uid of 0: the authority owner socket is root-only
-(design §8). There is no application-facing, broker-facing, or network
+only a kernel `SO_PEERCRED` uid of 0 (design §8). It is a host-root
+ceremony/control socket: uid 0 proves host-root execution, not human-owner
+authentication. There is no application-facing, broker-facing, or network
 listener.
 
 `main()` is the operational entrypoint for a later, separately authorized

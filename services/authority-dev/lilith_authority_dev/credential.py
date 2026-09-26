@@ -12,7 +12,9 @@ root-owned encrypted blob (`LoadCredentialEncrypted=`, design §5). This module:
   credential (`CREDENTIAL_INVALID`).
 
 L1 inspects only. It returns public facts (state and public-key fingerprint)
-and drops the private key object: nothing in L1 signs.
+and releases its only reference to the private-key object: nothing in L1
+signs. Process-memory zeroization of the credential bytes or key material is
+NOT_PROVEN (Python cannot guarantee it).
 """
 
 from __future__ import annotations

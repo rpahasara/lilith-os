@@ -49,7 +49,7 @@ All from the B1b-3d design record unless stated.
 | New separately versioned DEV_SYNTHETIC profile; the TEST signer (`BrokerSignerConfigV1`) is not widened | §4 |
 | `LoadCredentialEncrypted=owner-actor-signing-key:/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred` | §5, §15 |
 | Unit sketch: user/group, `StateDirectory` 0700, `ReadOnlyPaths`, `InaccessiblePaths`, hardening | §15 |
-| No application-facing socket; the only entry point is the root-only authority owner socket | §8 |
+| No application-facing socket; the only entry point is the root-only authority owner socket (here: the host-root ceremony/control socket) | §8 |
 | `/run/lilith-authority-dev/owner.sock` `root:root 0600`, directory `root:root 0700` | §15 |
 | Broker V1 framing: 4-byte length, RFC 8785 JSON, ≤ 16 KiB, closed operation set | §10 |
 | Startup failures serve `NOT_READY(reason)`; a missing credential fails the unit before exec | §18 |
@@ -60,14 +60,24 @@ All from the B1b-3d design record unless stated.
 | `OwnerEvidenceV2`, `AuthorityKeyRecordV1`, `key.registryVersion` = first publication, `key ≤ evidence ≤ verified registry` | B1b-3a |
 | Signer derives every signed value; the application sends only `OwnerEvidenceRequestV1` | B1b-3b |
 
-## 3. Unresolved design questions
+## 3. Design resolutions and open questions
 
-These are surfaced, not silently decided.
+### Owner decisions recorded (2026-09-26, DEV_SYNTHETIC scope only)
+
+These are recorded in design §24. They are not broadened beyond DEV_SYNTHETIC.
+
+| # | Decision |
+| --- | --- |
+| T-1 | A distinct `lilith-authority-dev` OS identity. Signing is not placed inside `lilith-memory-broker`. |
+| T-2 | `LoadCredentialEncrypted=` with a host-bound encrypted credential is accepted for DEV_SYNTHETIC custody only. **Limitation:** it is not whole-host or snapshot rollback protection (a disk snapshot contains both the blob and `/var/lib/systemd/credential.secret`), and it is not a claim of real-owner-grade custody. |
+| T-5 | Neither the signer service nor its socket is boot-enabled. Every activation is an explicit owner-controlled ceremony. The units carry no `[Install]` section. |
+
+### Questions
 
 | # | Question | L1 handling |
 | --- | --- | --- |
-| Q1 | **Broker → signer channel.** The task topology shows the Memory Broker sending constrained authority requests to the signer. The design (§8) says B1b-3d exposes **no** application-facing socket, and a future request path (for `OwnerEvidenceRequestV1`) "is a separate slice with its own strict protocol review". No socket path, peer uid, group, or protocol is designed for it. | **STOPPED.** L1 implements no broker-facing socket or peer. Only the root-only owner socket exists. |
-| Q2 | **T-1, T-2, T-5 are listed as unresolved owner decisions** in design §24 (with recommendations). T-3 is the only one marked decided there. | L1 source follows the recommendations the task names (separate identity, `LoadCredentialEncrypted` with the host key, sockets not enabled). The material is inert source; nothing is installed. The owner should record T-1/T-2/T-5 before live L1a. |
+| Q1 | **Broker → signer channel.** The task topology shows the Memory Broker sending constrained authority requests to the signer. The design (§8) says B1b-3d exposes **no** application-facing socket, and a future request path (for `OwnerEvidenceRequestV1`) "is a separate slice with its own strict protocol review". No socket path, peer uid, group, or protocol is designed for it. | **EXPLICITLY DEFERRED.** No Memory Broker → authority signer runtime channel is added during L1/L2 custody establishment. Rationale: prove signer identity isolation, credential custody, and the live denial properties independently first. A constrained broker runtime channel is a later integration boundary and needs its own request, authorization, replay, and caller-security design. Only the host-root ceremony/control socket exists. |
+| Q2 | T-1, T-2, and T-5 were listed as unresolved owner decisions in design §24. | **RESOLVED** for DEV_SYNTHETIC scope (see above). The L1 source already matched these decisions, so no runtime change was needed. |
 | Q3 | **`signer.json` contents** (§15 lists the file, `root:lilith-authority-dev 0640`) are not specified. | Not defined and not read in L1. The profile contract (`DevSyntheticSignerProfileV1`) exists; its file encoding is deferred. |
 | Q4 | **Peer check on the authority owner socket.** The design states `SO_PEERCRED uid == 0` explicitly for the witness owner socket; for the authority owner socket it says "root-only" and `root:root 0600`. | L1 enforces `SO_PEERCRED uid == 0` as well, in addition to the socket mode. This is narrower than, and consistent with, "root-only". |
 | Q5 | **Operation names** for the owner socket (PREPARE / CONSUME / ISSUE / RECONCILE_DECISION in the design text) are not fixed strings. | L1 defines only `HEALTH` and `ISSUE_OWNER_EVIDENCE`. The ledger operations need the durable ledger and are not defined. |
@@ -85,7 +95,7 @@ These are surfaced, not silently decided.
 | `services/authority-dev/lilith_authority_dev/core.py` | dispatch and L1 readiness |
 | `services/authority-dev/lilith_authority_dev/server.py` | inherited-socket, root-peer-only adapter; entrypoint |
 | `services/authority-dev/deploy/lilith-authority-dev.service` | unit |
-| `services/authority-dev/deploy/lilith-authority-dev.socket` | owner socket |
+| `services/authority-dev/deploy/lilith-authority-dev.socket` | host-root ceremony/control socket |
 | `services/authority-dev/deploy/lilith-authority-dev.tmpfiles.conf` | `/run/lilith-authority-dev` |
 | `services/authority-dev/release_file_set.py` | exact source/runtime file-set contract |
 | `services/authority-dev/tests/test_authority_dev_foundation.py` | repository tests |
@@ -131,9 +141,15 @@ or with supplementary groups.
 
 ```text
 LILITH / Hermes / model / Core API      no socket, no group, no path (none added)
-Memory Broker                           no channel in L1 (Q1, STOPPED)
-owner (root)  --owner.sock 0600-->      lilith-authority-dev   (SO_PEERCRED uid == 0)
+Memory Broker                           no channel (Q1, EXPLICITLY DEFERRED)
+host root  --owner.sock 0600-->         lilith-authority-dev   (SO_PEERCRED uid == 0)
 ```
+
+`owner.sock` keeps the design's file name, but it is a **host-root
+ceremony/control socket**. A peer uid of 0 proves only host-root execution.
+It is **not** proof of human-owner authentication, and any root-equivalent
+principal can use it. DR-3 stays **OPEN**: the local `ubuntu` account is still
+root-equivalent through `sudo` and `lxd`.
 
 - The adapter never binds; it accepts exactly one systemd listener whose
   name is `/run/lilith-authority-dev/owner.sock`.
@@ -152,7 +168,7 @@ Whether the kernel and systemd actually enforce this on DEV is
 | --- | --- | --- |
 | `CREDENTIAL_ABSENT` | `$CREDENTIALS_DIRECTORY` unset, or no `owner-actor-signing-key` in it | entrypoint exits `3` before serving; nothing is created |
 | `CREDENTIAL_INVALID` | wrong directory, symlink, non-regular, oversized, not DER, encrypted PKCS#8, not Ed25519 | entrypoint exits `4` before serving |
-| `CREDENTIAL_PRESENT_UNVERIFIED` | parseable Ed25519 PKCS#8 | public-key SHA-256 kept; the private key object is dropped; serves `HEALTH` as `NOT_READY` |
+| `CREDENTIAL_PRESENT_UNVERIFIED` | parseable Ed25519 PKCS#8 | public-key SHA-256 kept; no reference to the private-key object is retained; serves `HEALTH` as `NOT_READY` |
 
 Other startup refusals exit `2`. None of these is a signer failure. In a live
 unit, systemd fails the start earlier if the encrypted blob is missing
@@ -171,9 +187,19 @@ reasons   = [credential state if not present,] REGISTRY_MISSING, WITNESS_MISSING
 ```
 
 `ISSUE_OWNER_EVIDENCE` is structurally validated and then always refused
-with `SIGNING_NOT_AVAILABLE`. The core holds no key and no minter, so no code
-path in the running service reaches a signature. "Process running" is never
-"authority ready".
+with `SIGNING_NOT_AVAILABLE`. "Process running" is never "authority ready".
+
+Key-retention properties, stated narrowly:
+
+- no signing-capable private-key object is retained after L1 initialization.
+  The credential inspection derives the public fingerprint and releases its
+  only reference, and the core stores only the credential status;
+- no minter or signing execution path is reachable by the running L1
+  service. Nothing in `core.py` or `server.py` constructs or imports the
+  minter;
+- process-memory zeroization and remanence are **NOT_PROVEN**. Python gives
+  no guarantee that credential bytes or key material are erased from process
+  memory. This is not an L1 acceptance property.
 
 ## 9. Signing contract reused
 
@@ -259,7 +285,8 @@ generated.
 
 **Proven by repository tests:**
 
-- no code path in the service reaches a key or a signature in L1;
+- no signing-capable private-key object is retained after initialization,
+  and no minter or signing path is reachable by the running L1 service;
 - absence and invalidity of the credential are distinct, fail closed, and
   create nothing;
 - the protocol is closed and canonical, and exposes no raw signing;
@@ -268,7 +295,8 @@ generated.
   unchanged B1b-3a verifier;
 - PRIVACY is refused at every layer;
 - the unit, socket, and tmpfiles material names the dedicated identity,
-  root-only socket, encrypted credential slot, and inaccessible paths;
+  host-root ceremony/control socket, encrypted credential slot, and
+  inaccessible paths;
 - no Core API, broker, deployer, or deployment workflow file names the
   custody paths;
 - the runtime payload is exact and contains no private or TEST key material;
@@ -286,6 +314,13 @@ generated.
 - that the socket is never enabled at boot;
 - everything in design §22.
 
+**NOT_PROVEN, and not an L1 acceptance property:**
+
+- process-memory zeroization or remanence of credential bytes and key
+  material;
+- human-owner authentication on the ceremony socket (uid 0 is host root
+  only; DR-3 open).
+
 ## 15. Explicitly not done
 
 - No DEV or PROD contact. No SSH, IAP, service action, or `daemon-reload`.
@@ -299,8 +334,11 @@ generated.
 
 ## 16. Next step
 
-The recommended next source increment, before any live step, is the durable
-authority ledger (`authority_ledger.db`, design §12) with explicit owner
-provisioning and the B1b-3c readiness evaluation, as TEST-proven source.
-Live L1a (accounts) should wait for the owner to record T-1/T-2/T-5 and to
-decide Q1.
+The next architectural step remains **L2: synthetic OWNER_ACTOR credential
+custody and live custody preparation**. It covers design §23 L0 through L2b:
+read-only preflight, accounts, release tree and units, the host credential
+key, and the K-ACT blob. Each is a separately owner-authorized live step.
+
+It is **not** L4 ledger work. The durable `authority_ledger.db` is not built
+in this slice and is not the next step. The Memory Broker channel stays
+deferred (Q1).

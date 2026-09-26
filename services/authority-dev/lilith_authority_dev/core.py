@@ -10,7 +10,9 @@ Design §18 orders startup checks as custody preflight, key fingerprint vs
 registry, witness under its anchor, then B1b-3c readiness. None of the
 registry, witness, or durable ledger components exist in L1, so readiness is
 always `NOT_READY` and every signing request is refused before any key could
-be touched. The core holds no private key and no minter.
+be touched. The core stores only the credential status. It retains no
+private-key object and constructs no minter. Process-memory zeroization is
+NOT_PROVEN.
 """
 
 from __future__ import annotations

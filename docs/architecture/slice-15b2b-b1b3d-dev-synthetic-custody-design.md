@@ -1044,11 +1044,11 @@ If any of those changed: **STOP**.
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| T-1 | Separate `lilith-authority-dev` identity vs. signing inside `lilith-memory-broker` | separate (§6) |
-| T-2 | `LoadCredentialEncrypted` (host key) vs. plain `LoadCredential` | encrypted host key; TPM2 deferred |
+| T-1 | Separate `lilith-authority-dev` identity vs. signing inside `lilith-memory-broker` | separate (§6). **Decided 2026-09-26, DEV_SYNTHETIC scope only:** a distinct `lilith-authority-dev` OS identity; no signing inside `lilith-memory-broker` ([L1 record §3](slice-15b2b-b1b3d-l1-authority-signer-foundation.md#3-design-resolutions-and-open-questions)) |
+| T-2 | `LoadCredentialEncrypted` (host key) vs. plain `LoadCredential` | encrypted host key; TPM2 deferred. **Decided 2026-09-26, DEV_SYNTHETIC scope only:** `LoadCredentialEncrypted=` with a host-bound encrypted credential is accepted for DEV_SYNTHETIC custody only. It is not whole-host or snapshot rollback protection (a disk snapshot holds both the blob and `credential.secret`), and it is not a claim of real-owner-grade custody |
 | T-3 | Acknowledge DR-1 (the lost accepted Stage II incarnation, including the unexplained 2026-09-26 06:34 UTC restart) and decide whether a new incarnation baseline is recorded before L0 | acknowledge before L0; defer the baseline to the Stage III track. **Decided 2026-09-26:** DR-1 acknowledged; a new incarnation baseline is permitted after read-only revalidation and is required before B1b-3d live entry ([DR-1 forensics §11](slice15b2b-dr1-broker-restart-forensics.md#11-b1b-3d-live-entry-gates)) |
 | T-4 | Witness write frequency: per transition (B1b-3c) vs. checkpoints; accept the `LEDGER_AHEAD_OF_WITNESS` → epoch-advance availability cost | per transition for DEV_SYNTHETIC |
-| T-5 | Enable the new sockets at boot | not enabled in B1b-3d |
+| T-5 | Enable the new sockets at boot | not enabled in B1b-3d. **Decided 2026-09-26, DEV_SYNTHETIC scope only:** neither the signer service nor its socket is boot-enabled; every activation is an explicit owner-controlled ceremony |
 | T-6 | Include a VM reboot test in B1b-3d (it also drops the legacy broker) | defer to B1b-3e unless the owner wants it now |
 | T-7 | Live epoch-advance rehearsal in B1b-3d vs. B1b-3e | B1b-3e |
 | T-8 | Is the offline K-ROOT registry signature (no extra ceremony signature) sufficient epoch-advance authorization for DEV_SYNTHETIC | yes |
