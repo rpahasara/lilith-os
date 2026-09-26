@@ -67,6 +67,83 @@ class BrokerControlTests(unittest.TestCase):
         with self.assertRaisesRegex(broker.ValidationError, "BROKER_FILE_SET_MISMATCH"):
             broker.component_files(self.candidate)
 
+    def populate_b1b2a(self, source_only: bool = True) -> Path:
+        for name in broker.B1B2A_FILES:
+            path = self.candidate / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"# synthetic control-test placeholder\n")
+        conf = self.candidate / next(iter(broker.SOURCE_ONLY_BROKER_FILES))
+        if source_only:
+            conf.write_bytes(b"# source-only host install material\n")
+        return conf
+
+    def test_source_only_needrestart_file_is_the_one_exact_addition(self) -> None:
+        self.assertEqual(broker.SOURCE_ONLY_BROKER_FILES, frozenset({
+            "services/memory-broker/deploy/needrestart-lilith-authority-sensitive.conf"}))
+        self.assertFalse(broker.SOURCE_ONLY_BROKER_FILES & (broker.FILES | broker.B1B2A_FILES))
+        self.populate_b1b2a()
+        self.assertEqual(set(broker.component_files(self.candidate)), broker.B1B2A_FILES)
+
+    def test_source_only_file_is_recognized_but_never_packaged(self) -> None:
+        self.populate_b1b2a()
+        result = self.built()
+        self.assertEqual(result["componentVersion"], "B1b-2a")
+        self.assertEqual({item["path"] for item in result["files"]}, broker.B1B2A_FILES)
+        with tarfile.open(self.archive, "r:gz") as tar:
+            self.assertEqual(set(tar.getnames()), broker.B1B2A_FILES | {broker.MANIFEST_NAME})
+        # The artifact is byte-identical to one built without the file.
+        with_conf = self.archive.read_bytes()
+        (self.candidate / next(iter(broker.SOURCE_ONLY_BROKER_FILES))).unlink()
+        self.built()
+        self.assertEqual(self.archive.read_bytes(), with_conf)
+
+    def test_source_only_file_injected_into_artifact_is_rejected(self) -> None:
+        self.populate_b1b2a()
+        self.built()
+        self.rewrite_attested_archive({next(iter(broker.SOURCE_ONLY_BROKER_FILES)): b"# injected\n"})
+        with self.assertRaisesRegex(broker.ValidationError, "ARCHIVE_MEMBER_SET_MISMATCH"):
+            broker.verify_extract(self.archive, self.attestation, self.root / "out", SHA)
+
+    def test_unknown_extra_broker_file_still_mismatches(self) -> None:
+        for extra in ("deploy/needrestart-other.conf", "deploy/lilith-authority-dev.service",
+                      "deploy/needrestart-lilith-authority-sensitive.conf.bak", "README.txt"):
+            with self.subTest(extra=extra):
+                self.setUp()
+                self.populate_b1b2a()
+                (self.candidate / broker.BROKER_ROOT / extra).write_text("x\n")
+                with self.assertRaisesRegex(broker.ValidationError, "BROKER_FILE_SET_MISMATCH"):
+                    broker.component_files(self.candidate)
+
+    def test_source_only_file_does_not_admit_other_trees(self) -> None:
+        self.populate()
+        conf = self.candidate / next(iter(broker.SOURCE_ONLY_BROKER_FILES))
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_bytes(b"# only valid beside the B1b-2a surface\n")
+        with self.assertRaisesRegex(broker.ValidationError, "BROKER_FILE_SET_MISMATCH"):
+            broker.component_files(self.candidate)
+
+    def test_private_material_in_source_only_file_rejected(self) -> None:
+        conf = self.populate_b1b2a()
+        conf.write_bytes(b"-----BEGIN OPENSSH PRIVATE KEY-----\n")
+        with self.assertRaisesRegex(broker.ValidationError, "PRIVATE_MATERIAL_IN_BROKER"):
+            broker.component_files(self.candidate)
+
+    def test_repository_tree_is_accepted_with_source_only_file_unpackaged(self) -> None:
+        # Tracked files only, so local untracked caches cannot mask the contract.
+        repository = Path(__file__).resolve().parents[1]
+        tracked = subprocess.run(["git", "-C", str(repository), "ls-files", "-z", broker.BROKER_ROOT],
+                                 check=True, capture_output=True).stdout.decode().split("\0")
+        for name in filter(None, tracked):
+            path = self.candidate / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((repository / name).read_bytes())
+        for name in broker.SHARED_FILES:
+            path = self.candidate / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((repository / name).read_bytes())
+        self.assertEqual(set(filter(None, tracked)), broker.B1B2A_BROKER_FILES | broker.SOURCE_ONLY_BROKER_FILES)
+        self.assertEqual(set(broker.component_files(self.candidate)), broker.B1B2A_FILES)
+
     def test_extra_executable_and_symlink_rejected(self) -> None:
         self.populate()
         extra = self.candidate / broker.BROKER_ROOT / "lilith_memory_broker" / "unreviewed.py"
