@@ -48,17 +48,25 @@ the later denial proofs (design §17 N1–N9, D1–D12, B1–B4) run on DEV.
 | routine deployer sudo, helper, and verifier unchanged | design §7 |
 | one mutation per live step, separately owner-authorized; preservation set re-hashed | design §23 |
 
-## 3. Unresolved decisions (surfaced, not decided)
+## 3. Decisions, refinements, and open items
+
+### Recorded decisions and runbook refinements (DEV_SYNTHETIC scope only)
+
+| # | Decision or refinement | Rationale |
+| --- | --- | --- |
+| D-W | **Witness identity deferred.** L1a creates only `lilith-authority-dev`. Creating the `lilith-recovery-witness` identity is deferred to the L3 witness slice. Witness paths and the K-WIT blob stay absent throughout L2, and the installer checks that they are absent. | A deliberate DEV_SYNTHETIC sequencing refinement of design §23 L1a, not a mismatch. The OWNER_ACTOR custody slice needs no witness identity, and an unused root-created principal is avoidable surface. |
+| D-S | **No active swap during L2b.2** is an accepted ceremony requirement. The keygen refuses while `/proc/swaps` lists any swap. | The Ed25519 private key exists briefly in process memory. Active swap would add an avoidable path for those memory pages to be written to disk. **Limit:** this removes only the swap persistence path during the ceremony. It does not prove memory zeroization. It does not prove the plaintext never existed in RAM. It gives no snapshot or host-root protection. |
+| R-1 | **`/etc/credstore.encrypted` is created in its own step, L2b.1**, before the keygen (L2b.2). | The design gives the directory's mode but no step. Creating a root-only custody directory and creating the key blob are two state transitions. Keeping them apart preserves the accepted one-transition-per-step invariant (design §23). |
+| R-2 | **L1b and L1c are subdivided:** L1b.1 (tree) and L1b.2 (`current`); L1c.1 (unit files), L1c.2 (`daemon-reload`), and L1c.3 (CLI). | Each is a distinct state transition with its own POST and rollback. Combining them would break the one-transition-per-step invariant. |
+| R-3 | **Read-only observation ≠ staging ≠ installation** (§9). | Copying any file to the host, even to `/tmp`, is a host mutation. |
+
+### Open items
 
 | # | Decision | Handling here |
 | --- | --- | --- |
 | U1 | **Numeric uid/gid** for `lilith-authority-dev`. The design does not pin one. | Not pinned. `useradd --system` allocates it (the broker precedent); the POST evidence records it, and it must be `< 1000`, non-zero, and distinct from `lilith`, `lilith-memory-broker`, and `lilith-memory-relay`. |
-| U2 | **`lilith-recovery-witness` account.** Design L1a creates both accounts. The witness is a later slice, outside this OWNER_ACTOR scope. | **STOPPED.** L1a creates only `lilith-authority-dev`. The witness account, key (K-WIT), and paths stay absent and are checked absent. |
-| U3 | **Which step creates `/etc/credstore.encrypted`.** The design gives its mode but no step. | Proposed as its own step, L2b.1, before the keygen (L2b.2). |
-| U4 | **Splitting design L1b and L1c.** The design groups the tree with `current`, and the CLIs with the units and `daemon-reload`. | Split into L1b.1/L1b.2 and L1c.1/L1c.2/L1c.3, so each is one transition. |
 | U5 | **Blob check without decryption.** Proving that the blob decrypts to the published key needs plaintext again. | Not done at L2b. The link is checked at the later activation: the L1 service `HEALTH` reports `publicKeySha256`, which must equal the publication's value. |
-| U6 | **`deploy-dev.yml` deny-list extension** (design §7; DR-5). | Not changed. See §10. It must merge before L2b. |
-| U7 | **Swap during keygen.** Not in the design. | The keygen refuses while any swap is active (`/proc/swaps`), to keep the plaintext key out of swap. |
+| U6 | **`deploy-dev.yml` deny-list extension** (design §7; DR-5). | Not changed here. It is a **prerequisite of live L1a**, not of L2b (§10). DR-5 stays OPEN. |
 
 ## 4. Files
 
@@ -130,7 +138,9 @@ generate (process memory)
 Narrowing controls:
 
 - `RLIMIT_CORE=0` and `PR_SET_DUMPABLE=0` for the keygen;
-- no active swap;
+- no active swap (D-S). This removes only the swap persistence path. It
+  is not zeroization, not proof that plaintext never existed in RAM, and not
+  snapshot or host-root protection;
 - the only reference to the key object is released.
 
 **Memory zeroization and remanence are NOT_PROVEN.** Python bytes are
@@ -140,8 +150,14 @@ is secure erasure. Root can read any process's memory while it runs.
 ## 7. Public-material contract
 
 The keygen prints exactly one line on stdout. It is JSON with sorted keys, no
-whitespace, ASCII, and a trailing newline. For a given key and blob it is the
-same bytes every time; no timestamp is included.
+whitespace, ASCII, and a trailing newline.
+
+**Deterministic serialization.** For one generated key and one ceremony
+result (its blob), the serialization is canonical: the same inputs always give
+the same bytes, and no timestamp is included. Repeated key-generation runs
+do **not** give the same values. `Ed25519PrivateKey.generate()` is
+intentionally random, so each run has a new `publicKey`, `publicKeySha256`,
+and blob hash.
 
 ```json
 {"custodyEvidence":{"blobByteSize":<int>,"blobSha256":"<hex64>","credentialName":"owner-actor-signing-key","credentialPath":"/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred","machineId":"ae929170e6fa4c8ab9cc7b9547238d9d","withKey":"host"},"profile":"DEV_SYNTHETIC","publicVerificationMaterial":{"algorithm":"Ed25519","environment":"dev","evidenceTypes":["OWNER_MEMORY_OPERATION"],"keyId":"test-only.dev-synthetic.actor.b1b3d.1","publicKey":"<base64url 32 bytes>","publicKeySha256":"<hex64>","signingDomain":"OWNER_ACTOR"},"publicationType":"LILITH_AUTHORITY_KEY_PUBLICATION","schemaVersion":1}
@@ -189,16 +205,49 @@ publicVerificationMaterial           -> later AuthorityKeyRecordV1 (L3a, offline
   over the owner's own IAP session. There is exactly one mutation per step,
   and each step is separately authorized. Never run from GitHub Actions or as
   the deployer.
-- **Transfer.** Copy files with `gcloud compute scp --tunnel-through-iap`.
-  Do not pipe scripts over stdin to `gcloud compute ssh` on Windows (a stray
-  `y` is injected).
-- **Installer invocation.** Copy `services/authority-dev/ceremony/install_authority_dev.py`
-  from the reviewed commit and run it:
-  `sudo /usr/bin/python3 -I -B /tmp/b1b3d-l2/install_authority_dev.py …`.
+- **Three kinds of step (R-3):**
+
+  ```text
+  READ_ONLY OBSERVATION  !=  STAGING  !=  INSTALLATION
+  ```
+
+  - A **read-only observation** writes no file on DEV. The script runs
+    through a pipe, never as a staged file.
+  - **Staging** copies bytes onto the host. It is a host mutation, even into
+    `/tmp` or a home directory. It is its own separately authorized step
+    (S-1), with its own cleanup step (S-2).
+  - An **installation** is a ladder step (L1a…L2b) that changes custody
+    state.
+- **Streamed execution (no staging).** Both
+  `services/authority-dev/ceremony/install_authority_dev.py` and
+  `scripts/verify_broker_dev_current_incarnation.py` run from standard input
+  as `python3 -I -B - <args>`. Neither reads `__file__` nor a sibling module.
+  On the owner workstation, from the reviewed commit, embed one tool per
+  command. It is about 11 KiB and 14.5 KiB as gzip+base64, within command-line
+  limits. Run:
+
+  ```text
+  B64=$(gzip -9n < <tool.py> | base64 -w0)
+  gcloud compute ssh lilith-dev-01 --zone=asia-southeast1-b --project=lilith-agent-260823-27389 \
+    --tunnel-through-iap --command="echo $B64 | base64 -d | gunzip | sudo /usr/bin/python3 -I -B - <args>"
+  ```
+
+  This creates no file, and `-B` writes no bytecode. Output returns to the
+  owner terminal and is saved on the workstation. Do not pipe the script
+  over `gcloud compute ssh` standard input on Windows, because a stray `y`
+  is injected. Embed it in `--command` instead.
+  - **Unavoidable side effects**, not custody state: the IAP/OS Login
+    session and `sudo` produce login and journal accounting records, as in
+    every earlier read-only inspection.
+  - A local check streamed the installer this way on a non-DEV Linux host.
+    It refused with `NOT_DEV_HOST` and left no file behind.
+- **Installer invocation.** Every installer stage below, including the
+  mutating ones, uses the streamed form above with `<args>` =
+  `<stage> …`. Only L1b.1 also needs the staged archive (S-1).
   `<SHA>` below is the protected-main commit being installed.
 - **Preservation set.** Every step starts by re-running the read-only
-  preservation checks:
-  - `scripts/verify_broker_dev_current_incarnation.py baseline` equals the
+  preservation checks (streamed):
+  - `verify_broker_dev_current_incarnation.py baseline` equals the
     accepted current-runtime baseline;
   - the B1c helper, library, verifier, and sudoers hashes are unchanged;
   - activation is `NOT_ACCEPTED reason=GRANT_ABSENT`;
@@ -217,15 +266,17 @@ publicVerificationMaterial           -> later AuthorityKeyRecordV1 (L3a, offline
 
 | Step | PRE | Exact authorized mutation | POST evidence | STOP if | Rollback boundary |
 | --- | --- | --- | --- | --- | --- |
-| **L0** | owner authorization; files copied to `/tmp/b1b3d-l2/` | none: `install_authority_dev.py preflight` | `status L0` PASS: account and all paths absent, needrestart control hash `503279…68d2`, units not found/inactive | anything present; needrestart changed; preservation diff | — |
-| **L1a** | L0 PASS | `install_authority_dev.py accounts` → `useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lilith-authority-dev` | `status L1a` PASS: uid/gid recorded (U1), primary group only, password locked, `sudo -l -U` not allowed, `/nonexistent` absent | the name exists; any contract check fails | `userdel lilith-authority-dev` (removes the user group), only if nothing later ran |
-| **L1b.1** | L1a PASS; archive and attestation built on the workstation by `ceremony/build_authority_dev_release.py` from clean `<SHA>`; archive SHA-256 recorded | `install_authority_dev.py release <SHA> <archive> <attestation>`: verify the archive, stage, create an offline pinned venv, import-check as `lilith-authority-dev`, rename to `releases/<SHA>` | `status L1b.1 <SHA>` PASS; manifest hash; tree `root:root`, dirs 0755 | verification or import check fails; staging or target exists | `rm -rf /opt/lilith-authority-dev/releases/<SHA>` (and the empty parents if this created them) |
-| **L1b.2** | L1b.1 PASS | `install_authority_dev.py select <SHA>` → `current -> releases/<SHA>` | `status L1b.2 <SHA>` PASS | `current` exists | `rm /opt/lilith-authority-dev/current` |
+| **L0** | owner authorization; §10 prerequisites met | **none (READ_ONLY OBSERVATION):** streamed `install_authority_dev.py preflight` and streamed `verify_broker_dev_current_incarnation.py baseline`; no file is copied to DEV | `status L0` PASS: account and all paths absent, needrestart control hash `503279…68d2`, units not found/inactive; baseline equals the accepted current-runtime baseline | anything present; needrestart changed; baseline or preservation diff | — (nothing changed) |
+| **L1a** | L0 PASS; the §10 deployer/DR-5 hardening merged and its live denial prerequisites passed on a real routine deployment | `install_authority_dev.py accounts` → `useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lilith-authority-dev` | `status L1a` PASS: uid/gid recorded (U1), primary group only, password locked, `sudo -l -U` not allowed, `/nonexistent` absent | the name exists; any contract check fails | `userdel lilith-authority-dev` (removes the user group), only if nothing later ran |
+| **S-1** (staging) | L1a PASS; archive and attestation built on the workstation by `ceremony/build_authority_dev_release.py` from clean `<SHA>`; their SHA-256 recorded | **STAGING only:** `mkdir -m 0700 ~/b1b3d-l2-stage` (as the owner, not root), then `gcloud compute scp --tunnel-through-iap` of exactly the archive and attestation into it | on-host `sha256sum` of both equals the workstation values; directory owner-only 0700; nothing else in it | any hash mismatch; the directory already exists | `rm -rf ~/b1b3d-l2-stage` |
+| **L1b.1** | L1a PASS; S-1 POST PASS | streamed `install_authority_dev.py release <SHA> <staged archive> <staged attestation>` (it reads each file once and verifies from memory): verify the archive, stage, create an offline pinned venv, import-check as `lilith-authority-dev`, rename to `releases/<SHA>` | `status L1b.1 <SHA>` PASS; manifest hash; tree `root:root`, dirs 0755 | verification or import check fails; staging or target exists | `rm -rf /opt/lilith-authority-dev/releases/<SHA>` (and the empty parents if this created them) |
+| **S-2** (unstaging) | L1b.1 PASS | `rm -rf ~/b1b3d-l2-stage` (nothing else) | the directory is absent | — | — |
+| **L1b.2** | L1b.1 PASS; S-2 done | `install_authority_dev.py select <SHA>` → `current -> releases/<SHA>` | `status L1b.2 <SHA>` PASS | `current` exists | `rm /opt/lilith-authority-dev/current` |
 | **L1c.1** | L1b.2 PASS | `install_authority_dev.py units <SHA>` → unit, socket, and tmpfiles files `root:root 0644` from the release (no reload, no enable, no `systemd-tmpfiles --create`) | `status L1c.1 <SHA>` PASS: bytes equal the release assets; units not active, not enabled | any target exists | remove the three files |
 | **L1c.2** | L1c.1 PASS | `systemctl daemon-reload` (nothing else) | `status L1c.2 <SHA>` PASS: both units `LoadState=loaded`, `ActiveState=inactive`, `UnitFileState=static`, `NeedDaemonReload=no` | any unit active or enabled | remove the L1c.1 files, then `daemon-reload` |
 | **L1c.3** | L1c.2 PASS | `install_authority_dev.py cli <SHA>` → `/usr/local/sbin/lilith-authority-keygen-dev` `root:root 0755` from the release | `status L1c.3 <SHA>` PASS; CLI hash equals the release copy | target exists | remove the CLI |
 | **L2a** | L1c.3 PASS; `/var/lib/systemd/credential.secret` absent; no credential anywhere | `systemd-creds setup` (nothing else) | `status L2a <SHA>` PASS: host key `root:root 0400` (stat only; never printed or copied) | the host key already exists; any other credential present | remove `/var/lib/systemd/credential.secret`, only while no blob exists |
-| **L2b.1** | L2a PASS; `deploy-dev.yml` deny-list extension merged (§10) | `install_authority_dev.py credstore <SHA>` → `/etc/credstore.encrypted` `root:root 0700` | `status L2b.1 <SHA>` PASS: directory empty | the directory exists | `rmdir /etc/credstore.encrypted` (only if empty) |
+| **L2b.1** | L2a PASS; the §10 denials for every path created so far are non-vacuous on the latest routine deployment | `install_authority_dev.py credstore <SHA>` → `/etc/credstore.encrypted` `root:root 0700` | `status L2b.1 <SHA>` PASS: directory empty | the directory exists | `rmdir /etc/credstore.encrypted` (only if empty) |
 | **L2b.2** | L2b.1 PASS; `swapon --show` empty | `lilith-authority-keygen-dev actor > /root/b1b3d-l2b-publication.json` | publication JSON; `status L2b.2 <SHA>` PASS with `credentialBlobSha256` equal to `blobSha256`; `journalctl` and transcript scans clean | exit ≠ 0; any private-key pattern anywhere; hash mismatch | delete the blob (synthetic; re-keying is recovery, design §16) |
 
 Not in this runbook, and **not authorized by it**:
@@ -288,28 +339,69 @@ This slice does not change:
 The routine deployment never packages anything from `services/authority-dev/`
 or any credential. The release archive refuses custody-looking members.
 
-**Required before L2b (a separate PR; design §7).** Extend the routine
-deny list in `deploy-dev.yml` with proof-only checks:
+### Dependency order (corrected)
+
+```text
+L2 source preparation (this record)
+  -> deployer / DR-5 authority-path hardening (separate PR; deploy-dev.yml)
+  -> live denial-proof prerequisites (a real routine deployment passes them)
+  -> only then live L1a
+```
+
+The deny list must be in place **before live L1a**, not before L2b. The
+authority domain must not be created before the routine deployer boundary is
+established. Otherwise a compromised routine deployer could pre-position a
+modified signer release, CLI, or unit before the credential is introduced,
+and the credential would then be loaded by attacker-chosen code.
+
+**Denial-proof prerequisites before L1a.** Most authority paths do not exist
+yet. Their denials are vacuous until they do (DR-5). So the prerequisites that
+can be proven non-vacuously before L1a are:
+
+- the effective-sudo proof (the deployer can run only the fixed helper,
+  D12);
+- write denials on the existing parent directories that the ladder will
+  populate: `/opt`, `/etc/systemd/system`, `/etc/tmpfiles.d`,
+  `/usr/local/sbin`, `/etc`, and `/var/lib/systemd`;
+- `sudo -u` denial for the existing `lilith-memory-broker`.
+
+Every path-specific denial below becomes mandatory and non-vacuous as soon as
+the ladder step that creates the path completes.
+
+**Required extension (separate PR; design §7; not made here).** Proof-only
+checks in `deploy-dev.yml`:
 
 ```text
 deny sudo -n -u lilith-authority-dev true
 deny sudo -n /usr/bin/systemctl restart lilith-authority-dev.service
 deny sudo -n /usr/bin/systemctl start lilith-authority-dev.socket
 deny sudo -n /usr/local/sbin/lilith-authority-keygen-dev actor
+deny test -w                       /opt /etc/systemd/system /etc/tmpfiles.d /usr/local/sbin /etc /var/lib/systemd
 deny test -r / test -w / test -x   /etc/credstore.encrypted
 deny test -r / test -w             /etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred
 deny test -r                       /var/lib/systemd/credential.secret
-deny test -w                       /opt/lilith-authority-dev  /opt/lilith-authority-dev/current
+deny test -w                       /opt/lilith-authority-dev  /opt/lilith-authority-dev/releases  /opt/lilith-authority-dev/current
 deny test -w                       /usr/local/sbin/lilith-authority-keygen-dev
 deny test -w                       /etc/systemd/system/lilith-authority-dev.service (and .socket)
 ```
 
+It covers:
+
+- `sudo -u lilith-authority-dev`;
+- starting and restarting the authority units;
+- running `lilith-authority-keygen-dev`;
+- writing or replacing the release trees, the CLI, and the unit and socket
+  material;
+- reading and writing `/etc/credstore.encrypted` and the K-ACT blob;
+- reading the host credential key.
+
 **Relationship to DR-5.** A missing path currently counts as `DENIED`, which
-proves nothing. The fix is an existence rule: every listed path whose owner
-step has completed must exist, or the deploy fails. The design keys this on
-the `INSTALLED` marker (L4). That marker comes too late for the L2b blob. So
-the extension must at least require the credstore paths once
-`/etc/credstore.encrypted` exists.
+proves nothing. The fix is an existence rule: once the ladder step that
+creates a listed path has completed, that path must exist, or the deploy
+fails. The design keys the rule on the `INSTALLED` marker (L4). That is too
+late here, because paths are created from L1a onward. The PR must key each
+path's requirement on an earlier, root-controlled fact that the deployer
+cannot forge. That mechanism is designed in that PR, not here.
 
 **DR-5 stays OPEN.** It closes only when that extension is merged and a real
 routine deployment after L2b shows non-vacuous `DENIED` lines.
@@ -333,7 +425,8 @@ touch `/`.
 - it refuses on every unmet precondition before generating anything;
 - plaintext is written only to the encryptor's stdin, and the blob is
   written `O_EXCL` `0600`;
-- the public output is deterministic and yields a valid B1b-3a
+- the public output's serialization is canonical for a given key and
+  ceremony result (not across key generations), and yields a valid B1b-3a
   `AuthorityKeyRecordV1`;
 - the installer performs one transition per stage, refuses collisions, never
   enables, starts, or reloads a unit, and never runs `systemd-creds`;

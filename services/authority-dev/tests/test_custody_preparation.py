@@ -589,6 +589,20 @@ class BoundaryTests(unittest.TestCase):
                      "services/authority-dev/ceremony/lilith_authority_keygen_dev.py"):
             self.assertNotIn(path, CL.CONTROL_ONLY_PATHS)
 
+    @unittest.skipUnless(POSIX, "the installer is Linux-only")
+    def test_installer_runs_streamed_from_stdin_without_staging(self):
+        # L0 is READ_ONLY only if the tool needs no staged file. Off DEV it must
+        # refuse (NOT_ROOT or NOT_DEV_HOST) and leave nothing behind.
+        self.assertNotIn("__file__", INSTALLER_SOURCE)
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([sys.executable, "-I", "-B", "-", "preflight"], input=INSTALLER_SOURCE.encode(),
+                                    capture_output=True, cwd=directory, timeout=60)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertRegex(result.stderr.decode(), r"REFUSED (NOT_ROOT|NOT_DEV_HOST)")
+            self.assertEqual(os.listdir(directory), [])
+        self.assertIn("READ_ONLY OBSERVATION  !=  STAGING  !=  INSTALLATION", RUNBOOK)
+        self.assertNotIn("/tmp/b1b3d-l2", RUNBOOK)
+
     def test_runbook_contract_equals_installer(self):
         rows = re.findall(r"^\| `(/[^`]+)` \| (dir|file|symlink) \| root:root \| (\d{4}|—) \| (L[0-9a-z.]+) \|$",
                           RUNBOOK, re.MULTILINE)
