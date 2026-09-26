@@ -148,6 +148,23 @@ $nrconf{override_rc}{qr(^lilith-authority-dev\.service$)} = 0;
 $nrconf{override_rc}{qr(^lilith-recovery-witness\.service$)} = 0;
 ```
 
+**Packaging boundary.** The file is SOURCE-CONTROLLED INSTALL MATERIAL, not
+AUTOMATIC BROKER RUNTIME PAYLOAD. The chain is: source-controlled artifact ≠
+deployed artifact ≠ installed configuration ≠ activated control.
+
+- The broker file-set contract in
+  [`scripts/memory_broker_validation.py`](../../scripts/memory_broker_validation.py)
+  lists it as the only `SOURCE_ONLY_BROKER_FILES` entry.
+  - The file is accepted only as an exact addition to the B1b-2a tree.
+  - It is never packed into the runner-only validation artifact. The archive
+    stays byte-identical, and a copy injected into the archive is rejected.
+  - Any other extra file still fails with `BROKER_FILE_SET_MISMATCH`.
+- It is not in the broker OS release, which pins its own `ASSET_HASHES`.
+- It is not in the Core API bundle or any deployment workflow or helper.
+- It is not in the PROD `deploy.yml` path filter.
+- The DEV classifier gives it no special lane: fail-closed `DEPLOY_REQUIRED`
+  runs the routine Core API deployment only.
+
 **Read-only probe:**
 [`scripts/probe_needrestart_lilith_override.py`](../../scripts/probe_needrestart_lilith_override.py).
 

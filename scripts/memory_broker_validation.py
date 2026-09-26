@@ -61,7 +61,20 @@ B1B2A_EXTRA = frozenset({
 })
 B1B2A_BROKER_FILES = BROKER_FILES | B1B2A_EXTRA
 B1B2A_FILES = B1B2A_BROKER_FILES | SHARED_FILES
-ALLOWED_FILES = FILES | B1B2A_FILES
+# Source-controlled host install material kept beside the broker units. It is
+# recognized exactly in the tree but never packaged into the validation
+# artifact (or the OS release, which pins its own assets). Only the owner
+# runbook in docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md
+# installs it; its content hash is pinned by scripts/test_needrestart_lilith_override.py.
+SOURCE_ONLY_BROKER_FILES = frozenset({
+    "services/memory-broker/deploy/needrestart-lilith-authority-sensitive.conf",
+})
+ACCEPTED_BROKER_TREES = (
+    BROKER_FILES,
+    B1B2A_BROKER_FILES,
+    B1B2A_BROKER_FILES | SOURCE_ONLY_BROKER_FILES,
+)
+ALLOWED_FILES = FILES | B1B2A_FILES | SOURCE_ONLY_BROKER_FILES
 MANIFEST_NAME = "broker-validation-manifest.json"
 MAX_FILE = 1024 * 1024
 MAX_ARCHIVE = 8 * 1024 * 1024
@@ -114,8 +127,14 @@ def component_files(root: Path) -> dict[str, bytes] | None:
             actual.add(path.relative_to(root).as_posix())
         elif not path.is_dir():
             raise ValidationError("UNEXPECTED_COMPONENT_ENTRY")
-    if actual not in (BROKER_FILES, B1B2A_BROKER_FILES):
+    if actual not in ACCEPTED_BROKER_TREES:
         raise ValidationError(f"BROKER_FILE_SET_MISMATCH actual={sorted(actual)}")
+    for name in sorted(actual & SOURCE_ONLY_BROKER_FILES):
+        data = _path(root, name).read_bytes()
+        if len(data) > MAX_FILE:
+            raise ValidationError(f"COMPONENT_FILE_OVERSIZED:{name}")
+        if b"PRIVATE KEY-----" in data:
+            raise ValidationError("PRIVATE_MATERIAL_IN_BROKER")
     selected = FILES if actual == BROKER_FILES else B1B2A_FILES
     values = {}
     for name in sorted(selected):

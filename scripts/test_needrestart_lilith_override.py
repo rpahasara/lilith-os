@@ -107,6 +107,62 @@ class ArtifactContent(unittest.TestCase):
                          {name: True for name in baseline.AUTHORITY_SENSITIVE_SERVICES})
 
 
+class PackagingBoundary(unittest.TestCase):
+    """source-controlled artifact != deployed artifact != installed config != active control."""
+
+    def test_not_in_broker_os_release(self) -> None:
+        from scripts import memory_broker_os_release as release
+        self.assertNotIn(probe.ARTIFACT, release.ASSET_HASHES)
+        self.assertNotIn(probe.ARTIFACT, release.SOURCE_MAP)
+        self.assertFalse(any("needrestart" in path for path in release.EXPECTED_PATHS))
+
+    def test_not_in_broker_validation_payload(self) -> None:
+        from scripts import memory_broker_validation as validation
+        self.assertIn(probe.ARTIFACT, validation.SOURCE_ONLY_BROKER_FILES)
+        self.assertNotIn(probe.ARTIFACT, validation.FILES | validation.B1B2A_FILES)
+
+    def test_not_in_core_api_bundle(self) -> None:
+        from scripts import build_core_api_bundle as bundle
+        self.assertFalse(any("memory-broker" in path or "needrestart" in path for path in bundle.FIXED_FILES))
+
+    def test_no_deployment_path_installs_or_names_it(self) -> None:
+        for relative in (".github/workflows/deploy-dev.yml", ".github/workflows/deploy.yml",
+                         ".github/workflows/memory-broker-dev-first-install.yml",
+                         ".github/workflows/memory-broker-dev-stage2-runtime.yml",
+                         ".github/workflows/memory-broker-dev-stage3-a2-final.yml",
+                         ".github/workflows/memory-broker-dev-stage3-a2-forensics.yml",
+                         "scripts/dev_deployer/lilith-dev-deploy",
+                         "scripts/dev_deployer/install_dev_deployer_boundary.sh",
+                         "scripts/memory_broker_os_installer.py",
+                         "scripts/memory_broker_os_release.py",
+                         "scripts/build_core_api_bundle.py",
+                         "scripts/deploy_core_api_remote.sh"):
+            text = (ROOT / relative).read_text(encoding="utf-8").lower()
+            self.assertNotIn("needrestart", text, relative)
+            self.assertNotIn("/etc/needrestart", text, relative)
+
+    def test_prod_deploy_trigger_excludes_broker_tree(self) -> None:
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+        paths = re.search(r"paths:\n((?:\s+- .+\n)+)", workflow).group(1)
+        self.assertEqual(re.findall(r'- "([^"]+)"', paths),
+                         ["services/core-api/**", "scripts/deploy_core_api_remote.sh", ".github/workflows/deploy.yml"])
+
+    def test_dev_classifier_gives_it_no_special_lane(self) -> None:
+        from scripts import classify_dev_deployment as classify
+        self.assertNotIn(probe.ARTIFACT, classify.CONTROL_ONLY_PATHS | classify.BROKER_CANDIDATE_PATHS)
+        entry = [(probe.ARTIFACT, "A", "000000", "100644")]
+        self.assertEqual(classify.classify_entries(entry, {}), classify.DEPLOY_REQUIRED)
+
+    def test_ci_permissions_stay_read_only(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        blocks = re.findall(r"^( *)permissions:\n((?:\1  .*\n)+)", workflow, re.MULTILINE)
+        self.assertEqual(len(blocks), workflow.count("permissions:"))
+        self.assertTrue(blocks)
+        for _, body in blocks:
+            self.assertEqual(body.split(), ["contents:", "read"])
+        self.assertNotIn("id-token", workflow)
+
+
 class ProbeLogic(unittest.TestCase):
     def pass_parsed(self) -> dict:
         units = {unit: [(f"(?^:^{re.escape(unit)}$)", "0")] for unit in probe.EXCLUDED_UNITS}
