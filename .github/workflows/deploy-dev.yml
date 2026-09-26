@@ -283,6 +283,17 @@ jobs:
           set -u
           fail=0
           deny() { if "$@" >/dev/null 2>&1; then echo "ALLOWED(unexpected): $*"; fail=1; else echo "DENIED: $*"; fi; }
+          # DENIAL PROOF != ATTEMPT THE FORBIDDEN MUTATION: a mutating command is
+          # only ever QUERIED against the privilege policy (-l), never run.
+          query_denied() {
+            local out rc
+            out="$(sudo -n -l "$@" 2>&1)"; rc=$?
+            if [ "$rc" -eq 0 ]; then echo "ALLOWED(unexpected) query: $*"; fail=1; return; fi
+            case "$out" in
+              *"unknown user"*|*"command not found"*|*"unable to resolve"*|*"unknown group"*) echo "INCONCLUSIVE query: $*"; fail=1 ;;
+              *) echo "DENIED(query): $*" ;;
+            esac
+          }
           id
           if ! . /usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh; then
             echo "SUDO_EFFECTIVE_PROOF=FAIL reason=PROOF_CONTROL_MISSING"
@@ -292,7 +303,7 @@ jobs:
           deny sudo -n true
           deny sudo -n bash -c true
           deny sudo -n /usr/bin/python3 -c 0
-          deny sudo -n /usr/bin/systemctl restart lilith-memory-broker.service
+          query_denied /usr/bin/systemctl restart lilith-memory-broker.service
           deny sudo -n -u lilith true
           for path in /opt/lilith-memory-broker /opt/lilith-memory-broker/current /etc/lilith-memory-broker \
               /etc/systemd/system /etc/systemd/system/lilith-memory-broker.service /etc/sudoers.d \
@@ -318,6 +329,27 @@ jobs:
           esac
           exit "$fail"
           REMOTE
+
+      # 15B2b-B1b-3d (DR-5): proof only, run AS the deployer before deploying.
+      # The script is streamed from the same candidate generation as this
+      # workflow file (no file is copied to DEV). It must print the exact PASS
+      # line; anything else stops the deployment here.
+      - name: Prove the routine DEV deployer has no authority-custody reach
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          set -o pipefail
+          proof=candidate/scripts/deployer_authority_boundary_proof.sh
+          test -f "${proof}" && ! test -L "${proof}"
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --ssh-flag=-T \
+            --command="bash -s" \
+            < "${proof}" | tee "${RUNNER_TEMP}/authority-boundary.txt"
+          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" | grep -Eq '^AUTHORITY_BOUNDARY_PROOF=PASS maturity=(PRE_L1A|L1a|L1b\.1|L1b\.2|L1c\.1|L1c\.3|L2a|L2b\.1)$'
+          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Package exact-SHA bundle for the fixed DEV helper
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
