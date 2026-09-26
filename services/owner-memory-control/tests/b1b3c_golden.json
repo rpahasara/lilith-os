@@ -1,0 +1,297 @@
+{
+  "domainSeparators": {
+    "ledgerHead": "LILITH_AUTHORITY_LEDGER_HEAD_V1\u0000",
+    "recoveryEpoch": "LILITH_RECOVERY_EPOCH_V1\u0000",
+    "witness": "LILITH_RECOVERY_WITNESS_V1\u0000"
+  },
+  "epochs": {
+    "E1": {
+      "canonical": "{\"counter\":2,\"random\":\"5f555e13717eb989f6d87e685eaaeba2\"}",
+      "digestDev": "657368b022ba9d447e932abc2a9c2afe36775b009d738eb11b67f13977255e7a",
+      "digestTest": "ce47718f264384899a9ffa3ae92115d4b73fefac8c0de86b3b6dad710c816078",
+      "epoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "ledgerEpochDev": "lep1.657368b022ba9d447e932abc2a9c2afe36775b009d738eb11b67f13977255e7a",
+      "ledgerEpochTest": "lep1.ce47718f264384899a9ffa3ae92115d4b73fefac8c0de86b3b6dad710c816078"
+    },
+    "E2": {
+      "canonical": "{\"counter\":3,\"random\":\"066d64447bca06b5077834c104abbb9e\"}",
+      "digestDev": "d3d0b6d032995978f8de9a99b08fdd80193ff90138b865a175e758b581e0c338",
+      "digestTest": "cd65f5a247e69e54f3524237a9fa7384af231b2ec43bb365e1566c2943411534",
+      "epoch": {
+        "counter": 3,
+        "random": "066d64447bca06b5077834c104abbb9e"
+      },
+      "ledgerEpochDev": "lep1.d3d0b6d032995978f8de9a99b08fdd80193ff90138b865a175e758b581e0c338",
+      "ledgerEpochTest": "lep1.cd65f5a247e69e54f3524237a9fa7384af231b2ec43bb365e1566c2943411534"
+    },
+    "E2_FORK": {
+      "canonical": "{\"counter\":3,\"random\":\"4274ab0b9bbb940e2ff387398108c1f0\"}",
+      "digestDev": "cb3aa11d0764231e5f4a23b777e1e300cce8c95e3b42d8458e774868bcbfed6c",
+      "digestTest": "bc22b25423a1d713a297308ee20f212c00c51312027efe71f01c14fcc2cea980",
+      "epoch": {
+        "counter": 3,
+        "random": "4274ab0b9bbb940e2ff387398108c1f0"
+      },
+      "ledgerEpochDev": "lep1.cb3aa11d0764231e5f4a23b777e1e300cce8c95e3b42d8458e774868bcbfed6c",
+      "ledgerEpochTest": "lep1.bc22b25423a1d713a297308ee20f212c00c51312027efe71f01c14fcc2cea980"
+    },
+    "E3": {
+      "canonical": "{\"counter\":4,\"random\":\"505e76ba4ffaff8a42cc53f529265dd7\"}",
+      "digestDev": "aea35145da1b08331323ea1d73b27e10fc6dde9d41371210997a2173f8663c93",
+      "digestTest": "7b5841aa501027796dc5c7d52e5917ac954dfbb8ba7c03093242769595508755",
+      "epoch": {
+        "counter": 4,
+        "random": "505e76ba4ffaff8a42cc53f529265dd7"
+      },
+      "ledgerEpochDev": "lep1.aea35145da1b08331323ea1d73b27e10fc6dde9d41371210997a2173f8663c93",
+      "ledgerEpochTest": "lep1.7b5841aa501027796dc5c7d52e5917ac954dfbb8ba7c03093242769595508755"
+    }
+  },
+  "fieldSemantics": {
+    "ledgerEpoch": "lep1. + sha256(RECOVERY_EPOCH_V1 separator || JCS{counter, environment, random})",
+    "recoveryEpoch": "B1b-3a (counter, random), unchanged; equality exact on both parts",
+    "registryTupleVersion": "memory tuple registry version; owner-bound via the challenge",
+    "registryVersion": "authority key registry version; signer-bound via OwnerEvidenceV2, floor from witness",
+    "witness": "freshness / monotonic-state evidence only; never authority"
+  },
+  "genesisLedger": {
+    "head": "3685385aeee9566088b18903d077c307416f499665c30498a691eb15b389c11f",
+    "log": [
+      {
+        "environment": "test",
+        "op": "GENESIS",
+        "policyVersion": "policy.synthetic.v2",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 3,
+        "signingKeyIds": [
+          "actor.b1b3b-broker-1"
+        ]
+      }
+    ],
+    "sequence": 1
+  },
+  "genesisWitness": {
+    "currentRecoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "environment": "test",
+    "ledgerHead": "3685385aeee9566088b18903d077c307416f499665c30498a691eb15b389c11f",
+    "ledgerSequence": 1,
+    "minimumRegistryVersion": 3,
+    "policyVersion": "policy.synthetic.v2",
+    "previousWitnessDigest": null,
+    "protocol": "LILITH_RECOVERY_WITNESS",
+    "schemaVersion": 1,
+    "signature": "G55jQW9pR0-Jb7h3ZccTkaDhbAxnDysAC48XE5KaMXJliwjGetuS4Eiu-mCKrDBJjzEBx9qkR9690gQJNJ4KBA",
+    "updatedAt": "2026-09-26T12:00:01Z",
+    "witnessKeyId": "test-only.witness.recovery-1",
+    "witnessVersion": 1
+  },
+  "genesisWitnessDigest": "47333e0fe0c56e37469d494152f936f6f7cb5bc7e5ab4a0e861a77ea109cba28",
+  "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3c. No real key, owner, registry, witness, or authority.",
+  "restoreMatrix": [
+    {
+      "authorityIssuanceBlocked": false,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "clean-restart-no-restore",
+      "operationRefusal": null,
+      "readiness": "RESTORE_READY",
+      "reason": null,
+      "scenario": 1,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "broker-ledger-restored-witness-current",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "LEDGER_BEHIND_WITNESS",
+      "scenario": 2,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": false,
+      "name": "witness-restored-broker-current",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "LEDGER_AHEAD_OF_WITNESS",
+      "scenario": 3,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": false,
+      "detail": null,
+      "detected": false,
+      "historicalReadsAllowed": true,
+      "name": "both-restored-together",
+      "operationRefusal": null,
+      "readiness": "RESTORE_READY",
+      "reason": null,
+      "scenario": 4,
+      "unresolved": "WHOLE_HOST_OR_WHOLE_DISK_ROLLBACK: a same-host witness rolled back with the ledger matches it; needs an off-host or independently monotonic anchor",
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": false,
+      "name": "old-registry-current-witness",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "REGISTRY_DOWNGRADE",
+      "scenario": 5,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "current-registry-old-ledger",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "BROKER_REGISTRY_VIEW_STALE",
+      "scenario": 6,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "consumed-challenge-reopened-by-stale-db",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "TERMINAL_STATE_REOPENED",
+      "scenario": 7,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "prepared-challenge-resurrected-after-recovery",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "LEDGER_EPOCH_STALE",
+      "scenario": 8,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": false,
+      "name": "retired-key-resurrected",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "REGISTRY_DOWNGRADE",
+      "scenario": 9,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": false,
+      "name": "compromised-key-state-rolled-back",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "REGISTRY_DOWNGRADE",
+      "scenario": 10,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "old-authority-evidence-replayed-after-e2",
+      "operationRefusal": "STALE_EPOCH_EVIDENCE",
+      "readiness": "RESTORE_READY",
+      "reason": null,
+      "scenario": 11,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "stale-application-db-current-broker",
+      "operationRefusal": "EVIDENCE_ALREADY_USED",
+      "readiness": "RESTORE_READY",
+      "reason": null,
+      "scenario": 12,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "stale-broker-current-application-db",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "LEDGER_BEHIND_WITNESS",
+      "scenario": 13,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": true,
+      "name": "duplicate-epoch-counter-different-nonce",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "LEDGER_EPOCH_FORKED",
+      "scenario": 14,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    },
+    {
+      "authorityIssuanceBlocked": true,
+      "detail": null,
+      "detected": true,
+      "historicalReadsAllowed": false,
+      "name": "same-epoch-object-wrong-environment",
+      "operationRefusal": null,
+      "readiness": "NOT_READY",
+      "reason": "ENVIRONMENT_MISMATCH",
+      "scenario": 15,
+      "unresolved": null,
+      "wholeHostRollbackProtected": false
+    }
+  ],
+  "witnessPublicKey": "5hHVO5l90UU12DoPvDDOMHP9JsORGDVUwtmAupcYLAs"
+}
