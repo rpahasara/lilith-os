@@ -117,6 +117,19 @@ jobs:
               "$unit_dir/lilith-memory-broker.socket"
           fi
 
+      - name: Statically verify proposed authority-signer systemd units
+        shell: bash
+        run: |
+          service=services/authority-dev/deploy/lilith-authority-dev.service
+          grep -Fxq 'ExecStart=/opt/lilith-authority-dev/current/venv/bin/python -B -m lilith_authority_dev.server' "$service"
+          test "$(grep -c '^ExecStart=' "$service")" -eq 1
+          unit_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$unit_dir"' EXIT
+          # Nothing is installed on CI. Verify syntax with an executable stand-in.
+          sed 's#^ExecStart=.*#ExecStart=/usr/bin/true#' "$service" > "$unit_dir/lilith-authority-dev.service"
+          cp services/authority-dev/deploy/lilith-authority-dev.socket "$unit_dir/lilith-authority-dev.socket"
+          systemd-analyze verify "$unit_dir/lilith-authority-dev.service" "$unit_dir/lilith-authority-dev.socket"
+
   frontend-quality:
     name: Frontend build and command core
     runs-on: ubuntu-latest
@@ -176,6 +189,11 @@ jobs:
         run: |
           python -m compileall -q services/owner-memory-control/lilith_owner_memory
           python -m unittest discover -s services/owner-memory-control/tests -p "test_*.py"
+
+      - name: Compile and test B1b-3d L1 authority-signer source foundation
+        run: |
+          python -m compileall -q services/authority-dev/lilith_authority_dev
+          python -m unittest discover -s services/authority-dev/tests -p "test_*.py"
 
       - name: Run Slice 8-15 architecture regressions
         run: python scripts/run_cognitive_regressions.py

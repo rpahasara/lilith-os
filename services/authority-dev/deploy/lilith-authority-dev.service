@@ -1,0 +1,41 @@
+[Unit]
+Description=LILITH DEV_SYNTHETIC OWNER_ACTOR authority signer (DEV only)
+Requires=lilith-authority-dev.socket
+After=lilith-authority-dev.socket
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lilith-authority-dev
+Group=lilith-authority-dev
+WorkingDirectory=/opt/lilith-authority-dev/current
+Environment=LILITH_ENV=dev
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+ExecStart=/opt/lilith-authority-dev/current/venv/bin/python -B -m lilith_authority_dev.server
+LoadCredentialEncrypted=owner-actor-signing-key:/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred
+StateDirectory=lilith-authority-dev
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/opt/lilith-authority-dev /etc/lilith-authority-dev /var/lib/lilith-recovery-witness
+ReadWritePaths=/var/lib/lilith-authority-dev
+InaccessiblePaths=/etc/credstore.encrypted /etc/lilith-memory-broker /var/lib/lilith-memory-broker /etc/lilith-os-dev
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=15s
+TimeoutStopSec=10s
