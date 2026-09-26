@@ -38,6 +38,9 @@ REGISTRY_VERSION = 3
 ROOT_KEY_ID = "test-only.registry-root-1"
 DEV_ROOT_KEY_ID = "test-only.registry-root-dev-1"
 LOGICAL_OWNER = "owner.synthetic.v1"
+# Logical authority context, with the established B2a meaning (the same
+# synthetic value as the B2a fixtures). It is NOT the signing domain.
+LOGICAL_AUTHORITY_DOMAIN = "authority.synthetic.memory"
 REGISTRY_ISSUED_AT = "2026-09-26T06:00:00Z"
 
 
@@ -91,7 +94,7 @@ def key_record(key_id: str, *, seed_name: str | None = None, **overrides: Any) -
     value = {
         "schemaVersion": 1,
         "keyId": key_id,
-        "authorityDomain": domain,
+        "signingDomain": domain,
         "evidenceTypes": sorted(A.EVIDENCE_TYPES_BY_DOMAIN[domain]),
         "environment": ENV,
         "algorithm": "Ed25519",
@@ -194,7 +197,8 @@ def owner_evidence_unsigned(**overrides: Any) -> dict[str, Any]:
         "actionDigest": _digest("frozen action create"),
         "requestDigest": _digest("owner request create"),
         "payloadDigest": _digest("payload create"),
-        "authorityDomain": A.OWNER_ACTOR,
+        "signingDomain": A.OWNER_ACTOR,
+        "authorityDomain": LOGICAL_AUTHORITY_DOMAIN,
         "evidenceType": A.OWNER_MEMORY_OPERATION,
         "environment": ENV,
         "logicalOwnerId": LOGICAL_OWNER,
@@ -224,7 +228,7 @@ def owner_expectation(**overrides: Any) -> A.OwnerEvidenceExpectationV2:
         challenge_digest=base["challengeDigest"], credential_record_id=base["credentialRecordId"],
         assertion_digest=base["assertionDigest"], action_digest=base["actionDigest"],
         request_digest=base["requestDigest"], payload_digest=base["payloadDigest"],
-        logical_owner_id=LOGICAL_OWNER,
+        logical_owner_id=LOGICAL_OWNER, authority_domain=LOGICAL_AUTHORITY_DOMAIN,
     )
     value.update(overrides)
     return A.OwnerEvidenceExpectationV2(**value)
@@ -245,7 +249,8 @@ def privacy_unsigned(**overrides: Any) -> dict[str, Any]:
         "memoryItemId": "mitem.synthetic",
         "actionDigest": _digest("frozen action forget"),
         "resourceOwners": ["L04", "L18_V2", "PRIVACY"],
-        "authorityDomain": A.PRIVACY,
+        "signingDomain": A.PRIVACY,
+        "authorityDomain": LOGICAL_AUTHORITY_DOMAIN,
         "evidenceType": A.PRIVACY_ERASURE_AUTHORIZATION,
         "environment": ENV,
         "logicalOwnerId": LOGICAL_OWNER,
@@ -277,6 +282,7 @@ def privacy_expectation(**overrides: Any) -> A.PrivacyAuthorizationExpectationV2
         subject_namespace=base["subjectNamespace"], subject_key=base["subjectKey"],
         memory_item_id=base["memoryItemId"], action_digest=base["actionDigest"],
         resource_owners=tuple(base["resourceOwners"]), logical_owner_id=LOGICAL_OWNER,
+        authority_domain=LOGICAL_AUTHORITY_DOMAIN,
     )
     value.update(overrides)
     return A.PrivacyAuthorizationExpectationV2(**value)
@@ -303,6 +309,11 @@ def _outcome_vectors() -> list[dict[str, Any]]:
     retired_historical = owner_evidence(keyId="actor.retired-1", registryVersion=2,
                                         issuedAt="2026-09-20T12:00:00Z")
     retired_new = owner_evidence(keyId="actor.retired-1", issuedAt="2026-09-26T12:00:21Z")
+    # Issued at registry version 2, before rotation; the registry is now at 3.
+    in_flight = owner_evidence(keyId="actor.retired-1", registryVersion=2, issuedAt="2026-09-25T23:59:00Z")
+    # Correct signing domain and key, wrong logical authority context: the two
+    # fields are independent, so this is a logical-context mismatch only.
+    logical_is_not_signing = owner_evidence(authorityDomain="authority.synthetic.privacy")
     compromised_backdated = owner_evidence(keyId="actor.compromised-1", registryVersion=2,
                                            issuedAt="2026-09-20T12:00:00Z")
     old_epoch = owner_evidence(keyId="actor.epoch1-1", registryVersion=1, recoveryEpoch=OLD_EPOCH.to_dict(),
@@ -317,6 +328,9 @@ def _outcome_vectors() -> list[dict[str, Any]]:
          "keyStatus": "RETIRED_AFTER_ISSUANCE"},
         {"name": "retirement-new-admission-rejected", "kind": "owner", "context": "new",
          "artifact": retired_new, "status": V.NOT_ACCEPTED, "reason": "KEY_RETIRED"},
+        {"name": "registry-update-keeps-in-flight-evidence", "kind": "owner", "context": "new",
+         "artifact": in_flight, "status": V.VERIFIED_AUTHORITY_EVIDENCE, "reason": None,
+         "keyStatus": "RETIRED_AFTER_ISSUANCE"},
         {"name": "compromise-backdated-rejected", "kind": "owner", "context": "historical",
          "artifact": compromised_backdated, "status": V.NOT_ACCEPTED, "reason": "KEY_COMPROMISED"},
         {"name": "epoch-old-evidence-historical-only", "kind": "owner", "context": "historical",
@@ -325,11 +339,13 @@ def _outcome_vectors() -> list[dict[str, Any]]:
         {"name": "epoch-old-evidence-new-admission-rejected", "kind": "owner", "context": "new",
          "artifact": old_epoch, "status": V.NOT_ACCEPTED, "reason": "RECOVERY_EPOCH_MISMATCH"},
         {"name": "cross-domain-actor-key-signs-privacy", "kind": "privacy", "context": "new",
-         "artifact": actor_signed_privacy, "status": V.NOT_ACCEPTED, "reason": "KEY_DOMAIN_MISMATCH"},
+         "artifact": actor_signed_privacy, "status": V.NOT_ACCEPTED, "reason": "KEY_SIGNING_DOMAIN_MISMATCH"},
         {"name": "cross-domain-privacy-key-signs-actor", "kind": "owner", "context": "new",
-         "artifact": privacy_signed_actor, "status": V.NOT_ACCEPTED, "reason": "KEY_DOMAIN_MISMATCH"},
+         "artifact": privacy_signed_actor, "status": V.NOT_ACCEPTED, "reason": "KEY_SIGNING_DOMAIN_MISMATCH"},
         {"name": "cross-domain-owner-evidence-as-privacy", "kind": "privacy", "context": "new",
          "artifact": owner_as_privacy, "status": V.NOT_ACCEPTED, "reason": "EVIDENCE_MALFORMED"},
+        {"name": "logical-authority-context-mismatch-with-valid-signing-domain", "kind": "owner", "context": "new",
+         "artifact": logical_is_not_signing, "status": V.NOT_ACCEPTED, "reason": "AUTHORITY_DOMAIN_MISMATCH"},
         {"name": "environment-test-evidence-in-dev", "kind": "owner", "context": "dev",
          "artifact": cross_env, "status": V.NOT_ACCEPTED, "reason": "ENVIRONMENT_MISMATCH"},
     ]
@@ -354,6 +370,12 @@ def golden_document() -> dict[str, Any]:
     priv = privacy_authorization()
     return {
         "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3a. No real key, owner, registry, or authority.",
+        "fieldSemantics": {
+            "signingDomain": "cryptographic signing domain: " + ", ".join(sorted(A.SIGNING_DOMAINS)),
+            "authorityDomain": "logical authority context (B2a meaning); never a signing domain",
+            "keyRecord.registryVersion": "the registry version in which this key was first published",
+            "evidence.registryVersion": "any version from key first publication to the verified registry",
+        },
         "domainSeparators": {
             "registry": A.REGISTRY_DOMAIN_SEPARATOR.decode("ascii"),
             "ownerEvidence": A.OWNER_EVIDENCE_DOMAIN_SEPARATOR.decode("ascii"),

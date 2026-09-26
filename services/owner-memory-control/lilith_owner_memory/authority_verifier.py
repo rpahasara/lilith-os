@@ -11,15 +11,20 @@ admission, and not a truth claim.
 
 Semantics frozen here:
 
-- routine retirement or non-compromise revocation keeps historical evidence
-  valid inside `[notBefore, retiredAt/revokedAt)`, for HISTORICAL_VERIFICATION
-  only; a retired or revoked key never supports NEW_ADMISSION;
+- `signingDomain` (OWNER_ACTOR | PRIVACY) is the cryptographic domain; the
+  logical `authorityDomain` keeps its B2a meaning and is matched separately;
+- routine retirement or non-compromise revocation keeps evidence valid
+  inside `[notBefore, retiredAt/revokedAt)` for both purposes, so a key
+  rotation does not invalidate in-flight evidence;
 - compromise is retroactive: every piece of evidence the key signed is
   rejected, whatever its signer-controlled `issuedAt`, because re-attestation
   does not exist yet;
-- NEW_ADMISSION requires the current recovery epoch, registry version, and
-  policy version; HISTORICAL_VERIFICATION accepts older-epoch evidence as
-  history only (`authorizesNewAdmission` is false);
+- evidence may name any registry version from its key's first publication
+  up to the verified registry; registry evolution alone never invalidates it,
+  and no historical registry snapshot is consulted (reported in the facts);
+- NEW_ADMISSION requires the current recovery epoch and policy version;
+  HISTORICAL_VERIFICATION accepts older-epoch evidence as history only
+  (`authorizesNewAdmission` is false);
 - a registry below the caller's trusted monotonic version is a downgrade.
 
 This detects stale-epoch evidence given a trusted expected epoch. It does not
@@ -46,6 +51,7 @@ VERIFIED_REGISTRY = "VERIFIED_REGISTRY"
 VERIFIED_AUTHORITY_EVIDENCE = "VERIFIED_AUTHORITY_EVIDENCE"
 NOT_ACCEPTED = "NOT_ACCEPTED"
 EVIDENCE_SEMANTICS = "REGISTRY_KEY_SIGNED_AUTHORITY_EVIDENCE_NOT_MEMORY_ACCEPTANCE"
+REGISTRY_VERSION_BASIS = "KEY_FIRST_PUBLICATION_TO_VERIFIED_REGISTRY_CURRENT_RECORD"
 
 # Closed, ordered NOT_ACCEPTED reason taxonomy for this slice.
 REASONS = (
@@ -66,11 +72,11 @@ REASONS = (
     "REGISTRY_POLICY_MISMATCH",
     "EVIDENCE_MISSING",
     "EVIDENCE_MALFORMED",
-    "EVIDENCE_DOMAIN_MISMATCH",
+    "SIGNING_DOMAIN_MISMATCH",
     "EVIDENCE_TYPE_MISMATCH",
     "ENVIRONMENT_MISMATCH",
     "KEY_UNKNOWN",
-    "KEY_DOMAIN_MISMATCH",
+    "KEY_SIGNING_DOMAIN_MISMATCH",
     "SIGNATURE_INVALID",
     "KEY_COMPROMISED",
     "RECOVERY_EPOCH_MISMATCH",
@@ -80,6 +86,7 @@ REASONS = (
     "KEY_REVOKED",
     "KEY_RETIRED",
     "LOGICAL_OWNER_MISMATCH",
+    "AUTHORITY_DOMAIN_MISMATCH",
     "EVIDENCE_ID_MISMATCH",
     "EVIDENCE_NONCE_MISMATCH",
     "CHALLENGE_REFERENCE_MISMATCH",
@@ -123,7 +130,7 @@ _REGISTRY_CODES = {
     "KEY_ENVIRONMENT_MISMATCH": "KEY_ENVIRONMENT_MISMATCH",
 }
 _KEY_RECORD_CODES = frozenset({
-    "INVALID_AUTHORITY_DOMAIN", "INVALID_EVIDENCE_TYPES", "INVALID_PUBLIC_KEY",
+    "INVALID_SIGNING_DOMAIN", "INVALID_EVIDENCE_TYPES", "INVALID_PUBLIC_KEY",
     "INVALID_VALIDITY_INTERVAL", "INVALID_REVOCATION", "INVALID_REVOCATION_REASON",
     "INVALID_KEY_ORDER", "DUPLICATE_PUBLIC_KEY", "INVALID_KEY_REGISTRY_VERSION",
     "INVALID_KEY_TIMESTAMP", "INVALID_KEY_RECOVERY_EPOCH", "INVALID_KEY_POLICY_VERSION",
@@ -220,14 +227,14 @@ def _verify_evidence(context, registry, evidence, contract, domain, evidence_typ
     _require(evidence is not None, "EVIDENCE_MISSING")
     envelope = _parse_evidence(contract.from_dict, evidence)
 
-    # Domain and type before key lookup: a Privacy artifact is never Actor
-    # evidence and vice versa, regardless of which key signed it.
-    _require(envelope["authorityDomain"] == domain, "EVIDENCE_DOMAIN_MISMATCH")
+    # Signing domain and type before key lookup: a Privacy artifact is never
+    # Actor evidence and vice versa, regardless of which key signed it.
+    _require(envelope["signingDomain"] == domain, "SIGNING_DOMAIN_MISMATCH")
     _require(envelope["evidenceType"] == evidence_type, "EVIDENCE_TYPE_MISMATCH")
     _require(envelope["environment"] == context.environment, "ENVIRONMENT_MISMATCH")
     key = parsed.keys.get(envelope["keyId"])
     _require(key is not None, "KEY_UNKNOWN")
-    _require(key.authority_domain == domain, "KEY_DOMAIN_MISMATCH")
+    _require(key.signing_domain == domain, "KEY_SIGNING_DOMAIN_MISMATCH")
     _require(evidence_type in key.evidence_types, "EVIDENCE_TYPE_MISMATCH")
     _verify_signature(key.public_key, envelope.signature, envelope.signing_bytes(), "SIGNATURE_INVALID")
 
@@ -238,22 +245,26 @@ def _verify_evidence(context, registry, evidence, contract, domain, evidence_typ
     _require(envelope.recovery_epoch == key.recovery_epoch, "RECOVERY_EPOCH_MISMATCH")
     if new_admission:
         _require(envelope.recovery_epoch == context.expected_recovery_epoch, "RECOVERY_EPOCH_MISMATCH")
+    # Registry evolution alone never invalidates evidence: the evidence may
+    # name any version from the key's first publication up to the verified
+    # registry. The key is judged by its record in the verified registry,
+    # whose current compromise, retirement, and revocation facts apply.
     version = envelope["registryVersion"]
     _require(key.registry_version <= version <= parsed.registry_version, "REGISTRY_VERSION_MISMATCH")
-    if new_admission:
-        _require(version == parsed.registry_version, "REGISTRY_VERSION_MISMATCH")
     _require(envelope["policyVersion"] == key.policy_version, "POLICY_VERSION_MISMATCH")
     if new_admission:
         _require(envelope["policyVersion"] == context.policy_version, "POLICY_VERSION_MISMATCH")
 
     issued = envelope.issued_at
     _require(issued >= key.not_before, "KEY_NOT_YET_VALID")
+    # Routine retirement and non-compromise revocation are interval rules for
+    # both purposes, so a key rotation does not invalidate in-flight evidence.
     key_status = "CURRENT"
     if key.revoked_at is not None:
-        _require(not new_admission and issued < key.revoked_at, "KEY_REVOKED")
+        _require(issued < key.revoked_at, "KEY_REVOKED")
         key_status = "REVOKED_AFTER_ISSUANCE"
     if key.retired_at is not None:
-        _require(not new_admission and issued < key.retired_at, "KEY_RETIRED")
+        _require(issued < key.retired_at, "KEY_RETIRED")
         key_status = "RETIRED_AFTER_ISSUANCE" if key_status == "CURRENT" else key_status
     return envelope, key, key_status, parsed
 
@@ -266,6 +277,7 @@ def _facts(context, envelope, key_status, parsed, id_field) -> dict[str, Any]:
         "purpose": context.purpose,
         "authorizesNewAdmission": context.purpose == A.NEW_ADMISSION,
         id_field: envelope[id_field],
+        "signingDomain": envelope["signingDomain"],
         "authorityDomain": envelope["authorityDomain"],
         "evidenceType": envelope["evidenceType"],
         "environment": envelope["environment"],
@@ -275,6 +287,12 @@ def _facts(context, envelope, key_status, parsed, id_field) -> dict[str, Any]:
         "evidenceRegistryVersion": envelope["registryVersion"],
         "evidencePolicyVersion": envelope["policyVersion"],
         "registryVersion": parsed.registry_version,
+        # The evidence's registryVersion is checked against the key's first
+        # publication and the verified registry only. No snapshot of the
+        # registry at that version is consulted; that needs a future
+        # registry-history mechanism and is reported explicitly here.
+        "registryVersionBasis": REGISTRY_VERSION_BASIS,
+        "historicalRegistrySnapshotVerified": False,
         "issuedAt": envelope["issuedAt"],
     }
 
@@ -289,6 +307,7 @@ def verify_owner_evidence(*, context: A.AuthorityVerificationContextV1, registry
             context, registry, evidence, A.OwnerEvidenceV2, A.OWNER_ACTOR, A.OWNER_MEMORY_OPERATION)
         e = expectation
         _require(envelope["logicalOwnerId"] == e.logical_owner_id, "LOGICAL_OWNER_MISMATCH")
+        _require(envelope["authorityDomain"] == e.authority_domain, "AUTHORITY_DOMAIN_MISMATCH")
         _require(envelope["evidenceId"] == e.evidence_id, "EVIDENCE_ID_MISMATCH")
         # B1b-1: the challenge ID is the unique evidence nonce.
         _require(envelope["evidenceNonce"] == envelope["challengeId"], "EVIDENCE_NONCE_MISMATCH")
@@ -317,6 +336,7 @@ def verify_privacy_authorization(*, context: A.AuthorityVerificationContextV1,
             A.PRIVACY_ERASURE_AUTHORIZATION)
         e = expectation
         _require(envelope["logicalOwnerId"] == e.logical_owner_id, "LOGICAL_OWNER_MISMATCH")
+        _require(envelope["authorityDomain"] == e.authority_domain, "AUTHORITY_DOMAIN_MISMATCH")
         _require(envelope["authorizationId"] == e.authorization_id, "EVIDENCE_ID_MISMATCH")
         _require(envelope["executionNonce"] == e.execution_nonce, "EVIDENCE_NONCE_MISMATCH")
         _require(envelope["forgetRequestId"] == e.forget_request_id, "FORGET_REQUEST_MISMATCH")

@@ -57,33 +57,43 @@ the TEST-only admission record.
 Each signature is Ed25519 over `separator ‖ RFC 8785 canonical bytes` of every
 field except `signature`.
 
-**Authority domains** are a closed set: `OWNER_ACTOR` (evidence type
-`OWNER_MEMORY_OPERATION`) and `PRIVACY` (evidence type
-`PRIVACY_ERASURE_AUTHORIZATION`). Containment is not an authority domain.
+**Two different domain fields.** The logical authority context is not the
+cryptographic signing domain:
+
+| Field | Meaning | Values | Where |
+| --- | --- | --- | --- |
+| `signingDomain` | cryptographic signing domain: key isolation, cross-domain signature rejection, evidence/key compatibility | closed set `OWNER_ACTOR` (evidence type `OWNER_MEMORY_OPERATION`), `PRIVACY` (evidence type `PRIVACY_ERASURE_AUTHORIZATION`) | key records and both evidence contracts |
+| `authorityDomain` | logical authority context, with its established B2a meaning (the logical scope within an environment) | an opaque identifier; a signing-domain name is rejected | both evidence contracts only; never on key records |
+
+B2a's `authorityDomain` semantics are unchanged. Containment is not a signing
+domain.
 
 - **`RecoveryEpochV1`** — `{counter, random}`. `counter` is a JSON-safe
   integer of at least 0. `random` is 32 lowercase hex characters. Two epochs
   are equal only when both parts are equal, so divergent restores to the same
   counter stay distinguishable.
 - **`AuthorityKeyRecordV1`** — `schemaVersion` (1), `keyId`,
-  `authorityDomain`, `evidenceTypes`, `environment`, `algorithm`,
+  `signingDomain`, `evidenceTypes`, `environment`, `algorithm`,
   `publicKey`, `createdAt`, `notBefore`, `retiredAt`, `revokedAt`,
   `revocationReason`, `compromisedSince`, `recoveryEpoch`, `policyVersion`,
   `registryVersion`.
-  - `evidenceTypes` is a sorted, non-empty subset of the key's own domain.
+  - `evidenceTypes` is a sorted, non-empty subset of the key's own signing
+    domain.
   - `algorithm` must be `Ed25519`.
   - `publicKey` is 32 bytes, base64url.
   - `revocationReason` is `ROUTINE`, `COMPROMISED`, or `SUPERSEDED`.
     `COMPROMISED` holds if and only if `compromisedSince` is set, and
     `compromisedSince` must not be later than `revokedAt`.
-  - `registryVersion` is the registry version that first published the key.
+  - `registryVersion` is **the registry version in which this key was first
+    published**. It is immutable: later retirement or revocation does not
+    change it. It is frozen in the golden file's `fieldSemantics`.
 - **`AuthorityRegistryV1`** — `protocol` (`LILITH_AUTHORITY_REGISTRY`),
   `schemaVersion` (1), `environment`, `registryVersion`, `recoveryEpoch`,
   `policyVersion`, `registryRootKeyId`, `issuedAt`, `keys`, and `signature`.
   The signature binds the exact contents, schema, environment, registry
   version, recovery epoch, and policy version. Registry invariants:
   - key IDs are strictly ascending;
-  - public keys are unique, so no key serves two roles or domains;
+  - public keys are unique, so no key serves two roles or signing domains;
   - every record's environment equals the registry's;
   - no record timestamp is later than `issuedAt`;
   - no record is from a future or forked epoch;
@@ -98,16 +108,16 @@ field except `signature`.
 - **`OwnerEvidenceV2`** — `protocol` (`LILITH_ACTOR_EVIDENCE`),
   `schemaVersion` (2), `evidenceId`, `evidenceNonce`, `challengeId`,
   `challengeDigest`, `credentialRecordId`, `assertionDigest`, `actionDigest`,
-  `requestDigest`, `payloadDigest`, `authorityDomain`, `evidenceType`,
-  `environment`, `logicalOwnerId`, `keyId`, `registryVersion`,
+  `requestDigest`, `payloadDigest`, `signingDomain`, `authorityDomain`,
+  `evidenceType`, `environment`, `logicalOwnerId`, `keyId`, `registryVersion`,
   `recoveryEpoch`, `policyVersion`, `issuedAt`, and `signature`.
   `evidenceNonce` must equal `challengeId`, as in B1b-1.
 - **`PrivacyAuthorizationV2`** — `protocol`
   (`LILITH_PRIVACY_AUTHORIZATION`), `schemaVersion` (2), `authorizationId`,
   `executionNonce`, `forgetRequestId`, `holdId`, `ownerEvidenceId`,
   `memoryClass`, `subjectNamespace`, `subjectKey`, `memoryItemId`,
-  `actionDigest`, `resourceOwners` (sorted, unique), `authorityDomain`,
-  `evidenceType`, `environment`, `logicalOwnerId`, `keyId`,
+  `actionDigest`, `resourceOwners` (sorted, unique), `signingDomain`,
+  `authorityDomain`, `evidenceType`, `environment`, `logicalOwnerId`, `keyId`,
   `registryVersion`, `recoveryEpoch`, `policyVersion`, `issuedAt`, and
   `signature`. The field set follows the 15B2a `ErasureAuthorizationV1`;
   `ownerEvidenceId` replaces the HMAC-era actor evidence reference.
@@ -116,7 +126,7 @@ field except `signature`.
   `trusted_minimum_registry_version`, `expected_recovery_epoch`,
   `policy_version`. The expectation types (`OwnerEvidenceExpectationV2`,
   `PrivacyAuthorizationExpectationV2`) carry what the caller has already
-  verified independently.
+  verified independently, including the logical `authority_domain`.
 
 ## Verifier
 
@@ -124,41 +134,54 @@ field except `signature`.
   `NOT_ACCEPTED(reason)`.
 - `verify_owner_evidence` and `verify_privacy_authorization` return
   `VERIFIED_AUTHORITY_EVIDENCE` or `NOT_ACCEPTED(reason)`.
-- Reasons come from a closed, ordered 43-reason taxonomy
-  (`authority_verifier.REASONS`).
+- Reasons come from a closed, ordered 44-reason taxonomy
+  (`authority_verifier.REASONS`). Signing-domain failures are
+  `SIGNING_DOMAIN_MISMATCH` (evidence) and `KEY_SIGNING_DOMAIN_MISMATCH` (key).
+  A logical-context failure is `AUTHORITY_DOMAIN_MISMATCH`.
 
 The registry signature is verified before any record content is trusted.
 
 A positive result is **not** `ACCEPTED_MEMORY`. Its facts always carry
 `memoryAcceptance: false`, `truthClaim: false`, and `authorizesNewAdmission`,
-which is true only for `NEW_ADMISSION`.
+which is true only for `NEW_ADMISSION`. They report `signingDomain` and
+`authorityDomain` separately.
 
 **Semantics:**
 
-- **Routine retirement, and non-compromise revocation.**
-  - Under `HISTORICAL_VERIFICATION`, evidence is valid only when
-    `notBefore ≤ issuedAt < retiredAt` (or `< revokedAt`).
-  - A retired or revoked key never supports `NEW_ADMISSION`
-    (`KEY_RETIRED` / `KEY_REVOKED`).
+- **Routine retirement, and non-compromise revocation.** For both purposes,
+  evidence is valid only when `notBefore ≤ issuedAt < retiredAt` (or
+  `< revokedAt`); otherwise `KEY_RETIRED` / `KEY_REVOKED` /
+  `KEY_NOT_YET_VALID`. A key rotation therefore does not invalidate in-flight
+  evidence issued before the rotation.
 - **Compromise** is retroactive: `KEY_COMPROMISED` for every piece of evidence
   the key signed, in every purpose, whatever its signer-controlled `issuedAt`.
   Re-attestation is not implemented.
 - **Environment, domain, and type.**
   - Cross-environment use is always rejected, whether through the registry,
     the key record, or the evidence.
-  - The evidence domain and type must match the contract, and the key's
-    domain and types must match the evidence.
+  - The evidence's signing domain and type must match the contract, and the
+    key's signing domain and types must match the evidence.
+  - The evidence's logical `authorityDomain` must match the expectation.
   - Actor keys never verify Privacy authorizations, and Privacy keys never
     verify Actor evidence.
 - **Epoch.**
   - Evidence must be in its key's epoch.
   - `NEW_ADMISSION` also requires the context's expected epoch.
   - Old-epoch evidence verifies only as history.
-- **Registry version.**
+- **Registry version.** Registry evolution alone never invalidates evidence.
   - Evidence must satisfy
-    `key.registryVersion ≤ evidence.registryVersion ≤ registry.registryVersion`.
-  - `NEW_ADMISSION` requires equality with the current registry version.
+    `key.registryVersion ≤ evidence.registryVersion ≤ registry.registryVersion`
+    for both purposes. There is no exact current-version match.
   - A registry below `trusted_minimum_registry_version` is `REGISTRY_DOWNGRADE`.
+  - The key is judged by its record in the verified (current) registry, so
+    current compromise status still applies retroactively, and retirement and
+    revocation intervals still apply.
+  - No registry snapshot at `evidence.registryVersion` is consulted. The
+    facts report this explicitly as `registryVersionBasis:
+    KEY_FIRST_PUBLICATION_TO_VERIFIED_REGISTRY_CURRENT_RECORD` and
+    `historicalRegistrySnapshotVerified: false`. Proving the key record as it
+    stood at an older version needs a future registry-history mechanism; it
+    is not implemented here.
 - **Policy version.** Evidence must carry its key's policy version.
   `NEW_ADMISSION` also requires the context's policy version.
 
@@ -169,18 +192,27 @@ which is true only for `NEW_ADMISSION`.
 - It does **not** detect whole-host or whole-disk rollback.
 - Where the trusted minimum registry version comes from is out of scope. Local
   filesystem state is not assumed to be a monotonic authority.
+- Because only the current registry is verified, a key record removed from a
+  later registry makes its evidence `KEY_UNKNOWN`. Records must therefore be
+  retained, not deleted, until registry history exists.
 
 ## Evidence
 
 - Golden vectors for:
   - the registry, `OwnerEvidenceV2`, and `PrivacyAuthorizationV2` (full signed
     artifacts plus signing digests);
-  - nine frozen outcomes: retirement accepted as history, retirement rejected
-    for new admission, backdated compromise, old epoch as history only, old
-    epoch rejected for new admission, three cross-domain cases, and a
-    cross-environment replay.
-- A 131-case negative matrix that asserts the exact reason for each case and
+  - eleven frozen outcomes: retirement accepted as history, retirement
+    rejected for new admission, in-flight evidence surviving a registry
+    update, backdated compromise, old epoch as history only, old epoch
+    rejected for new admission, three cross-domain cases, a logical-context
+    mismatch with a valid signing domain, and a cross-environment replay;
+  - a `fieldSemantics` block that freezes the meaning of `signingDomain`,
+    `authorityDomain`, and both `registryVersion` fields.
+- A 138-case negative matrix that asserts the exact reason for each case and
   covers every reason in the taxonomy.
+- Registry-evolution tests: pending evidence stays valid across unrelated
+  monotonic updates; version bounds; downgrade; compromise marked in a later
+  registry is retroactive.
 - A mutation of every signed registry and evidence field is rejected.
 - Pinned B2a golden file and B1a/B2a separators; the new separators are
   distinct from each other and from the B1a/B2a separators (seven in total).

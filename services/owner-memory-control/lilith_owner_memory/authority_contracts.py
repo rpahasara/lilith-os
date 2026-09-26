@@ -48,11 +48,15 @@ PRIVACY_AUTHORIZATION_SCHEMA_VERSION = 2
 
 ALGORITHM = "Ed25519"
 
-# Cryptographic authority domains. Containment is deliberately absent: the
-# containment key is a detection PRF and never an authority-signing key.
+# Cryptographic signing domains (`signingDomain`). They isolate keys and
+# signatures. They are NOT the logical authority context: `authorityDomain`
+# keeps its established B2a meaning (the logical authority scope within an
+# environment). logical authority context != cryptographic signing domain.
+# Containment is deliberately absent: the containment key is a detection PRF
+# and never an authority-signing key.
 OWNER_ACTOR = "OWNER_ACTOR"
 PRIVACY = "PRIVACY"
-AUTHORITY_DOMAINS = frozenset({OWNER_ACTOR, PRIVACY})
+SIGNING_DOMAINS = frozenset({OWNER_ACTOR, PRIVACY})
 OWNER_MEMORY_OPERATION = "OWNER_MEMORY_OPERATION"
 PRIVACY_ERASURE_AUTHORIZATION = "PRIVACY_ERASURE_AUTHORIZATION"
 EVIDENCE_TYPES_BY_DOMAIN = {
@@ -121,7 +125,7 @@ class RecoveryEpochV1:
 
 
 KEY_RECORD_FIELDS = frozenset({
-    "schemaVersion", "keyId", "authorityDomain", "evidenceTypes", "environment",
+    "schemaVersion", "keyId", "signingDomain", "evidenceTypes", "environment",
     "algorithm", "publicKey", "createdAt", "notBefore", "retiredAt", "revokedAt",
     "revocationReason", "compromisedSince", "recoveryEpoch", "policyVersion",
     "registryVersion",
@@ -132,12 +136,16 @@ KEY_RECORD_FIELDS = frozenset({
 class AuthorityKeyRecordV1:
     """One public authority verification key. No private material.
 
-    `registryVersion` is the registry version that first published the key; it
-    does not change when the record is later retired or revoked.
+    `signingDomain` is the cryptographic domain the key may sign for. A key
+    record carries no logical `authorityDomain`.
+
+    `registryVersion` is the registry version in which this key was first
+    published. It is immutable: it does not change when the record is later
+    retired or revoked, and evidence can never claim an earlier version.
     """
 
     key_id: str
-    authority_domain: str
+    signing_domain: str
     evidence_types: frozenset[str]
     environment: str
     public_key: bytes
@@ -166,7 +174,7 @@ class AuthorityKeyRecordV1:
             raise ContractViolation("UNSUPPORTED_SCHEMA_VERSION")
         if value["algorithm"] != ALGORITHM:
             raise ContractViolation("UNSUPPORTED_ALGORITHM")
-        domain = _choice(value["authorityDomain"], AUTHORITY_DOMAINS, "authority_domain")
+        domain = _choice(value["signingDomain"], SIGNING_DOMAINS, "signing_domain")
         types = value["evidenceTypes"]
         if (not isinstance(types, list) or not types or types != sorted(set(types))
                 or not all(isinstance(t, str) for t in types)
@@ -325,7 +333,11 @@ class _SignedEvidence:
             raise ContractViolation("UNSUPPORTED_SCHEMA_VERSION")
         _exact(value, cls.FIELDS)
         _schema(value, cls.PROTOCOL, cls.SCHEMA_VERSION)
-        _choice(value["authorityDomain"], AUTHORITY_DOMAINS, "authority_domain")
+        _choice(value["signingDomain"], SIGNING_DOMAINS, "signing_domain")
+        # Logical authority context, B2a meaning. A signing-domain name is never
+        # accepted here, so the two fields cannot be confused.
+        if _id(value["authorityDomain"], "authority_domain") in SIGNING_DOMAINS:
+            raise ContractViolation("INVALID_AUTHORITY_DOMAIN")
         _choice(value["evidenceType"], EVIDENCE_TYPES, "evidence_type")
         _choice(value["environment"], DEPLOYMENT_ENVIRONMENTS, "environment")
         for name in cls.ID_FIELDS + ("keyId", "policyVersion"):
@@ -356,7 +368,7 @@ class _SignedEvidence:
 
 
 _COMMON_EVIDENCE_FIELDS = frozenset({
-    "protocol", "schemaVersion", "authorityDomain", "evidenceType", "environment",
+    "protocol", "schemaVersion", "signingDomain", "authorityDomain", "evidenceType", "environment",
     "logicalOwnerId", "keyId", "registryVersion", "recoveryEpoch", "policyVersion",
     "issuedAt", "signature",
 })
@@ -475,6 +487,7 @@ class OwnerEvidenceExpectationV2:
     request_digest: str
     payload_digest: str
     logical_owner_id: str
+    authority_domain: str
 
 
 @dataclass(frozen=True)
@@ -494,3 +507,4 @@ class PrivacyAuthorizationExpectationV2:
     action_digest: str
     resource_owners: tuple[str, ...]
     logical_owner_id: str
+    authority_domain: str

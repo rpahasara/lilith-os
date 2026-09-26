@@ -5,7 +5,6 @@
     "keys": [
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": null,
         "createdAt": "2026-09-26T00:00:00Z",
         "environment": "dev",
@@ -24,7 +23,8 @@
         "retiredAt": null,
         "revocationReason": null,
         "revokedAt": null,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       }
     ],
     "policyVersion": "policy.synthetic.v2",
@@ -36,12 +36,18 @@
     "registryRootKeyId": "test-only.registry-root-dev-1",
     "registryVersion": 3,
     "schemaVersion": 1,
-    "signature": "2ZKoCyx12AR5zJ5y4Mnkt95R3krAC9Nrfld-Lmfmi4akRk6K-jmmXMgAHHVmFcayEAnMUwE-gh3uSYc-hDahCw"
+    "signature": "zoBopRd7hBThFMHCBdqk4UcWc1psRCfob81O6ftbqyBjIjPpDQwwmXXB-9RErRkUmdgkgy7AUEHh1h9OtReVDQ"
   },
   "domainSeparators": {
     "ownerEvidence": "LILITH_ACTOR_EVIDENCE_V2\u0000",
     "privacyAuthorization": "LILITH_PRIVACY_AUTHORIZATION_V2\u0000",
     "registry": "LILITH_AUTHORITY_REGISTRY_V1\u0000"
+  },
+  "fieldSemantics": {
+    "authorityDomain": "logical authority context (B2a meaning); never a signing domain",
+    "evidence.registryVersion": "any version from key first publication to the verified registry",
+    "keyRecord.registryVersion": "the registry version in which this key was first published",
+    "signingDomain": "cryptographic signing domain: OWNER_ACTOR, PRIVACY"
   },
   "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3a. No real key, owner, registry, or authority.",
   "outcomes": [
@@ -49,7 +55,7 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -70,7 +76,8 @@
         "registryVersion": 2,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "YP1qrXEvPkVqkkkSfSjba3-63eZAy90H_xnnsAzPUYnvjMyk2ppNy1DPaTcf0j3PIqWdBiU1Zx6oQvSuIP7LCA"
+        "signature": "OXX2Fn-caTeZNwZK45RFAiSSSecRsCQcrujIvXZpzhXoKwObsAEiMH5JhMME3-myjNy7N5THH5LxwdB32H9VBA",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "historical",
       "keyStatus": "RETIRED_AFTER_ISSUANCE",
@@ -83,7 +90,7 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -104,7 +111,8 @@
         "registryVersion": 3,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "LGSQakPqJ6TBdUBqbhEcfAjoYQq-TJELD8XfeUUyA8xEoRWoZkZHitUq08tzwyraALXaU9MzEWpaSi6sjDe3Cg"
+        "signature": "9LxVIDWJDc0YrrpNuX7kUd5OpEL0bj0UXHH7WeBQsKYLwhEudCMT8IQp4RwgVIVxmBJq0N-DXqGfSv98BCtEAg",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "new",
       "kind": "owner",
@@ -116,7 +124,42 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
+        "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
+        "challengeId": "och.synthetic-create",
+        "credentialRecordId": "ocred.synthetic",
+        "environment": "test",
+        "evidenceId": "aev.synthetic-create",
+        "evidenceNonce": "och.synthetic-create",
+        "evidenceType": "OWNER_MEMORY_OPERATION",
+        "issuedAt": "2026-09-25T23:59:00Z",
+        "keyId": "actor.retired-1",
+        "logicalOwnerId": "owner.synthetic.v1",
+        "payloadDigest": "9bd579e59c75451368363277083853d9a2d802459d7d6fcab056429770af1cf5",
+        "policyVersion": "policy.synthetic.v2",
+        "protocol": "LILITH_ACTOR_EVIDENCE",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
+        "schemaVersion": 2,
+        "signature": "hZOHdB10Ju94h8UkzPjjRu6w90xqdqOKh681InGG07CC4pPoX4oDuXex0-NntU3LBZojx-0kUvmY3tfRyrGJAQ",
+        "signingDomain": "OWNER_ACTOR"
+      },
+      "context": "new",
+      "keyStatus": "RETIRED_AFTER_ISSUANCE",
+      "kind": "owner",
+      "name": "registry-update-keeps-in-flight-evidence",
+      "reason": null,
+      "status": "VERIFIED_AUTHORITY_EVIDENCE"
+    },
+    {
+      "artifact": {
+        "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
+        "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -137,7 +180,8 @@
         "registryVersion": 2,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "TQiZutFBxARM0abSZaaF-kkMnc0JMhLgpRfhNtY-scYCHRvHDgtx4XydMGmhmjnFAe1_U53ruARjKAbBA2lVDg"
+        "signature": "BKilAwmKH_TrFiIcx4jyYTDLRpLFkYPp1x1NBaSIhH2TbP7mZjETG5sja3qPj0jc3bfO_6MINg6q0GLl0W2gDQ",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "historical",
       "kind": "owner",
@@ -149,7 +193,7 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -170,7 +214,8 @@
         "registryVersion": 1,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "D4JjQyS2KzoO8Tpe8XNkFJTYJhlW0ueM6pZlNGgkNYOjOFIv8ug6H-GsYupjm45fYXk-IHsvmDgq41FjUm_vBA"
+        "signature": "4reSQAVxKKo2YHHrOFHiqspgiq8Ey__dhZqnK8jyM6AGUTxhAvk4c8NYmBMVbm6XURCz7cp8y9S4JfTCnihACA",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "historical",
       "keyStatus": "RETIRED_AFTER_ISSUANCE",
@@ -183,7 +228,7 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -204,7 +249,8 @@
         "registryVersion": 1,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "D4JjQyS2KzoO8Tpe8XNkFJTYJhlW0ueM6pZlNGgkNYOjOFIv8ug6H-GsYupjm45fYXk-IHsvmDgq41FjUm_vBA"
+        "signature": "4reSQAVxKKo2YHHrOFHiqspgiq8Ey__dhZqnK8jyM6AGUTxhAvk4c8NYmBMVbm6XURCz7cp8y9S4JfTCnihACA",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "new",
       "kind": "owner",
@@ -215,7 +261,7 @@
     {
       "artifact": {
         "actionDigest": "ed6ef042e7d064ef61a8a1d3f0dd043497d1ec9b989c4db0939cee064c123206",
-        "authorityDomain": "PRIVACY",
+        "authorityDomain": "authority.synthetic.memory",
         "authorizationId": "pauth.synthetic-forget",
         "environment": "test",
         "evidenceType": "PRIVACY_ERASURE_AUTHORIZATION",
@@ -241,21 +287,22 @@
           "PRIVACY"
         ],
         "schemaVersion": 2,
-        "signature": "3-_dgZxc4brVLPyiEnDz5M-bxnMyqasCdf3UVRwEG0eF_kiN1AP_dwm9bc5gu-EraNezykWLpZNJS5iGhocpCw",
+        "signature": "TD249PJBSmkTW8HMu11E8fwg-MZ3mWKjJ8gzIB5eegxsz7z-7H4Z7BTxGb3wwlzPRl0M2BO_d9QnpAZN46hZDA",
+        "signingDomain": "PRIVACY",
         "subjectKey": "codename",
         "subjectNamespace": "project.homelab"
       },
       "context": "new",
       "kind": "privacy",
       "name": "cross-domain-actor-key-signs-privacy",
-      "reason": "KEY_DOMAIN_MISMATCH",
+      "reason": "KEY_SIGNING_DOMAIN_MISMATCH",
       "status": "NOT_ACCEPTED"
     },
     {
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -276,19 +323,20 @@
         "registryVersion": 3,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "r2pYmdfKGK4Vh_8DiTTn1M1hUHzF9cgvEUlnwKvP-yPO9Ka1wq9q9thsia3-M-rBPq8CE_4mKhg276l2VbptAw"
+        "signature": "7FFXXb8cA4dNwagTmHmSMAjBnT_8UwnzC5UbUR9QvB2D5tZz-vA-9wQySnMtV8nTt1ImULZ6AdVS6kBMNEDPAA",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "new",
       "kind": "owner",
       "name": "cross-domain-privacy-key-signs-actor",
-      "reason": "KEY_DOMAIN_MISMATCH",
+      "reason": "KEY_SIGNING_DOMAIN_MISMATCH",
       "status": "NOT_ACCEPTED"
     },
     {
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.memory",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -309,7 +357,8 @@
         "registryVersion": 3,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "BFn2voNB_tgqXqWezjm38X_xhSNDSaymZtJgkp_blYTVp4Tt85xBcCoPJAapMkzFlEwwhBhXV0rk7I8He25wDA"
+        "signature": "lyu2Ms9GDkttfWfWwz1U_Jg1imJUIOTodHN1KYV98DpIz8wsnQ2hJwGxId9KRK3ZoPhQ3DQxX6jZfIQxigYuAQ",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "new",
       "kind": "privacy",
@@ -321,7 +370,7 @@
       "artifact": {
         "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
         "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-        "authorityDomain": "OWNER_ACTOR",
+        "authorityDomain": "authority.synthetic.privacy",
         "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
         "challengeId": "och.synthetic-create",
         "credentialRecordId": "ocred.synthetic",
@@ -342,7 +391,42 @@
         "registryVersion": 3,
         "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
         "schemaVersion": 2,
-        "signature": "BFn2voNB_tgqXqWezjm38X_xhSNDSaymZtJgkp_blYTVp4Tt85xBcCoPJAapMkzFlEwwhBhXV0rk7I8He25wDA"
+        "signature": "4k0mEWbINf3sbMXN7HwMwP3hj7-Bp7LCQQ91EEri71oG8768R37xDHhstjZ7JJeoB5xBPrp6usj9OfaOcdsOAA",
+        "signingDomain": "OWNER_ACTOR"
+      },
+      "context": "new",
+      "kind": "owner",
+      "name": "logical-authority-context-mismatch-with-valid-signing-domain",
+      "reason": "AUTHORITY_DOMAIN_MISMATCH",
+      "status": "NOT_ACCEPTED"
+    },
+    {
+      "artifact": {
+        "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
+        "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
+        "authorityDomain": "authority.synthetic.memory",
+        "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
+        "challengeId": "och.synthetic-create",
+        "credentialRecordId": "ocred.synthetic",
+        "environment": "test",
+        "evidenceId": "aev.synthetic-create",
+        "evidenceNonce": "och.synthetic-create",
+        "evidenceType": "OWNER_MEMORY_OPERATION",
+        "issuedAt": "2026-09-26T12:00:21Z",
+        "keyId": "actor.current-2",
+        "logicalOwnerId": "owner.synthetic.v1",
+        "payloadDigest": "9bd579e59c75451368363277083853d9a2d802459d7d6fcab056429770af1cf5",
+        "policyVersion": "policy.synthetic.v2",
+        "protocol": "LILITH_ACTOR_EVIDENCE",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 3,
+        "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
+        "schemaVersion": 2,
+        "signature": "lyu2Ms9GDkttfWfWwz1U_Jg1imJUIOTodHN1KYV98DpIz8wsnQ2hJwGxId9KRK3ZoPhQ3DQxX6jZfIQxigYuAQ",
+        "signingDomain": "OWNER_ACTOR"
       },
       "context": "dev",
       "kind": "owner",
@@ -351,11 +435,11 @@
       "status": "NOT_ACCEPTED"
     }
   ],
-  "ownerEvidenceSigningDigest": "708e350908800e6877cc205b416efdc31e26d5693e91ff517dfafcc433951cf0",
+  "ownerEvidenceSigningDigest": "0a8d5fe6775662c513fb0bde120d5999804be1e1a7437ea3eb3ddd63eac6fd97",
   "ownerEvidenceV2": {
     "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
     "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
-    "authorityDomain": "OWNER_ACTOR",
+    "authorityDomain": "authority.synthetic.memory",
     "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
     "challengeId": "och.synthetic-create",
     "credentialRecordId": "ocred.synthetic",
@@ -376,12 +460,13 @@
     "registryVersion": 3,
     "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
     "schemaVersion": 2,
-    "signature": "BFn2voNB_tgqXqWezjm38X_xhSNDSaymZtJgkp_blYTVp4Tt85xBcCoPJAapMkzFlEwwhBhXV0rk7I8He25wDA"
+    "signature": "lyu2Ms9GDkttfWfWwz1U_Jg1imJUIOTodHN1KYV98DpIz8wsnQ2hJwGxId9KRK3ZoPhQ3DQxX6jZfIQxigYuAQ",
+    "signingDomain": "OWNER_ACTOR"
   },
-  "privacyAuthorizationSigningDigest": "c38fa840e918408da446aa1bb2be242590701130119b8e92674c71eafed7c648",
+  "privacyAuthorizationSigningDigest": "8182cc7a8024992dbe1a685abc5a2e261b2cc6ee46c6348db56f1ba67db73813",
   "privacyAuthorizationV2": {
     "actionDigest": "ed6ef042e7d064ef61a8a1d3f0dd043497d1ec9b989c4db0939cee064c123206",
-    "authorityDomain": "PRIVACY",
+    "authorityDomain": "authority.synthetic.memory",
     "authorizationId": "pauth.synthetic-forget",
     "environment": "test",
     "evidenceType": "PRIVACY_ERASURE_AUTHORIZATION",
@@ -407,7 +492,8 @@
       "PRIVACY"
     ],
     "schemaVersion": 2,
-    "signature": "nsMcHdT-5xP5lg-peQuBhWsrlmOidfeVNnffWsPKaSX6nwh21DdWaIFLjjdidgkeAFtl50oHG_PDT4R-U39sAA",
+    "signature": "DRMOce5SpS_VCq10lL2P47XBNUQleuy9yJfLSwOTR5s8sISZ8PW1X1DcBPyFS-P3VkiBRtANvqqlriwQdFe0BQ",
+    "signingDomain": "PRIVACY",
     "subjectKey": "codename",
     "subjectNamespace": "project.homelab"
   },
@@ -423,7 +509,6 @@
     "keys": [
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": "2026-09-24T00:00:00Z",
         "createdAt": "2026-09-10T00:00:00Z",
         "environment": "test",
@@ -442,11 +527,11 @@
         "retiredAt": null,
         "revocationReason": "COMPROMISED",
         "revokedAt": "2026-09-25T00:00:00Z",
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       },
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": null,
         "createdAt": "2026-09-26T00:00:00Z",
         "environment": "test",
@@ -465,11 +550,11 @@
         "retiredAt": null,
         "revocationReason": null,
         "revokedAt": null,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       },
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": null,
         "createdAt": "2026-08-01T00:00:00Z",
         "environment": "test",
@@ -488,11 +573,11 @@
         "retiredAt": "2026-09-10T00:00:00Z",
         "revocationReason": null,
         "revokedAt": null,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       },
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": null,
         "createdAt": "2026-09-10T00:00:00Z",
         "environment": "test",
@@ -511,11 +596,11 @@
         "retiredAt": "2026-09-26T00:00:00Z",
         "revocationReason": null,
         "revokedAt": null,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       },
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "OWNER_ACTOR",
         "compromisedSince": null,
         "createdAt": "2026-09-10T00:00:00Z",
         "environment": "test",
@@ -534,11 +619,11 @@
         "retiredAt": null,
         "revocationReason": "ROUTINE",
         "revokedAt": "2026-09-20T00:00:00Z",
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
       },
       {
         "algorithm": "Ed25519",
-        "authorityDomain": "PRIVACY",
         "compromisedSince": null,
         "createdAt": "2026-09-10T00:00:00Z",
         "environment": "test",
@@ -557,7 +642,8 @@
         "retiredAt": null,
         "revocationReason": null,
         "revokedAt": null,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "signingDomain": "PRIVACY"
       }
     ],
     "policyVersion": "policy.synthetic.v2",
@@ -569,7 +655,7 @@
     "registryRootKeyId": "test-only.registry-root-1",
     "registryVersion": 3,
     "schemaVersion": 1,
-    "signature": "RqSuWO5nK2k32Od43sUbKw7H5LAy_SplyGP_7hPClcgYL5k5rJAVvn4XbanaWWnooj5_YL4Ybe6mribOvxFcAA"
+    "signature": "mgknhTnLo692-Gc_-9Rzvsq_c356BUlKWpLtRkZG1Y_40jJqrFIJzQPOmBXztiUO4gtGcwxuDTdVawlCKDwmAg"
   },
-  "registrySigningDigest": "cff1ea806815c93b2ef65d021c35c04f4960c1c5d4c0638dafa04890c94569a6"
+  "registrySigningDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d"
 }

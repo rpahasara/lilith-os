@@ -1,6 +1,8 @@
 """15B2b-B1b-3a authority evidence and key registry contracts: golden vectors,
-domain separation, retirement vs compromise, environment/domain/epoch rules,
-downgrade, full negative matrix, B2a/V1 immutability, isolation (TEST_ONLY)."""
+signing-domain separation (distinct from the logical authorityDomain),
+retirement vs compromise, environment/domain/epoch rules, registry evolution
+and downgrade, full negative matrix, B2a/V1 immutability, isolation
+(TEST_ONLY)."""
 
 from __future__ import annotations
 
@@ -109,8 +111,10 @@ CASES = [
     ("key-hmac-algorithm", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", algorithm="HMAC-SHA256"))), "KEY_ALGORITHM_UNSUPPORTED"),
     ("key-unsupported-schema", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", schemaVersion=2))), "UNSUPPORTED_SCHEMA_VERSION"),
     ("key-malformed-public-key", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", publicKey=S.b64(b"\x01" * 31)))), "KEY_RECORD_INVALID"),
-    ("key-containment-domain", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", authorityDomain="CONTAINMENT"))), "KEY_RECORD_INVALID"),
+    ("key-containment-domain", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", signingDomain="CONTAINMENT"))), "KEY_RECORD_INVALID"),
     ("key-cross-domain-evidence-type", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", evidenceTypes=["OWNER_MEMORY_OPERATION", "PRIVACY_ERASURE_AUTHORIZATION"]))), "KEY_RECORD_INVALID"),
+    ("key-record-carries-logical-authority-domain", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", authorityDomain=S.LOGICAL_AUTHORITY_DOMAIN))), "REGISTRY_MALFORMED"),
+    ("key-record-legacy-authority-domain-field", lambda: reg_result(reg=S.registry(keys=[({**{k: v for k, v in r.items() if k != "signingDomain"}, "authorityDomain": r["signingDomain"]} if r["keyId"] == "actor.current-2" else r) for r in S.default_keys()])), "REGISTRY_MALFORMED"),
     ("key-empty-evidence-types", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", evidenceTypes=[]))), "KEY_RECORD_INVALID"),
     ("key-actor-key-reused-as-privacy", lambda: reg_result(reg=S.registry(keys=keys_with("privacy.current-1", publicKey=S.public_b64("actor.current-2")))), "KEY_RECORD_INVALID"),
     ("key-registry-root-as-authority-key", lambda: reg_result(reg=S.registry(keys=keys_with("actor.current-2", publicKey=S.public_b64("root")))), "KEY_RECORD_INVALID"),
@@ -151,7 +155,9 @@ CASES = [
     ("evidence-malformed-digest", lambda: S.verify_owner(S.owner_evidence(actionDigest="ABC")), "EVIDENCE_MALFORMED"),
     ("privacy-artifact-as-owner-evidence", lambda: S.verify_owner(S.privacy_authorization()), "EVIDENCE_MALFORMED"),
     # Domain, type, environment, key
-    ("evidence-claims-privacy-domain", lambda: S.verify_owner(S.owner_evidence(authorityDomain="PRIVACY")), "EVIDENCE_DOMAIN_MISMATCH"),
+    ("evidence-claims-privacy-signing-domain", lambda: S.verify_owner(S.owner_evidence(signingDomain="PRIVACY")), "SIGNING_DOMAIN_MISMATCH"),
+    ("signing-domain-value-as-logical-context", lambda: S.verify_owner(S.owner_evidence(authorityDomain="OWNER_ACTOR")), "EVIDENCE_MALFORMED"),
+    ("logical-context-as-signing-domain", lambda: S.verify_owner(S.owner_evidence(signingDomain=S.LOGICAL_AUTHORITY_DOMAIN)), "EVIDENCE_MALFORMED"),
     ("evidence-wrong-evidence-type", lambda: S.verify_owner(S.owner_evidence(evidenceType="PRIVACY_ERASURE_AUTHORIZATION")), "EVIDENCE_TYPE_MISMATCH"),
     ("evidence-wrong-environment", lambda: S.verify_owner(S.owner_evidence(environment="prod")), "ENVIRONMENT_MISMATCH"),
     ("cross-environment-replay-test-into-dev", lambda: S.verify_owner(ctx=S.dev_context(), reg=S.dev_registry()), "ENVIRONMENT_MISMATCH"),
@@ -160,8 +166,8 @@ CASES = [
     ("relabelled-environment-replay", lambda: S.verify_owner(tampered(S.owner_evidence(), environment="dev"), ctx=S.dev_context(), reg=S.dev_registry()), "SIGNATURE_INVALID"),
     ("unknown-key", lambda: S.verify_owner(S.owner_evidence(signer="attacker", keyId="actor.attacker-1")), "KEY_UNKNOWN"),
     ("containment-key-id-unknown", lambda: S.verify_owner(S.owner_evidence(signer="attacker", keyId="containment.legacy-1")), "KEY_UNKNOWN"),
-    ("privacy-key-signs-actor-evidence", lambda: S.verify_owner(S.owner_evidence(signer="privacy.current-1", keyId="privacy.current-1")), "KEY_DOMAIN_MISMATCH"),
-    ("actor-key-signs-privacy-typed", lambda: S.verify_privacy(S.privacy_authorization(signer="actor.current-2", keyId="actor.current-2")), "KEY_DOMAIN_MISMATCH"),
+    ("privacy-key-signs-actor-evidence", lambda: S.verify_owner(S.owner_evidence(signer="privacy.current-1", keyId="privacy.current-1")), "KEY_SIGNING_DOMAIN_MISMATCH"),
+    ("actor-key-signs-privacy-typed", lambda: S.verify_privacy(S.privacy_authorization(signer="actor.current-2", keyId="actor.current-2")), "KEY_SIGNING_DOMAIN_MISMATCH"),
     ("privacy-key-claims-actor-key-id", lambda: S.verify_owner(S.owner_evidence(signer="privacy.current-1")), "SIGNATURE_INVALID"),
     ("containment-derived-ed25519-signs-actor", lambda: S.verify_owner(containment_signed_owner()), "SIGNATURE_INVALID"),
     ("containment-hmac-tag-as-signature", lambda: S.verify_owner(containment_hmac_owner()), "EVIDENCE_MALFORMED"),
@@ -182,19 +188,21 @@ CASES = [
     ("wrong-recovery-epoch-forked", lambda: S.verify_owner(S.owner_evidence(recoveryEpoch=S.FORK_EPOCH.to_dict())), "RECOVERY_EPOCH_MISMATCH"),
     ("wrong-recovery-epoch-old-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.epoch1-1", registryVersion=1, recoveryEpoch=S.OLD_EPOCH.to_dict(), issuedAt="2026-09-05T12:00:00Z")), "RECOVERY_EPOCH_MISMATCH"),
     ("old-epoch-evidence-relabelled-current-epoch", lambda: S.verify_owner(S.owner_evidence(keyId="actor.epoch1-1", registryVersion=1, issuedAt="2026-09-05T12:00:00Z"), ctx=S.historical_context()), "RECOVERY_EPOCH_MISMATCH"),
-    ("wrong-registry-version-older", lambda: S.verify_owner(S.owner_evidence(registryVersion=2)), "REGISTRY_VERSION_MISMATCH"),
+    ("evidence-version-before-key-publication", lambda: S.verify_owner(S.owner_evidence(registryVersion=2)), "REGISTRY_VERSION_MISMATCH"),
     ("wrong-registry-version-future", lambda: S.verify_owner(S.owner_evidence(registryVersion=4)), "REGISTRY_VERSION_MISMATCH"),
-    ("historical-evidence-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", registryVersion=2, issuedAt="2026-09-20T12:00:00Z")), "REGISTRY_VERSION_MISMATCH"),
+    ("evidence-version-beyond-verified-registry", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", registryVersion=4, issuedAt="2026-09-20T12:00:00Z")), "REGISTRY_VERSION_MISMATCH"),
     ("wrong-policy-version", lambda: S.verify_owner(S.owner_evidence(policyVersion="policy.synthetic.v1")), "POLICY_VERSION_MISMATCH"),
     # Validity interval, retirement, routine revocation
     ("evidence-before-not-before", lambda: S.verify_owner(S.owner_evidence(issuedAt="2026-09-25T23:59:59Z")), "KEY_NOT_YET_VALID"),
     ("retired-key-historical-before-not-before", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", registryVersion=2, issuedAt="2026-09-05T00:00:00Z"), ctx=S.historical_context()), "KEY_NOT_YET_VALID"),
     ("retired-key-new-evidence-historical", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", registryVersion=2, issuedAt="2026-09-26T00:00:00Z"), ctx=S.historical_context()), "KEY_RETIRED"),
-    ("retired-key-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", issuedAt="2026-09-20T12:00:00Z")), "KEY_RETIRED"),
+    ("retired-key-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.retired-1", issuedAt="2026-09-26T00:00:00Z")), "KEY_RETIRED"),
     ("revoked-key-after-revocation", lambda: S.verify_owner(S.owner_evidence(keyId="actor.revoked-1", registryVersion=2, issuedAt="2026-09-21T00:00:00Z"), ctx=S.historical_context()), "KEY_REVOKED"),
-    ("revoked-key-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.revoked-1", issuedAt="2026-09-15T00:00:00Z")), "KEY_REVOKED"),
+    ("revoked-key-new-admission", lambda: S.verify_owner(S.owner_evidence(keyId="actor.revoked-1", issuedAt="2026-09-21T00:00:00Z")), "KEY_REVOKED"),
     # Binding to the independently verified expectation
     ("logical-owner-mismatch", lambda: S.verify_owner(S.owner_evidence(logicalOwnerId="owner.other.v1")), "LOGICAL_OWNER_MISMATCH"),
+    ("logical-authority-domain-mismatch", lambda: S.verify_owner(S.owner_evidence(authorityDomain="authority.synthetic.other")), "AUTHORITY_DOMAIN_MISMATCH"),
+    ("logical-authority-domain-expectation-mismatch", lambda: S.verify_owner(expectation=S.owner_expectation(authority_domain="authority.synthetic.other")), "AUTHORITY_DOMAIN_MISMATCH"),
     ("evidence-id-substitution", lambda: S.verify_owner(S.owner_evidence(evidenceId="aev.synthetic-other")), "EVIDENCE_ID_MISMATCH"),
     ("nonce-substitution", lambda: S.verify_owner(S.owner_evidence(evidenceNonce="och.synthetic-other")), "EVIDENCE_NONCE_MISMATCH"),
     ("challenge-id-substitution", lambda: S.verify_owner(S.owner_evidence(challengeId="och.synthetic-other", evidenceNonce="och.synthetic-other")), "CHALLENGE_REFERENCE_MISMATCH"),
@@ -209,12 +217,13 @@ CASES = [
     ("owner-artifact-as-privacy", lambda: S.verify_privacy(S.owner_evidence()), "EVIDENCE_MALFORMED"),
     ("privacy-unsorted-resource-owners", lambda: S.verify_privacy(S.privacy_authorization(resourceOwners=["PRIVACY", "L04"])), "EVIDENCE_MALFORMED"),
     ("privacy-unsupported-schema", lambda: S.verify_privacy(S.privacy_authorization(schemaVersion=1)), "UNSUPPORTED_SCHEMA_VERSION"),
-    ("privacy-claims-actor-domain", lambda: S.verify_privacy(S.privacy_authorization(authorityDomain="OWNER_ACTOR")), "EVIDENCE_DOMAIN_MISMATCH"),
+    ("privacy-claims-actor-signing-domain", lambda: S.verify_privacy(S.privacy_authorization(signingDomain="OWNER_ACTOR")), "SIGNING_DOMAIN_MISMATCH"),
     ("privacy-wrong-evidence-type", lambda: S.verify_privacy(S.privacy_authorization(evidenceType="OWNER_MEMORY_OPERATION")), "EVIDENCE_TYPE_MISMATCH"),
     ("privacy-signature-under-owner-separator", lambda: S.verify_privacy({**S.privacy_unsigned(), "signature": S.b64(S.private("privacy.current-1").sign(A.OWNER_EVIDENCE_DOMAIN_SEPARATOR + K._canonical(S.privacy_unsigned())))}), "SIGNATURE_INVALID"),
     ("privacy-hold-mutation-unsigned", lambda: S.verify_privacy(tampered(S.privacy_authorization(), holdId="phold.other")), "SIGNATURE_INVALID"),
     ("privacy-wrong-epoch", lambda: S.verify_privacy(S.privacy_authorization(recoveryEpoch=S.OLD_EPOCH.to_dict())), "RECOVERY_EPOCH_MISMATCH"),
     ("privacy-logical-owner", lambda: S.verify_privacy(S.privacy_authorization(logicalOwnerId="owner.other.v1")), "LOGICAL_OWNER_MISMATCH"),
+    ("privacy-logical-authority-domain", lambda: S.verify_privacy(S.privacy_authorization(authorityDomain="authority.synthetic.other")), "AUTHORITY_DOMAIN_MISMATCH"),
     ("privacy-authorization-id-substitution", lambda: S.verify_privacy(S.privacy_authorization(authorizationId="pauth.other")), "EVIDENCE_ID_MISMATCH"),
     ("privacy-nonce-substitution", lambda: S.verify_privacy(S.privacy_authorization(executionNonce="pnonce.other")), "EVIDENCE_NONCE_MISMATCH"),
     ("privacy-forget-request-substitution", lambda: S.verify_privacy(S.privacy_authorization(forgetRequestId="pforget.other")), "FORGET_REQUEST_MISMATCH"),
@@ -264,7 +273,7 @@ class NegativeMatrixTests(unittest.TestCase):
             (A.OwnerEvidenceV2, S.owner_evidence(), S.verify_owner),
             (A.PrivacyAuthorizationV2, S.privacy_authorization(), S.verify_privacy),
         ):
-            for name in sorted(contract.signed_fields() - {"protocol", "schemaVersion", "authorityDomain",
+            for name in sorted(contract.signed_fields() - {"protocol", "schemaVersion", "signingDomain",
                                                            "evidenceType", "environment", "keyId"}):
                 with self.subTest(contract=contract.__name__, field=name):
                     value = artifact[name]
@@ -299,11 +308,16 @@ class PositivePathTests(unittest.TestCase):
         self.assertIs(result.facts["truthClaim"], False)
         self.assertIs(result.facts["authorizesNewAdmission"], True)
         self.assertEqual(result.facts["keyStatus"], "CURRENT")
+        self.assertEqual(result.facts["signingDomain"], A.OWNER_ACTOR)
+        self.assertEqual(result.facts["authorityDomain"], S.LOGICAL_AUTHORITY_DOMAIN)
+        self.assertEqual(result.facts["registryVersionBasis"], V.REGISTRY_VERSION_BASIS)
+        self.assertIs(result.facts["historicalRegistrySnapshotVerified"], False)
 
     def test_privacy_authorization_verifies(self):
         result = S.verify_privacy()
         self.assertEqual(result.status, V.VERIFIED_AUTHORITY_EVIDENCE)
-        self.assertEqual(result.facts["authorityDomain"], A.PRIVACY)
+        self.assertEqual(result.facts["signingDomain"], A.PRIVACY)
+        self.assertEqual(result.facts["authorityDomain"], S.LOGICAL_AUTHORITY_DOMAIN)
         self.assertIs(result.facts["memoryAcceptance"], False)
 
     def test_dev_environment_is_self_consistent_only(self):
@@ -327,10 +341,19 @@ class RetirementAndCompromiseTests(unittest.TestCase):
         self.assertEqual(S.verify_owner(at_retirement, ctx=S.historical_context()).reason, "KEY_RETIRED")
         self.assertTrue(S.verify_owner(at_not_before, ctx=S.historical_context()).verified)
 
-    def test_routine_revocation_behaves_like_retirement_for_history(self):
+    def test_routine_revocation_behaves_like_retirement(self):
         evidence = S.owner_evidence(keyId="actor.revoked-1", registryVersion=2, issuedAt="2026-09-15T00:00:00Z")
-        result = S.verify_owner(evidence, ctx=S.historical_context())
-        self.assertEqual(result.facts["keyStatus"], "REVOKED_AFTER_ISSUANCE")
+        for ctx in (S.context(), S.historical_context()):
+            with self.subTest(purpose=ctx.purpose):
+                result = S.verify_owner(evidence, ctx=ctx)
+                self.assertEqual(result.facts["keyStatus"], "REVOKED_AFTER_ISSUANCE")
+
+    def test_rotation_does_not_invalidate_in_flight_evidence(self):
+        in_flight = S.owner_evidence(keyId="actor.retired-1", registryVersion=2, issuedAt="2026-09-25T23:59:00Z")
+        result = S.verify_owner(in_flight)
+        self.assertEqual(result.status, V.VERIFIED_AUTHORITY_EVIDENCE)
+        self.assertIs(result.facts["authorizesNewAdmission"], True)
+        self.assertEqual(result.facts["keyStatus"], "RETIRED_AFTER_ISSUANCE")
 
     def test_no_signer_controlled_timestamp_rescues_a_compromised_key(self):
         for issued in ("2026-09-10T00:00:00Z", "2026-09-15T00:00:00Z", "2026-09-23T23:59:59Z",
@@ -348,8 +371,86 @@ class RetirementAndCompromiseTests(unittest.TestCase):
         # support NEW_ADMISSION.
         before = S.owner_evidence(keyId="actor.compromised-1", issuedAt="2026-09-11T00:00:00Z")
         self.assertEqual(S.verify_owner(before).reason, "KEY_COMPROMISED")
-        routine = S.owner_evidence(keyId="actor.revoked-1", issuedAt="2026-09-15T00:00:00Z")
-        self.assertEqual(S.verify_owner(routine).reason, "KEY_REVOKED")
+        after = S.owner_evidence(keyId="actor.revoked-1", issuedAt="2026-09-21T00:00:00Z")
+        self.assertEqual(S.verify_owner(after).reason, "KEY_REVOKED")
+
+
+class RegistryEvolutionTests(unittest.TestCase):
+    """Registry evolution alone never invalidates otherwise-valid evidence."""
+
+    def test_unrelated_monotonic_registry_updates_keep_pending_evidence_valid(self):
+        pending = S.owner_evidence()  # issued under registry version 3
+        extra = S.key_record("privacy.zz-added-4", seed_name="attacker", registryVersion=4)
+        for version, keys in ((3, None), (4, S.default_keys() + [extra]), (9, None)):
+            with self.subTest(registry_version=version):
+                reg = S.registry(registryVersion=version, keys=keys)
+                result = S.verify_owner(pending, reg=reg)
+                self.assertEqual(result.status, V.VERIFIED_AUTHORITY_EVIDENCE)
+                self.assertEqual(result.facts["evidenceRegistryVersion"], 3)
+                self.assertEqual(result.facts["registryVersion"], version)
+                self.assertIs(result.facts["historicalRegistrySnapshotVerified"], False)
+
+    def test_evidence_version_bounds(self):
+        # Key first published at 3: evidence may not claim 2, nor exceed the
+        # verified registry.
+        self.assertEqual(S.verify_owner(S.owner_evidence(registryVersion=2)).reason, "REGISTRY_VERSION_MISMATCH")
+        self.assertEqual(S.verify_owner(S.owner_evidence(registryVersion=4)).reason, "REGISTRY_VERSION_MISMATCH")
+        later = S.owner_evidence(registryVersion=4)
+        self.assertTrue(S.verify_owner(later, reg=S.registry(registryVersion=4)).verified)
+
+    def test_downgrade_still_rejected_and_current_compromise_still_applies(self):
+        pending = S.owner_evidence()
+        self.assertEqual(S.verify_owner(pending, ctx=S.context(trusted_minimum_registry_version=4)).reason,
+                         "REGISTRY_DOWNGRADE")
+        # A later registry marks the signing key compromised: retroactive.
+        compromised = S.registry(registryVersion=4, keys=[
+            ({**k, "revokedAt": "2026-09-26T06:00:00Z", "revocationReason": "COMPROMISED",
+              "compromisedSince": "2026-09-26T00:00:00Z"} if k["keyId"] == "actor.current-2" else k)
+            for k in S.default_keys()])
+        self.assertEqual(S.verify_owner(pending, reg=compromised).reason, "KEY_COMPROMISED")
+
+    def test_key_record_registry_version_means_first_publication(self):
+        self.assertEqual(GOLDEN["fieldSemantics"]["keyRecord.registryVersion"],
+                         "the registry version in which this key was first published")
+        self.assertIn("first published", " ".join(A.AuthorityKeyRecordV1.__doc__.split()))
+        record = next(k for k in S.default_keys() if k["keyId"] == "actor.retired-1")
+        self.assertEqual(record["registryVersion"], 2)  # unchanged by its later retirement
+        self.assertIsNotNone(record["retiredAt"])
+
+
+class SigningDomainSemanticsTests(unittest.TestCase):
+    """logical authority context != cryptographic signing domain."""
+
+    def test_field_sets(self):
+        self.assertIn("signingDomain", A.KEY_RECORD_FIELDS)
+        self.assertNotIn("authorityDomain", A.KEY_RECORD_FIELDS)
+        for contract in (A.OwnerEvidenceV2, A.PrivacyAuthorizationV2):
+            self.assertIn("signingDomain", contract.FIELDS)
+            self.assertIn("authorityDomain", contract.FIELDS)
+        self.assertEqual(A.SIGNING_DOMAINS, frozenset({"OWNER_ACTOR", "PRIVACY"}))
+        self.assertFalse(hasattr(A, "AUTHORITY_DOMAINS"))
+
+    def test_b2a_authority_domain_semantics_are_unchanged(self):
+        # B2a keeps authorityDomain as the logical scope; the B1b-3a logical
+        # value is the same synthetic scope, and it is not a signing domain.
+        import synthetic_chain
+        self.assertEqual(synthetic_chain.AUTHORITY_DOMAIN, S.LOGICAL_AUTHORITY_DOMAIN)
+        self.assertNotIn(S.LOGICAL_AUTHORITY_DOMAIN, A.SIGNING_DOMAINS)
+        self.assertIn("authorityDomain", K.CHALLENGE_V2_FIELDS)
+        self.assertIn("authorityDomain", K.EVIDENCE_FIELDS)
+        self.assertNotIn("signingDomain", K.CHALLENGE_V2_FIELDS | K.EVIDENCE_FIELDS)
+
+    def test_golden_vectors_make_the_distinction_explicit(self):
+        semantics = GOLDEN["fieldSemantics"]
+        self.assertIn("cryptographic", semantics["signingDomain"])
+        self.assertIn("logical", semantics["authorityDomain"])
+        self.assertEqual(GOLDEN["ownerEvidenceV2"]["signingDomain"], "OWNER_ACTOR")
+        self.assertEqual(GOLDEN["ownerEvidenceV2"]["authorityDomain"], "authority.synthetic.memory")
+        self.assertEqual(GOLDEN["privacyAuthorizationV2"]["signingDomain"], "PRIVACY")
+        self.assertEqual(GOLDEN["privacyAuthorizationV2"]["authorityDomain"], "authority.synthetic.memory")
+        for record in GOLDEN["registry"]["keys"]:
+            self.assertIn(record["signingDomain"], {"OWNER_ACTOR", "PRIVACY"})
+            self.assertNotIn("authorityDomain", record)
 
 
 class EpochTests(unittest.TestCase):
@@ -414,9 +515,11 @@ class GoldenVectorTests(unittest.TestCase):
     def test_outcome_vectors(self):
         self.assertEqual([v["name"] for v in GOLDEN["outcomes"]], [
             "retirement-historical-accepted", "retirement-new-admission-rejected",
+            "registry-update-keeps-in-flight-evidence",
             "compromise-backdated-rejected", "epoch-old-evidence-historical-only",
             "epoch-old-evidence-new-admission-rejected", "cross-domain-actor-key-signs-privacy",
             "cross-domain-privacy-key-signs-actor", "cross-domain-owner-evidence-as-privacy",
+            "logical-authority-context-mismatch-with-valid-signing-domain",
             "environment-test-evidence-in-dev",
         ])
         for vector in GOLDEN["outcomes"]:
