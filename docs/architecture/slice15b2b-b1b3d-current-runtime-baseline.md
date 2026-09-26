@@ -387,6 +387,87 @@ B1b-3d custody installation (design L1 onwards) must not start before gate 4
 has been installed and post-verified. Until then, the next library update
 mapped by the broker can restart it again and end this acceptance.
 
+## 10. Host maintenance policy addendum (read-only, 2026-09-26)
+
+**Finding:** `AUTO_REBOOT_DISABLED` for `lilith-dev-01`.
+
+This addendum does not change the §3 acceptance, the §5 artifact, or the §6
+runbook.
+
+**Scope of the review:**
+
+- Protected main was `ef17e6b612df7aaadf7addeeda829a8d35db83b8`.
+- Only `lilith-dev-01` was contacted, and the hostname was checked before any
+  privileged read. GCE was queried with read-only describe/list calls.
+- Nothing was mutated and PROD was not contacted.
+
+| # | Fact | Evidence (source) |
+| --- | --- | --- |
+| 1 | unattended-upgrades remains enabled | `APT::Periodic::Unattended-Upgrade "1"` and `Update-Package-Lists "1"` in `20auto-upgrades` (EXPLICIT) |
+| 2 | Security packages install automatically | `Allowed-Origins` includes `${distro_codename}-security` and the ESM security origins (EXPLICIT) |
+| 3 | `Unattended-Upgrade::Automatic-Reboot` is effectively false | The key is absent from `apt-config dump` and from every `apt.conf.d` file; it appears only as a comment in `50unattended-upgrades`. In `unattended-upgrade` 2.9.1, `reboot_if_requested_and_needed()` reads `find_b("Unattended-Upgrade::Automatic-Reboot", False)` and returns before `shutdown -r` (PACKAGE DEFAULT, read from the installed source). `Automatic-Reboot-WithUsers` and `Automatic-Reboot-Time` are absent too, and they have no effect while the reboot is off |
+| 4 | The apt maintenance timers do not reboot the host | `apt-daily.timer` and `apt-daily-upgrade.timer` have no drop-ins. They start oneshot `apt.systemd.daily update`/`install`, which contains no reboot or shutdown call |
+| 5 | Routine package maintenance can still restart services through needrestart | `99needrestart` `DPkg::Post-Invoke` (§4). This is the DR-1 path |
+
+Also checked:
+
+- No cron, `at`, systemd timer, cloud-init `power_state`, livepatch, or kexec
+  reboot path is configured. `systemd-sysupdate-reboot.timer` is disabled.
+- The OS Config API is disabled on the project, so no VM Manager patch
+  deployment, patch job, or OS policy can apply.
+- The instance has no schedule resource policy.
+
+**History:**
+
+- Since the instance was created on 2026-09-13 there has been one boot, boot ID
+  `24d1771d-e1b5-4e5f-816d-da08ad8b367a` (the §3 boot ID).
+- The GCE operations for the instance show `insert` only.
+- The unattended-upgrades log and the journal have no reboot entries.
+- `/var/run/reboot-required` has been present since 2026-09-14, and
+  unattended-upgrades has run on several later days without rebooting. The
+  finding therefore rests on configuration and source, not only on the absence
+  of events.
+
+**Consequence for B1b-3d:**
+
+6. The reviewed service-specific needrestart override (§5, installed by §6)
+   closes the package-maintenance process-replacement gap for the three
+   authority-sensitive services. unattended-upgrades does not reboot the host,
+   so that override is the remaining maintenance path to close.
+7. Owner-controlled restart, read-only revalidation, and explicit baseline
+   acceptance (§7) remain required for every replacement.
+8. **Fault-reset paths remain outside this control:**
+   - kernel `panic=10`, `panic_on_oops=1`, and `softlockup_panic=1` reboot 10 s
+     after a panic;
+   - GCE `scheduling.automaticRestart=true` restarts the VM after a host
+     failure.
+
+   Planned host maintenance is `onHostMaintenance=MIGRATE`, a live migration,
+   not a reboot. A fault reset changes the boot ID and ends the §3 acceptance.
+   The legacy units are not enabled, so the host comes back with the broker
+   down, which fails closed. The host then enters §7 at step 5.
+9. This does **not** establish whole-host rollback protection.
+10. **Pending reboot.** `/var/run/reboot-required` exists. It lists `libc6`,
+    `linux-image-7.0.0-1011-gcp`, and `linux-base`, while the running kernel
+    is `6.17.0-1022-gcp`. The next deliberate owner reboot will change the
+    kernel and every process incarnation. It requires a fresh post-reboot
+    runtime baseline: read-only revalidation and a new explicit acceptance in
+    a new record.
+
+The two rules of §7 still hold:
+
+- **automatic restart ≠ unauthorized authority mutation**;
+- **process replacement requires revalidation evidence.**
+
+**Trusted-control bootstrap note.** The first post-merge DEV run for main
+`ef17e6b` ended with `TRUSTED_CONTROL_BOOTSTRAP_EXPECTED_FAILURE`.
+
+- Its trusted validator came from first parent `ab9efcc`, which did not yet
+  recognise the source-only needrestart artifact (§5).
+- It is not an implementation regression and was not rerun.
+- The next normal main candidate uses `ef17e6b`'s validator as its trusted
+  parent.
+
 ## Evidence limitations
 
 - The observation is point-in-time. No file-integrity monitoring ran between
@@ -400,7 +481,7 @@ mapped by the broker can restart it again and end this acceptance.
   config. They were not demonstrated by a live deferred upgrade, and the probe
   emulates the loader rather than running needrestart.
 - Whether unattended-upgrades is configured to reboot automatically was not
-  inspected.
+  inspected for §2–§6. It was inspected afterwards, read-only, in §10.
 
 ## Explicitly not done
 

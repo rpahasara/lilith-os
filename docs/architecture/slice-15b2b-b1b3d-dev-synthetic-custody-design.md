@@ -877,6 +877,13 @@ Two things are left to the owner:
 
 This design does not change the legacy units.
 
+**Automatic reboot policy (2026-09-26).** The read-only review found
+`AUTO_REBOOT_DISABLED`: unattended-upgrades does not reboot `lilith-dev-01`.
+Kernel-panic and GCE host-failure restarts remain possible. A pending
+`reboot-required` means the next owner reboot needs a fresh runtime baseline.
+See the
+[current runtime baseline §10](slice15b2b-b1b3d-current-runtime-baseline.md#10-host-maintenance-policy-addendum-read-only-2026-09-26).
+
 ## 19. Privacy
 
 - Privacy custody does not move. B1b-3f stays separate. D2 and D4 remain
