@@ -368,7 +368,7 @@ can be proven non-vacuously before L1a are:
 Every path-specific denial below becomes mandatory and non-vacuous as soon as
 the ladder step that creates the path completes.
 
-**Required extension (separate PR; design §7; not made here).** Proof-only
+**Required extension (separate PR; design §7; not made here).** Implemented as source in the [deployer authority-boundary record](slice-15b2b-b1b3d-deployer-authority-boundary.md), where maturity is derived from the ladder's own root-owned objects rather than a marker; live denial is still to be proven. Proof-only
 checks in `deploy-dev.yml`:
 
 ```text

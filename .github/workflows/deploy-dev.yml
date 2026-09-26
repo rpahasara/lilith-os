@@ -319,6 +319,27 @@ jobs:
           exit "$fail"
           REMOTE
 
+      # 15B2b-B1b-3d (DR-5): proof only, run AS the deployer before deploying.
+      # The script is streamed from the same candidate generation as this
+      # workflow file (no file is copied to DEV). It must print the exact PASS
+      # line; anything else stops the deployment here.
+      - name: Prove the routine DEV deployer has no authority-custody reach
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
+        shell: bash
+        run: |
+          set -o pipefail
+          proof=candidate/scripts/deployer_authority_boundary_proof.sh
+          test -f "${proof}" && ! test -L "${proof}"
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${GCP_ZONE}" \
+            --tunnel-through-iap \
+            --ssh-flag=-T \
+            --command="bash -s" \
+            < "${proof}" | tee "${RUNNER_TEMP}/authority-boundary.txt"
+          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" | grep -Eq '^AUTHORITY_BOUNDARY_PROOF=PASS maturity=(PRE_L1A|L1a|L1b\.1|L1b\.2|L1c\.1|L1c\.3|L2a|L2b\.1)$'
+          tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Package exact-SHA bundle for the fixed DEV helper
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash
