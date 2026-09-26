@@ -9,7 +9,8 @@
 #   - `stat` and the shell `test -r/-w/-x` access checks (access(2));
 #   - `sudo -n -l <command>` policy QUERIES, which ask sudo whether a command
 #     would be permitted and never run it;
-#   - `pkcheck` polkit authorization QUERIES, when pkcheck is installed.
+#   - `pkcheck` polkit authorization QUERIES, when pkcheck is installed (a
+#     tripwire only; polkit is not part of the PASS gate).
 #
 # Rules:
 #
@@ -192,7 +193,7 @@ ab_check_sudo_as() {
 }
 
 ab_check_service_control() {
-  local unit verb action
+  local unit verb action rc
   if ! ab_stat "${AB_SYSTEMCTL}" | grep -q '^regular file|0|0|'; then
     ab_fail "SYSTEMCTL_NOT_ROOT_OWNED ${AB_SYSTEMCTL}"
     return
@@ -203,17 +204,23 @@ ab_check_service_control() {
       ab_sudo_denied "${AB_SYSTEMCTL} ${verb} ${unit}" "${AB_SYSTEMCTL}" "${verb}" "${unit}"
     done
   done
+  # Polkit is NOT part of the PASS gate: over a non-interactive SSH session
+  # pkcheck typically reports a challenge (rc 2), which is neither a grant nor
+  # a conclusive denial. It is a tripwire only: a conclusive grant (rc 0)
+  # fails; every other result is DEFERRED_NOT_IN_GATE and never counted.
   if ab_have_pkcheck; then
     for action in org.freedesktop.systemd1.manage-units org.freedesktop.systemd1.manage-unit-files \
         org.freedesktop.systemd1.reload-daemon; do
-      if ab_pkcheck "${action}"; then
+      ab_pkcheck "${action}"
+      rc=$?
+      if [ "${rc}" -eq 0 ]; then
         ab_fail "ALLOWED(unexpected) polkit ${action}"
       else
-        ab_say "DENIED: polkit ${action}"
+        ab_say "DEFERRED_NOT_IN_GATE: polkit ${action} pkcheck_rc=${rc} (not counted as a denial)"
       fi
     done
   else
-    ab_say "NOT_PROVEN: polkit unit control (pkcheck unavailable; the effective-sudo proof still applies)"
+    ab_say "DEFERRED_NOT_IN_GATE: polkit unit control (pkcheck unavailable; not counted)"
   fi
 }
 

@@ -64,14 +64,14 @@ absent, and nothing would force its denial to become real once it appeared.
 | --- | --- |
 | filesystem | `stat` and the shell's `test -r/-w/-x` (access(2)). No file is created, even to test |
 | sudo | `sudo -n -l <command>`, a policy **query**. The probed command is never run |
-| polkit | `pkcheck --action-id …`, an authorization **query**, when `pkcheck` exists. Otherwise the line is `NOT_PROVEN`; the effective-sudo proof still applies |
+| polkit | `pkcheck --action-id …`, an authorization **query**, when `pkcheck` exists. **Not part of the PASS gate** (§7a): it is a tripwire only |
 
 ## 4. Denial classes
 
 | Class | Proof |
 | --- | --- |
 | A. identity assumption | before L1a: `sudo -u lilith-memory-broker`, a real, existing proxy. It is a FAIL if the broker is missing or the query is inconclusive. From L1a: `sudo -u lilith-authority-dev`. Also: the effective user must be the deployer (not uid 0), in none of `root sudo adm lxd docker wheel google-sudoers systemd-journal lilith lilith-authority-dev lilith-recovery-witness lilith-memory-broker lilith-memory-ipc` |
-| B. service control | sudo queries for `daemon-reload` and for `start stop restart reload try-restart reload-or-restart enable disable reenable mask unmask edit revert` on both units. polkit queries for `manage-units`, `manage-unit-files`, `reload-daemon` |
+| B. service control | sudo queries for `daemon-reload` and for `start stop restart reload try-restart reload-or-restart enable disable reenable mask unmask edit revert` on both units. The sudo route is gated. The polkit route (`manage-units`, `manage-unit-files`, `reload-daemon`) is deferred from the gate; a conclusive grant still FAILs (§7a) |
 | C. key ceremony | once the CLI exists (L1c.3): sudo queries for `lilith-authority-keygen-dev actor` and bare. Before then: `DEFERRED_UNTIL_OBJECT_EXISTS`, and the effective-sudo proof covers it |
 | D. release | `/opt` write denial now. From L1b: `/opt/lilith-authority-dev`, `releases/`, and every `releases/<sha>` (each must be a 40-hex root dir 0755), `current` (root symlink to `releases/<40-hex>`), and its target |
 | E. CLI | `/usr/local/sbin` write denial now. From L1c.3: the CLI itself |
@@ -156,7 +156,69 @@ own rows when those slices define their objects.
 - **Pre-L1a**, the correct live state is `PASS maturity=PRE_L1A`. Normal
   deployments continue.
 
+### 7a. Polkit disposition: deferred from the PASS gate
+
+`AUTHORITY_BOUNDARY_PROOF=PASS` never counts unknown polkit evidence.
+
+Over a non-interactive SSH session, `pkcheck` normally reports a challenge
+(rc 2: authorization would need interactive authentication). That is neither
+a grant nor a conclusive denial. `pkcheck` may also be absent, or error
+(rc 127). So a conclusive polkit **denial** cannot meaningfully be proven
+before L1a. The polkit route is therefore **removed from the PRE_L1A
+acceptance set and deferred**:
+
+- **rc 0**, a conclusive grant: `FAIL`, so the proof is never PASS.
+- **Any other rc**, or `pkcheck` unavailable: a `DEFERRED_NOT_IN_GATE: polkit …`
+  line. It is never printed as `DENIED`, never counted as evidence, and never
+  turned into success.
+
+What the gate does prove about unit control is the **sudo** route (class B
+queries, plus the effective-sudo proof), together with the deployer being
+outside every privileged group, including the `sudo`/`adm` groups that
+polkit treats as administrators. Proving the polkit route conclusively is
+open work for a later owner-run check.
+
+### 7b. Denial-proof invariant
+
+```text
+DENIAL PROOF != ATTEMPT THE FORBIDDEN MUTATION
+```
+
+No probe runs a command whose success would itself be a forbidden mutation.
+Mutating commands are only ever **queried** (`sudo -n -l <exact command>`).
+
+The existing inline B1c deny list had one probe that violated this:
+
+- **Old:** `deny sudo -n /usr/bin/systemctl restart lilith-memory-broker.service`.
+  If the permission were ever granted, the probe itself would have restarted
+  the pinned memory broker.
+- **New:** `query_denied /usr/bin/systemctl restart lilith-memory-broker.service`.
+  It runs `sudo -n -l <command>` with the same classification as this proof:
+  - rc 0 prints `ALLOWED(unexpected) query: …` and fails;
+  - `unknown user`, `command not found`, `unable to resolve`, or
+    `unknown group` prints `INCONCLUSIVE query: …` and fails;
+  - otherwise it prints `DENIED(query): …`.
+
+  A failure fails the existing step, so the deployment stops before
+  *Package* and *Deploy*.
+
+The assertion is unchanged: the routine deployer must not be able to
+restart `lilith-memory-broker.service`. No other deny line runs a unit
+start, stop, restart, reload, enable, disable, mask, or daemon-reload; a test
+pins this. The remaining execute-style probes (`sudo -n true`,
+`sudo -n bash -c true`, `sudo -n /usr/bin/python3 -c 0`, `sudo -n -u lilith true`)
+run only no-op commands. The sudoers rule and the helper are unchanged.
+
 ## 8. Trusted-control / bootstrap analysis
+
+**Trust scope.** This DR-5 proof establishes the boundary against compromise
+of the **routine DEV deployer identity**. It assumes that protected-main,
+owner-reviewed repository control stays trusted. It does **not** establish
+integrity against an attacker who can maliciously modify the protected-main
+workflow or the proof itself. That attacker could remove or weaken the gate
+in the same merge. No new trusted-parent infrastructure is added for that
+case.
+
 
 | Component | Generation that runs |
 | --- | --- |
@@ -218,7 +280,8 @@ parent write denials appeared as `nobody`.
   `sa_112096412008414111981`;
 - the real `sudo -n -l` refusals and the real parent denials on
   `lilith-dev-01`;
-- the polkit result, or its `NOT_PROVEN` line;
+- the polkit tripwire line (`DEFERRED_NOT_IN_GATE` expected; it is not
+  evidence, and a grant would FAIL);
 - after each later ladder step, a routine deployment showing that step's
   leaf denials non-vacuously.
 
@@ -234,15 +297,11 @@ parent write denials appeared as `nobody`.
   2. then, after each ladder step, a routine deployment passing with that
      step's leaves non-vacuous.
 
-  **Residual DR-5 debt outside B1b-3d:**
-  - The existing inline B1c/broker deny list still counts some missing
-    paths as `DENIED`, for example `/var/lib/.lilith-memory-broker-stage3-a2`.
-  - Its `deny sudo -n /usr/bin/systemctl restart lilith-memory-broker.service`
-    probe is execute-style. If that right were ever granted, the probe itself
-    would restart the pinned broker. It should become a `sudo -n -l` query in
-    a separate change.
-
-  Neither is changed here.
+  **Residual DR-5 debt outside B1b-3d:** the existing inline B1c/broker
+  deny list still counts some missing paths as `DENIED`, for example
+  `/var/lib/.lilith-memory-broker-stage3-a2`. That is not changed here. Its
+  execute-style broker-restart probe **is** fixed here (§7b).
+- **Polkit** unit control is deferred, not proven (§7a).
 
 ## 11. Post-merge live proof procedure
 
@@ -255,7 +314,8 @@ parent write denials appeared as `nobody`.
    - the last line, `AUTHORITY_BOUNDARY_PROOF=PASS maturity=PRE_L1A`;
    - the `DENIED:` lines for each parent and for
      `sudo -u lilith-memory-broker`;
-   - the polkit line.
+   - the polkit tripwire line (expected `DEFERRED_NOT_IN_GATE`, not evidence);
+   - in the preceding step, `DENIED(query): /usr/bin/systemctl restart lilith-memory-broker.service`.
 
    Check the preceding step shows `SUDO_EFFECTIVE_PROOF=PASS`. Check the
    run completed *Deploy* and *Health*.

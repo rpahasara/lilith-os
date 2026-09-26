@@ -283,6 +283,17 @@ jobs:
           set -u
           fail=0
           deny() { if "$@" >/dev/null 2>&1; then echo "ALLOWED(unexpected): $*"; fail=1; else echo "DENIED: $*"; fi; }
+          # DENIAL PROOF != ATTEMPT THE FORBIDDEN MUTATION: a mutating command is
+          # only ever QUERIED against the privilege policy (-l), never run.
+          query_denied() {
+            local out rc
+            out="$(sudo -n -l "$@" 2>&1)"; rc=$?
+            if [ "$rc" -eq 0 ]; then echo "ALLOWED(unexpected) query: $*"; fail=1; return; fi
+            case "$out" in
+              *"unknown user"*|*"command not found"*|*"unable to resolve"*|*"unknown group"*) echo "INCONCLUSIVE query: $*"; fail=1 ;;
+              *) echo "DENIED(query): $*" ;;
+            esac
+          }
           id
           if ! . /usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh; then
             echo "SUDO_EFFECTIVE_PROOF=FAIL reason=PROOF_CONTROL_MISSING"
@@ -292,7 +303,7 @@ jobs:
           deny sudo -n true
           deny sudo -n bash -c true
           deny sudo -n /usr/bin/python3 -c 0
-          deny sudo -n /usr/bin/systemctl restart lilith-memory-broker.service
+          query_denied /usr/bin/systemctl restart lilith-memory-broker.service
           deny sudo -n -u lilith true
           for path in /opt/lilith-memory-broker /opt/lilith-memory-broker/current /etc/lilith-memory-broker \
               /etc/systemd/system /etc/systemd/system/lilith-memory-broker.service /etc/sudoers.d \

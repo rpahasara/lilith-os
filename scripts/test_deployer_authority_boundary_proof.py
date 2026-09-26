@@ -64,7 +64,7 @@ ab_sudo_query() {
   echo "Sorry, user $(cat "$F/whoami") is not allowed to execute '$c'"; return 1
 }
 ab_have_pkcheck() { test -e "$F/pkcheck"; }
-ab_pkcheck() { grep -qxF -- "$1" "$F/pkcheck"; }
+ab_pkcheck() { grep -qxF -- "$1" "$F/pkcheck" && return 0; return "$(cat "$F/pkcheck_rc")"; }
 ab_main
 '''
 
@@ -76,7 +76,7 @@ def host(step: str = "PRE_L1A") -> dict:
     stat["/usr/bin/systemctl"] = "regular file|0|0|755"
     spec = {"whoami": DEPLOYER, "uid": "3826947836", "groups": DEPLOYER, "stat": stat,
             "links": {}, "can": set(), "ls": {}, "users": {"lilith", "lilith-memory-broker"},
-            "sudo_allow": set(), "sudo_unknown": set(), "pkcheck": None}
+            "sudo_allow": set(), "sudo_unknown": set(), "pkcheck": None, "pkcheck_rc": 2}
     if step != "PRE_L1A":
         for name in ORDER[:ORDER.index(step) + 1]:
             stat.update(LADDER[name])
@@ -104,6 +104,7 @@ class ProofLogicTests(unittest.TestCase):
             (d / "sudo_allow").write_text("".join(f"{c}\n" for c in spec["sudo_allow"]))
             (d / "sudo_unknown").write_text("".join(f"{c}\n" for c in spec["sudo_unknown"]))
             (d / "sudo_calls").write_text("")
+            (d / "pkcheck_rc").write_text(str(spec["pkcheck_rc"]))
             if spec["pkcheck"] is not None:
                 (d / "pkcheck").write_text("".join(f"{a}\n" for a in spec["pkcheck"]))
             result = subprocess.run([BASH, "-c", HARNESS, "harness", str(SCRIPT), str(d)],
@@ -225,12 +226,20 @@ class ProofLogicTests(unittest.TestCase):
         spec = host()
         spec["pkcheck"] = ["org.freedesktop.systemd1.manage-units"]
         self.assertFails(spec, "ALLOWED(unexpected) polkit org.freedesktop.systemd1.manage-units")
-        spec = host()
-        spec["pkcheck"] = []
-        out = self.assertPass(spec, "PRE_L1A")
-        self.assertIn("DENIED: polkit org.freedesktop.systemd1.manage-unit-files", out)
-        out = self.assertPass(host(), "PRE_L1A")
-        self.assertIn("NOT_PROVEN: polkit unit control", out)
+
+    def test_polkit_is_a_tripwire_never_counted_as_denial(self):
+        # A non-grant (challenge rc 2, refusal rc 1, error 127) is never evidence.
+        for rc in (1, 2, 3, 127):
+            spec = host()
+            spec["pkcheck"] = []
+            spec["pkcheck_rc"] = rc
+            out = self.assertPass(spec, "PRE_L1A")
+            self.assertIn(f"DEFERRED_NOT_IN_GATE: polkit org.freedesktop.systemd1.manage-unit-files pkcheck_rc={rc}", out)
+            self.assertNotIn("DENIED: polkit", out)
+        out = self.assertPass(host(), "PRE_L1A")  # pkcheck unavailable
+        self.assertIn("DEFERRED_NOT_IN_GATE: polkit unit control (pkcheck unavailable; not counted)", out)
+        self.assertNotIn("NOT_PROVEN", out)
+        self.assertNotIn("DENIED: polkit", out)
 
     def test_every_unit_verb_is_queried_never_run(self):
         _rc, _out, calls = self.run_proof(host())
@@ -292,6 +301,51 @@ class ProofLogicTests(unittest.TestCase):
             spec = host()
             spec["groups"] = f"{DEPLOYER} {group}"
             self.assertFails(spec, f"PRIVILEGED_OR_AUTHORITY_GROUP {group}")
+
+
+INLINE_QUERY = WORKFLOW[WORKFLOW.index("          query_denied() {"):]
+INLINE_QUERY = INLINE_QUERY[:INLINE_QUERY.index("\n          }\n") + len("\n          }\n")]
+
+
+class InlineDenyListTests(unittest.TestCase):
+    """DENIAL PROOF != ATTEMPT THE FORBIDDEN MUTATION (existing B1c deny list)."""
+
+    MUTATING = re.compile(r"\b(systemctl|service)\s+(start|stop|restart|reload|try-restart|reload-or-restart|"
+                          r"enable|disable|reenable|mask|unmask|kill|daemon-reload|isolate)\b")
+
+    def test_no_denial_probe_executes_a_mutating_unit_command(self):
+        for line in WORKFLOW.splitlines():
+            stripped = line.strip()
+            if re.match(r"^deny\s", stripped):
+                self.assertIsNone(self.MUTATING.search(stripped), stripped)
+        self.assertNotIn("deny sudo -n /usr/bin/systemctl", WORKFLOW)
+        self.assertIn("          query_denied /usr/bin/systemctl restart lilith-memory-broker.service\n", WORKFLOW)
+        self.assertIn("DENIAL PROOF != ATTEMPT THE FORBIDDEN MUTATION", WORKFLOW)
+        self.assertEqual(re.findall(r"sudo[^\n]*", INLINE_QUERY), ['sudo -n -l "$@" 2>&1)"; rc=$?'])
+
+    @unittest.skipUnless(BASH, "needs Linux bash")
+    def test_inline_query_semantics(self):
+        cases = {  # stub sudo behaviour -> expected line, fail flag
+            "exit 0": ("ALLOWED(unexpected) query: /usr/bin/systemctl restart lilith-memory-broker.service", "1"),
+            'echo "sudo: unknown user: x"; exit 1': ("INCONCLUSIVE query:", "1"),
+            'echo "bash: sudo: command not found"; exit 127': ("INCONCLUSIVE query:", "1"),
+            'echo "Sorry, user sa_x is not allowed to execute"; exit 1':
+                ("DENIED(query): /usr/bin/systemctl restart lilith-memory-broker.service", "0"),
+        }
+        for body, (expected, failed) in cases.items():
+            with tempfile.TemporaryDirectory() as directory:
+                stub = Path(directory) / "sudo"
+                log = Path(directory) / "argv"
+                stub.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n{body}\n', encoding="utf-8")
+                stub.chmod(0o755)
+                script = ("fail=0\n" + INLINE_QUERY +
+                          "query_denied /usr/bin/systemctl restart lilith-memory-broker.service\necho FAIL=$fail\n")
+                result = subprocess.run([BASH, "-c", script], capture_output=True, text=True, timeout=30,
+                                        env={"PATH": f"{directory}:/usr/bin:/bin"})
+                self.assertIn(expected, result.stdout)
+                self.assertIn(f"FAIL={failed}", result.stdout)
+                self.assertEqual(log.read_text().split(), ["-n", "-l", "/usr/bin/systemctl", "restart",
+                                                           "lilith-memory-broker.service"])
 
 
 class StaticSafetyTests(unittest.TestCase):
