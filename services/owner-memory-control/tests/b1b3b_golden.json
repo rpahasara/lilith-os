@@ -1,0 +1,139 @@
+{
+  "admissionViewFields": [
+    "actionDigest",
+    "admissionBasis",
+    "admissionId",
+    "admissionOutcome",
+    "applyAuditId",
+    "epistemicBasis",
+    "memoryClass",
+    "memoryItemId",
+    "operation",
+    "payloadDigest",
+    "proposalRefId",
+    "revisionId",
+    "schemaVersion",
+    "subjectKey",
+    "subjectNamespace"
+  ],
+  "brokerKeyId": "actor.b1b3b-broker-1",
+  "brokerKeyRecord": {
+    "algorithm": "Ed25519",
+    "compromisedSince": null,
+    "createdAt": "2026-09-26T00:00:00Z",
+    "environment": "test",
+    "evidenceTypes": [
+      "OWNER_MEMORY_OPERATION"
+    ],
+    "keyId": "actor.b1b3b-broker-1",
+    "notBefore": "2026-09-26T00:00:00Z",
+    "policyVersion": "policy.synthetic.v2",
+    "publicKey": "3ynWQ-GoECJQuzs4Hv6kO-qulvxhAoc5hj3brYOtUB0",
+    "recoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "registryVersion": 3,
+    "retiredAt": null,
+    "revocationReason": null,
+    "revokedAt": null,
+    "schemaVersion": 1,
+    "signingDomain": "OWNER_ACTOR"
+  },
+  "brokerPublicKey": "3ynWQ-GoECJQuzs4Hv6kO-qulvxhAoc5hj3brYOtUB0",
+  "brokerSignedOwnerEvidenceDigest": "c6c3a236664d5b905c7d47e1325b76525a413518e51e1d39c9d1f0d4071b91c9",
+  "brokerSignedOwnerEvidenceV2": {
+    "actionDigest": "d28d0bfa280c08f262d3934acb0bcf68f32a14bab322059c9035a60c3a0c9d8b",
+    "assertionDigest": "ce0fe37d3b2992178ad510f4ad1b58a4f98c3904144b136c226a4463747a12b6",
+    "authorityDomain": "authority.synthetic.memory",
+    "challengeDigest": "befc6df47270454cf5999d450c549bcf4a7b0b72b05f6a874083f1adb45ec23c",
+    "challengeId": "och.synthetic-create",
+    "credentialRecordId": "ocred.synthetic",
+    "environment": "test",
+    "evidenceId": "aev.synthetic-create",
+    "evidenceNonce": "och.synthetic-create",
+    "evidenceType": "OWNER_MEMORY_OPERATION",
+    "issuedAt": "2026-09-26T12:00:21Z",
+    "keyId": "actor.b1b3b-broker-1",
+    "logicalOwnerId": "owner.synthetic.v1",
+    "payloadDigest": "9bd579e59c75451368363277083853d9a2d802459d7d6fcab056429770af1cf5",
+    "policyVersion": "policy.synthetic.v2",
+    "protocol": "LILITH_ACTOR_EVIDENCE",
+    "recoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "registryVersion": 3,
+    "requestDigest": "0e7ed30c8a20b72939db5ceefa6479a42cfee9594b1db87cf846e44b71276b3a",
+    "schemaVersion": 2,
+    "signature": "r5GM_QsjItIBu15kugLgDr7HcXh8RtlaPyZIoWcLEUKAA9Yyfm_Fij3x8L_IgfLGHhJcTMXOl1eAxzi8CuVyAQ",
+    "signingDomain": "OWNER_ACTOR"
+  },
+  "evidenceIdDomainSeparator": "LILITH_B1B3B_OWNER_EVIDENCE_ID_V1\u0000",
+  "l04V2Basis": {
+    "admissionBasis": "OWNER_DIRECTED_EXACT_ACTION",
+    "epistemicBasis": "USER_ASSERTED"
+  },
+  "linkFields": [
+    "actionDigest",
+    "admissionId",
+    "applyAuditId",
+    "authorityEvidenceDigest",
+    "authorityEvidenceId",
+    "challengeId",
+    "memoryItemId",
+    "payloadDigest",
+    "proposalRefId",
+    "revisionId",
+    "schemaVersion"
+  ],
+  "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3b. No real key, owner, registry, memory, or authority.",
+  "semantics": {
+    "acceptance": "OWNER_AUTHORIZED_AUTHORITY_SIGNED_L04_ADMITTED_NOT_A_TRUTH_CLAIM",
+    "admission": "L04_APPLIED_AND_LINKED_TO_VERIFIED_AUTHORITY_NOT_MEMORY_ACCEPTANCE"
+  },
+  "signerReasons": [
+    "REQUEST_MALFORMED",
+    "CHALLENGE_MALFORMED",
+    "CHALLENGE_CONTEXT_MISMATCH",
+    "PRIVACY_OWNED_OPERATION",
+    "CHALLENGE_ALREADY_PREPARED",
+    "CHALLENGE_UNKNOWN",
+    "CHALLENGE_NOT_PREPARED",
+    "CHALLENGE_EXPIRED",
+    "CHALLENGE_NOT_CONSUMED",
+    "OWNER_PROOF_REJECTED",
+    "EVIDENCE_ALREADY_ISSUED"
+  ],
+  "stages": [
+    "VERIFIED_AUTHORITY_EVIDENCE",
+    "L04_ADMITTED",
+    "ACCEPTED_MEMORY"
+  ],
+  "v2Reasons": [
+    "MALFORMED_CONTEXT",
+    "AUTHORITY_EVIDENCE_MISSING",
+    "NON_V2_EVIDENCE_NOT_ACCEPTED",
+    "PROPOSAL_UNRESOLVED",
+    "PRIVACY_OWNED_OPERATION",
+    "PRIVACY_STATE_UNAVAILABLE",
+    "PRIVACY_HOLD_ACTIVE",
+    "OWNER_PROOF_REJECTED",
+    "CHALLENGE_AUTHORITY_CONTEXT_MISMATCH",
+    "AUTHORITY_EVIDENCE_REJECTED",
+    "EVIDENCE_ORDER_INVALID",
+    "EVIDENCE_ALREADY_CONSUMED",
+    "L04_NOT_ADMITTED",
+    "ADMISSION_LINK_MISSING",
+    "ADMISSION_LINK_MALFORMED",
+    "ADMISSION_LINK_MISMATCH",
+    "ADMISSION_MISSING",
+    "ADMISSION_MALFORMED",
+    "ADMISSION_NOT_ACCEPTED",
+    "ADMISSION_BINDING_MISMATCH",
+    "EVIDENCE_USE_MISSING",
+    "EVIDENCE_USE_MISMATCH",
+    "NOT_READABLE",
+    "ACTIVE_REVISION_MISMATCH"
+  ]
+}
