@@ -90,6 +90,9 @@ jobs:
       - name: Validate trusted broker lifecycle and production absence gates
         run: python -m unittest scripts/test_broker_dev_lifecycle.py
 
+      - name: Validate read-only DR-1 current-incarnation baseline contract
+        run: python -m unittest scripts/test_verify_broker_dev_current_incarnation.py
+
       - name: Check broker DEV validation shell syntax
         run: bash -n scripts/run_memory_broker_dev_validation.sh
 
