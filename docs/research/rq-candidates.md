@@ -35,6 +35,24 @@ and anti-suffering constraints). Revised recommendations:
 Net: one candidate (CAND-B) looks like a new question; six extend existing
 MASTER questions. No numbers are assigned.
 
+## Research charter cross-reference (2026-09-26)
+
+The [Cognitive Continuity, Memory & Substrate Research Charter v0.1](charters/lilith-cognitive-continuity-research-charter-v0.1.md)
+develops several of these candidates as DESIGN or RESEARCH / OPEN
+directions. It uses its own local question IDs (C01–C07), which are **not**
+RQ numbers. The [charters README](charters/README.md#c01c07-relationship-to-existing-research-questions)
+maps them. No number is assigned and no recommendation above changes.
+
+| Candidate | Charter sections |
+| --- | --- |
+| CAND-A | §09 Affective Cognition (appraisal first; no named-emotion sliders); C04 |
+| CAND-B | §09 "Three distinct objects of study", §09 metacognitive revision, Figure 4 — **still distinct after inspection** |
+| CAND-C | §10 Relational and Romantic Continuity; C05 |
+| CAND-D | §08 Autobiographical Memory and Reappraisal; C03 (partial) |
+| CAND-E | §05 Cognitive Substrate Continuity; C01 (partial) |
+| CAND-F | §11 Artificial Welfare and Non-Suffering; C06 |
+| CAND-G | §10 and §12 Governance Separation (emotion ≠ authority) |
+
 ## Candidate summary (first pass — superseded by the recheck above)
 
 | Working ID | Working title | Closest existing questions | Recommendation |
@@ -75,6 +93,13 @@ limited to confidence, contradiction, drive tension, and loops.
 
 **Overlap.** RQ-023 concerns unreliable *reasoning*, not self-interpretation;
 distinct.
+
+**Charter link (2026-09-26).** Research charter v0.1 §09 treats affective
+state, LILITH's interpretation of it, and its expression as three distinct
+objects of study; self-report is not privileged ground truth, and
+metacognition revises interpretations as evidence changes. See the
+[charter](charters/lilith-cognitive-continuity-research-charter-v0.1.md#09--affective-cognition).
+It remains un-numbered.
 
 ### CAND-C — Relational / romantic continuity without coercion
 
