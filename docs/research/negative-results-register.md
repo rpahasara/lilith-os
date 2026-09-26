@@ -1,0 +1,72 @@
+# Negative Results and Failure Register
+
+Status: **RECONCILIATION RECORD**. Failures, aborted experiments, false
+positives, and deferred capabilities are research evidence. This register
+exists so they cannot be sanitized out of the project history. Entries are
+never deleted; a later fix adds a resolution note but keeps the failure.
+
+Labels follow the [slice history](slice-history.md#evidence-labels):
+OBSERVED (in-repo), REPORTED (out-of-repo notes or the reconciliation brief),
+INFERRED. "Cause: unproven" means the repository does not establish why.
+The primary-source pass (2026-09-26) added PRIMARY (archived historical
+source) and RUN (GitHub Actions record) labels, corrected N-01, N-15, N-25 and
+N-28, and added N-36–N-41.
+
+## Register
+
+| ID | Date | Slice | What happened | Cause | What it taught | Label / source |
+| --- | --- | --- | --- | --- | --- | --- |
+| N-01 | 2026-09-06 | Slice 1 | Verifier reported an inconsistency between overview ("0 unhealthy") and detail ("2 unhealthy") instead of passing on HTTP 200. | Upstream data disagreement | A verifier that checks content, not transport, surfaces real inconsistencies. | PRIMARY *(corrected)*: J1 Entry 9 — "4 of 6 services healthy with evidence and an overview-vs-detail discrepancy" |
+| N-02 | 2026-09-07 | Slice 5 | Approval-expiry sweep never fired under simulated time. | `expireApproval` recomputed real "now" | Time must be injected into expiry logic to be testable. | REPORTED |
+| N-03 | 2026-09-07 | Slice 7 | Backend phase split from frontend phase; VM unreachable from the frontend environment. | Environment boundary | Design and deploy steps need explicit environment ownership. | REPORTED |
+| N-04 | 2026-09-08 | Slice 7.2 | Shadow run reproduced the original defect: the model surfaced raw database paths and message identifiers in chat. | Ungrounded model rummaging raw stores | Grounding must come from reconciled state, not free exploration. | REPORTED |
+| N-05 | 2026-09-08 | Slice 7.3 | Two duplicate unsent application-14 drafts exist; dedup refuses to create a third and requires manual reconciliation. | Pre-dedup history | Dedup protects the future but does not repair the past; later slices repeatedly show app 14 "blocked". | REPORTED; consequence OBSERVED in Slices 8–13 records |
+| N-06 | 2026-09-08 | Slice 9 | A reasoning turn can be answered but not persisted if history reconstruction fails. | Fail-safe branch | Fail-open answering can trade durability for availability. | OBSERVED |
+| N-07 | 2026-09-08 | Slice 11 | Motivation contributed **zero** workspace slots in realistic turns. | Its sources were already raw candidates (dedup) | A drive system can be correct yet behaviourally inert; effect must be measured, not assumed. | OBSERVED |
+| N-08 | 2026-09-09 | Slice 12 | Detector-precedence defect found during acceptance; fixed and redeployed (second restart). | Intent precedence | Acceptance scenarios catch routing interactions unit tests miss. | OBSERVED |
+| N-09 | 2026-09-09 | Slices 12–13 | LLM candidate paths for planning and ethics were built and unit-tested but **not wired live**; only deterministic paths are live. | Deliberate deferral | "Implemented" ≠ "in use"; the live claim is narrower than the code. | OBSERVED |
+| N-10 | 2026-09-09 | Slice 13 | Local `test_motivation` showed one failure against unmodified Slice 12 code. | Local module-snapshot mismatch (as recorded) | Deploy-exact trees matter; local copies drift. | OBSERVED |
+| N-11 | 2026-09-09 | Slice 14 | Transport may stream or finalize text before `enforce_reply()` replaces it. | Streaming vs post-enforcement | Recorded as debt `STREAMED_RESPONSE_VS_POST_ENFORCEMENT_FINAL_RESPONSE_RECONCILIATION`; unresolved. | OBSERVED |
+| N-12 | 2026-09-09 | Slices 10–14 | Several acceptances were route-level or lane-level harness runs, not full live LLM conversation turns; Telegram parity was computed in-process with no transport. | Methodology choice | "Live acceptance" in these records is narrower than end-to-end user conversation. | OBSERVED |
+| N-13 | 2026-09-09 | 15B1 | Pre-commit audit found `occurredAt` inside the semantic proposal fingerprint; removed. | Over-bound identity input | Timestamps in identity digests break idempotency. | OBSERVED |
+| N-14 | 2026-09-10 | 15B2a | Legacy containment could fall through when the production registry was empty; changed to `LEGACY_CONTAINMENT_NOT_READY`. | Empty-registry branch | Empty configuration must fail closed, not open. | OBSERVED |
+| N-15 | 2026-08-31 → *(corrected from 2026-09-10; J1 Entry 12)* | Observation source | Gmail/Calendar stopped refreshing after 31 Aug; expired/revoked tokens from 2 Sep; Morning Brief honestly reported stale sources (J1 Entry 12). By 15B2a (2026-09-10) `lilith-career-watcher` and `lilith-meeting-prep` were failing on Google OAuth `invalid_grant`. The 15B2b-A record later observed zero new World-Model events. | Expired/revoked token | Slice 1-style observation feeding the World Model is degraded; beliefs may be stale without being marked stale (no TTL policy). The link between the two observations is INFERRED. | OBSERVED (failures) / INFERRED (impact) |
+| N-16 | 2026-09-13 | Docs | Roadmap and `as-is.md` were written as a fresh start and never reconciled with Slices 1–15B2a (roadmap still lists the first approval-gated write as FUTURE). | Documentation drift | A roadmap not tied to slice evidence silently becomes false. | OBSERVED |
+| N-17 | 2026-09-22 | 15B2b-A | The default-branch `workflow_run` trust boundary could not validate its own new deployment controls; bootstrap PRs #14–#16 were required. | Trust-root self-reference | Controls that verify candidates cannot certify changes to themselves. | OBSERVED |
+| N-18 | 2026-09-24 | B1b-2b Stage II | Trusted source pinned a volatile API PID and start time as a durable invariant; preflight stopped after a legitimate restart. | Control-model defect | Separate configured identity from process incarnation. | OBSERVED |
+| N-19 | 2026-09-24 | B1b-2b Stage II | Attempt #1 (run 35924789001) **FAILED-INERT**: API non-interference falsely reported a restart after `daemon-reload` changed `ExecStart` display annotations. | Whole-string comparison of annotated field | Compare security-relevant fields, not display strings; preserve failed attempts as terminal history. | OBSERVED |
+| N-20 | 2026-09-24 | B1b-2b Stage II | IPC sequence left a gap between negative peer probes and relay HEALTH; repaired with inertness checks after each probe. | Probe ordering | Negative isolation tests must re-verify inertness after every probe. | OBSERVED |
+| N-21 | 2026-09-24 | DEV validation | Remote staging path parsed from SSH stdout was contaminated; rejected before cleanup. | Transport output contamination (banner content unproven) | Never interpret transport stdout as a path or result. | OBSERVED |
+| N-22 | 2026-09-24 | DEV validation | Two `gcloud compute scp` uploads stalled at zero bytes; SSH-stdin streaming also stalled (run 35986496264). | **Unproven** | Transport retired in favour of a persistent trusted tool; cause remains open. | OBSERVED |
+| N-23 | 2026-09-24 | Snapshot tool | Installed release `36a3c93e…` failed self-test (nested sudo); release `b2d6a450…` failed self-test (boot-ID format). Both preserved unaccepted. | Environment assumptions | Install-then-self-test before selection; keep failed releases as evidence. | OBSERVED |
+| N-24 | 2026-09-25 | Stage III-A | `systemctl mask --runtime` did not mask broker units installed under `/etc/systemd/system` (isolated WSL2 test). | systemd unit precedence | OS semantics must be tested on a real init system before relying on them. | OBSERVED |
+| N-25 | 2026-09-25 | Stage III-A A2 | Dispatch run 36145190507: **controller failed; phase journal INTENT only**; no arm, no guard; V2 authorization preserved, not consumed. **The crash experiment never ran.** | Not recorded in the repository (a read-only forensics operation was added in PR #60) | A2 and A1–A5 remain live-unproven; a one-shot controller that fails early yields no experimental evidence. Do not retry without explicit justification. | OBSERVED (B1c acceptance record); RUN 36145190507 failed at the dispatch step; owner manual broker restart afterwards REPORTED |
+| N-26 | 2026-09-25 | B1c | Owner install failed closed: OS Login POSIX user not resolvable before first login. | Unmaterialized identity | Proofs need a DEFERRED state distinct from PASS and FAIL. | OBSERVED (`def790c`) |
+| N-27 | 2026-09-25 | B1c-1A | Activation verifier shebang `-I -S` would pass one invalid argument on Linux. | Shebang argument semantics | Execute installed artifacts through their real entry path in tests. | OBSERVED (`43e7887`) |
+| N-28 | 2026-09-26 | B1c | `gcloud compute ssh` required `compute.projects.get`; the documented contingency custom role was added. | Instance-scoped roles cannot grant project reads | Least privilege has platform floors; record the minimal exception. | RUN *(corrected)*: 36172947091 attempt 1, step "Prove the routine DEV deployer has no root, broker, or Stage III reach", log `Required 'compute.projects.get' permission` |
+| N-29 | 2026-09-26 | B1c | First deploy run 36172947091 failed in helper: inherited private cwd, then EXIT trap read out-of-scope locals under `set -u`. No release switched. | Shell privilege-drop semantics | `cd /` before privilege drop; trap-visible state must be global. | OBSERVED (`963b141`) |
+| N-30 | 2026-09-26 | B1c | Federation proof failed after a correct denial: `curl -f` exited on HTTP 403 before the denial could be judged. | Transport failure conflated with a negative result | Judge denials by explicit status; transport error is a separate state. | OBSERVED (`fbf37e0`) |
+| N-31 | 2026-09-24 → 25 | Governance | Repeated owner PR-only ruleset bypass procedures for trust-root changes (PR #30, failed-inert bridge, accepted-lifecycle bridge, broker-only governance). | Self-certification deadlock | A recurring governance cost of pinned trusted controls; worth a design review. | OBSERVED |
+| N-32 | 2026-09-25 | B1c | `memory-broker-dev-*` workflows lost GitHub federation by design; broker install, recovery, forensics are owner break-glass only. | Deliberate authority cut | Security gain traded for automation. | OBSERVED |
+| N-33 | 2026-09-25 → | B1c | `CROSS_ENVIRONMENT_PROD_AUTHORITY_DEBT` open: legacy PROD deployer keeps project-wide `osAdminLogin` and could reach DEV as root. Level 2 isolation **not** claimed. | Unverifiable without a PROD run | Accepted scope must name what it does not retire. | OBSERVED |
+| N-34 | 2026-09-13 → | Identity | `principles.md` P-01 and ADR-0001 rely on a "versioned identity charter"; no such artifact exists. | Missing artifact | Identity continuity claims currently rest on an undefined invariant. | OBSERVED (15B2b-B design) |
+| N-35 | 2026-09-10 → | Memory | Application user `lilith` holds Actor, Privacy, and containment HMAC keys (`0600`) and can write cognitive and Privacy DBs → could mint owner-looking evidence. | Custody not yet isolated (B1b-3 not started) | Authority must leave the application, as activation did in B1c. | OBSERVED (15B2a, 15B2b-B design) |
+| N-36 | 2026-09-25 | Stage III-A A2 | An earlier `DISPATCH_ONCE` (RUN 36143716249) also failed at "Invoke only the fixed one-shot systemd dispatch", before the candidate's inactive install (RUN 36144155832). | Not recorded in the repository | The consumed run (N-25) was the second dispatch attempt, not the first. | RUN (added in the primary-source pass) |
+| N-37 | 2026-09-25 | B1c | Validation runs 36176288675 (`963b141`) and 36178821872 (`fbf37e0`) failed at "Validate routine DEV deployer authority boundary". | Helper test harness lost sandbox variables across `env -i`; curl stub did not consume the piped body (per fix commits `5216381`, `bfdcc10`) | Tests of security tooling need their own fixtures verified. | RUN; cause from commit subjects (INFERRED) |
+| N-38 | 2026-09-07 | Command System V1 | "Blank routes" after Command V1 looked like a layout/provider regression; cause was a stale Turbopack chunk cache. No code change. | Build cache | Inspect console and network before changing architecture. | PRIMARY (J1 Entry 7) |
+| N-39 | early Sep 2026 | Presence | Edge-grip/peek poses failed contact gates (penetration, palm gaps, wrist stability); left experimental. | Rig-matrix vs skinned-surface deformation mismatch (B-Bones, helpers, exporter) | Build deformation-parity tooling before pose iteration. | PRIMARY (J1 Entries 4–5) |
+| N-40 | 2026-09-06 | Presence | DEV-01: development StrictMode replay caused R3F `forceContextLoss` and a blank avatar after hard refresh; classified development-only; no product fix. | R3F cleanup ownership | Reopen as a release blocker if seen in production. | PRIMARY (M1.1 §P.2, public; S5 §13, PRIVATE HISTORICAL SOURCE) |
+| N-41 | 2026-09-26 | This reconciliation | **What happened:** the first source-discovery pass classified locally available historical sources (both Masters, three Infrastructure editions, OS Architecture, Roadmap, Cognitive Architecture V1 PDF, Engineering Journal) as MISSING. **Impact:** MASTER:RQ-051–121 were labelled REPORTED only, historic hashes were declared unverifiable, and Slices 1–3 evidence stayed REPORTED. **Correction:** a scoped re-search found all nine; affected records carry dated correction notes. | **Root cause:** the filename searches had matched the files, but their output was truncated (`head -80`, `head -60`) before the matches; the content search also skipped binaries | **Lesson:** discovery-output truncation must never be interpreted as exhaustive evidence of absence (an instance of pattern 1, transport ≠ result). | OBSERVED (see [source-material README §F](source-material/README.md)) |
+
+## Patterns across failures
+
+1. **Transport ≠ result.** N-01, N-21, N-22, N-30: every time a transport
+   signal (HTTP status, stdout, exit code) was treated as semantic output, it
+   produced a false result or a stall that hid the real state.
+2. **Volatile identity ≠ durable identity.** N-18, N-19: process incarnation
+   leaked into what should have been configuration identity.
+3. **Trust roots cannot certify themselves.** N-17, N-31.
+4. **Built ≠ live ≠ effective.** N-07, N-09, N-12: code existed, but its live
+   effect was narrower or zero.
+5. **Fail-closed worked.** N-14, N-19, N-25, N-26, N-29: failures stopped before
+   authority or state changed. This is the positive side of the register.
