@@ -55,6 +55,36 @@ standard: any draft drawing on MASTER:RQ-101–121 should use the v1.1 wording.
 The Master's own "novelty discipline" note requires a literature review before
 publication.
 
+## Research charter (added 2026-09-26)
+
+The [Cognitive Continuity, Memory & Substrate Research Charter v0.1](charters/lilith-cognitive-continuity-research-charter-v0.1.md)
+is useful as:
+
+- a research-methodology foundation (the WHY … ACCEPTANCE review lenses,
+  the hidden-assumption test, and causal story versus authority story);
+- an architecture overview of the continuity, memory, substrate, affect,
+  relationship, and welfare directions;
+- a framework for future papers and blog posts.
+
+It is **not scientific evidence**.
+
+- **Status labels.** Its CANONICAL label means a normative project
+  principle, not the CANONICAL public-writing status above.
+- **Citing it.** A draft may quote the charter as the project's stated
+  doctrine, labelled PROPOSED or RESEARCH / UNKNOWN as appropriate. Any
+  factual, technical, or scientific claim must cite:
+  - primary literature (no literature review exists yet);
+  - actual experiments with stated protocols and results;
+  - implementation evidence (code, tests, runs, acceptance records).
+- **No proof of mind.** The charter's affect, relationship, and welfare
+  sections do not support any claim that LILITH feels, suffers, is
+  conscious, or has human-equivalent emotion.
+- **Local question IDs.** C01–C07 are local to the charter. Do not cite them
+  as RQ numbers.
+- **Public-safe derivative.** The repository PDF and DOCX are public-safe
+  derivatives: one private provenance identifier was redacted (see the
+  [charters README](charters/README.md#sanitization-record)).
+
 ## Sanitization before any publication
 
 In-repo records contain operational identifiers (cloud project, zone,

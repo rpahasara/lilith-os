@@ -25,6 +25,21 @@ renumber, or authorize anything.
 - [RQ candidates](rq-candidates.md) — proposed, un-numbered new questions, including the affective design clarification.
 - [Publication notes](publication-notes.md) — venue maturity and forbidden claims.
 
+## Research charters (2026-09-26)
+
+Long-term research doctrine. A charter constrains design and experiments. It
+is not an acceptance record, a completed architecture, or proof of
+cognition, emotion, or consciousness.
+
+- [Research charters](charters/README.md) — document control, sanitization
+  record, links to current slice records, and the C01–C07 ↔ RQ mapping.
+- [LILITH Cognitive Continuity, Memory & Substrate Research Charter v0.1](charters/lilith-cognitive-continuity-research-charter-v0.1.md)
+  — a cross-slice research and design charter for identity continuity,
+  selective memory, substrate replacement, affect, relationship cognition,
+  artificial welfare, governance separation, and future multi-runtime work
+  ([PDF](charters/LILITH_Cognitive_Continuity_Research_Charter_v0.1.pdf),
+  [DOCX](charters/LILITH_Cognitive_Continuity_Research_Charter_v0.1.docx)).
+
 ## Program themes
 
 1. Identity and continuity
