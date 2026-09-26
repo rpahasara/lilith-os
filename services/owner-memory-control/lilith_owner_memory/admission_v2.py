@@ -77,6 +77,10 @@ REASONS = (
     "ADMISSION_MALFORMED",
     "ADMISSION_NOT_ACCEPTED",
     "ADMISSION_BINDING_MISMATCH",
+    "EVIDENCE_USE_MISSING",
+    "EVIDENCE_USE_MISMATCH",
+    "NOT_READABLE",
+    "ACTIVE_REVISION_MISMATCH",
 )
 
 
@@ -303,6 +307,21 @@ def check_admission_link(authority: VerifiedOwnerAuthorityV1, action: C.FrozenMe
     return admitted, linked
 
 
+def check_evidence_use(authority: VerifiedOwnerAuthorityV1, linked: AdmissionAuthorityLinkV1,
+                       evidence_use: Any) -> None:
+    """The authority-side ledger must record that exactly this admission
+    consumed exactly this evidence. App-held link metadata cannot stand in."""
+    require(evidence_use is not None, "EVIDENCE_USE_MISSING")
+    require(isinstance(evidence_use, Mapping), "EVIDENCE_USE_MISMATCH")
+    envelope = authority.evidence
+    require((evidence_use.get("state"), evidence_use.get("evidenceId"), evidence_use.get("evidenceDigest"),
+             evidence_use.get("challengeId"), evidence_use.get("actionDigest"), evidence_use.get("proposalRefId"),
+             evidence_use.get("admissionId"), evidence_use.get("revisionId"))
+            == ("CONSUMED", envelope["evidenceId"], authority.evidence_digest, envelope["challengeId"],
+                envelope["actionDigest"], linked["proposalRefId"], linked["admissionId"], linked["revisionId"]),
+            "EVIDENCE_USE_MISMATCH")
+
+
 def verify_accepted_memory_v2(
     *,
     owner_context: K.AcceptanceContextV1,
@@ -316,6 +335,7 @@ def verify_accepted_memory_v2(
     evidence: Any,
     admission: Mapping[str, Any] | None,
     link: Mapping[str, Any] | None,
+    evidence_use: Mapping[str, Any] | None,
 ) -> V2ResultV1:
     """ACCEPTED_MEMORY only when owner proof → broker-signed OwnerEvidenceV2 →
     registry → linked L04 admission all verify. Never a truth claim.
@@ -325,6 +345,10 @@ def verify_accepted_memory_v2(
     admission time) or HISTORICAL_VERIFICATION (re-verifying later, where
     routine retirement keeps pre-retirement evidence valid and compromise
     remains retroactive).
+
+    `evidence_use` is the authority-side ledger record for the evidence. It
+    must show that exactly this admission consumed it, so a duplicated or
+    forged admission of the same authorized action is not accepted.
     """
     try:
         require(isinstance(owner_context, K.AcceptanceContextV1)
@@ -346,6 +370,7 @@ def verify_accepted_memory_v2(
             owner_credential=owner_credential, registry=registry, evidence=evidence,
             expected_evidence_id=expected_id if isinstance(expected_id, str) else "")
         admitted, linked = check_admission_link(authority, action, admission, link)
+        check_evidence_use(authority, linked, evidence_use)
     except Reject as rejected:
         return V2ResultV1(NOT_ACCEPTED, rejected.reason, rejected.detail)
     challenge = authority.owner.challenge

@@ -3,51 +3,69 @@
 Design: docs/architecture/slice-15b2b-b1b3-custody-isolation-design.md.
 
 The adapter wraps the unchanged `lilith_memory.canonical_store.
-CanonicalMemoryStoreV2`; it does not replace, patch, or migrate it. For a V2
-NEW admission it requires, in order, and fails closed on the first miss:
+CanonicalMemoryStoreV2`; it does not patch or migrate it. For a V2 NEW
+admission it requires, in order, and fails closed at the first miss:
 
 1. a trusted NEW_ADMISSION authority context and owner context;
-2. authority evidence that is OwnerEvidenceV2 (V1 `ActorEvidenceRefV1` HMAC
-   evidence and the B2a TEST broker envelope are refused);
+2. authority evidence that is OwnerEvidenceV2. V1 `ActorEvidenceRefV1` HMAC
+   evidence and the B2a TEST broker envelope are refused;
 3. the candidate memory operation, resolved from the immutable L04 V2
-   proposal reference (never from the caller);
+   proposal reference, never from the caller;
 4. an operation L04 owns (FORGET is Privacy-owned and refused);
 5. no current Privacy hold or restore suppression for the identity;
 6. a consumed owner proof bound to that exact action (B2a steps 1-6);
 7. OwnerEvidenceV2 verified against the public registry (B1b-3a) and bound
-   to that owner proof and the exact request, action, and payload digests,
-   logical authority domain, owner, environment, signing domain, evidence
-   type, recovery epoch, policy version, and registry lifecycle;
-8. evidence and challenge not already used for an admission;
-9. every existing L04 rule, by delegating to `CanonicalMemoryStoreV2.apply`
-   (which still re-checks the Privacy hold inside its transaction).
+   to that owner proof and to:
+   - the exact request, action, and payload digests;
+   - the logical authority domain and owner;
+   - the environment, signing domain, and evidence type;
+   - the recovery epoch, policy version, and registry lifecycle;
+8. a successful authority-side reservation of the evidence. One evidence
+   instance gives at most one durable effect, recorded outside application
+   custody;
+9. every existing L04 rule, by delegating to `CanonicalMemoryStoreV2.apply`,
+   which still re-checks the Privacy hold inside its transaction.
 
-Only then does it record an `AdmissionAuthorityLinkV1`. Policy, Consent,
-Rollback, and ActorEvidenceRefV1 rows remain internal L04 state that the
-unchanged store consumes; they are necessary for L04 but never sufficient for
-V2, and the adapter never treats them as authority.
+**V2 admission mode.** The store must be in V2 admission mode: its
+`actor_authority` is a `V2AdmissionActorGate`. The gate refuses every
+`validate_existing` call except during this adapter's own apply, for exactly
+the action it just verified. A direct `apply` on that store, even with valid
+V1 HMAC Actor evidence and every V1 row, is therefore rejected by L04 itself
+(`ACTOR_UNRESOLVED`). HISTORICAL_V1 rows stay readable and V1-verifiable,
+through `V2AdmissionActorGate.verify_historical_v1` or the inner authority.
+NEW_ADMISSION requires V2 authority.
+
+After L04 commits, the adapter records an `AdmissionAuthorityLinkV1`, with
+the public chain artifacts needed to re-verify on read, and then confirms
+the authority-side consumption. Policy, Consent, Rollback, and
+ActorEvidenceRefV1 rows remain internal L04 state that the unchanged store
+consumes. They are necessary for L04 but never sufficient for V2.
 
 Honest limits (TEST-only):
 
-- the link is held in an in-process `AdmissionLinkStoreV1`, recorded after
-  L04 commits. A crash between the two leaves an admission with no link,
-  which acceptance refuses (fail closed). Production needs the link written
-  in the L04 transaction, i.e. a schema migration;
-- the unchanged V1 `CanonicalMemoryStoreV2.apply` remains directly callable.
-  The adapter cannot stop a V1-path row; it guarantees only that such a row
-  is never L04_ADMITTED or ACCEPTED_MEMORY on the V2 path.
+- the link and the authority confirmation are written after L04 commits, so
+  a crash in between leaves a stored row that is not accepted (fail closed,
+  tested). Production needs the link in the L04 transaction (a schema
+  migration) and a durable authority acknowledgement;
+- the V2 guarantee holds for stores built in V2 admission mode. An unguarded
+  `CanonicalMemoryStoreV2` over the same database can still write a V1 row.
+  Such a row is never L04_ADMITTED, ACCEPTED_MEMORY, or returned by the
+  accepted-memory read facade. A write barrier inside L04 itself is later
+  core-api work.
 
 The adapter holds public registry material only and never signs.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from lilith_memory import canonical_authority as CA
 from lilith_memory import canonical_contracts as C
 from lilith_memory import canonical_store as S
 from lilith_memory import learning_v2 as L
@@ -68,6 +86,7 @@ from .admission_v2 import (
 
 L04_ADMITTED = "L04_ADMITTED"
 ADMISSION_SEMANTICS = "L04_APPLIED_AND_LINKED_TO_VERIFIED_AUTHORITY_NOT_MEMORY_ACCEPTANCE"
+FAULT_POINTS = ("before_apply", "after_l04_commit", "after_link", "after_confirm")
 
 
 @dataclass(frozen=True)
@@ -86,30 +105,107 @@ class V2AdmissionRequestV1:
 class AdmissionLinkStoreV1:
     """TEST-ONLY in-memory admission ↔ evidence link store.
 
-    One link per proposal, per evidence ID, and per challenge. It is
-    application-held metadata: forging an entry grants nothing, because
-    acceptance re-verifies the evidence it names.
+    One link per proposal. It is **application-held metadata**, like the L04
+    rows themselves. It also archives the public chain artifacts (evidence,
+    owner challenge, assertion, credential) so the accepted-memory read
+    facade can re-verify. Forging or duplicating an entry grants nothing:
+    acceptance re-verifies every artifact and requires the authority-side
+    evidence-use record. This store is **not** the single-use authority.
     """
 
     def __init__(self) -> None:
         self._by_proposal: dict[str, dict[str, Any]] = {}
-        self._evidence: set[str] = set()
-        self._challenges: set[str] = set()
+        self._chains: dict[str, dict[str, Any]] = {}
 
-    def used(self, evidence_id: str, challenge_id: str) -> bool:
-        return evidence_id in self._evidence or challenge_id in self._challenges
-
-    def record(self, link: AdmissionAuthorityLinkV1) -> None:
-        if (link["proposalRefId"] in self._by_proposal
-                or self.used(link["authorityEvidenceId"], link["challengeId"])):
+    def record(self, link: AdmissionAuthorityLinkV1, chain: Mapping[str, Any]) -> None:
+        if link["proposalRefId"] in self._by_proposal:
             raise ValueError("admission link already recorded")
         self._by_proposal[link["proposalRefId"]] = dict(link.fields)
-        self._evidence.add(link["authorityEvidenceId"])
-        self._challenges.add(link["challengeId"])
+        self._chains[link["proposalRefId"]] = dict(chain)
 
     def get(self, proposal_ref_id: str) -> dict[str, Any] | None:
         link = self._by_proposal.get(proposal_ref_id)
         return None if link is None else dict(link)
+
+    def chain(self, proposal_ref_id: str) -> dict[str, Any] | None:
+        chain = self._chains.get(proposal_ref_id)
+        return None if chain is None else dict(chain)
+
+
+class V2AdmissionActorGate:
+    """Puts an L04 store into V2 admission mode.
+
+    It wraps the 15B2a `LocalOwnerAuthority` that the unchanged store
+    consults during `apply`. Outside the adapter's own apply of a verified
+    V2 action, every NEW-admission `validate_existing` is refused, whatever
+    V1 HMAC evidence or rows exist. Inside it, the V1 check still runs as
+    internal-state validation: necessary, never sufficient.
+    """
+
+    def __init__(self, inner: CA.LocalOwnerAuthority):
+        if not isinstance(inner, CA.LocalOwnerAuthority):
+            raise TypeError("the gate wraps the 15B2a LocalOwnerAuthority")
+        self._inner = inner
+        self._pending_action_digest: str | None = None
+        self.ACTOR = inner.ACTOR
+
+    @contextlib.contextmanager
+    def admitting(self, action_digest: str):
+        if self._pending_action_digest is not None:
+            raise RuntimeError("a V2 admission is already in progress")
+        self._pending_action_digest = action_digest
+        try:
+            yield
+        finally:
+            self._pending_action_digest = None
+
+    def validate_existing(self, reference_id: str, *, action: C.FrozenMemoryActionV1,
+                          request_digest: str | None = None, require_consumed: bool = False):
+        if self._pending_action_digest is None or action.action_digest != self._pending_action_digest:
+            raise CA.ActorEvidenceError(C.ACTOR_UNRESOLVED)
+        return self._inner.validate_existing(reference_id, action=action, request_digest=request_digest,
+                                             require_consumed=require_consumed)
+
+    def verify_historical_v1(self, reference_id: str, *, action: C.FrozenMemoryActionV1):
+        """HISTORICAL_V1 verification with its unchanged semantics. Never an
+        admission, and never V2 acceptance."""
+        return self._inner.validate_existing(reference_id, action=action, require_consumed=True)
+
+
+def v2_admission_store(store: S.CanonicalMemoryStoreV2) -> S.CanonicalMemoryStoreV2:
+    """A V2-admission-mode view of an unchanged store: same database and
+    rules, with its Actor authority wrapped by `V2AdmissionActorGate`."""
+    if not isinstance(store, S.CanonicalMemoryStoreV2):
+        raise TypeError("store must be the unchanged CanonicalMemoryStoreV2")
+    if isinstance(store.actor_authority, V2AdmissionActorGate):
+        return store
+    guarded = S.CanonicalMemoryStoreV2.__new__(S.CanonicalMemoryStoreV2)
+    guarded.__dict__.update(store.__dict__)
+    guarded.actor_authority = V2AdmissionActorGate(store.actor_authority)
+    return guarded
+
+
+def resolve_v2_action(store: S.CanonicalMemoryStoreV2, proposal_ref_id: Any) -> C.FrozenMemoryActionV1:
+    """The frozen action named by an immutable L04 V2 proposal reference."""
+    try:
+        ref, proposal = store.learning_store.resolve_proposal_ref(proposal_ref_id)
+        require(ref.proposal_family == L.V2_PROPOSAL_FAMILY, "PROPOSAL_UNRESOLVED", "V1_PROPOSAL_FAMILY")
+        action = S.CanonicalMemoryStoreV2._action(proposal)
+        action.validate()
+    except Reject:
+        raise
+    except Exception as exc:
+        raise Reject("PROPOSAL_UNRESOLVED") from exc
+    return action
+
+
+LEDGER_METHODS = ("reserve", "confirm", "abandon", "lookup")
+
+
+def check_evidence_use_ledger(ledger: Any) -> None:
+    if isinstance(ledger, AdmissionLinkStoreV1) or not all(callable(getattr(ledger, m, None))
+                                                           for m in LEDGER_METHODS):
+        raise TypeError("an authority-side evidence-use ledger is required")
 
 
 def _stored_value_digest(revision: sqlite3.Row | tuple) -> str | None:
@@ -127,9 +223,13 @@ def _stored_value_digest(revision: sqlite3.Row | tuple) -> str | None:
     return recomputed if canonical == str(value_json) and recomputed == value_digest else None
 
 
+def _read_only(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
+
+
 def read_l04_admission_view(path: Path, proposal_ref_id: str, action: C.FrozenMemoryActionV1) -> dict[str, Any] | None:
     """Read one admission from the unchanged L04 rows, read-only."""
-    conn = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
+    conn = _read_only(path)
     try:
         admission = conn.execute(
             "SELECT admission_id,outcome FROM memory_admission WHERE proposal_ref_id=?",
@@ -170,15 +270,29 @@ def read_l04_admission_view(path: Path, proposal_ref_id: str, action: C.FrozenMe
     }
 
 
+def proposal_for_revision(path: Path, revision_id: str) -> str | None:
+    """The proposal reference that created one revision, read-only."""
+    conn = _read_only(path)
+    try:
+        row = conn.execute("SELECT created_from_proposal_ref_id FROM memory_revision WHERE revision_id=?",
+                           (revision_id,)).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else str(row[0])
+
+
 class L04V2AdmissionAdapter:
     """V2 NEW admission gate around the unchanged L04 store (TEST-ONLY)."""
 
     def __init__(self, store: S.CanonicalMemoryStoreV2, *, owner_context: K.AcceptanceContextV1,
                  authority_context: A.AuthorityVerificationContextV1,
                  registry_provider: Callable[[], Mapping[str, Any] | None],
-                 link_store: AdmissionLinkStoreV1):
+                 link_store: AdmissionLinkStoreV1, evidence_use_ledger: Any,
+                 fault_hook: Callable[[str], None] | None = None):
         if not isinstance(store, S.CanonicalMemoryStoreV2):
             raise TypeError("store must be the unchanged CanonicalMemoryStoreV2")
+        if not isinstance(store.actor_authority, V2AdmissionActorGate):
+            raise TypeError("the store must be in V2 admission mode (v2_admission_store)")
         if not isinstance(owner_context, K.AcceptanceContextV1):
             raise TypeError("owner context is invalid")
         if not isinstance(authority_context, A.AuthorityVerificationContextV1) \
@@ -186,23 +300,18 @@ class L04V2AdmissionAdapter:
             raise TypeError("the V2 adapter admits only under a NEW_ADMISSION context")
         if not callable(registry_provider) or not isinstance(link_store, AdmissionLinkStoreV1):
             raise TypeError("registry provider or link store is invalid")
+        check_evidence_use_ledger(evidence_use_ledger)
         self.store = store
         self.owner_context = owner_context
         self.authority_context = authority_context
         self.registry_provider = registry_provider
         self.link_store = link_store
+        self.evidence_use_ledger = evidence_use_ledger
+        self.fault_hook = fault_hook
 
-    def _resolve_action(self, proposal_ref_id: Any) -> C.FrozenMemoryActionV1:
-        try:
-            ref, proposal = self.store.learning_store.resolve_proposal_ref(proposal_ref_id)
-            require(ref.proposal_family == L.V2_PROPOSAL_FAMILY, "PROPOSAL_UNRESOLVED", "V1_PROPOSAL_FAMILY")
-            action = S.CanonicalMemoryStoreV2._action(proposal)
-            action.validate()
-        except Reject:
-            raise
-        except Exception as exc:
-            raise Reject("PROPOSAL_UNRESOLVED") from exc
-        return action
+    def _fault(self, point: str) -> None:
+        if self.fault_hook is not None:
+            self.fault_hook(point)
 
     def _privacy_clear(self, action: C.FrozenMemoryActionV1) -> None:
         try:
@@ -218,7 +327,7 @@ class L04V2AdmissionAdapter:
             require(request.evidence is not None, "AUTHORITY_EVIDENCE_MISSING")
             legacy = non_v2_evidence_kind(request.evidence)
             require(legacy is None, "NON_V2_EVIDENCE_NOT_ACCEPTED", legacy)
-            action = self._resolve_action(request.proposal_ref_id)
+            action = resolve_v2_action(self.store, request.proposal_ref_id)
             require(action.operation != C.FORGET, "PRIVACY_OWNED_OPERATION")
             try:
                 challenge_operation = B2A.parse_challenge_v2(request.challenge_json)["operation"]
@@ -233,15 +342,25 @@ class L04V2AdmissionAdapter:
                 assertion=request.assertion, owner_credential=request.owner_credential,
                 registry=self.registry_provider(), evidence=request.evidence, expected_evidence_id=None)
             envelope = authority.evidence
-            require(not self.link_store.used(envelope["evidenceId"], envelope["challengeId"]),
-                    "EVIDENCE_ALREADY_CONSUMED")
+            # Authority-side single use, recorded before any durable effect.
+            reserved = self.evidence_use_ledger.reserve(
+                evidence_id=envelope["evidenceId"], evidence_digest=authority.evidence_digest,
+                challenge_id=envelope["challengeId"], proposal_ref_id=request.proposal_ref_id,
+                action_digest=envelope["actionDigest"])
+            require(reserved.status == "RESERVED", "EVIDENCE_ALREADY_CONSUMED", reserved.reason)
+            self._fault("before_apply")
 
             # Every existing L04 rule applies unchanged, including its own
             # in-transaction Privacy hold checks and V1 internal-state rows.
-            applied = self.store.apply(request.proposal_ref_id)
+            with self.store.actor_authority.admitting(action.action_digest):
+                applied = self.store.apply(request.proposal_ref_id)
+            if applied.outcome != S.ACCEPTED:
+                self.evidence_use_ledger.abandon(evidence_id=envelope["evidenceId"],
+                                                 proposal_ref_id=request.proposal_ref_id)
             require(applied.outcome == S.ACCEPTED, "L04_NOT_ADMITTED",
                     applied.outcome if applied.failure_code is None
                     else f"{applied.outcome}:{applied.failure_code}")
+            self._fault("after_l04_commit")
             view = read_l04_admission_view(self.store.path, request.proposal_ref_id, action)
             require(view is not None, "ADMISSION_MISSING")
             link = {
@@ -258,7 +377,16 @@ class L04V2AdmissionAdapter:
                 "payloadDigest": envelope["payloadDigest"],
             }
             _admitted, linked = check_admission_link(authority, action, view, link)
-            self.link_store.record(linked)
+            self.link_store.record(linked, {
+                "evidence": dict(request.evidence), "challengeJson": bytes(request.challenge_json),
+                "assertion": dict(request.assertion), "ownerCredential": dict(request.owner_credential),
+            })
+            self._fault("after_link")
+            confirmed = self.evidence_use_ledger.confirm(
+                evidence_id=envelope["evidenceId"], proposal_ref_id=request.proposal_ref_id,
+                admission_id=view["admissionId"], revision_id=view["revisionId"])
+            require(confirmed.status == "CONSUMED", "EVIDENCE_USE_MISMATCH", confirmed.reason)
+            self._fault("after_confirm")
         except Reject as rejected:
             return V2ResultV1(NOT_ACCEPTED, rejected.reason, rejected.detail)
         return V2ResultV1(L04_ADMITTED, None, None, {

@@ -489,7 +489,8 @@ class NegativeMatrixTests(FlowCase):
         self.assertEqual(self.admit(self.proposal, self.proof, self.evidence).status, AD.L04_ADMITTED)
         after = self.flow.l04.counts()
         # Same request again: the evidence is already consumed by an admission.
-        self.assertRejected(self.admit(self.proposal, self.proof, self.evidence), "EVIDENCE_ALREADY_CONSUMED")
+        self.assertRejected(self.admit(self.proposal, self.proof, self.evidence), "EVIDENCE_ALREADY_CONSUMED",
+                            "EVIDENCE_ALREADY_CONSUMED")
         # Same evidence replayed for another operation on another proposal.
         action2, encoded2 = self.flow.l04.action("SYNTH-MATRIX", operation=C.SUPERSEDE,
                                                  expected=self.flow.links.get(self.proposal)["revisionId"])
@@ -545,7 +546,8 @@ class NegativeMatrixTests(FlowCase):
         rejected_view = {**view, "admissionOutcome": "REJECTED", "applyAuditId": None}
         self.assertRejected(self.accept(self.proof, self.evidence, self.proposal, admission=rejected_view),
                             "ADMISSION_NOT_ACCEPTED")
-        source = inspect.getsource(inspect.getmodule(self))
+        source = inspect.getsource(inspect.getmodule(self)) + Path(__file__).with_name(
+            "test_b1b3b_hardening.py").read_text(encoding="utf-8")
         for reason in V2.REASONS + B.SIGNER_REASONS:
             with self.subTest(reason=reason):
                 self.assertIn(f'"{reason}"', source)
@@ -716,14 +718,25 @@ class DirectDatabaseWriterTests(FlowCase):
         self.assertEqual(self.accept(proof, evidence, proposal).status, V2.ACCEPTED_MEMORY)
 
     def test_v2_modules_never_read_policy_consent_rollback_or_actor_rows(self):
-        for module in (V2, AD):
+        from lilith_owner_memory import accepted_read_v2 as AR
+
+        def names(tree):
+            return {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)} | \
+                   {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+
+        for module in (V2, AD, AR):
             tree = ast.parse(inspect.getsource(module))
-            names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)} | \
-                    {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-            for forbidden in ("policy_store", "consent_store", "rollback_authority", "actor_authority",
-                              "validate_existing", "resolve_and_consume"):
+            for forbidden in ("policy_store", "consent_store", "rollback_authority", "resolve_and_consume"):
                 with self.subTest(module=module.__name__, name=forbidden):
-                    self.assertNotIn(forbidden, names)
+                    self.assertNotIn(forbidden, names(tree))
+        for module in (V2, AR):
+            self.assertFalse({"actor_authority", "validate_existing"} & names(ast.parse(inspect.getsource(module))))
+        # In the adapter, the Actor authority appears only as the V2 admission
+        # gate: it is never consulted as V2 authority.
+        tree = ast.parse(inspect.getsource(AD))
+        gate = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "V2AdmissionActorGate")
+        used = set().union(*(names(n) for n in tree.body if n is not gate))
+        self.assertNotIn("validate_existing", used)
 
 
 # ------------------------------------------------ 11. old app HMAC key ---

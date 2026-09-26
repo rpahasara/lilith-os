@@ -29,6 +29,7 @@ import synthetic_authority as SA
 import synthetic_chain as SC
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from lilith_authority_signer import synthetic_broker as B
+from lilith_authority_signer import synthetic_evidence_ledger as EL
 from lilith_memory import backup
 from lilith_memory import canonical_authority as CA
 from lilith_memory import canonical_contracts as C
@@ -38,6 +39,7 @@ from lilith_memory import learning_v2
 from lilith_memory import memory_store
 from lilith_memory import memory_v2
 from lilith_memory import slice15b2a_migration
+from lilith_owner_memory import accepted_read_v2 as AR
 from lilith_owner_memory import authority_contracts as A
 from lilith_owner_memory import contracts as K
 from lilith_owner_memory import l04_v2_adapter as AD
@@ -289,12 +291,32 @@ class Flow:
         self.broker = broker(self.clock)
         self.registry_doc = registry()
         self.links = AD.AdmissionLinkStoreV1()
+        # Authority-side (broker) evidence-use ledger: not application state.
+        self.ledger = EL.SyntheticEvidenceUseLedgerV1()
         self.adapter = self.make_adapter()
 
-    def make_adapter(self, **context: Any) -> AD.L04V2AdmissionAdapter:
-        return AD.L04V2AdmissionAdapter(self.l04.store(), owner_context=owner_context(),
-                                        authority_context=authority_context(**context),
-                                        registry_provider=lambda: self.registry_doc, link_store=self.links)
+    def make_adapter(self, *, store_overrides: dict | None = None, fault_hook=None,
+                     **context: Any) -> AD.L04V2AdmissionAdapter:
+        return AD.L04V2AdmissionAdapter(
+            AD.v2_admission_store(self.l04.store(**(store_overrides or {}))), owner_context=owner_context(),
+            authority_context=authority_context(**context), registry_provider=lambda: self.registry_doc,
+            link_store=self.links, evidence_use_ledger=self.ledger, fault_hook=fault_hook)
+
+    def l04_read_facade(self):
+        return memory_v2.CanonicalMemoryReadFacade(
+            self.l04.store(), registry=self.l04.tuple_registry, consent_store=self.l04.consent,
+            privacy_hold_resolver=self.l04.privacy, actor_resolver=lambda actor: actor == self.l04.actor.ACTOR)
+
+    def reader(self, **context: Any) -> AR.AcceptedMemoryReadFacadeV2:
+        return AR.AcceptedMemoryReadFacadeV2(
+            self.l04_read_facade(), self.l04.store(), owner_context=owner_context(),
+            authority_context=SA.historical_context(**context), registry_provider=lambda: self.registry_doc,
+            challenge_record_provider=self.broker.ledger_record, link_store=self.links,
+            evidence_use_ledger=self.ledger)
+
+    def read(self, reader=None):
+        return (reader or self.reader()).read_accepted(actor=self.l04.actor.ACTOR, memory_class=L04_CLASS,
+                                                      subject_namespace=L04_NAMESPACE, subject_key=L04_KEY)
 
     def signed(self, proof: OwnerProof) -> dict[str, Any]:
         """Owner proof → challenge consumed → broker-signed OwnerEvidenceV2."""
@@ -330,7 +352,9 @@ class Flow:
                      assertion=proof.assertion, owner_credential=proof.credential, registry=self.registry_doc,
                      evidence=evidence, admission=AD.read_l04_admission_view(self.l04.db, proposal_ref_id,
                                                                             proof.action),
-                     link=self.links.get(proposal_ref_id))
+                     link=self.links.get(proposal_ref_id),
+                     evidence_use=self.ledger.lookup(evidence.get("evidenceId") if isinstance(evidence, dict)
+                                                     else None))
         value.update(replace)
         return value
 
