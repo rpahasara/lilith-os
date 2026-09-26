@@ -4,6 +4,28 @@ This register captures the hard questions that shape LILITH as autonomy, persist
 
 Status meanings are defined in the [research method](method.md). “Designed” means a proposed answer exists—not that it is implemented or correct.
 
+## Register provenance and numbering (added 2026-09-26)
+
+- **Origin.** All fifty rows below were created in commit `1eee09b`
+  (2026-09-13, "chore: establish LILITH repository foundation") and were not
+  modified until this note. The wording and **Status** column below are the
+  original historical record and must not be rewritten; later evidence is
+  recorded separately.
+- **Current evidence.** Per-question evidence, a proposed evidence-assessed
+  maturity, and what remains unknown are in the [RQ evidence map](rq-evidence-map.md).
+  Proposed changes there take effect only when accepted in a pull request.
+- **Numbering.** This register's numbers are **not** the numbering of the
+  out-of-repo Architecture & Research Master v1.1 (RQ-001–RQ-121). The same
+  number can name a different question in the two registers. See the
+  [numbering reconciliation](rq-numbering-reconciliation.md). ADRs cite this
+  register's numbers. Do not assign RQ-051 or later until the owner decides
+  how the two registers relate.
+- **Master archived (2026-09-26).** Both Master editions are now archived
+  under [source-material/originals](source-material/originals/). Cite this
+  register as `REPO:RQ-NNN` and the Master as `MASTER:RQ-NNN`; the
+  [REPO ↔ MASTER crosswalk](rq-register-crosswalk.md) classifies every pair.
+  Only RQ-001 means the same question in both.
+
 ## Priority questions
 
 The first evaluation wave should focus on the questions with the highest architectural leverage:
