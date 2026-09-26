@@ -8,6 +8,17 @@ docs/architecture/slice-15b2b-b1b3d-l2-custody-preparation.md.
 
     sudo /usr/bin/python3 -I -B install_authority_dev.py <stage> [...]
 
+Provenance (N-45):
+
+- RELEASE_SHA: the protected-main commit the installed, immutable signer
+  release was built from. It is the `<sha>` argument of every stage below,
+  and the only commit this installer reads state for.
+- CONTROL_SHA: the protected-main commit this installer, the verifiers, and
+  the runbook are taken from and streamed. It may be newer than RELEASE_SHA.
+  A control-only change never requires rebuilding or reinstalling
+  RELEASE_SHA, unless the signer release payload changes. This file is
+  never part of that payload (tests pin this).
+
 Each mutating stage performs exactly one logical state transition and then
 prints its POST evidence. Every stage refuses on any collision instead of
 correcting existing state.
@@ -17,7 +28,7 @@ correcting existing state.
 | `status --expect <S>` | POST of S | none (read-only) |
 | `preflight` | L0 | none (read-only) |
 | `accounts` | L1a | create system user+group `lilith-authority-dev` |
-| `release` | L1b.1 | install `/opt/lilith-authority-dev/releases/<sha>` from a verified archive |
+| `release` | L1b.1 | install `/opt/lilith-authority-dev/releases/<RELEASE_SHA>` from a verified archive |
 | `select` | L1b.2 | create the `current` selector |
 | `units` | L1c.1 | install unit, socket, and tmpfiles files (no reload, no enable) |
 | `cli` | L1c.3 | install `/usr/local/sbin/lilith-authority-keygen-dev` |
@@ -423,6 +434,11 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
         uid, gid = (system.owner_uid if uid == 0 else uid), (system.owner_gid if gid == 0 else gid)
         if meta["kind"] != kind or meta["uid"] != uid or meta["gid"] != gid or (mode and meta["mode"] != mode):
             failures.append("CONTRACT:" + absolute)
+    if sha and STAGES.index(stage) >= STAGES.index("L1b.1") and system.path(RELEASES).is_dir():
+        entries = sorted(entry.name for entry in system.path(RELEASES).iterdir())
+        observed["releaseEntries"] = entries
+        if entries != [sha]:
+            failures.append("RELEASE_SET")  # exactly RELEASE_SHA; no second release or staging leftover
     if sha and STAGES.index(stage) >= STAGES.index("L1b.2"):
         target = os.readlink(system.path(CURRENT)) if system.path(CURRENT).is_symlink() else None
         observed["currentTarget"] = target
@@ -453,7 +469,7 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
         failures.append("CREDSTORE_NOT_EMPTY")
     observed["credentialBlobSha256"] = _file_sha(system, CREDENTIAL)
     observed["hostPrerequisites"] = prerequisites
-    return {"schemaVersion": 1, "stage": stage, "candidateSha": sha,
+    return {"schemaVersion": 1, "stage": stage, "releaseSha": sha,
             "result": "PASS" if not failures else "FAIL", "failures": failures, "observed": observed}
 
 

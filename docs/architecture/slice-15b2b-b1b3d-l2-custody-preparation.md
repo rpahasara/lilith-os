@@ -245,18 +245,54 @@ publicVerificationMaterial           -> later AuthorityKeyRecordV1 (L3a, offline
 - **Installer invocation.** Every installer stage below, including the
   mutating ones, uses the streamed form above with `<args>` =
   `<stage> …`. Only L1b.1 also needs the staged archive (S-1).
-  `<SHA>` below is the protected-main commit being installed.
-- **Preservation set.** Every step starts by re-running the read-only
-  preservation checks (streamed):
-  - `verify_broker_dev_current_incarnation.py baseline` equals the
-    accepted current-runtime baseline;
-  - the B1c helper, library, verifier, and sudoers hashes are unchanged;
-  - activation is `NOT_ACCEPTED reason=GRANT_ABSENT`;
-  - the Stage III artifacts are unchanged.
+  `<RELEASE_SHA>` below is the installed signer release (see *Provenance*).
+- **Provenance (N-45).** Two commits are distinguished:
+  - `RELEASE_SHA`: the protected-main commit that the installed, immutable
+    signer release was built from. Every installer stage and every `status`
+    takes it. Live value after L1b.1:
+    `9ac7de22bf977385ceb954624677e33f0bae062b`.
+  - `CONTROL_SHA`: the protected-main commit whose ceremony controls
+    (installer, verifiers, and this runbook) are streamed. It may be newer
+    than `RELEASE_SHA`, and each transcript records it (`git rev-parse HEAD`
+    of the workstation checkout used).
 
-  **STOP** on any difference.
+  A control-only change (installer, verifier, runbook, DR-5 proof) **never**
+  requires rebuilding or reinstalling `RELEASE_SHA`. Only a change to the
+  signer release payload does: the runtime modules, the unit and socket
+  assets, the keygen CLI, or the pinned wheels. That needs a new release
+  and its own ladder steps.
+- **Preservation set (phase-aware; corrected by N-45).** Every step starts
+  by re-running the read-only preservation checks (streamed):
+  - **Before any custody path exists (L0, L1a):**
+    `verify_broker_dev_current_incarnation.py baseline` equals the accepted
+    current-runtime baseline. This is the historical pre-custody operation.
+  - **From L1b.1 on** (S-2, L1b.2, and all later steps), **all** of:
+    1. `verify_broker_dev_current_incarnation.py preservation` shows
+       `BROKER_PRESERVATION=PASS`. That means the same broker incarnation
+       (`42af2691b8d24ee5a92a286197c5444c`) and the same `baselineCandidate`
+       SHA-256 (`3549585487ad…a7eee5`). The same PID, start ticks, boot ID,
+       NRestarts, release and manifest, shared libraries, config, state,
+       identity and socket boundary, Stage III, and B1c policy all hold.
+    2. `install_authority_dev.py status --expect <stage> <RELEASE_SHA>` shows
+       `PASS` for the current authority ladder stage. This alone owns exact
+       authority state. It fails on any unexpected or out-of-order authority
+       object, including a second release directory.
+    3. DR-5 evidence where the ladder requires it (a routine or control-only
+       run with `AUTHORITY_BOUNDARY_PROOF=PASS maturity=<stage>`).
+
+    The broker verifier does **not** own authority custody. `preservation`
+    reports custody paths verbatim and never judges them or derives a
+    maturity. Custody presence is never read as broker drift, nor as
+    authority progress.
+  - Always: the B1c helper, library, verifier, and sudoers hashes are
+    unchanged; activation is `NOT_ACCEPTED reason=GRANT_ABSENT`; the Stage
+    III artifacts are unchanged.
+
+  **STOP** on any difference. `baseline` is not used after L1b.1: it
+  correctly fails there with `CUSTODY_PATH_PRESENT_BEFORE_B1B3D`, and its
+  historical meaning is not reinterpreted.
 - **POST check.** Every step's POST is
-  `install_authority_dev.py status --expect <step> [<SHA>]` with
+  `install_authority_dev.py status --expect <step> [<RELEASE_SHA>]` with
   `"result": "PASS"`, plus the step-specific evidence below. Save every
   transcript to the owner evidence directory.
 - **Private material.** Any private-key pattern in any output or journal
@@ -269,16 +305,16 @@ publicVerificationMaterial           -> later AuthorityKeyRecordV1 (L3a, offline
 | --- | --- | --- | --- | --- | --- |
 | **L0** | owner authorization; §10 prerequisites met | **none (READ_ONLY OBSERVATION):** streamed `install_authority_dev.py preflight` and streamed `verify_broker_dev_current_incarnation.py baseline`; no file is copied to DEV | `status L0` PASS: account and all LILITH paths absent; host prerequisites ABSENT or PRESENT_SECURE (current DEV: host key ABSENT, credstore PRESENT_SECURE and empty); needrestart control hash `503279…68d2`; units not found/inactive; baseline equals the accepted current-runtime baseline | any LILITH object present; a prerequisite PRESENT_UNSAFE or the credstore not empty; needrestart changed; baseline or preservation diff | — (nothing changed) |
 | **L1a** | L0 PASS; the §10 deployer/DR-5 hardening merged and its live denial prerequisites passed on a real routine deployment | `install_authority_dev.py accounts` → `useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lilith-authority-dev` | `status L1a` PASS: uid/gid recorded (U1), primary group only, password locked, `sudo -l -U` not allowed, `/nonexistent` absent | the name exists; any contract check fails | `userdel lilith-authority-dev` (removes the user group), only if nothing later ran |
-| **S-1** (staging) | L1a PASS; archive and attestation built on the workstation by `ceremony/build_authority_dev_release.py` from clean `<SHA>`; their SHA-256 recorded | **STAGING only:** `mkdir -m 0700 ~/b1b3d-l2-stage` (as the owner, not root), then `gcloud compute scp --tunnel-through-iap` of exactly the archive and attestation into it | on-host `sha256sum` of both equals the workstation values; directory owner-only 0700; nothing else in it | any hash mismatch; the directory already exists | `rm -rf ~/b1b3d-l2-stage` |
-| **L1b.1** | L1a PASS; S-1 POST PASS | streamed `install_authority_dev.py release <SHA> <staged archive> <staged attestation>` (it reads each file once and verifies from memory): verify the archive, stage, create an offline pinned venv, import-check as `lilith-authority-dev`, rename to `releases/<SHA>` | `status L1b.1 <SHA>` PASS; manifest hash; tree `root:root`, dirs 0755 | verification or import check fails; staging or target exists | `rm -rf /opt/lilith-authority-dev/releases/<SHA>` (and the empty parents if this created them) |
+| **S-1** (staging) | L1a PASS; archive and attestation built on the workstation by `ceremony/build_authority_dev_release.py` from clean `<RELEASE_SHA>`; their SHA-256 recorded | **STAGING only:** `mkdir -m 0700 ~/b1b3d-l2-stage` (as the owner, not root), then `gcloud compute scp --tunnel-through-iap` of exactly the archive and attestation into it | on-host `sha256sum` of both equals the workstation values; directory owner-only 0700; nothing else in it | any hash mismatch; the directory already exists | `rm -rf ~/b1b3d-l2-stage` |
+| **L1b.1** | L1a PASS; S-1 POST PASS | streamed `install_authority_dev.py release <RELEASE_SHA> <staged archive> <staged attestation>` (it reads each file once and verifies from memory): verify the archive, stage, create an offline pinned venv, import-check as `lilith-authority-dev`, rename to `releases/<RELEASE_SHA>` | `status L1b.1 <RELEASE_SHA>` PASS; manifest hash; tree `root:root`, dirs 0755 | verification or import check fails; staging or target exists | `rm -rf /opt/lilith-authority-dev/releases/<RELEASE_SHA>` (and the empty parents if this created them) |
 | **S-2** (unstaging) | L1b.1 PASS | `rm -rf ~/b1b3d-l2-stage` (nothing else) | the directory is absent | — | — |
-| **L1b.2** | L1b.1 PASS; S-2 done | `install_authority_dev.py select <SHA>` → `current -> releases/<SHA>` | `status L1b.2 <SHA>` PASS | `current` exists | `rm /opt/lilith-authority-dev/current` |
-| **L1c.1** | L1b.2 PASS | `install_authority_dev.py units <SHA>` → unit, socket, and tmpfiles files `root:root 0644` from the release (no reload, no enable, no `systemd-tmpfiles --create`) | `status L1c.1 <SHA>` PASS: bytes equal the release assets; units not active, not enabled | any target exists | remove the three files |
-| **L1c.2** | L1c.1 PASS | `systemctl daemon-reload` (nothing else) | `status L1c.2 <SHA>` PASS: both units `LoadState=loaded`, `ActiveState=inactive`, `UnitFileState=static`, `NeedDaemonReload=no` | any unit active or enabled | remove the L1c.1 files, then `daemon-reload` |
-| **L1c.3** | L1c.2 PASS | `install_authority_dev.py cli <SHA>` → `/usr/local/sbin/lilith-authority-keygen-dev` `root:root 0755` from the release | `status L1c.3 <SHA>` PASS; CLI hash equals the release copy | target exists | remove the CLI |
-| **L2a** (host prerequisite) | L1c.3 PASS; read `observed.hostPrerequisites` from it | **If ABSENT:** `systemd-creds setup` (nothing else). **If PRESENT_SECURE:** adopt it, **no mutation**. **If PRESENT_UNSAFE:** STOP (L1c.3 already FAILs) | `status L2a <SHA>` PASS: host key `root:root 0400` (stat only; never printed or copied); record CREATED or ADOPTED | unsafe owner, mode, or type; the credstore not empty | only if this step CREATED it and no blob exists: remove it. An adopted key is never removed |
-| **L2b.1** (host prerequisite) | L2a PASS; the §10 denials for every LILITH path created so far are non-vacuous on the latest routine deployment | streamed `install_authority_dev.py credstore <SHA>`: **if ABSENT**, create `/etc/credstore.encrypted` `root:root 0700`; **if PRESENT_SECURE and empty** (current DEV), adopt it, **no mutation** (`"mutation": "ADOPTED_NO_MUTATION"`) | `status L2b.1 <SHA>` PASS: directory `root:root 0700`, empty | PRESENT_UNSAFE; not empty | only if CREATED: `rmdir` (if empty). An adopted credstore is never removed |
-| **L2b.2** | L2b.1 PASS; re-check both host prerequisites PRESENT_SECURE and the credstore empty (`status --expect L2b.1`, and again by the keygen preflight); `swapon --show` empty | `lilith-authority-keygen-dev actor > /root/b1b3d-l2b-publication.json` | publication JSON; `status L2b.2 <SHA>` PASS with `credentialBlobSha256` equal to `blobSha256`; `journalctl` and transcript scans clean | exit ≠ 0; any private-key pattern anywhere; hash mismatch | delete the blob (synthetic; re-keying is recovery, design §16) |
+| **L1b.2** | L1b.1 PASS; S-2 done | `install_authority_dev.py select <RELEASE_SHA>` → `current -> releases/<RELEASE_SHA>` | `status L1b.2 <RELEASE_SHA>` PASS | `current` exists | `rm /opt/lilith-authority-dev/current` |
+| **L1c.1** | L1b.2 PASS | `install_authority_dev.py units <RELEASE_SHA>` → unit, socket, and tmpfiles files `root:root 0644` from the release (no reload, no enable, no `systemd-tmpfiles --create`) | `status L1c.1 <RELEASE_SHA>` PASS: bytes equal the release assets; units not active, not enabled | any target exists | remove the three files |
+| **L1c.2** | L1c.1 PASS | `systemctl daemon-reload` (nothing else) | `status L1c.2 <RELEASE_SHA>` PASS: both units `LoadState=loaded`, `ActiveState=inactive`, `UnitFileState=static`, `NeedDaemonReload=no` | any unit active or enabled | remove the L1c.1 files, then `daemon-reload` |
+| **L1c.3** | L1c.2 PASS | `install_authority_dev.py cli <RELEASE_SHA>` → `/usr/local/sbin/lilith-authority-keygen-dev` `root:root 0755` from the release | `status L1c.3 <RELEASE_SHA>` PASS; CLI hash equals the release copy | target exists | remove the CLI |
+| **L2a** (host prerequisite) | L1c.3 PASS; read `observed.hostPrerequisites` from it | **If ABSENT:** `systemd-creds setup` (nothing else). **If PRESENT_SECURE:** adopt it, **no mutation**. **If PRESENT_UNSAFE:** STOP (L1c.3 already FAILs) | `status L2a <RELEASE_SHA>` PASS: host key `root:root 0400` (stat only; never printed or copied); record CREATED or ADOPTED | unsafe owner, mode, or type; the credstore not empty | only if this step CREATED it and no blob exists: remove it. An adopted key is never removed |
+| **L2b.1** (host prerequisite) | L2a PASS; the §10 denials for every LILITH path created so far are non-vacuous on the latest routine deployment | streamed `install_authority_dev.py credstore <RELEASE_SHA>`: **if ABSENT**, create `/etc/credstore.encrypted` `root:root 0700`; **if PRESENT_SECURE and empty** (current DEV), adopt it, **no mutation** (`"mutation": "ADOPTED_NO_MUTATION"`) | `status L2b.1 <RELEASE_SHA>` PASS: directory `root:root 0700`, empty | PRESENT_UNSAFE; not empty | only if CREATED: `rmdir` (if empty). An adopted credstore is never removed |
+| **L2b.2** | L2b.1 PASS; re-check both host prerequisites PRESENT_SECURE and the credstore empty (`status --expect L2b.1`, and again by the keygen preflight); `swapon --show` empty | `lilith-authority-keygen-dev actor > /root/b1b3d-l2b-publication.json` | publication JSON; `status L2b.2 <RELEASE_SHA>` PASS with `credentialBlobSha256` equal to `blobSha256`; `journalctl` and transcript scans clean | exit ≠ 0; any private-key pattern anywhere; hash mismatch | delete the blob (synthetic; re-keying is recovery, design §16) |
 
 Not in this runbook, and **not authorized by it**:
 
@@ -305,7 +341,7 @@ never LILITH maturity.
 | --- | --- | --- | --- | --- |
 | `/opt/lilith-authority-dev` | dir | root:root | 0755 | L1b.1 |
 | `/opt/lilith-authority-dev/releases` | dir | root:root | 0755 | L1b.1 |
-| `/opt/lilith-authority-dev/releases/<SHA>` | dir | root:root | 0755 | L1b.1 |
+| `/opt/lilith-authority-dev/releases/<RELEASE_SHA>` | dir | root:root | 0755 | L1b.1 |
 | `/opt/lilith-authority-dev/current` | symlink | root:root | — | L1b.2 |
 | `/etc/systemd/system/lilith-authority-dev.service` | file | root:root | 0644 | L1c.1 |
 | `/etc/systemd/system/lilith-authority-dev.socket` | file | root:root | 0644 | L1c.1 |
@@ -333,6 +369,41 @@ Must stay **absent** through L2b:
   `/run/credentials/lilith-authority-dev.service`;
 - `/var/lib/lilith-recovery-witness`, `/run/lilith-recovery-witness`, and
   the K-WIT blob.
+
+### N-45: `PRESERVATION_VERIFIER_PHASE_MISMATCH`
+
+Recorded 2026-09-27 (register
+[N-45](../research/negative-results-register.md#register)).
+
+**What happened.** During the live ladder, L1b.1 had passed
+(`RELEASE_SHA=9ac7de2…`; `/opt/lilith-authority-dev`, `releases/`, and
+`releases/<RELEASE_SHA>` all `root:root 0755`), and `DR5_L1B1_LIVE_BOUNDARY`
+was PASS. `current` was absent, and S-1 staging still held exactly the two
+accepted artifacts. The S-2 PRE preservation check then ran
+`verify_broker_dev_current_incarnation.py baseline`. It returned
+`CURRENT_RUNTIME_BASELINE=FAIL` with only
+`failures=["CUSTODY_PATH_PRESENT_BEFORE_B1B3D"]` and
+`custodyPaths./opt/lilith-authority-dev=PRESENT`. The broker candidate
+itself was still the accepted incarnation.
+
+**Cause.** The runbook used a pre-custody observer as the preservation
+check for post-custody steps. `baseline` encodes "no custody path exists
+yet", which is correct for L0 and L1a and correctly false from L1b.1 on.
+
+**Correction (source only).**
+
+- `baseline` keeps its exact semantics, and its output is unchanged.
+- A separate `preservation` operation runs the same broker checks and pins
+  the accepted incarnation and candidate hash. It always produces and hashes
+  the candidate. It reports custody without judging it, and it has no
+  ignore, allow, or bypass option.
+- Exact authority state stays with the installer `status`, and deployer
+  denial with DR-5.
+- `status` now also refuses any `releases/` entry other than
+  `<RELEASE_SHA>`.
+
+**Nothing live changed.** S-2 and L1b.2 remain NOT_EXECUTED until
+re-authorized under the corrected preservation rule.
 
 ## 10. Deployer boundary and DR-5
 

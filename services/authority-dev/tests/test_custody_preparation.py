@@ -607,6 +607,87 @@ class HostPrerequisiteTests(unittest.TestCase):
                 self.assertIn(needed, failures)
 
 
+@unittest.skipUnless(POSIX, "owner and mode semantics are POSIX")
+class ProvenanceAndPreservationTests(unittest.TestCase):
+    """N-45: broker preservation, authority status, RELEASE_SHA != CONTROL_SHA."""
+
+    def l1b1_host(self, directory: str, out: Path, wheels: Path) -> tuple[FakeHost, I.System]:
+        host = FakeHost(directory)
+        system = host.system()
+        archive, attestation, _ = build_archive(out, wheels)
+        I.stage_accounts(system)
+        I.stage_release(system, SHA, archive, attestation)
+        return host, system
+
+    def test_installer_status_is_still_required_for_authority_maturity(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+            host, system = self.l1b1_host(d, Path(out), wheels)
+            report = I.status(system, "L1b.1", SHA)
+            self.assertEqual(report["result"], "PASS", report["failures"])
+            self.assertEqual(report["releaseSha"], SHA)
+            self.assertNotIn("candidateSha", report)
+            # Presence of custody paths alone establishes no later stage.
+            for later in ("L1b.2", "L1c.1", "L1c.3"):
+                self.assertEqual(I.status(system, later, SHA)["result"], "FAIL", later)
+
+    def test_unexpected_authority_state_is_refused_by_status(self):
+        cases = (
+            ("etc/lilith-authority-dev", "dir"),                      # later-step (L3a) path
+            ("etc/systemd/system/lilith-authority-dev.service", "file"),  # L1c object at L1b.1
+            ("opt/lilith-authority-dev/current", "link"),             # L1b.2 object at L1b.1
+            (f"opt/lilith-authority-dev/releases/{'0' * 40}", "dir"),  # a second, unaccepted release
+        )
+        for relative, kind in cases:
+            with self.subTest(path=relative), tempfile.TemporaryDirectory() as d, \
+                    tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+                host, system = self.l1b1_host(d, Path(out), wheels)
+                target = host.root / relative
+                if kind == "dir":
+                    target.mkdir()
+                elif kind == "file":
+                    target.write_bytes(b"x")
+                else:
+                    os.symlink(f"releases/{SHA}", target)
+                report = I.status(system, "L1b.1", SHA)
+                self.assertEqual(report["result"], "FAIL", relative)
+                if relative.endswith("0" * 40):
+                    self.assertIn("RELEASE_SET", report["failures"])
+
+    def test_status_is_keyed_by_release_sha_not_by_the_control_commit(self):
+        control = "f" * 40  # a newer, control-only protected-main commit
+        self.assertNotEqual(control, SHA)
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+            _host, system = self.l1b1_host(d, Path(out), wheels)
+            self.assertEqual(I.status(system, "L1b.1", SHA)["result"], "PASS")
+            self.assertEqual(I.status(system, "L1b.1", control)["result"], "FAIL")  # nothing installed at CONTROL_SHA
+        code = code_only(INSTALLER_SOURCE)
+        for forbidden in ("git", "rev-parse", "__file__"):
+            self.assertNotIn(forbidden, code, forbidden)
+
+    def test_control_tooling_is_never_release_payload(self):
+        with fake_wheels() as wheels:
+            payloads = B.build_payloads(ROOT, wheels)
+        control = [INSTALLER_SOURCE.encode(),
+                   (HERE / "build_authority_dev_release.py").read_bytes(),
+                   (ROOT / "scripts/verify_broker_dev_current_incarnation.py").read_bytes(),
+                   RUNBOOK.encode()]
+        for data in control:
+            self.assertNotIn(data, payloads.values())
+        self.assertEqual(payloads[I.CLI_PATH], KEYGEN_SOURCE.encode())  # the keygen IS release payload
+        self.assertFalse(any(name.startswith(("ceremony/", "docs/", "scripts/")) for name in payloads))
+
+    def test_runbook_uses_phase_aware_preservation(self):
+        self.assertIn("N-45", RUNBOOK)
+        self.assertIn("PRESERVATION_VERIFIER_PHASE_MISMATCH", RUNBOOK)
+        self.assertIn("verify_broker_dev_current_incarnation.py preservation", RUNBOOK)
+        self.assertIn("install_authority_dev.py status --expect <stage> <RELEASE_SHA>", RUNBOOK)
+        self.assertIn("CONTROL_SHA", RUNBOOK)
+        self.assertIn("RELEASE_SHA", RUNBOOK)
+        self.assertNotIn("<SHA>", RUNBOOK.replace("<RELEASE_SHA>", "").replace("<CONTROL_SHA>", ""))
+        for text in (INSTALLER_SOURCE, RUNBOOK):
+            self.assertNotIn("gcloud compute ssh lilith-01", text)
+
+
 class ReleaseArchiveTests(unittest.TestCase):
     """Req 8, 9, 15: deterministic, pinned, no custody material."""
 
@@ -712,7 +793,7 @@ class BoundaryTests(unittest.TestCase):
     def test_runbook_contract_equals_installer(self):
         rows = re.findall(r"^\| `(/[^`]+)` \| (dir|file|symlink) \| root:root \| (\d{4}|—) \| (L[0-9a-z.]+) \|$",
                           RUNBOOK, re.MULTILINE)
-        documented = {path.replace("<SHA>", SHA): (kind, mode, stage) for path, kind, mode, stage in rows}
+        documented = {path.replace("<RELEASE_SHA>", SHA): (kind, mode, stage) for path, kind, mode, stage in rows}
         final = I.expected_paths("L2b.2", SHA)
         contract = {path: (spec[0], spec[3] or "—") for path, spec in final.items() if spec is not None}
         self.assertEqual({p: v[:2] for p, v in documented.items()}, contract)

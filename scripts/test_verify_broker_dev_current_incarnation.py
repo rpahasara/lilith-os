@@ -231,6 +231,163 @@ class NoFalseDenialTests(unittest.TestCase):
         self.assertIn("CUSTODY_PATH_PRESENT_BEFORE_B1B3D", gate.evaluate(obs)["failures"])
 
 
+L1B1_CUSTODY = {  # legitimate B1b-3d state at L1b.1 as seen by this observer
+    "/opt/lilith-authority-dev": {"present": True, "uid": 0, "gid": 0, "mode": 0o755},
+}
+LEGACY_EMPTY_FAILURE_ORDER = [  # `baseline` failure order on an empty observation, as on origin/main 9ac7de2
+    "HOST_MISMATCH", "RELEASE_SELECTOR_CHANGED", "RELEASE_MANIFEST_CHANGED", "RELEASE_PAYLOAD_CHANGED",
+    "PROCESS_NOT_ON_SELECTED_RELEASE", "UNIT_FILE_CHANGED", "BROKER_CONFIG_CHANGED", "DIRECTORY_CUSTODY_CHANGED",
+    "BROKER_STATE_CHANGED", "BROKER_ACCOUNT_CHANGED", "IPC_GROUP_CHANGED", "BROKER_PROCESS_IDENTITY_CHANGED",
+    "BROKER_PROCESS_PRIVILEGE_CHANGED", "BROKER_SANDBOX_CHANGED", "SOCKET_UNIT_CHANGED", "RUNTIME_DIRECTORY_CHANGED",
+    "OWNER_SOCKET_CHANGED", "STAGE3_JOURNAL_CHANGED", "STAGE3_ARTIFACT_CHANGED",
+    "STAGE3_ARM_GUARD_OR_CONSUMPTION_PRESENT", "STAGE3_CONTROLLER_CHANGED", "DEPLOYER_POLICY_CHANGED",
+    "CUSTODY_PATH_PRESENT_BEFORE_B1B3D", "RUNTIME_SUBSTRATE_STALE_OR_UNREADABLE",
+    "BROKER_SERVICE_STATE_UNEXPECTED", "INVOCATION_ID_INVALID", "BROKER_PROCESS_AMBIGUOUS",
+]
+
+
+def with_l1b1_custody(obs: dict) -> dict:
+    obs["custodyPaths"].update(copy.deepcopy(L1B1_CUSTODY))
+    return obs
+
+
+def preserve(obs: dict) -> dict:
+    """Evaluate `preservation` with the fixture's own accepted pins."""
+    accepted = gate.evaluate(observation())["baselineCandidateSha256"]
+    return gate.evaluate_preservation(obs, accepted_incarnation=CURRENT_INVOCATION,
+                                      accepted_candidate_sha256=accepted)
+
+
+class LegacyBaselineUnchangedTests(unittest.TestCase):
+    """N-45: `baseline` keeps its historical pre-custody semantics exactly."""
+
+    def test_baseline_still_rejects_legitimate_custody_presence(self) -> None:
+        result = gate.evaluate(with_l1b1_custody(observation()))
+        self.assertEqual(result["CURRENT_RUNTIME_BASELINE"], "FAIL")
+        self.assertEqual(result["failures"], ["CUSTODY_PATH_PRESENT_BEFORE_B1B3D"])
+        self.assertIsNone(result["baselineCandidateSha256"])
+        self.assertEqual(result["operation"], "READ_ONLY_OBSERVATION")
+
+    def test_baseline_failure_order_is_unchanged(self) -> None:
+        self.assertEqual(gate.evaluate({})["failures"], LEGACY_EMPTY_FAILURE_ORDER)
+
+    def test_only_two_fixed_operations_and_no_bypass(self) -> None:
+        self.assertEqual(set(gate.OPERATIONS), {"baseline", "preservation"})
+        for argv in ([], ["baseline", "--ignore-failure"], ["preservation", "--allow-path", "/opt"],
+                     ["preservation", "--force"], ["--ignore-failure"], ["bypass"], ["PRESERVATION"]):
+            with self.assertRaises(gate.BaselineError):
+                gate.main(argv)
+        tree = ast.parse(SOURCE)
+        for node in ast.walk(tree):  # scan code only, not the docstrings that explain the rule
+            body = getattr(node, "body", None)
+            if (isinstance(body, list) and body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+                body[0] = ast.Pass()
+        code = ast.unparse(tree)
+        for token in ("ignore", "allow_path", "allow-path", "bypass", "skip", "--force", "argparse"):
+            self.assertNotIn(token, code.lower(), token)
+        self.assertNotIn("os.environ", code)  # no environment-driven switch either
+
+
+class PreservationTests(unittest.TestCase):
+    def test_accepts_legitimate_l1b1_custody_when_broker_is_unchanged(self) -> None:
+        result = preserve(with_l1b1_custody(observation()))
+        self.assertEqual(result["BROKER_PRESERVATION"], "PASS", result["failures"])
+        self.assertTrue(result["baselineCandidateMatchesAccepted"])
+        self.assertEqual(result["runtimeIncarnation"], CURRENT_INVOCATION)
+        self.assertEqual(result["operation"], "READ_ONLY_BROKER_PRESERVATION")
+        for key in ("releaseEquivalent", "configEquivalent", "stateEquivalent", "identityBoundaryEquivalent",
+                    "socketBoundaryEquivalent", "stageIIIUntouched", "deployerPolicyTextEquivalent",
+                    "incarnationHealthy"):
+            self.assertIs(result[key], True, key)
+
+    def test_candidate_is_always_produced_and_hashed(self) -> None:
+        for obs in (with_l1b1_custody(observation()), {}):
+            result = preserve(obs)
+            self.assertRegex(result["baselineCandidateSha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(result["baselineCandidateSha256"], gate.canonical_sha256(result["baselineCandidate"]))
+        # With custody present the candidate is the same one `baseline` accepted before custody existed.
+        self.assertEqual(preserve(with_l1b1_custody(observation()))["baselineCandidate"],
+                         gate.evaluate(observation())["baselineCandidate"])
+
+    def assertBrokerDrift(self, mutate, code: str) -> None:
+        obs = with_l1b1_custody(observation())
+        mutate(obs)
+        result = preserve(obs)
+        self.assertEqual(result["BROKER_PRESERVATION"], "FAIL", code)
+        self.assertIn(code, result["failures"])
+
+    def test_every_broker_drift_class_still_fails(self) -> None:
+        cases = {
+            "RELEASE_SELECTOR_CHANGED": lambda o: o["release"].update(target="releases/" + "0" * 40),
+            "RELEASE_MANIFEST_CHANGED": lambda o: o["release"].update(manifestSha256="0" * 64),
+            "RELEASE_PAYLOAD_CHANGED": lambda o: o["release"].update(payloadMismatches=["x.py"]),
+            "UNIT_FILE_CHANGED": lambda o: o["files"][next(iter(gate.UNIT_FILES))].update(sha256="0" * 64),
+            "BROKER_CONFIG_CHANGED": lambda o: o["files"][next(iter(gate.CONFIG_FILES))].update(mode=0o644),
+            "BROKER_STATE_CHANGED": lambda o: o["files"][next(iter(gate.STATE_FILES))].update(sha256="0" * 64),
+            "DIRECTORY_CUSTODY_CHANGED": lambda o: o["directories"][str(gate.STATE)].update(mode=0o755),
+            "BROKER_ACCOUNT_CHANGED": lambda o: o["accounts"]["broker"].update(shell="/bin/bash"),
+            "BROKER_PROCESS_IDENTITY_CHANGED": lambda o: o["process"]["status"].update(uid=[0] * 4),
+            "BROKER_SANDBOX_CHANGED": lambda o: o["units"][gate.SERVICE].update(ProtectSystem="no"),
+            "SOCKET_UNIT_CHANGED": lambda o: o["units"][gate.SOCKET].update(SocketMode="0666"),
+            "OWNER_SOCKET_CHANGED": lambda o: o["ownerSocket"].update(mode=0o666),
+            "STAGE3_ARM_GUARD_OR_CONSUMPTION_PRESENT": lambda o: o["stage3"]["absent"].update(
+                {gate.STAGE3_ABSENT[0]: False}),
+            "STAGE3_JOURNAL_CHANGED": lambda o: o["stage3"].update(phases=["INTENT", "ARM"]),
+            "DEPLOYER_POLICY_CHANGED": lambda o: o["deployer"].update(helperSha256="0" * 64),
+            "BROKER_SERVICE_STATE_UNEXPECTED": lambda o: o["units"][gate.SERVICE].update(NRestarts="1"),
+            "HOST_MISMATCH": lambda o: o["host"].update(instanceName="lilith-01"),
+        }
+        for code, mutate in cases.items():
+            with self.subTest(code=code):
+                self.assertBrokerDrift(mutate, code)
+
+    def test_process_and_incarnation_continuity_are_pinned(self) -> None:
+        def restart(o):  # same healthy shape, new process identity
+            o["units"][gate.SERVICE].update(InvocationID="f" * 32, MainPID="140000")
+            o["process"].update(pid=140000, startTicks=999)
+            o["brokerProcesses"] = [140000]
+        self.assertBrokerDrift(restart, "RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE")
+        self.assertBrokerDrift(restart, "BASELINE_CANDIDATE_CHANGED")
+        for mutate in (lambda o: o["process"].update(startTicks=1),
+                       lambda o: o["host"].update(bootId="00000000-0000-0000-0000-000000000000"),
+                       lambda o: o["libraries"][EXPAT].update(sha256="c" * 64)):
+            self.assertBrokerDrift(mutate, "BASELINE_CANDIDATE_CHANGED")
+        # `baseline` alone would accept that restart as a *new* candidate; `preservation` never does.
+        obs = observation()
+        restart(obs)
+        self.assertEqual(gate.evaluate(obs)["CURRENT_RUNTIME_BASELINE"], "PASS")
+
+    def test_custody_presence_is_reported_never_judged_or_matured(self) -> None:
+        clean = preserve(observation())
+        custody = preserve(with_l1b1_custody(observation()))
+        odd = observation()
+        odd["custodyPaths"]["/etc/lilith-authority-dev"] = {"present": True, "uid": 1001, "gid": 1002, "mode": 0o777}
+        unexpected = preserve(odd)
+        for result in (clean, custody, unexpected):
+            self.assertEqual(result["BROKER_PRESERVATION"], "PASS")
+            self.assertEqual(result["authorityCustody"]["brokerVerifierAssessment"], "NOT_ASSESSED_BY_BROKER_VERIFIER")
+            self.assertEqual(result["authorityCustody"]["exactAuthorityState"],
+                             "install_authority_dev.py status --expect <stage> <RELEASE_SHA>")
+            keys = {key.lower() for key in walk_keys(result)}
+            self.assertFalse(any("maturity" in key or "stage" == key for key in keys))
+            self.assertNotIn("L1b", json.dumps(result))
+        # Unexpected authority state is visible verbatim, so the separately required
+        # installer status (not this verifier) can refuse it.
+        self.assertEqual(unexpected["authorityCustody"]["observedPaths"]["/etc/lilith-authority-dev"],
+                         {"present": True, "uid": 1001, "gid": 1002, "mode": 0o777})
+        self.assertEqual(clean["baselineCandidateSha256"], custody["baselineCandidateSha256"])
+
+    def test_real_pins_match_the_accepted_runtime_baseline_record(self) -> None:
+        record = (ROOT / "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md").read_text(encoding="utf-8")
+        self.assertIn(gate.ACCEPTED_CURRENT_INCARNATION, record)
+        self.assertIn(gate.ACCEPTED_CURRENT_BASELINE_SHA256, record)
+        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, CURRENT_INVOCATION)
+        # The fixture is not the live host, so the real pin rejects it: no silent acceptance.
+        self.assertIn("BASELINE_CANDIDATE_CHANGED",
+                      gate.evaluate_preservation(with_l1b1_custody(observation()))["failures"])
+
+
 class ParserTests(unittest.TestCase):
     def test_maps_skip_anonymous_and_flag_deleted(self) -> None:
         text = "\n".join((

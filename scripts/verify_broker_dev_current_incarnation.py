@@ -17,6 +17,20 @@ subprocess is ``systemctl show``.
 The output is a *candidate* for separate owner acceptance. It never claims
 Stage II acceptance for this incarnation, and it never reports a missing path
 as a denial.
+
+Two fixed operations exist (N-45 PRESERVATION_VERIFIER_PHASE_MISMATCH):
+
+- ``baseline``: the historical pre-custody observation. Unchanged: it still
+  FAILs with ``CUSTODY_PATH_PRESENT_BEFORE_B1B3D`` once any B1b-3d custody
+  path exists. Its old evidence keeps its old meaning.
+- ``preservation``: phase-aware broker continuity for use once legitimate
+  B1b-3d custody exists (from L1b.1). It runs the same broker checks, and it
+  additionally pins the owner-accepted incarnation and baselineCandidate
+  SHA-256. It does not assess authority custody: exact authority state is
+  owned by ``install_authority_dev.py status --expect <stage> <RELEASE_SHA>``,
+  and routine-deployer denial by the DR-5 proof. Custody paths are only
+  reported, with their raw metadata. There is no ignore, allow, or bypass
+  option.
 """
 
 from __future__ import annotations
@@ -68,6 +82,18 @@ ACCEPTED_SERVICE_INVOCATION = "5c1eb955e2dc44e78139c416f0c9469a"
 ACCEPTED_BROKER_PID = 96650
 ACCEPTED_BROKER_START_TICKS = 91036598
 ACCEPTED_BROKER_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
+
+# Owner-accepted B1b-3d current-runtime baseline
+# (docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md). Required
+# only by `preservation`; `baseline` keeps reporting it as a new candidate.
+ACCEPTED_CURRENT_INCARNATION = "42af2691b8d24ee5a92a286197c5444c"
+ACCEPTED_CURRENT_BASELINE_SHA256 = "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5"
+PRESERVATION_SCHEMA = "BrokerDevPreservationV1"
+AUTHORITY_CUSTODY_OWNERS = {
+    "exactAuthorityState": "install_authority_dev.py status --expect <stage> <RELEASE_SHA>",
+    "routineDeployerDenial": "scripts/deployer_authority_boundary_proof.sh (DR-5)",
+    "brokerVerifierAssessment": "NOT_ASSESSED_BY_BROKER_VERIFIER",
+}
 
 # Accepted Stage II artifact contract (verify_broker_dev_lifecycle.ACCEPTED_FILES,
 # minus the API app and unit, which routine B1c deployments legitimately change).
@@ -284,8 +310,9 @@ def _subset(observed: dict, expected: dict) -> bool:
     return all(observed.get(key) == value for key, value in expected.items())
 
 
-def evaluate(obs: dict) -> dict:
-    """Pure: observation -> result. Missing keys fail closed."""
+def _broker_checks(obs: dict) -> dict:
+    """Pure broker-continuity checks shared by both operations. Missing keys
+    fail closed. Custody paths are observed here but judged by the caller."""
     failures: list[str] = []
 
     def check(condition: bool, code: str) -> bool:
@@ -369,8 +396,7 @@ def evaluate(obs: dict) -> dict:
     custody = obs.get("custodyPaths", {})
     custody_states = {path: classify_custody_path(custody.get(path, {"present": True}))
                       for path in CUSTODY_PATHS}
-    check(all(state == "NOT_YET_PRESENT" for state in custody_states.values()),
-          "CUSTODY_PATH_PRESENT_BEFORE_B1B3D")
+    custody_position = len(failures)  # where `baseline` reports its custody rule
 
     libraries = obs.get("libraries", {})
     library_list = sorted(
@@ -405,6 +431,34 @@ def evaluate(obs: dict) -> dict:
         "sharedLibraries": library_list,
         "sharedLibrariesSha256": canonical_sha256(library_list),
     }
+    return {
+        "failures": failures, "custodyPosition": custody_position,
+        "candidate": candidate, "custodyStates": custody_states,
+        "custodyObserved": {path: custody.get(path, {"present": True}) for path in CUSTODY_PATHS},
+        "facts": {
+            "releaseEquivalent": release_ok, "configEquivalent": config_ok, "stateEquivalent": state_ok,
+            "identityBoundaryEquivalent": identity_ok, "socketBoundaryEquivalent": socket_ok,
+            "stageIIIUntouched": stage3_ok, "deployerPolicyTextEquivalent": deployer_ok,
+            "incarnationHealthy": incarnation_ok, "processContinuity": process_continuity,
+        },
+        "invocation": invocation, "host": host, "process": process,
+    }
+
+
+def evaluate(obs: dict) -> dict:
+    """`baseline`: pure observation -> result. Historical semantics: any
+    B1b-3d custody path present is a FAIL. Missing keys fail closed."""
+    checked = _broker_checks(obs)
+    failures = checked["failures"]
+    facts, candidate, custody_states = checked["facts"], checked["candidate"], checked["custodyStates"]
+    invocation, host, process = checked["invocation"], checked["host"], checked["process"]
+    if not all(state == "NOT_YET_PRESENT" for state in custody_states.values()):
+        failures.insert(checked["custodyPosition"], "CUSTODY_PATH_PRESENT_BEFORE_B1B3D")
+    release_ok, config_ok, state_ok = facts["releaseEquivalent"], facts["configEquivalent"], facts["stateEquivalent"]
+    identity_ok, socket_ok, stage3_ok = (facts["identityBoundaryEquivalent"], facts["socketBoundaryEquivalent"],
+                                         facts["stageIIIUntouched"])
+    deployer_ok, incarnation_ok = facts["deployerPolicyTextEquivalent"], facts["incarnationHealthy"]
+    process_continuity = facts["processContinuity"]
     passed = not failures
     return {
         "schema": SCHEMA,
@@ -432,6 +486,45 @@ def evaluate(obs: dict) -> dict:
         "informational": {
             "deployerBoundary": "POLICY_TEXT_ONLY_NOT_A_DENIAL_PROOF",
             "sudoAsBrokerDenial": "NOT_TESTED_DR5_OPEN",
+            "dr3Ubuntu": obs.get("ubuntu"),
+            "needrestart": obs.get("needrestart"),
+        },
+    }
+
+
+def evaluate_preservation(obs: dict, *, accepted_incarnation: str = ACCEPTED_CURRENT_INCARNATION,
+                          accepted_candidate_sha256: str = ACCEPTED_CURRENT_BASELINE_SHA256) -> dict:
+    """`preservation`: broker continuity independent of the authority-custody
+    lifecycle. Every broker check of `baseline` applies unchanged; in place of
+    the pre-custody absence rule, the owner-accepted incarnation and the
+    canonical baselineCandidate SHA-256 must match exactly. The candidate is
+    always produced and hashed. Authority custody is reported, never judged,
+    and never yields a maturity."""
+    checked = _broker_checks(obs)
+    failures = list(checked["failures"])
+    candidate = checked["candidate"]
+    candidate_sha256 = canonical_sha256(candidate)
+    if checked["invocation"] != accepted_incarnation:
+        failures.append("RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE")
+    if candidate_sha256 != accepted_candidate_sha256:
+        failures.append("BASELINE_CANDIDATE_CHANGED")
+    return {
+        "schema": PRESERVATION_SCHEMA,
+        "operation": "READ_ONLY_BROKER_PRESERVATION",
+        "BROKER_PRESERVATION": "PASS" if not failures else "FAIL",
+        "failures": failures,
+        **checked["facts"],
+        "runtimeIncarnation": checked["invocation"],
+        "acceptedRuntimeIncarnation": accepted_incarnation,
+        "baselineCandidate": candidate,
+        "baselineCandidateSha256": candidate_sha256,
+        "acceptedBaselineCandidateSha256": accepted_candidate_sha256,
+        "baselineCandidateMatchesAccepted": candidate_sha256 == accepted_candidate_sha256,
+        "runtimeBehavioralEquivalence": "NOT_PROVEN_BY_OBSERVATION",
+        "stageIIAcceptance": "HISTORICAL_RECORD_UNCHANGED_NOT_EXTENDED_TO_THIS_INCARNATION",
+        "authorityCustody": {**AUTHORITY_CUSTODY_OWNERS, "observedPaths": checked["custodyObserved"]},
+        "informational": {
+            "deployerBoundary": "POLICY_TEXT_ONLY_NOT_A_DENIAL_PROOF",
             "dr3Ubuntu": obs.get("ubuntu"),
             "needrestart": obs.get("needrestart"),
         },
@@ -664,12 +757,19 @@ def collect() -> dict:
     }
 
 
+OPERATIONS = {
+    "baseline": (evaluate, "CURRENT_RUNTIME_BASELINE"),
+    "preservation": (evaluate_preservation, "BROKER_PRESERVATION"),
+}
+
+
 def main(argv: list[str]) -> int:
-    require(argv == ["baseline"], "FIXED_BASELINE_COMMAND_ONLY")
+    require(len(argv) == 1 and argv[0] in OPERATIONS, "FIXED_BASELINE_COMMAND_ONLY")
     require(os.name == "posix" and os.geteuid() == 0 and pwd is not None, "ROOT_LINUX_REQUIRED")
-    result = evaluate(collect())
+    operation, verdict = OPERATIONS[argv[0]]
+    result = operation(collect())
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
-    return 0 if result["CURRENT_RUNTIME_BASELINE"] == "PASS" else 2
+    return 0 if result[verdict] == "PASS" else 2
 
 
 if __name__ == "__main__":
