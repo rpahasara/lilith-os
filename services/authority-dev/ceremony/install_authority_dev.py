@@ -21,7 +21,7 @@ correcting existing state.
 | `select` | L1b.2 | create the `current` selector |
 | `units` | L1c.1 | install unit, socket, and tmpfiles files (no reload, no enable) |
 | `cli` | L1c.3 | install `/usr/local/sbin/lilith-authority-keygen-dev` |
-| `credstore` | L2b.1 | create `/etc/credstore.encrypted` `root:root 0700` |
+| `credstore` | L2b.1 | create `/etc/credstore.encrypted` `root:root 0700` if absent; adopt it unchanged if already exactly secure and empty |
 
 `systemctl daemon-reload` (L1c.2), `systemd-creds setup` (L2a), and the
 keygen ceremony (L2b.2) are separate owner commands in the runbook; this
@@ -336,6 +336,17 @@ def verify_account_contract(system: System) -> dict:
 
 STAGES = ("L0", "L1a", "L1b.1", "L1b.2", "L1c.1", "L1c.2", "L1c.3", "L2a", "L2b.1", "L2b.2")
 
+# AMBIENT HOST PREREQUISITE != LILITH CEREMONY ARTIFACT != LILITH MATURITY
+# EVIDENCE. These generic systemd paths may pre-exist (run 36264031829). Before
+# the step that requires them they may be ABSENT or PRESENT_SECURE (exact
+# spec); anything else is PRESENT_UNSAFE and fails. From that step on they
+# must be PRESENT_SECURE. They never indicate that a LILITH ceremony ran.
+HOST_PREREQUISITES = {HOST_KEY: ("file", 0, 0, "0400"), CREDSTORE: ("dir", 0, 0, "0700")}
+
+
+class HostPrerequisite(tuple):
+    """Expected-path marker: ABSENT or exactly this spec; never required yet."""
+
 
 def expected_paths(stage: str, sha: str | None) -> dict[str, tuple | None]:
     """Cumulative path contract after `stage`. None means must be absent.
@@ -354,14 +365,23 @@ def expected_paths(stage: str, sha: str | None) -> dict[str, tuple | None]:
         SOCKET_UNIT: ("file", 0, 0, "0644") if at("L1c.1") else None,
         TMPFILES: ("file", 0, 0, "0644") if at("L1c.1") else None,
         KEYGEN_CLI: ("file", 0, 0, "0755") if at("L1c.3") else None,
-        HOST_KEY: ("file", 0, 0, "0400") if at("L2a") else None,
-        CREDSTORE: ("dir", 0, 0, "0700") if at("L2b.1") else None,
+        HOST_KEY: HOST_PREREQUISITES[HOST_KEY] if at("L2a") else HostPrerequisite(HOST_PREREQUISITES[HOST_KEY]),
+        CREDSTORE: HOST_PREREQUISITES[CREDSTORE] if at("L2b.1") else HostPrerequisite(HOST_PREREQUISITES[CREDSTORE]),
         CREDENTIAL: ("file", 0, 0, "0600") if at("L2b.2") else None,
         **{path: None for path in DEFERRED_PATHS},
     }
     if release:
         paths[release] = ("dir", 0, 0, "0755") if at("L1b.1") else None
     return paths
+
+
+def prerequisite_state(system: System, absolute: str, meta: dict | None) -> str:
+    if meta is None:
+        return "ABSENT"
+    kind, uid, gid, mode = HOST_PREREQUISITES[absolute]
+    if (meta["kind"], meta["uid"], meta["gid"], meta["mode"]) == (kind, system.owner_uid, system.owner_gid, mode):
+        return "PRESENT_SECURE"
+    return "PRESENT_UNSAFE"
 
 
 def status(system: System, stage: str, sha: str | None = None) -> dict:
@@ -381,9 +401,17 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
             failures.append(exc.reason)
     elif account is not None:
         failures.append("ACCOUNT_PRESENT_TOO_EARLY")
+    prerequisites: dict[str, str] = {}
     for absolute, expected in expected_paths(stage, sha).items():
         meta = _meta(system, absolute)
         observed[absolute] = meta
+        if absolute in HOST_PREREQUISITES:
+            prerequisites[absolute] = prerequisite_state(system, absolute, meta)
+            if prerequisites[absolute] == "PRESENT_UNSAFE":
+                failures.append("HOST_PREREQ_UNSAFE:" + absolute)
+                continue
+            if isinstance(expected, HostPrerequisite):
+                continue  # ABSENT or PRESENT_SECURE: both valid, neither is maturity
         if expected is None:
             if meta is not None:
                 failures.append("UNEXPECTED_PRESENT:" + absolute)
@@ -424,6 +452,7 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
             and any(system.path(CREDSTORE).iterdir()):
         failures.append("CREDSTORE_NOT_EMPTY")
     observed["credentialBlobSha256"] = _file_sha(system, CREDENTIAL)
+    observed["hostPrerequisites"] = prerequisites
     return {"schemaVersion": 1, "stage": stage, "candidateSha": sha,
             "result": "PASS" if not failures else "FAIL", "failures": failures, "observed": observed}
 
@@ -542,10 +571,23 @@ def stage_cli(system: System, sha: str) -> dict:
 
 
 def stage_credstore(system: System, sha: str) -> dict:
+    """L2b.1: create the credstore if ABSENT; adopt it unchanged if PRESENT_SECURE.
+
+    The L2a POST already requires it to be absent or exactly root:root 0700 and
+    empty. Zero mutation is valid when the prerequisite already exists in the
+    accepted state; that is not evidence that a LILITH ceremony ran.
+    """
     require_dev_root(system)
-    _require(status(system, "L2a", sha))
-    _mkdir(system, CREDSTORE, 0o700)
-    return status(system, "L2b.1", sha)
+    before = status(system, "L2a", sha)
+    _require(before)
+    if before["observed"]["hostPrerequisites"][CREDSTORE] == "ABSENT":
+        _mkdir(system, CREDSTORE, 0o700)
+        mutation = "CREATED"
+    else:
+        mutation = "ADOPTED_NO_MUTATION"
+    report = status(system, "L2b.1", sha)
+    report["mutation"] = mutation
+    return report
 
 
 def main(argv: list[str], system: System | None = None) -> int:

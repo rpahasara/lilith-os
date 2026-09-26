@@ -501,6 +501,112 @@ class InstallerLadderTests(unittest.TestCase):
             self.assertIn("NEEDRESTART_CONTROL_CHANGED", I.status(host.system(), "L0")["failures"])
 
 
+@unittest.skipUnless(POSIX, "owner and mode semantics are POSIX")
+class HostPrerequisiteTests(unittest.TestCase):
+    """AMBIENT HOST PREREQUISITE != LILITH CEREMONY ARTIFACT (run 36264031829)."""
+
+    def secure_credstore(self, host: FakeHost) -> Path:
+        store = host.root / "etc/credstore.encrypted"
+        store.mkdir(mode=0o700)
+        os.chmod(store, 0o700)
+        return store
+
+    def test_dev_observed_fixture_is_l0(self):  # regression 11 (root-side view)
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            self.secure_credstore(host)
+            report = I.status(host.system(), "L0")
+            self.assertEqual(report["result"], "PASS", report["failures"])
+            self.assertEqual(report["observed"]["hostPrerequisites"],
+                             {I.HOST_KEY: "ABSENT", I.CREDSTORE: "PRESENT_SECURE"})
+            self.assertIsNone(report["observed"]["credentialBlobSha256"])
+
+    def test_secure_prerequisites_do_not_imply_any_ladder_step(self):  # regressions 1-4
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            self.secure_credstore(host)
+            host.systemd_creds_setup()
+            self.assertEqual(I.status(host.system(), "L0")["result"], "PASS")
+            self.assertEqual(I.status(host.system(), "L1a")["result"], "FAIL")  # nothing LILITH exists
+
+    def test_unsafe_prerequisites_fail_closed(self):  # regression 5
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            store = self.secure_credstore(host)
+            os.chmod(store, 0o755)
+            self.assertIn(f"HOST_PREREQ_UNSAFE:{I.CREDSTORE}", I.status(host.system(), "L0")["failures"])
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            host.systemd_creds_setup()
+            os.chmod(host.root / "var/lib/systemd/credential.secret", 0o600)
+            self.assertIn(f"HOST_PREREQ_UNSAFE:{I.HOST_KEY}", I.status(host.system(), "L0")["failures"])
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            (self.secure_credstore(host) / "other.cred").write_bytes(b"x")
+            self.assertIn("CREDSTORE_NOT_EMPTY", I.status(host.system(), "L0")["failures"])
+
+    def test_out_of_order_lilith_blob_fails_closed(self):  # regression 6
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            (self.secure_credstore(host) / "lilith-authority-dev.owner-actor.cred").write_bytes(b"x")
+            failures = I.status(host.system(), "L0")["failures"]
+            self.assertIn(f"UNEXPECTED_PRESENT:{I.CREDENTIAL}", failures)
+            self.assertIn("CREDSTORE_NOT_EMPTY", failures)
+
+    def run_ladder_to_l2a(self, host: FakeHost, wheels: Path, out: Path, *, adopt_host_key: bool) -> I.System:
+        system = host.system()
+        archive, attestation, _ = build_archive(out, wheels)
+        I.stage_accounts(system)
+        I.stage_release(system, SHA, archive, attestation)
+        I.stage_select(system, SHA)
+        I.stage_units(system, SHA)
+        host.daemon_reload()
+        I.stage_cli(system, SHA)
+        if not adopt_host_key:
+            host.systemd_creds_setup()  # owner L2a transition when ABSENT
+        self.assertEqual(I.status(system, "L2a", SHA)["result"], "PASS")
+        return system
+
+    def test_l2a_and_l2b1_adopt_existing_secure_prerequisites_without_mutation(self):  # regressions 7, 9, 10
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+            host = FakeHost(directory)
+            store = self.secure_credstore(host)  # ambient, before any LILITH ceremony
+            host.systemd_creds_setup()           # ambient too
+            key = host.root / "var/lib/systemd/credential.secret"
+            before = (os.stat(store), os.stat(key), key.read_bytes())
+            system = self.run_ladder_to_l2a(host, wheels, Path(out), adopt_host_key=True)
+            report = I.stage_credstore(system, SHA)
+            self.assertEqual(report["result"], "PASS", report["failures"])
+            self.assertEqual(report["mutation"], "ADOPTED_NO_MUTATION")
+            after = (os.stat(store), os.stat(key), key.read_bytes())
+            for b, a in zip(before[:2], after[:2]):
+                self.assertEqual((b.st_ino, b.st_mtime_ns, b.st_mode), (a.st_ino, a.st_mtime_ns, a.st_mode))
+            self.assertEqual(before[2], after[2])
+            for call in host.calls:
+                self.assertNotIn("systemd-creds", " ".join(call))
+            G.ceremony(host.keygen_host(), I.DEV_MACHINE_ID, key_factory=pipeline_key, encrypt=fake_encrypt([]))
+            final = I.status(system, "L2b.2", SHA)
+            self.assertEqual(final["result"], "PASS", final["failures"])
+            self.assertEqual(final["observed"]["hostPrerequisites"],
+                             {I.HOST_KEY: "PRESENT_SECURE", I.CREDSTORE: "PRESENT_SECURE"})
+
+    def test_l2b1_creates_credstore_only_when_absent(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+            host = FakeHost(directory)
+            system = self.run_ladder_to_l2a(host, wheels, Path(out), adopt_host_key=False)
+            report = I.stage_credstore(system, SHA)
+            self.assertEqual((report["result"], report["mutation"]), ("PASS", "CREATED"))
+
+    def test_l2b2_requires_both_prerequisites_and_the_complete_ladder(self):  # regression 7
+        with tempfile.TemporaryDirectory() as directory:
+            host = FakeHost(directory)
+            (self.secure_credstore(host) / "lilith-authority-dev.owner-actor.cred").write_bytes(b"x")
+            os.chmod(host.root / "etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred", 0o600)
+            failures = I.status(host.system(), "L2b.2", SHA)["failures"]
+            for needed in ("ACCOUNT_ABSENT", f"MISSING:{I.HOST_KEY}", f"MISSING:{I.OPT}", f"MISSING:{I.KEYGEN_CLI}"):
+                self.assertIn(needed, failures)
+
+
 class ReleaseArchiveTests(unittest.TestCase):
     """Req 8, 9, 15: deterministic, pinned, no custody material."""
 
@@ -611,9 +717,18 @@ class BoundaryTests(unittest.TestCase):
         contract = {path: (spec[0], spec[3] or "—") for path, spec in final.items() if spec is not None}
         self.assertEqual({p: v[:2] for p, v in documented.items()}, contract)
         for path, (_kind, _mode, stage) in documented.items():
-            self.assertIsNotNone(I.expected_paths(stage, SHA)[path], path)
-            earlier = I.STAGES[I.STAGES.index(stage) - 1]
-            self.assertIsNone(I.expected_paths(earlier, SHA)[path], path)
+            required = I.expected_paths(stage, SHA)[path]
+            self.assertIsNotNone(required, path)
+            self.assertNotIsInstance(required, I.HostPrerequisite, path)
+            earlier = I.expected_paths(I.STAGES[I.STAGES.index(stage) - 1], SHA)[path]
+            if path in I.HOST_PREREQUISITES:
+                # Generic host prerequisite: before its step it may already exist
+                # securely (run 36264031829); it is never LILITH maturity.
+                self.assertIsInstance(earlier, I.HostPrerequisite, path)
+                self.assertEqual(tuple(earlier), required)
+            else:
+                self.assertIsNone(earlier, path)
+        self.assertEqual(set(I.HOST_PREREQUISITES), {I.HOST_KEY, I.CREDSTORE})
         for path in I.DEFERRED_PATHS:
             if "witness.cred" not in path:
                 self.assertIn(f"`{path}`", RUNBOOK)

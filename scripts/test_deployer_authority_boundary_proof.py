@@ -40,10 +40,13 @@ LADDER = {
               "/etc/systemd/system/lilith-authority-dev.socket": "regular file|0|0|644",
               "/etc/tmpfiles.d/lilith-authority-dev.conf": "regular file|0|0|644"},
     "L1c.3": {"/usr/local/sbin/lilith-authority-keygen-dev": "regular file|0|0|755"},
-    "L2a": {"/var/lib/systemd/credential.secret": "regular file|0|0|400"},
-    "L2b.1": {"/etc/credstore.encrypted": "directory|0|0|700"},
 }
+# Generic host prerequisites: observable, never LILITH maturity.
+SECURE_PREREQS = {"/var/lib/systemd/credential.secret": "regular file|0|0|400",
+                  "/etc/credstore.encrypted": "directory|0|0|700"}
 ORDER = list(LADDER)
+CRED = "/etc/credstore.encrypted"
+KEY = "/var/lib/systemd/credential.secret"
 
 HARNESS = r'''
 AB_LIBRARY_ONLY=1 . "$1"
@@ -69,7 +72,7 @@ ab_main
 '''
 
 
-def host(step: str = "PRE_L1A") -> dict:
+def host(step: str = "PRE_L1A", *, credstore: bool = False, host_key: bool = False) -> dict:
     """A healthy DEV host at ladder `step`, as the routine deployer sees it."""
     stat = {path: "directory|0|0|755" for path in PARENTS}
     stat.update({path: "regular file|0|0|644" for path in ROOT_FILES})
@@ -81,6 +84,10 @@ def host(step: str = "PRE_L1A") -> dict:
         for name in ORDER[:ORDER.index(step) + 1]:
             stat.update(LADDER[name])
         spec["users"].add("lilith-authority-dev")
+    if credstore:
+        stat["/etc/credstore.encrypted"] = SECURE_PREREQS["/etc/credstore.encrypted"]
+    if host_key:
+        stat["/var/lib/systemd/credential.secret"] = SECURE_PREREQS["/var/lib/systemd/credential.secret"]
     if "/opt/lilith-authority-dev/releases" in stat:
         spec["ls"]["/opt/lilith-authority-dev/releases"] = [SHA]
     if "/opt/lilith-authority-dev/current" in stat:
@@ -133,7 +140,7 @@ class ProofLogicTests(unittest.TestCase):
             self.assertIn(f"DENIED: test -w {parent}", out)
         self.assertIn("DENIED: sudo -u lilith-memory-broker /usr/bin/true", out)
         self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u lilith-authority-dev", out)
-        self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: /etc/credstore.encrypted (L2b.1)", out)
+        self.assertIn("HOST_PREREQ: /etc/credstore.encrypted ABSENT (no maturity meaning; not counted as a denial)", out)
         self.assertNotIn("DENIED: test -r /var/lib/systemd/credential.secret", out)  # absent != denied
 
     # 3: absence never counts as denial.
@@ -172,24 +179,61 @@ class ProofLogicTests(unittest.TestCase):
         del spec["stat"]["/opt/lilith-authority-dev/current"]
         del spec["links"]["/opt/lilith-authority-dev/current"]
         self.assertFails(spec, "LADDER_OBJECT_MISSING /opt/lilith-authority-dev/current")
-        spec = host("L2b.1")
+        spec = host("L1c.3", credstore=True, host_key=True)
         spec["users"].discard("lilith-authority-dev")
         self.assertFails(spec, "LADDER_OBJECT_MISSING account lilith-authority-dev")
         spec = host("L1c.1")
         del spec["stat"]["/etc/tmpfiles.d/lilith-authority-dev.conf"]
         self.assertFails(spec, "LADDER_OBJECT_MISSING /etc/tmpfiles.d/lilith-authority-dev.conf")
 
-    def test_unexplained_host_key_forces_ladder_failure(self):
-        spec = host()
-        spec["stat"]["/var/lib/systemd/credential.secret"] = "regular file|0|0|400"
-        self.assertFails(spec, "LADDER_OBJECT_MISSING /opt/lilith-authority-dev")
+    # Ambient host prerequisites never advance maturity (run 36264031829).
+    def test_secure_credstore_alone_is_pre_l1a(self):  # regressions 1, 2
+        out = self.assertPass(host(credstore=True), "PRE_L1A")
+        self.assertIn("HOST_PREREQ: /etc/credstore.encrypted PRESENT_SECURE (no maturity meaning)", out)
+        self.assertNotIn("maturity=L2b.1", out)
+        self.assertNotIn("LADDER_OBJECT_MISSING", out)
+
+    def test_secure_host_key_alone_is_pre_l1a(self):  # regression 3
+        out = self.assertPass(host(host_key=True), "PRE_L1A")
+        self.assertIn("HOST_PREREQ: /var/lib/systemd/credential.secret PRESENT_SECURE (no maturity meaning)", out)
+        self.assertIn("DENIED: test -r /var/lib/systemd/credential.secret", out)
+
+    def test_both_secure_prerequisites_without_lilith_artifacts_are_pre_l1a(self):  # regression 4
+        out = self.assertPass(host(credstore=True, host_key=True), "PRE_L1A")
+        self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: /opt/lilith-authority-dev (L1b.1)", out)
+
+    def test_unsafe_prerequisite_fails_closed(self):  # regression 5
+        for path, meta in ((CRED, "directory|0|0|755"), (CRED, "directory|3826947836|0|700"),
+                           (CRED, "regular file|0|0|700"), (KEY, "regular file|0|0|600"),
+                           (KEY, "regular file|0|0|444"), (KEY, "symbolic link|0|0|777")):
+            spec = host()
+            spec["stat"][path] = meta
+            self.assertFails(spec, f"HOST_PREREQ_UNSAFE {path}")
+
+    def test_absent_prerequisite_is_not_a_denial(self):  # regression 8
+        out = self.assertPass(host(), "PRE_L1A")
+        for path in (CRED, KEY):
+            self.assertIn(f"HOST_PREREQ: {path} ABSENT", out)
+            for op in ("-r", "-w", "-x"):
+                self.assertNotIn(f"DENIED: test {op} {path}", out)
+
+    def test_dev_observed_state_after_run_36264031829_is_pre_l1a(self):  # regression 11
+        # Owner read-only observation: credstore root:root 0700 empty; no host key,
+        # no blob, no account. The blob inside is not observable by the deployer.
+        spec = host(credstore=True)
+        out = self.assertPass(spec, "PRE_L1A")
+        self.assertIn("HOST_PREREQ: /var/lib/systemd/credential.secret ABSENT", out)
+        for op in ("-r", "-w", "-x"):
+            self.assertIn(f"DENIED: test {op} /etc/credstore.encrypted", out)
+        self.assertIn("UNOBSERVABLE_BY_DESIGN: /etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred", out)
+        self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u lilith-authority-dev", out)
 
     # 7: a writable leaf after maturity is failure.
     def test_writable_leaf_after_maturity_is_failure(self):
         for leaf in ("/etc/systemd/system/lilith-authority-dev.socket", "/opt/lilith-authority-dev/releases",
                      f"/opt/lilith-authority-dev/releases/{SHA}", "/usr/local/sbin/lilith-authority-keygen-dev",
                      "/etc/tmpfiles.d/lilith-authority-dev.conf"):
-            spec = host("L2b.1")
+            spec = host("L1c.3", credstore=True, host_key=True)
             spec["can"].add(f"-w {leaf}")
             self.assertFails(spec, f"ALLOWED(unexpected) test -w {leaf}")
 
@@ -261,19 +305,18 @@ class ProofLogicTests(unittest.TestCase):
 
     # 11, 12: credstore and host-key access is failure.
     def test_credstore_and_host_key_access_is_failure(self):
-        for op in ("-r", "-w", "-x"):
-            spec = host("L2b.1")
-            spec["can"].add(f"{op} /etc/credstore.encrypted")
-            self.assertFails(spec, f"ALLOWED(unexpected) test {op} /etc/credstore.encrypted")
-        spec = host("L2a")
-        spec["can"].add("-r /var/lib/systemd/credential.secret")
-        self.assertFails(spec, "ALLOWED(unexpected) test -r /var/lib/systemd/credential.secret")
-        spec = host("L2b.1")
-        spec["stat"]["/etc/credstore.encrypted"] = "directory|0|0|755"
-        self.assertFails(spec, "LADDER_OBJECT_CONTRACT /etc/credstore.encrypted")
+        for step in ("PRE_L1A", "L1c.3"):
+            for op in ("-r", "-w", "-x"):
+                spec = host(step, credstore=True)
+                spec["can"].add(f"{op} /etc/credstore.encrypted")
+                self.assertFails(spec, f"ALLOWED(unexpected) test {op} /etc/credstore.encrypted")
+            for op in ("-r", "-w"):
+                spec = host(step, host_key=True)
+                spec["can"].add(f"{op} /var/lib/systemd/credential.secret")
+                self.assertFails(spec, f"ALLOWED(unexpected) test {op} /var/lib/systemd/credential.secret")
 
     def test_full_ladder_passes_with_leaf_denials(self):
-        out = self.assertPass(host("L2b.1"), "L2b.1")
+        out = self.assertPass(host("L1c.3", credstore=True, host_key=True), "L1c.3")
         for needle in ("DENIED: test -r /etc/credstore.encrypted", "DENIED: test -x /etc/credstore.encrypted",
                        "DENIED: test -r /var/lib/systemd/credential.secret",
                        "DENIED: sudo -u lilith-authority-dev /usr/bin/true",
@@ -283,9 +326,9 @@ class ProofLogicTests(unittest.TestCase):
             self.assertIn(needle, out)
 
     def test_later_authority_state_is_denied_when_present(self):
-        spec = host("L2b.1")
+        spec = host("L1c.3", credstore=True, host_key=True)
         spec["stat"]["/var/lib/lilith-authority-dev"] = "directory|990|980|700"
-        out = self.assertPass(spec, "L2b.1")
+        out = self.assertPass(spec, "L1c.3")
         self.assertIn("DENIED: test -r /var/lib/lilith-authority-dev", out)
         spec["can"].add("-r /var/lib/lilith-authority-dev")
         self.assertFails(spec, "ALLOWED(unexpected) test -r /var/lib/lilith-authority-dev")
@@ -381,6 +424,10 @@ class StaticSafetyTests(unittest.TestCase):
         self.assertIn('--command="bash -s"', block)
         self.assertIn("set -o pipefail", block)
         self.assertIn("AUTHORITY_BOUNDARY_PROOF=PASS maturity=", block)
+        # Host prerequisites are never maturity labels (run 36264031829).
+        self.assertIn("maturity=(PRE_L1A|L1a|L1b\\.1|L1b\\.2|L1c\\.1|L1c\\.3)$'", block)
+        self.assertNotIn("L2a", block)
+        self.assertNotIn("L2b", block)
         self.assertNotIn("sudo", block)
         self.assertNotIn("compute scp", block)
         self.assertNotIn("always()", block)

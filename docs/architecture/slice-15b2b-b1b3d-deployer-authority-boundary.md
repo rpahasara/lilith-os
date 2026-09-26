@@ -76,8 +76,8 @@ absent, and nothing would force its denial to become real once it appeared.
 | D. release | `/opt` write denial now. From L1b: `/opt/lilith-authority-dev`, `releases/`, and every `releases/<sha>` (each must be a 40-hex root dir 0755), `current` (root symlink to `releases/<40-hex>`), and its target |
 | E. CLI | `/usr/local/sbin` write denial now. From L1c.3: the CLI itself |
 | F. systemd material | `/etc/systemd/system` and `/etc/tmpfiles.d` write denial now. From L1c.1: the service, socket, and tmpfiles files |
-| G. credential store | `/etc` write denial now. From L2b.1: `/etc/credstore.encrypted` must be root `0700`, and read, write, and traverse are all denied. The K-ACT blob inside is `UNOBSERVABLE_BY_DESIGN` to the deployer and is covered by the parent traversal denial |
-| H. host credential key | `/var/lib/systemd` write denial now. From L2a: the key must be root `0400`, with read and write denied |
+| G. credential store | `/etc` write denial now. `/etc/credstore.encrypted` is a **host prerequisite**, not a ladder object (§6a). Whenever present it must be exactly root `0700`, and read, write, and traverse are all denied. The K-ACT blob inside is `UNOBSERVABLE_BY_DESIGN` to the deployer, covered by the traversal denial |
+| H. host credential key | `/var/lib/systemd` write denial now. `/var/lib/systemd/credential.secret` is a **host prerequisite** (§6a). Whenever present it must be exactly root `0400`, with read and write denied |
 | I. later authority state | `/etc/lilith-authority-dev`, `/var/lib/lilith-authority-dev`, `/run/lilith-authority-dev`, `/run/credentials/lilith-authority-dev.service`, and the witness state/run directories. Write is denied whenever present, and read too for state and run |
 | integrity of the proof's own inputs | write denial on `/etc/passwd`, `/etc/group`, the effective-sudo proof library, `/usr/local/lib/lilith-dev-deploy`, and the needrestart control file and directory. Each must exist and be root-owned |
 
@@ -112,8 +112,17 @@ that the ceremony steps already create:
 | `L1b.2` | `…/current` |
 | `L1c.1` | the service, socket, and tmpfiles files |
 | `L1c.3` | `/usr/local/sbin/lilith-authority-keygen-dev` |
-| `L2a` | `/var/lib/systemd/credential.secret` |
-| `L2b.1` | `/etc/credstore.encrypted` |
+
+**Corrected 2026-09-26 after run 36264031829 (§12).** `L2a`
+(`/var/lib/systemd/credential.secret`) and `L2b.1` (`/etc/credstore.encrypted`)
+are **not** maturity signals. They are generic systemd host prerequisites
+(§6a). The only LILITH-specific custody object after L1c is the K-ACT blob.
+The deployer cannot observe it, so **deployer-observed maturity ends at
+`L1c.3`**. Blob presence and post-L2b.2 consistency are checked only by the
+root-run `install_authority_dev.py status --expect L2b.2`: blob root `0600`,
+credstore root `0700`, host key root `0400`, and the complete earlier ladder.
+An out-of-order blob fails there, as `UNEXPECTED_PRESENT` at any earlier
+stage.
 
 Rules:
 
@@ -135,6 +144,28 @@ Why the deployer cannot forge or hide maturity:
 
 The rule carries no "accepted" semantics. It only decides which denials must
 now be non-vacuous.
+
+### 6a. Host prerequisites (never maturity)
+
+```text
+AMBIENT HOST PREREQUISITE  !=  LILITH CEREMONY ARTIFACT  !=  LILITH MATURITY EVIDENCE
+```
+
+| Path | Secure state | Denials when present |
+| --- | --- | --- |
+| `/var/lib/systemd/credential.secret` | regular file `root:root 0400` | `-r`, `-w` |
+| `/etc/credstore.encrypted` | directory `root:root 0700` | `-r`, `-w`, `-x` |
+
+Each is reported as one of:
+
+- `HOST_PREREQ: <path> ABSENT`: no maturity meaning, and not a denial;
+- `HOST_PREREQ: <path> PRESENT_SECURE`: no maturity meaning; the denials
+  above must hold;
+- `HOST_PREREQ_UNSAFE <path> …`: fail closed.
+
+LILITH does not own the generic `/etc/credstore.encrypted` namespace. The
+deployer cannot see whether it is empty (mode 0700). Emptiness before K-ACT
+creation is checked root-side, by `status` and the keygen.
 
 L1c.2 (`daemon-reload`) is not a filesystem object and is not a maturity
 signal. Service control is queried at every maturity anyway. The rule is
@@ -248,6 +279,9 @@ Consequences for the first post-merge run of this PR:
   state is `AUTHORITY_BOUNDARY_PROOF=PASS maturity=PRE_L1A`. A `FAIL` there
   is a real finding, not a bootstrap artefact. It stops that deployment,
   and it must be investigated, not rerun.
+- **Outcome, recorded in §12:** the first post-merge run (36264031829)
+  exercised the proof live and failed closed on a false maturity inference.
+  That was a real finding, not a bootstrap artefact.
 - A later PR that changes only `deploy-dev.yml` is `CONTROL_ONLY_NO_DEPLOY`
   and does not contact DEV. The proof then next runs at the following
   `DEPLOY_REQUIRED` deployment. This is the existing semantics.
@@ -323,9 +357,57 @@ parent write denials appeared as `nobody`.
    the transcript. L1a stays blocked.
 4. On PASS, record the run URL and transcript as the pre-L1a denial evidence
    in an owner record. That satisfies the L2 L1a PRE together with L0.
-5. After each later live ladder step, the next routine deployment must pass
-   at that step's maturity (for example `maturity=L1a`, then `L1b.1`, …)
-   before the next step is authorized.
+5. After each later LILITH ladder step (L1a through L1c.3), the next
+   routine deployment must pass at that step's maturity before the next step
+   is authorized.
+   - L2a and L2b.1 are **host-prerequisite** transitions. Their owner
+     ceremony POST (`status --expect L2a|L2b.1`) is authoritative. A later
+     routine deployment observes them as `HOST_PREREQ … PRESENT_SECURE`, but
+     it reports no new maturity label, and none is forced.
+   - L2b.2 is checked root-side only (§6).
+
+## 12. Negative result: run 36264031829 (`DR5_MATURITY_FALSE_POSITIVE`)
+
+Register entry
+[N-44](../research/negative-results-register.md#register).
+[Run 36264031829](https://github.com/rpahasara/lilith-os/actions/runs/36264031829)
+was on main `e534f96`, the merge of this record's first version.
+
+- **What ran.** It was the first post-merge DR-5 proof, run live as the real
+  routine deployer.
+- **Evidence that held.** Real deployer evidence was collected:
+  - every parent write denial;
+  - `sudo -u lilith-memory-broker`;
+  - 27 unit-control sudo queries;
+  - polkit `pkcheck_rc=2` for all three actions, `DEFERRED_NOT_IN_GATE`.
+- **The failure.** The proof inferred `maturity=L2b.1` from the ambient
+  `/etc/credstore.encrypted`. It then correctly failed:
+  - `LADDER_OBJECT_MISSING` for the account and every L1b–L1c object and
+    the host key;
+  - `SUDO_QUERY_INCONCLUSIVE` for the absent keygen.
+
+  Last line: `AUTHORITY_BOUNDARY_PROOF=FAIL maturity=L2b.1`.
+- **Nothing proceeded.** The workflow failed closed before *Package* and
+  *Deploy*. No custody mutation occurred. No authority account, key, or
+  blob existed.
+- **Owner read-only observation afterwards:**
+  - `/etc/credstore.encrypted` directory `root:root 0700`, empty;
+  - `/var/lib/systemd/credential.secret` absent;
+  - blob absent;
+  - account absent.
+
+  The actual maturity was `PRE_L1A`.
+- **Classification:** `DR5_MATURITY_FALSE_POSITIVE`. It is a genuine negative
+  result. It is **not** successful pre-L1a evidence and is not reinterpreted
+  as such. The run is not rerun.
+- **Correction** (§6, §6a): maturity comes only from LILITH-specific objects.
+  Host prerequisites are reported separately and never advance it. The
+  accepted maturity labels are `PRE_L1A|L1a|L1b.1|L1b.2|L1c.1|L1c.3`.
+- **Expected next live result** for the recorded DEV state:
+  - `HOST_PREREQ: /var/lib/systemd/credential.secret ABSENT`;
+  - `HOST_PREREQ: /etc/credstore.encrypted PRESENT_SECURE`, with `DENIED`
+    for `-r`, `-w`, and `-x`;
+  - last line `AUTHORITY_BOUNDARY_PROOF=PASS maturity=PRE_L1A`.
 
 ## Explicitly not done
 
