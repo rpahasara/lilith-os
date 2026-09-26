@@ -154,6 +154,12 @@ def _challenge_from_bytes(raw: bytes) -> K.OwnerMemoryChallengeV2:
     return challenge
 
 
+def parse_challenge_v2(raw: bytes) -> K.OwnerMemoryChallengeV2:
+    """Parse exact canonical V2 challenge bytes (duplicate fields rejected).
+    Raises `OwnerProofError` on any malformed or non-canonical input."""
+    return _challenge_from_bytes(raw)
+
+
 def _verify_webauthn(challenge: K.OwnerMemoryChallengeV2, assertion: P.OwnerAssertionV1,
                      credential: P.OwnerCredentialV1, *, rp_id: str, origin: str) -> None:
     """The unchanged B1a WebAuthn sequence, over the V2 challenge bytes."""
@@ -210,8 +216,58 @@ def verify_accepted_memory(
         return AcceptanceResultV1(NOT_ACCEPTED, rejected.reason)
 
 
-def _verify(context, action, challenge_json, challenge_record, assertion,
-            owner_credential, evidence, broker_keys, admission) -> dict[str, Any]:
+VERIFIED_OWNER_PROOF = "VERIFIED_OWNER_PROOF"
+
+
+@dataclass(frozen=True)
+class VerifiedOwnerProofV1:
+    """Steps 1-6 of the chain: a consumed, owner-signed V2 challenge bound to
+    the frozen action. It is owner authorization only: never broker evidence,
+    never an admission, never ACCEPTED_MEMORY."""
+
+    challenge: K.OwnerMemoryChallengeV2
+    record: K.OwnerChallengeLedgerRecordV2
+    assertion: P.OwnerAssertionV1
+    credential: P.OwnerCredentialV1
+    consumed_at: Any
+    owner_credential_status: str
+
+    @property
+    def assertion_digest(self) -> str:
+        return K.assertion_digest(self.assertion)
+
+
+@dataclass(frozen=True)
+class OwnerProofResultV1:
+    status: str
+    reason: str | None = None
+    proof: VerifiedOwnerProofV1 | None = None
+
+    @property
+    def verified(self) -> bool:
+        return self.status == VERIFIED_OWNER_PROOF
+
+
+def verify_owner_proof(
+    *,
+    context: K.AcceptanceContextV1,
+    action: C.FrozenMemoryActionV1 | None,
+    challenge_json: bytes | None,
+    challenge_record: Mapping[str, Any] | None,
+    assertion: Mapping[str, Any] | None,
+    owner_credential: Mapping[str, Any] | None,
+) -> OwnerProofResultV1:
+    """Verify only the owner-proof part of the chain (steps 1-6), with the same
+    rules and reasons as `verify_accepted_memory`."""
+    try:
+        return OwnerProofResultV1(VERIFIED_OWNER_PROOF, None, _verify_owner_proof(
+            context, action, challenge_json, challenge_record, assertion, owner_credential))
+    except _Reject as rejected:
+        return OwnerProofResultV1(NOT_ACCEPTED, rejected.reason)
+
+
+def _verify_owner_proof(context, action, challenge_json, challenge_record, assertion,
+                        owner_credential) -> VerifiedOwnerProofV1:
     # 1. Trusted context. B2a supports only the synthetic TEST environment.
     _require(isinstance(context, K.AcceptanceContextV1), "MALFORMED_ARTIFACT")
     _parse(lambda value: value.validate(), context)
@@ -270,6 +326,14 @@ def _verify(context, action, challenge_json, challenge_record, assertion,
         _require(_instant(credential.revoked_at) > consumed, "OWNER_CREDENTIAL_REVOKED")
         owner_credential_status = "REVOKED_AFTER_AUTHORIZATION"
     _verify_webauthn(challenge, proof, credential, rp_id=context.rp_id, origin=context.origin)
+    return VerifiedOwnerProofV1(challenge, record, proof, credential, consumed, owner_credential_status)
+
+
+def _verify(context, action, challenge_json, challenge_record, assertion,
+            owner_credential, evidence, broker_keys, admission) -> dict[str, Any]:
+    owner = _verify_owner_proof(context, action, challenge_json, challenge_record, assertion, owner_credential)
+    challenge, proof, credential = owner.challenge, owner.assertion, owner.credential
+    consumed, owner_credential_status = owner.consumed_at, owner.owner_credential_status
 
     # 7. Broker evidence: known, in-scope key; valid signature; allowed release.
     _require(evidence is not None, "BROKER_EVIDENCE_MISSING")
