@@ -1,0 +1,19 @@
+[Unit]
+Description=LILITH DEV_SYNTHETIC authority signer owner socket (DEV only, root-only)
+Requires=systemd-tmpfiles-setup.service
+After=systemd-tmpfiles-setup.service
+AssertPathIsDirectory=/run/lilith-authority-dev
+
+[Socket]
+ListenStream=/run/lilith-authority-dev/owner.sock
+Accept=no
+Service=lilith-authority-dev.service
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+DirectoryMode=0700
+FlushPending=yes
+RemoveOnStop=yes
+Backlog=16
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=3
