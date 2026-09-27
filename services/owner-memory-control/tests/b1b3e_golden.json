@@ -1,0 +1,648 @@
+{
+  "authorityRecoveryLedgerHead": "2a928f5cdac2e5804d93a362baf26cda2da21f110d8e0c36714632dfa8a139d6",
+  "authorityRecoveryLedgerOps": [
+    "GENESIS",
+    "PREPARE",
+    "CONSUME",
+    "ISSUE",
+    "PREPARE",
+    "REGISTRY_VIEW",
+    "ADVANCE_EPOCH",
+    "VOID_CHALLENGE"
+  ],
+  "domainSeparators": {
+    "epochAdvanceAuthorization": "LILITH_EPOCH_ADVANCE_AUTHORIZATION_V1\u0000",
+    "recoveryWitnessV2": "LILITH_RECOVERY_WITNESS_V2\u0000",
+    "registryHeadAdvanceAuthorization": "LILITH_REGISTRY_HEAD_ADVANCE_AUTHORIZATION_V1\u0000"
+  },
+  "epochAdvanceAuthorization": {
+    "authorizationId": "eaa.b1b3e-recovery-1",
+    "environment": "test",
+    "expectedPriorWitnessDigest": "ab3b966e40ce8848e492d51a3927b9af080050c254e2fbf493f62511e30e597d",
+    "expectedPriorWitnessVersion": 3,
+    "issuedAt": "2026-09-27T07:30:00Z",
+    "nonce": "84126f4c548cf0e34bd21801b8791f6d",
+    "notAfter": "2026-09-28T07:30:00Z",
+    "priorRecoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "protocol": "LILITH_EPOCH_ADVANCE_AUTHORIZATION",
+    "reason": "OPERATOR_RECOVERY",
+    "registryRootKeyId": "test-only.registry-root-1",
+    "schemaVersion": 1,
+    "signature": "lvgeZDHoYfYKTGRMeRgucLUQen1mI-elcQaC2LWLac9WAXp02O8VHBkp5MwSs-sz7cOkzap4AJzhcIuDwsUVCw",
+    "successorRecoveryEpoch": {
+      "counter": 3,
+      "random": "45b4eaa2b664cf7b64199ca072e233d9"
+    },
+    "targetRegistryDigest": "9e4aa36f07e5189b1458925d7f37189203f56ef822412115428001bc4a7ec869",
+    "targetRegistryVersion": 5
+  },
+  "epochAdvanceAuthorizationSigningDigest": "3bb8bcd3dd07ac3eaef5a0d5432b4e95303306eaea6a91cefdb5a395107430bd",
+  "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3e. No real key, owner, registry, witness, or authority.",
+  "publicKeys": {
+    "epoch3": "_XKk0n5DMFevgmB2fuYv483MN_5yeiG_LQzvuS5nZH4",
+    "root": "TxRtlpPMiLAffO81NAzt5GSwfFCZ4UPM8rGnsf2D1Rc",
+    "successor": "7taimQHTEkm2aL5yjpkrvSyKu0xaDjv1O-7Pvng2z_Q",
+    "witnessV2": "RFKEYOlVWQz2kDr849JqY9BNoUjN-mM_Zpna6VlSKv4"
+  },
+  "recoveryWitnessChain": [
+    {
+      "consumedAuthorizationId": null,
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+      "ledgerSequence": 5,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": null,
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+      "registryVersion": 3,
+      "schemaVersion": 2,
+      "signature": "NfkUGCCYAF8TPIivVzUonFJZ9ZjAExXnd5hamhr5PWUcHCgu7OsSd3QsTspqqhsCSHvsg-I2juB_Qx6395W0Bg",
+      "updatedAt": "2026-09-27T08:01:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 1
+    },
+    {
+      "consumedAuthorizationId": "rhaa.b1b3e-rotation-1",
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+      "ledgerSequence": 5,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "03402a3cd1e868f333359bcf1ccd37591d33b4595e20f1595fca7604d1bd3baa",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+      "registryVersion": 4,
+      "schemaVersion": 2,
+      "signature": "NTOP9mRiZ5Rg1e76ldx96B6lRc3Z8_2BvtEKnzHPVC-_l_9TYFnmBfggHmkUdlpsE3rqP42nY7Y6_Fw9XGQnCw",
+      "updatedAt": "2026-09-27T08:02:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 2
+    },
+    {
+      "consumedAuthorizationId": null,
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "5c424ef06a83e4d7ec2bfa0ed01e59dde6bee20884cb11a15c78df1b69ba0185",
+      "ledgerSequence": 6,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "a2a9bfd9177d3c282d1f537bb641f3b88e331a32f68a95686e0349d9888dfdfa",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+      "registryVersion": 4,
+      "schemaVersion": 2,
+      "signature": "QrC1F-fUrbX0zrQvxJ1NfQlomuQKvdFSxTwMVws6WTNLNAV4lr1caAewPYGGOOX59ejXVZLRqCcC2EAT4MCMDA",
+      "updatedAt": "2026-09-27T08:03:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 3
+    },
+    {
+      "consumedAuthorizationId": "eaa.b1b3e-recovery-1",
+      "currentRecoveryEpoch": {
+        "counter": 3,
+        "random": "45b4eaa2b664cf7b64199ca072e233d9"
+      },
+      "environment": "test",
+      "ledgerHead": "62eab21b145244a5f89d6860b0265043902a7ceb1993864e3380c54e6d011683",
+      "ledgerSequence": 7,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "ab3b966e40ce8848e492d51a3927b9af080050c254e2fbf493f62511e30e597d",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "9e4aa36f07e5189b1458925d7f37189203f56ef822412115428001bc4a7ec869",
+      "registryVersion": 5,
+      "schemaVersion": 2,
+      "signature": "FAIx0ED4gnnndRK1tCCbDyvYtBjIru7pHxyQsNcRVJW3ZhSARSM2VmghAgTXoBWxNdQodd7xLyBRyVmh2r7HDA",
+      "updatedAt": "2026-09-27T08:04:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 4
+    },
+    {
+      "consumedAuthorizationId": null,
+      "currentRecoveryEpoch": {
+        "counter": 3,
+        "random": "45b4eaa2b664cf7b64199ca072e233d9"
+      },
+      "environment": "test",
+      "ledgerHead": "2a928f5cdac2e5804d93a362baf26cda2da21f110d8e0c36714632dfa8a139d6",
+      "ledgerSequence": 8,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "d131f244f6ff8debfb816cb69c1bc0182d1f25658393639c56c2ceca93be9e9d",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "9e4aa36f07e5189b1458925d7f37189203f56ef822412115428001bc4a7ec869",
+      "registryVersion": 5,
+      "schemaVersion": 2,
+      "signature": "r_ZI8q23VyqOT3yhc7oYbH0S9cjt5ViWqIK9mA1_B_ve-e39MdcDCP0yrL8SQ3-3ZPIGfR3jNmx6ckI8WD-kCg",
+      "updatedAt": "2026-09-27T08:05:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 5
+    }
+  ],
+  "registryDigestDefinition": "sha256(LILITH_AUTHORITY_REGISTRY_V1\\0 || JCS(all registry fields except signature))",
+  "registryDigests": {
+    "v3": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+    "v4": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+    "v4Fork": "8b734697d205ab9a60987b779a9e8a418903cfcf3f55d730ecf0257ed67ade43",
+    "v5": "9e4aa36f07e5189b1458925d7f37189203f56ef822412115428001bc4a7ec869"
+  },
+  "registryHeadAdvanceAuthorization": {
+    "authorizationId": "rhaa.b1b3e-rotation-1",
+    "environment": "test",
+    "issuedAt": "2026-09-27T07:00:00Z",
+    "nonce": "6f83c0db592186f7750d7821bfac9dc0",
+    "notAfter": "2026-09-28T07:00:00Z",
+    "priorRegistryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+    "priorRegistryVersion": 3,
+    "protocol": "LILITH_REGISTRY_HEAD_ADVANCE_AUTHORIZATION",
+    "reason": "SUCCESSOR_ROTATION",
+    "recoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "registryRootKeyId": "test-only.registry-root-1",
+    "schemaVersion": 1,
+    "signature": "ZGP_cuCu4gZ906FJCByCHmwV6qbuzv4FarAfks3B8qiPxeAqIdLMDcSBgQv66tULIY0gJ-yQl0n1A0rbxJuNAg",
+    "targetRegistryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+    "targetRegistryVersion": 4
+  },
+  "registryHeadAdvanceAuthorizationSigningDigest": "107eb7b559d8b846ef8d4603b219d4d534065d608e0c89d94295d7b167cc2432",
+  "registryV4": {
+    "environment": "test",
+    "issuedAt": "2026-09-27T09:30:00Z",
+    "keys": [
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-27T09:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.b1b3e-successor-1",
+        "notBefore": "2026-09-27T09:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "7taimQHTEkm2aL5yjpkrvSyKu0xaDjv1O-7Pvng2z_Q",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 4,
+        "retiredAt": null,
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": "2026-09-24T00:00:00Z",
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.compromised-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "bOvF6hiDE1pSxBP7Wn9R3hTTIPO4S0KE_BmhbGIO0Hw",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": null,
+        "revocationReason": "COMPROMISED",
+        "revokedAt": "2026-09-25T00:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-26T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.current-2",
+        "notBefore": "2026-09-26T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "n7rQcDvIC44qnisyzYSRww6WW88f0AHhNGSI4hrZzMA",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 3,
+        "retiredAt": null,
+        "revocationReason": "SUPERSEDED",
+        "revokedAt": "2026-09-27T09:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-08-01T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.epoch1-1",
+        "notBefore": "2026-08-01T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "klPjVGNStIYrOm8Ft3D0Cu40aDiyFaBVz3_xr2IiT0I",
+        "recoveryEpoch": {
+          "counter": 1,
+          "random": "feedf481dde20041b30dd9a49a7725e1"
+        },
+        "registryVersion": 1,
+        "retiredAt": "2026-09-10T00:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.retired-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "gNUqIshATdSETh6XeaZDn3mi4eycuxKSw0M_KbXM1aU",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": "2026-09-26T00:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.revoked-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "w2pK6jmDERmbNGYF538aXrTt4JdYNNkkx6S4JG2B4_w",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": null,
+        "revocationReason": "ROUTINE",
+        "revokedAt": "2026-09-20T00:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "PRIVACY_ERASURE_AUTHORIZATION"
+        ],
+        "keyId": "privacy.current-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "YwjHkFySRnKfWM8UPWQCcJIdjAHBYrxwRjyALGWLFhs",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": null,
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "PRIVACY"
+      }
+    ],
+    "policyVersion": "policy.synthetic.v2",
+    "protocol": "LILITH_AUTHORITY_REGISTRY",
+    "recoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "registryRootKeyId": "test-only.registry-root-1",
+    "registryVersion": 4,
+    "schemaVersion": 1,
+    "signature": "U06r2sFOFWGU38DqdhH65rnR7791RftacLp9kr3JDZRLtJGUJ-U9ppnUDn5rUV8b-j6-J6Rg1t36gnQ5m6sBDQ"
+  },
+  "registryV5": {
+    "environment": "test",
+    "issuedAt": "2026-09-27T12:10:00Z",
+    "keys": [
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-27T12:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.b1b3e-epoch3-1",
+        "notBefore": "2026-09-27T12:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "_XKk0n5DMFevgmB2fuYv483MN_5yeiG_LQzvuS5nZH4",
+        "recoveryEpoch": {
+          "counter": 3,
+          "random": "45b4eaa2b664cf7b64199ca072e233d9"
+        },
+        "registryVersion": 5,
+        "retiredAt": null,
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-27T09:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.b1b3e-successor-1",
+        "notBefore": "2026-09-27T09:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "7taimQHTEkm2aL5yjpkrvSyKu0xaDjv1O-7Pvng2z_Q",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 4,
+        "retiredAt": "2026-09-27T12:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": "2026-09-24T00:00:00Z",
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.compromised-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "bOvF6hiDE1pSxBP7Wn9R3hTTIPO4S0KE_BmhbGIO0Hw",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": null,
+        "revocationReason": "COMPROMISED",
+        "revokedAt": "2026-09-25T00:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-26T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.current-2",
+        "notBefore": "2026-09-26T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "n7rQcDvIC44qnisyzYSRww6WW88f0AHhNGSI4hrZzMA",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 3,
+        "retiredAt": null,
+        "revocationReason": "SUPERSEDED",
+        "revokedAt": "2026-09-27T09:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-08-01T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.epoch1-1",
+        "notBefore": "2026-08-01T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "klPjVGNStIYrOm8Ft3D0Cu40aDiyFaBVz3_xr2IiT0I",
+        "recoveryEpoch": {
+          "counter": 1,
+          "random": "feedf481dde20041b30dd9a49a7725e1"
+        },
+        "registryVersion": 1,
+        "retiredAt": "2026-09-10T00:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.retired-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "gNUqIshATdSETh6XeaZDn3mi4eycuxKSw0M_KbXM1aU",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": "2026-09-26T00:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "OWNER_MEMORY_OPERATION"
+        ],
+        "keyId": "actor.revoked-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "w2pK6jmDERmbNGYF538aXrTt4JdYNNkkx6S4JG2B4_w",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": null,
+        "revocationReason": "ROUTINE",
+        "revokedAt": "2026-09-20T00:00:00Z",
+        "schemaVersion": 1,
+        "signingDomain": "OWNER_ACTOR"
+      },
+      {
+        "algorithm": "Ed25519",
+        "compromisedSince": null,
+        "createdAt": "2026-09-10T00:00:00Z",
+        "environment": "test",
+        "evidenceTypes": [
+          "PRIVACY_ERASURE_AUTHORIZATION"
+        ],
+        "keyId": "privacy.current-1",
+        "notBefore": "2026-09-10T00:00:00Z",
+        "policyVersion": "policy.synthetic.v2",
+        "publicKey": "YwjHkFySRnKfWM8UPWQCcJIdjAHBYrxwRjyALGWLFhs",
+        "recoveryEpoch": {
+          "counter": 2,
+          "random": "5f555e13717eb989f6d87e685eaaeba2"
+        },
+        "registryVersion": 2,
+        "retiredAt": "2026-09-27T12:00:00Z",
+        "revocationReason": null,
+        "revokedAt": null,
+        "schemaVersion": 1,
+        "signingDomain": "PRIVACY"
+      }
+    ],
+    "policyVersion": "policy.synthetic.v2",
+    "protocol": "LILITH_AUTHORITY_REGISTRY",
+    "recoveryEpoch": {
+      "counter": 3,
+      "random": "45b4eaa2b664cf7b64199ca072e233d9"
+    },
+    "registryRootKeyId": "test-only.registry-root-1",
+    "registryVersion": 5,
+    "schemaVersion": 1,
+    "signature": "gA0UPWvxy93nCMtr5jMXRDaxil3gVznY-Ur5IuEQlAfusIRnChFUY_NUpZofHI0gjIm6kPSL-Ru3HXLnRx9CBw"
+  },
+  "rotationOutcome": {
+    "issuanceReady": true,
+    "predecessorState": "P_SUPERSEDED",
+    "state": "S_CURRENT"
+  },
+  "rotationWitnessChain": [
+    {
+      "consumedAuthorizationId": null,
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+      "ledgerSequence": 5,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": null,
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+      "registryVersion": 3,
+      "schemaVersion": 2,
+      "signature": "NfkUGCCYAF8TPIivVzUonFJZ9ZjAExXnd5hamhr5PWUcHCgu7OsSd3QsTspqqhsCSHvsg-I2juB_Qx6395W0Bg",
+      "updatedAt": "2026-09-27T08:01:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 1
+    },
+    {
+      "consumedAuthorizationId": "rhaa.b1b3e-rotation-1",
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+      "ledgerSequence": 5,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "03402a3cd1e868f333359bcf1ccd37591d33b4595e20f1595fca7604d1bd3baa",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+      "registryVersion": 4,
+      "schemaVersion": 2,
+      "signature": "NTOP9mRiZ5Rg1e76ldx96B6lRc3Z8_2BvtEKnzHPVC-_l_9TYFnmBfggHmkUdlpsE3rqP42nY7Y6_Fw9XGQnCw",
+      "updatedAt": "2026-09-27T08:02:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 2
+    },
+    {
+      "consumedAuthorizationId": null,
+      "currentRecoveryEpoch": {
+        "counter": 2,
+        "random": "5f555e13717eb989f6d87e685eaaeba2"
+      },
+      "environment": "test",
+      "ledgerHead": "5c424ef06a83e4d7ec2bfa0ed01e59dde6bee20884cb11a15c78df1b69ba0185",
+      "ledgerSequence": 6,
+      "policyVersion": "policy.synthetic.v2",
+      "previousWitnessDigest": "a2a9bfd9177d3c282d1f537bb641f3b88e331a32f68a95686e0349d9888dfdfa",
+      "protocol": "LILITH_RECOVERY_WITNESS",
+      "registryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+      "registryVersion": 4,
+      "schemaVersion": 2,
+      "signature": "QrC1F-fUrbX0zrQvxJ1NfQlomuQKvdFSxTwMVws6WTNLNAV4lr1caAewPYGGOOX59ejXVZLRqCcC2EAT4MCMDA",
+      "updatedAt": "2026-09-27T08:03:00Z",
+      "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+      "witnessVersion": 3
+    }
+  ],
+  "successorPublication": {
+    "custodyEvidence": {
+      "blobByteSize": 128,
+      "blobSha256": "ea60f31423fbf94908d5017397766cc5ec1a40392a7f4dd05374a6ead969b7f7",
+      "credentialName": "owner-actor-signing-key",
+      "credentialPath": "/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred",
+      "machineId": "00000000000000000000000000000000",
+      "withKey": "host"
+    },
+    "profile": "DEV_SYNTHETIC",
+    "publicVerificationMaterial": {
+      "algorithm": "Ed25519",
+      "environment": "test",
+      "evidenceTypes": [
+        "OWNER_MEMORY_OPERATION"
+      ],
+      "keyId": "actor.b1b3e-successor-1",
+      "publicKey": "7taimQHTEkm2aL5yjpkrvSyKu0xaDjv1O-7Pvng2z_Q",
+      "publicKeySha256": "6dd40f7c6b9f07e31bcd9be5da63339105118a3361e69482e19e6a1d7e551647",
+      "signingDomain": "OWNER_ACTOR"
+    },
+    "publicationType": "LILITH_AUTHORITY_KEY_PUBLICATION",
+    "schemaVersion": 1
+  }
+}
