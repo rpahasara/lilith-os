@@ -2,8 +2,9 @@
 
 Status:
 
-- **DESIGN RECORD** (second review pass)
-- **OWNER DECISIONS C-1 AND C-4 ACCEPTED** (§17)
+- **DESIGN RECORD** (third pass: source-blocking decisions resolved)
+- **OWNER DECISIONS ACCEPTED: C-1, C-4, RR-2, RR-3, RR-4, RR-5a
+  (conditional), RR-10, RR-14** (§17)
 - **NOT IMPLEMENTED**
 - **NOT LIVE**
 - **NO LIVE MUTATION AUTHORIZED**
@@ -15,12 +16,12 @@ Base: protected main `069f6d1861b79d817f8b959e36b53f017bfbac32`.
 This record defines the fifth sub-slice of the
 [B1b-3 custody isolation design](slice-15b2b-b1b3-custody-isolation-design.md).
 It follows the [B1b-3d live closure](slice-15b2b-b1b3d-live-closure.md) and
-builds on three earlier records:
+builds on three records:
 
 - [B1b-3a](slice-15b2b-b1b3a-authority-registry-contracts.md): registry,
   key-record, and evidence contracts;
 - [B1b-3c](slice-15b2b-b1b3c-recovery-epoch-witness.md): recovery epoch,
-  witness, ledger, and readiness;
+  witness, recovery ledger, and readiness;
 - the [B1b-3d design](slice-15b2b-b1b3d-dev-synthetic-custody-design.md):
   DEV_SYNTHETIC custody, the witness service, the ceremony, and the ledger
   schema.
@@ -33,51 +34,53 @@ following:
 - a ceremony runbook;
 - an activation instruction.
 
-It does **not** mark any of the following as complete:
+It does **not** mark any of these complete: B1b-3, Level 2 isolation, real
+owner authority, First Memory, Privacy custody, or Stage III.
 
-- B1b-3;
-- Level 2 isolation;
-- real owner authority;
-- First Memory;
-- Privacy custody;
+Nothing was contacted or changed in any of these:
+
+- DEV, PROD, IAM, WIF, or systemd;
+- any key, credential, registry, witness, ledger, or broker;
 - Stage III.
 
-No DEV, PROD, IAM, WIF, systemd, key, credential, registry, witness, ledger,
-broker, or Stage III state was contacted or changed. No source, test, vector,
-workflow, or contract was changed.
+No source, test, vector, workflow, contract, or earlier record was changed.
 
-Labels are used as in the B1b-3 records.
+Labels:
 
 | Label | Meaning |
 | --- | --- |
 | **CANONICAL** | defined by accepted records or by protected-main source |
-| **IMPLEMENTED** | present in source (TEST) or in installed state |
+| **IMPLEMENTED** | present in source (TEST), or in installed state |
 | **LIVE** | installed on DEV, per the B1b-3d live closure |
-| **PROPOSED** | recommended by this record. It still needs review and a separately authorized source slice |
-| **OWNER-ACCEPTED** | a conflict decision the owner accepted in this review pass (§17) |
-| **SUPERSEDED FOR B1b-3e** | a part of an earlier design record that this record replaces for all future implementation. The earlier record itself is not edited |
+| **PROPOSED** | recommended here; it still needs review and a separately authorized source slice |
+| **OWNER-ACCEPTED** | an owner decision recorded for B1b-3e (§17). The accepted design property is binding for B1b-3e-S. The exact schemas stay follow-on source work |
+| **SUPERSEDED FOR B1b-3e** | a part of an earlier design record that this record replaces for all future implementation. The earlier record is not edited |
 
-## 1. Scope and current live baseline
+## 1. Scope, the four stories, and the live baseline
 
-B1b-3e defines what four words mean for LILITH authority:
+B1b-3e defines four terms:
 
 - **rotation:** an authority key is replaced by a successor;
 - **revocation:** a key stops being usable for new evidence;
 - **restore:** bytes come back from an older state;
 - **recovery:** authority resumes after a restore or a fault.
 
-The **authority story** is kept separate from the **freshness story** and the
-**causal/storage story**:
+Four separate stories are kept apart throughout this record. **None of them
+may take over another's role.**
 
-| Story | Question | Owner |
-| --- | --- | --- |
-| Authority | which keys does the owner's registry root authorize? | the owner, offline, through K-ROOT-signed `AuthorityRegistryV1` |
-| Freshness | is this registry state recent enough to trust, or is it stale or rolled back? | the recovery witness (`RecoveryWitnessV1`) |
-| Local issuance readiness | may this signer, with this ledger and this loaded credential, issue now? | the signer ledger + the readiness gate + independent verification |
-| Storage / causal | which bytes exist, were restored, or were installed? | the filesystem, root, and credential custody |
+| # | Story | Question | Objects | Owner |
+| --- | --- | --- | --- | --- |
+| 1 | **Authority** | which keys, and which transitions, does the owner authorize? | the K-ROOT-signed `AuthorityRegistryV1`; the K-ROOT-signed `EpochAdvanceAuthorizationV1` (§9) | the owner, offline, K-ROOT |
+| 2 | **Freshness** | is this registry state the trusted current head, or is it stale, rolled back, or forked? | `RecoveryWitnessV1`, and the accepted `RecoveryWitnessV2` registry-head binding (§10) | the recovery witness |
+| 3 | **Issuance readiness** | may this signer, with this loaded key, issue now? | `RESTORE_READY`; the independently verified loaded-key binding (§11.2); release of the local hold | the readiness gate + the independent verifier; hold release by host root on the owner's decision |
+| 4 | **Storage / observation** | which bytes exist, and what did a component record or observe? | `REGISTRY_VIEW` and other journal records; ceremony hold files; installed registry files; credential blobs; read models; transcripts | the filesystem, root, credential custody, and the recovery-ledger writer |
 
-The existence, restoration, or installation of bytes never decides by
-itself whether authority exists.
+Each story is limited to its own role:
+
+- Story 2 never authorizes.
+- Story 3 never authorizes and never refreshes.
+- Story 4 is never authority, freshness, or readiness. It is only an input
+  that stories 1–3 evaluate.
 
 **Current live DEV state** (from the
 [live closure](slice-15b2b-b1b3d-live-closure.md) §4 and §6):
@@ -86,24 +89,22 @@ itself whether authority exists.
 | --- | --- |
 | K-ACT `test-only.dev-synthetic.actor.b1b3d.1` host-bound encrypted blob | **yes** (custody only) |
 | `/var/lib/systemd/credential.secret` | yes |
-| `lilith-authority-dev` account, release `9ac7de2…`, units (inactive, not enabled) | yes |
+| `lilith-authority-dev` account; release `9ac7de2…`; units (inactive, not enabled) | yes |
 | `AuthorityRegistryV1`, `TrustedRegistryRootV1`, `/etc/lilith-authority-dev` | **no** |
-| K-WIT, `lilith-recovery-witness`, `RecoveryWitnessV1` | **no** |
+| K-WIT, `lilith-recovery-witness`, any witness | **no** |
 | `authority_ledger.db` | **no** |
 | Activation | `NOT_ACCEPTED reason=GRANT_ABSENT` |
 
-K-ACT is **not an authority key yet**. It appears in no registry, and it has
-no `AuthorityKeyRecordV1`. No witness or ledger exists.
+K-ACT is **not an authority key yet**. It is in no registry, and no witness or
+recovery ledger exists. Replacing K-ACT today would be a custody change with
+no authority effect.
 
-- Replacing K-ACT today would be a custody change with **no authority
-  effect**.
-- Every rotation, revocation, and epoch semantic in this record becomes live
-  only after B1b-3d L3a–L4 exist: the registry, the anchors, the witness,
-  the ledger, and signer readiness. None of these is authorized.
+Everything in this record becomes live only after B1b-3d L3a–L4 exist. None
+of that is authorized.
 
 ## 2. Inherited and pinned invariants
 
-These are inherited unchanged:
+Inherited unchanged:
 
 ```text
 model proposal             != authority
@@ -118,368 +119,364 @@ restore                    != authority restoration
 historical preservation    != current authorization
 ```
 
-B1b-3e pins these as well:
+Pinned by B1b-3e:
 
 ```text
-rotation                   != silent replacement
-prepared                   != active
-published                  != activated
-credential exists          != accepted authority
+rotation                          != silent replacement
+prepared                          != active
+registry publication              != activation
+registry publication              != signer issuance readiness
+registry publication              != witness execution authorization
+credential exists                 != accepted authority
+credential loaded                 != current authority
 
-witness freshness          != authority grant
-witness floor              != key activation
-registry publication       != signer issuance readiness
+owner request                     != authorization
+authorization                     != execution
+execution                         != verification
+signed authorization              != executed transition
 
-REGISTRY_VIEW              != authority
-REGISTRY_VIEW              != registry-root authorization
-REGISTRY_VIEW              != witness execution
+witness freshness                 != authority grant
+witness freshness                 != key activation
+witness floor                     != key activation
+witness head binding              != registry authority
+witness receipt                   != independent verification
 
-hold file                  != owner request
-root custody               != owner authorization
+REGISTRY_VIEW                     != authority
+REGISTRY_VIEW                     != registry-root authorization
+REGISTRY_VIEW                     != witness execution
 
-signed authorization       != executed transition
-witness receipt            != independent verification
-evidence.issuedAt          != authority cutover
+hold file                         != owner request
+root custody                      != owner authorization
+
+signer claim                      != verification
+S_ACTIVATED                       != S_CURRENT
+
+ledger evidence                   != registry authority
+historical interval cutoff        != current issuance authority
+evidence.issuedAt                 != authority cutover
 ```
 
-Two B1b-3c rules are inherited unchanged. They are listed under "Two rules
-carry the whole slice" in the B1b-3c record:
+Two B1b-3c rules are inherited unchanged:
 
-1. **Removing authority never needs readiness. Creating it always does.**
+1. **Removing authority never needs readiness; creating it always does.**
 2. **Recovery can only destroy pending authority, never create any.**
+
+The ledger rules are also inherited (§12): **PREPARED may be voided.
+CONSUMED never reopens.**
 
 ## 3. Existing contracts reused
 
-B1b-3e reuses the following as they are. It adds no duplicate concept.
+| Contract / mechanism | Source | Role in B1b-3e | Story |
+| --- | --- | --- | --- |
+| `AuthorityKeyRecordV1`, exact current fields in §7.2 | `authority_contracts.py` | the only representation of a key's lifecycle | 1 |
+| `AuthorityRegistryV1`, `TrustedRegistryRootV1` | `authority_contracts.py` | the authoritative registry state | 1 |
+| `verify_authority_registry`, `verify_owner_evidence` (44-reason taxonomy) | `authority_verifier.py` | forward rejection and historical verification | 1 + 2 |
+| `RecoveryEpochV1 {counter, random}`, `epoch_digest`, `compare_epochs`, `ledger_epoch_id` | `authority_contracts.py`, `recovery_contracts.py` | epoch identity, ordering, and forks | 2 |
+| `RecoveryWitnessV1`, `TrustedWitnessAnchorV1`, `witness_succession_reason` | `recovery_contracts.py` | the freshness state. V1 is unchanged; V2 is accepted (§10) | 2 |
+| `witness_authority_context` | `recovery_contracts.py` | combines story 1 (root anchor) with story 2 (freshness inputs), taken "from the verified witness and nowhere else" | 1 + 2 |
+| `AuthorityLedgerStateV1` ("authority-side recovery ledger model") and its journal ops | `synthetic_recovery_ledger.py` | the recovery ledger's state machine (§12) | 4, evaluated by 3 |
+| `begin_recovery`, `quarantine_pre_recovery`, `RECOVERY_REASONS` | `synthetic_recovery_ledger.py` | the governing epoch-advance steps (C-4) | 4 |
+| `evaluate_restore_readiness` | `synthetic_recovery_ledger.py` | the gate on every authority-creating operation | 3 |
+| `RecoveryEpochTransitionV1` | `synthetic_recovery_ledger.py` | the acknowledgement after an advance; a record | 4 |
+| `RecoveryBoundAdmissionGateV1`, `verify_historical_accepted_memory` | `recovery_admission.py` | new admission vs history | 1 + 2 + 3 |
+| Signer `HEALTH` `publicKeySha256`; the keygen publication `{publicKey, publicKeySha256, blobSha256}` | B1b-3d L1 service; L2 §7 and U5 | inputs to the loaded-key binding (§11.2) | 4, evaluated by 3 |
+| Witness owner ops, ceremony hold, verifier CLI | B1b-3d design §10, §11, §13 | execution and verification boundaries, designed only. C-4 applies | 2 / 3 / 4 |
+| DEV_SYNTHETIC no-backup policy | B1b-3d design §16 | credential restore | 4 |
 
-| Contract / mechanism | Source | Role in B1b-3e |
-| --- | --- | --- |
-| `AuthorityKeyRecordV1`: `createdAt`, `notBefore`, `retiredAt`, `revokedAt`, `revocationReason ∈ {ROUTINE, COMPROMISED, SUPERSEDED}`, `compromisedSince`, `recoveryEpoch`, `policyVersion`, and the immutable first-publication `registryVersion` | `authority_contracts.py` | the only representation of key lifecycle |
-| `AuthorityRegistryV1`, `TrustedRegistryRootV1` | `authority_contracts.py` | the **authority** state; the registry root signs every key transition and every epoch advance |
-| `verify_authority_registry`, `verify_owner_evidence` (44-reason taxonomy) | `authority_verifier.py` | forward rejection and historical verification |
-| `RecoveryEpochV1 {counter, random}`, `epoch_digest`, `compare_epochs` (`EQUAL` / `OLDER` / `NEWER` / `FORKED`), `ledger_epoch_id` | `authority_contracts.py`, `recovery_contracts.py` | epoch identity, ordering, and fork detection |
-| `RecoveryWitnessV1`, `TrustedWitnessAnchorV1`, `witness_succession_reason` (`SUCCESSION_REASONS`) | `recovery_contracts.py` | the **freshness** state and its monotonic succession |
-| `witness_authority_context` | `recovery_contracts.py` | combines the registry-root anchor with witness freshness (floor, epoch, policy) into the verification context. Its docstring says the "trusted monotonic inputs [are] taken from the verified witness and nowhere else" |
-| `AuthorityLedgerStateV1` journal ops: `PREPARE`, `CONSUME`, `ISSUE`, `RESERVE`, `CONFIRM`, `EXPIRE` / `CANCEL` / `FAIL`, `ABANDON`, `REGISTRY_VIEW`, `ADVANCE_EPOCH`, `VOID_CHALLENGE`, `QUARANTINE_USE` | `synthetic_recovery_ledger.py` | the ledger state machine |
-| `begin_recovery`, `quarantine_pre_recovery`, `RECOVERY_REASONS` | `synthetic_recovery_ledger.py` | the governing epoch-advance ledger steps (C-4) |
-| `evaluate_restore_readiness` → `RESTORE_READY` / `NOT_READY(reason)` | `synthetic_recovery_ledger.py` | the only gate for authority-creating operations |
-| `RecoveryEpochTransitionV1` | `synthetic_recovery_ledger.py` | the acknowledgement after an epoch advance. It is a record, not an authority |
-| `RecoveryBoundAdmissionGateV1`, `verify_historical_accepted_memory` | `recovery_admission.py` | NEW_ADMISSION_AUTHORITY vs HISTORICAL_VALIDITY |
-| Witness owner-socket ops `BOOTSTRAP`, `RAISE_REGISTRY_FLOOR`, `ADVANCE_EPOCH`; signer op `RECORD_LEDGER_ADVANCE`; ceremony hold; verifier CLI | B1b-3d design §10, §11, §13 | the execution and verification boundaries. They are designed, not live, and C-4 applies (§9.2) |
-| DEV_SYNTHETIC backup policy: no K-ACT or K-WIT backup; loss means re-key | B1b-3d design §16 | the credential-restore policy |
+## 4. State owners and ledger names
 
-## 4. State owners
+"The ledger" is never used without qualification in this record. There are
+three distinct ledgers.
 
-Every state object has exactly one owner. **No new service, identity,
-socket, or layer is introduced.** Every B1b-3e object is either a refinement
-of an existing owner's state or a record that the existing verifier produces.
+| Name used here | Physical | Owner (sole writer) | Contents | Role |
+| --- | --- | --- | --- | --- |
+| **Authority recovery ledger** | `/var/lib/lilith-authority-dev/authority_ledger.db` (B1b-3d §12; not provisioned) | `lilith-authority-dev`, the authority signer boundary | the hash-chained journal plus `authority_challenge_v2`, `authority_evidence_v2`, `authority_evidence_use_v1`, and `authority_epoch_v1`. It is the durable form of `AuthorityLedgerStateV1` | the only ledger any B1b-3e operation mutates. It is authoritative over its own rows |
+| **Legacy memory-broker ledgers** | `/var/lib/lilith-memory-broker/…/owner_control.db`, `synthetic_evidence.db` | `lilith-memory-broker` | B1b-1/B1b-2 synthetic challenge and evidence rows. Pinned Stage II evidence. `authority_epoch` is retired as non-authoritative (T-12) | **never** read or mutated by B1b-3e. The signer unit has them in `InaccessiblePaths` (B1b-3d §9) |
+| **Application / L04 databases** | application-owned | `lilith` / the application | L04 rows, admission links | never consulted by readiness (B1b-3c §14) |
 
-| State | Owner | Where | Mutated by | Is authority? | Live? |
-| --- | --- | --- | --- | --- | --- |
-| Owner transition request | the owner (a person) | the owner's workstation ceremony transcript. **No authenticated contract exists** (§9.1, RR-13) | the owner | no: intent only | no |
-| Local ceremony hold | host root | the root-owned hold file (B1b-3d §13 step 1) | host root | no: storage and gating only | no |
-| Authority registry state | the owner, **offline**, through K-ROOT | signed `AuthorityRegistryV1` documents (all versions retained) | owner workstation only | **yes**: the only authority state | no (no K-ROOT anchor is installed) |
-| Registry freshness: floor, epoch, policy; a head binding is proposed (§10.3) | the recovery witness | `witness.json` + append-only `chain/` | the witness service only, on request | **no**: freshness and rollback evidence | no |
-| Served registry file / pointer | host root | `/etc/lilith-authority-dev/registry/` | host root | no: storage | no |
-| Challenge, evidence, and evidence-use ledger; the observed registry view; the journalled signing key set | `lilith-authority-dev` | `authority_ledger.db` journal (authoritative over rows) | the signer only | no: local state, gated by readiness | no |
-| Private key material (K-ACT; later K-WIT) | root credential store + systemd | `/etc/credstore.encrypted/*.cred`, the host key | root ceremony CLIs | no | K-ACT **yes** |
-| Verification / read model | nobody (stateless) | output of the independent root-run verifier CLI | — | no | no |
-| Legacy `owner_control.db` `authority_epoch` | none: retired, non-authoritative history (B1b-3d T-12) | the legacy broker DB | — | no | yes, inert |
-| Application databases | not an authority owner; never consulted (B1b-3c §14) | — | — | no | — |
+**A terminology note.** The B1b-3b and B1b-3c records and module docstrings
+use "broker challenge ledger" and "evidence-use ledger" for the
+**authority-side** role, the "broker / authority signer". The B1b-3d design
+(§6) assigns that role to the new `lilith-authority-dev` identity, **not** to
+`lilith-memory-broker`. In B1b-3e those B1b-3b/3c terms mean the tables of
+the **authority recovery ledger**.
 
-**Verification is the combination.** A verifier trusts two things together:
+The signer therefore gains **no** mutation authority over any ledger it does
+not already solely own.
 
-1. a registry that verifies under the pinned `TrustedRegistryRootV1`
-   (authority);
-2. the verified witness's freshness inputs, taken through
-   `witness_authority_context` (freshness).
+### State owners
 
-Neither input alone is enough:
-
-- A K-ROOT-signed registry that is not fresh enough is stale authority, and
-  it is refused (`REGISTRY_DOWNGRADE`).
-- A witness names no key and grants nothing.
+| State | Story | Owner | Is authority? |
+| --- | --- | --- | --- |
+| Owner transition request (intent) | 4 | the owner (a person); recorded in the workstation transcript; unauthenticated (RR-13) | no |
+| Ceremony hold file | 4 | host root | no: gating only |
+| Authority registry generations | 1 | the owner, offline, K-ROOT | **yes** |
+| `EpochAdvanceAuthorizationV1` | 1 | the owner, offline, K-ROOT | **yes**, for exactly one transition |
+| Freshness: epoch, floor, head, ledger position | 2 | the recovery witness | no |
+| Served registry file / pointer | 4 | host root | no |
+| Authority recovery ledger | 4 (evaluated by 3) | `lilith-authority-dev` | no |
+| Private key material | 4 | root credential store + systemd | no |
+| Readiness result, loaded-key binding result, transition records | 3 | the independent verifier (stateless) | no |
 
 **Infrastructure depth is proportional to cognitive relevance.** B1b-3e adds
-none of these:
+no service, identity, socket, replica, daemon, scheduler, or off-host
+component.
 
-- a witness replica;
-- a rotation daemon;
-- a scheduler;
-- an off-host service.
-
-The only property being protected is this: owner-approved memory is never
-accepted on authority that is not current and fresh.
+The only thing it adds to the witness is a registry-head binding (V2). That
+lives inside the existing freshness boundary and uses the existing K-WIT
+key.
 
 ## 5. Timestamp and interval semantics (CANONICAL, from source)
 
-These are enforced by `authority_verifier._verify_evidence`,
-`AuthorityKeyRecordV1.from_dict`, and `AuthorityRegistryV1.from_verified_dict`.
-
 | Field | Record constraint | Verification effect |
 | --- | --- | --- |
-| `createdAt` | `notBefore ≥ createdAt`; `revokedAt ≥ createdAt`; `createdAt ≤ registry.issuedAt` | ordering only; no rule on evidence |
-| `notBefore` | `notBefore ≥ createdAt`; **not** bounded by `registry.issuedAt` | `issuedAt < notBefore` → `KEY_NOT_YET_VALID` |
-| `retiredAt` | `retiredAt ≥ notBefore`; `retiredAt ≤ registry.issuedAt` | `issuedAt ≥ retiredAt` → `KEY_RETIRED`, **both purposes** |
-| `revokedAt` + `revocationReason` | set together; `revokedAt ≥ createdAt`; `revokedAt ≤ registry.issuedAt` | ROUTINE or SUPERSEDED: `issuedAt ≥ revokedAt` → `KEY_REVOKED`, both purposes |
-| `compromisedSince` | set **if and only if** `COMPROMISED`; `compromisedSince ≤ revokedAt` | **not consulted.** Every piece of evidence from the key → `KEY_COMPROMISED`, both purposes (C-1, §6.3) |
-| evidence `issuedAt` | signer-controlled | the only time the evidence carries. **Not trustworthy after key exposure** |
-| `signedAt`, accepted-at | **do not exist** in any B1b-3a or B1b-3c contract | — |
-| key "current" | `retiredAt == null and revokedAt == null` (independent of `notBefore`) | registry invariant: a current key is in the registry's epoch and policy |
+| `createdAt` | `notBefore ≥ createdAt`; `revokedAt ≥ createdAt`; `≤ registry.issuedAt` | ordering only |
+| `notBefore` | `≥ createdAt`; **not** bounded by `registry.issuedAt` | `issuedAt < notBefore` → `KEY_NOT_YET_VALID` |
+| `retiredAt` | `≥ notBefore`; `≤ registry.issuedAt` | `issuedAt ≥ retiredAt` → `KEY_RETIRED`, both purposes |
+| `revokedAt` + `revocationReason` | set together; `≥ createdAt`; `≤ registry.issuedAt` | ROUTINE or SUPERSEDED: `issuedAt ≥ revokedAt` → `KEY_REVOKED`, both purposes. **The two are verification-identical**: `compromised` is `revocationReason == COMPROMISED` only |
+| `compromisedSince` | set **if and only if** `COMPROMISED`; `≤ revokedAt` | not consulted. All of the key's evidence → `KEY_COMPROMISED` (C-1) |
+| evidence `issuedAt` | signer-controlled | the evidence's only time. Untrustworthy after key exposure |
+| `signedAt`, accepted-at | **do not exist** | — |
+| key "current" | `retiredAt == null and revokedAt == null` | registry invariant: current keys are in the registry's epoch and policy |
 
-The only trusted ordering of authority events is the **ledger journal
-sequence**, and it is anchored by the witness's
+The only trusted ordering of authority events is the **authority recovery
+ledger** journal sequence, anchored by the witness's
 `ledgerSequence`/`ledgerHead`. It is ledger-only and holds only while the
-witness survives (B1b-3c §16). No trusted wall-clock acceptance time exists.
+witness survives. No trusted wall-clock acceptance time exists.
 
 ## 6. Revocation semantics
 
-### 6.1 Four distinct transitions
+### 6.1 Four transitions and their use (RR-10, OWNER-ACCEPTED)
 
-| Transition | Record expression (CANONICAL fields) | Meaning | Evidence already issued |
+| Transition | Record expression | Used for | Evidence already issued |
 | --- | --- | --- | --- |
-| **Retirement** | `retiredAt = t` | planned end of validity; the key is not suspected. Used by every epoch advance: "every current E1 key is retired at the recovery instant" (B1b-3c §10). Proposed for rotation (RR-10) | valid if `notBefore ≤ issuedAt < t` (`RETIRED_AFTER_ISSUANCE`) |
-| **Routine revocation** | `revokedAt = t`, `ROUTINE` | stopped for a non-security reason: lost, decommissioned, or never activated | valid if `issuedAt < t` (`REVOKED_AFTER_ISSUANCE`) |
-| **Supersession** | `revokedAt = t`, `SUPERSEDED` | replaced by a successor before its planned retirement. It verifies the same as ROUTINE. **No successor-link field exists**, and none is invented; the link lives in the transition record (§7.7) | as ROUTINE |
-| **Compromise** | `revokedAt = t`, `COMPROMISED`, `compromisedSince ≤ t` | private material may be outside custody | **all rejected**, `KEY_COMPROMISED`, both purposes |
+| **Supersession** | `revokedAt = t_cut`, `SUPERSEDED` | **ordinary predecessor → successor rotation** (accepted) | valid if `notBefore ≤ issuedAt < t_cut` (`REVOKED_AFTER_ISSUANCE`) |
+| **Routine revocation** | `revokedAt = t`, `ROUTINE` | **administrative end of use that does not express successor replacement** (accepted): decommissioned, lost without exposure, published but never activated | valid if `issuedAt < t` |
+| **Retirement** | `retiredAt = t` (no reason field) | the existing B1b-3c recovery ceremony ("every current E1 key is retired at the recovery instant"). This is unchanged; see RR-10a | valid if `issuedAt < t` (`RETIRED_AFTER_ISSUANCE`) |
+| **Compromise** | `revokedAt = t`, `COMPROMISED`, `compromisedSince ≤ t` | private material may be outside custody | **all rejected**, `KEY_COMPROMISED` |
+
+`ROUTINE` and `SUPERSEDED` verify identically in current source. The
+distinction is recorded meaning only, and the verifier is unchanged.
+
+**No successor-link field exists** in `AuthorityKeyRecordV1`, and none is
+invented. The predecessor → successor link is carried by
+`AuthorityKeyTransitionV1` (§7.7) and by the registry generation that holds
+both records.
 
 ### 6.2 Historical-validity invariant
 
-> Evidence that was valid under the registry/key state that applied to its
-> issuance is not retroactively invalidated merely because its key is later
-> retired, routinely revoked, or superseded.
+> Evidence valid under the registry/key state applicable to its issuance is
+> not retroactively invalidated merely because its key is later retired,
+> routinely revoked, or superseded.
 
-This holds in source for retirement, ROUTINE, and SUPERSEDED. The B1b-3a
-golden vectors freeze it: "retirement accepted as history" and "in-flight
-evidence surviving a registry update".
-
-It holds **only while the key record is kept unchanged** in every later
-registry, because verification uses only the current registry. The B1b-3a
-record puts it this way: "a key record removed from a later registry makes
-its evidence `KEY_UNKNOWN`". A rewritten `recoveryEpoch` or `policyVersion`
-would give `RECOVERY_EPOCH_MISMATCH` or `POLICY_VERSION_MISMATCH`.
-
-Today no source compares one registry version with the next. §10 closes this
-in design.
+This holds in source, pinned by the B1b-3a golden vectors "retirement accepted
+as history" and "in-flight evidence surviving a registry update". It holds
+only while every later registry keeps the record unchanged: a removed record
+gives `KEY_UNKNOWN`, and a rewritten one gives an epoch or policy mismatch.
+§10 enforces this.
 
 ### 6.3 Compromise: decision C-1 (OWNER-ACCEPTED)
 
-**Accepted: the current B1b-3a source semantics.** The source says it
-verbatim, in the `authority_verifier.py` module docstring:
+The current B1b-3a source semantics are accepted. The verifier docstring says:
 
 > compromise is retroactive: every piece of evidence the key signed is
 > rejected, whatever its signer-controlled `issuedAt`, because
 > re-attestation does not exist yet;
 
-This means:
+What follows from it:
 
-- `COMPROMISED` → `KEY_COMPROMISED` for **all** evidence from that key. This
-  holds for both purposes, including evidence whose `issuedAt` claims a time
-  before `compromisedSince`.
-- **Reason.** `issuedAt` is signer-controlled. After a compromise, whoever
-  holds the key can backdate newly forged evidence. `compromisedSince` must
-  **not** be used as evidence that earlier-looking evidence is still
-  trustworthy.
-- `compromisedSince` is recorded forensic information. It is not a
-  verification boundary.
-- Routine retirement and non-compromise revocation keep valid historical
-  evidence under their existing interval rules (§6.2). Compromise is the one
-  deliberate exception.
-- **Deferred:** pre-compromise evidence of a compromised key surviving. This
-  needs an independent timestamp, an admission-time attestation, or a
-  re-attestation contract that the compromised signing key cannot forge.
-  - A candidate basis is the witness-anchored ledger position of the
-    evidence's `ISSUE` and `CONFIRM` operations. That is ledger-only.
-  - Another is an owner-signed checkpoint over accepted evidence digests.
+- `COMPROMISED` → `KEY_COMPROMISED` for **all** evidence from the key. This
+  includes evidence that claims `issuedAt < compromisedSince`.
+- **Why.** `issuedAt` is signer-controlled. A key thief can backdate newly
+  forged evidence. `compromisedSince` is forensic only.
+- **Unchanged.** Routine retirement and non-compromise revocation keep their
+  interval rules.
+- **Deferred.** Pre-compromise survival needs an independent timestamp, an
+  admission-time attestation, or a re-attestation contract that the key
+  cannot forge. B1b-3a source is unchanged.
 
-  Neither exists, and neither is designed here.
-- The B1b-3a source is unchanged.
+**Friction (RR-8).** `compromisedSince ≤ revokedAt` means that a compromise
+found after a `ROUTINE` or `SUPERSEDED` revocation must be recorded with a
+`compromisedSince` that is knowingly imprecise. The verdict is the same.
 
-**Friction, recorded only (RR-8).** The contract enforces
-`compromisedSince ≤ revokedAt`. Suppose a key was routinely revoked at
-`t_r`, and its material leaks after `t_r`. It can be escalated to
-compromised only by setting `compromisedSince ≤ t_r`. The verdict is the same,
-because compromise is retroactive. The forensic field is then knowingly
-imprecise.
+### 6.4 Forward rejection and stale registries
 
-### 6.4 Forward rejection, stale registries, and registry-version effects
-
-- **Forward rejection at the verifier.** After retirement or revocation at
-  `t`, evidence with `issuedAt ≥ t` is refused for both purposes.
-- **Forward rejection at the ledger.** Issuance is refused before evidence
-  exists:
-  - readiness requires every journalled signing key to be current and not
-    compromised in the verified, fresh registry (`REQUIRED_KEY_UNAVAILABLE`);
-  - it requires the ledger's observed view to equal that registry
-    (`BROKER_REGISTRY_VIEW_STALE`).
-- **Why `issuedAt` alone is not the protection.** A retired key whose
-  material survived could still produce backdated evidence.
-  - For NEW_ADMISSION the protection is the ledger. `RESERVE` requires an
-    `ISSUE` record in this ledger (`EVIDENCE_NOT_ISSUED_HERE`), so forged
-    evidence cannot be reserved.
-  - For history the protection is the full acceptance chain: owner
-    assertion, L04 link, and consumed use.
-  - Retirement also requires the predecessor's material to leave active
-    custody (§8.4).
-- **Registry-version effects** (CANONICAL, B1b-3a).
-  - `key.registryVersion ≤ evidence.registryVersion ≤ registry.registryVersion`.
-  - Registry evolution alone never invalidates evidence.
-  - A key is judged by its record in the verified registry.
-- **Stale registry rejection:**
-  - a registry below the witness floor → `REGISTRY_DOWNGRADE`, which blocks
-    issuance **and** historical reads;
-  - a ledger view above the installed registry → `REGISTRY_DOWNGRADE`
-    (`BELOW_BROKER_VIEW`);
-  - an installed registry above the ledger view → `BROKER_REGISTRY_VIEW_STALE`.
-- **There is no "delete the bad key from history" mechanism.** A compromised
-  key is marked, never removed (§10).
+- **Verifier.** After revocation or retirement at `t`, evidence with
+  `issuedAt ≥ t` is refused for both purposes.
+- **Authority recovery ledger + readiness (story 3).** Readiness requires
+  every journalled signing key to be current and uncompromised in the
+  **fresh, K-ROOT-verified** registry (`REQUIRED_KEY_UNAVAILABLE`). It also
+  requires the journal's observed view to equal that registry
+  (`BROKER_REGISTRY_VIEW_STALE`).
+- **Protection against backdating.**
+  - For NEW_ADMISSION, `RESERVE` requires an `ISSUE` record in the authority
+    recovery ledger (`EVIDENCE_NOT_ISSUED_HERE`).
+  - For history, the full acceptance chain applies.
+- **Stale registry.** A registry below freshness → `REGISTRY_DOWNGRADE`,
+  which blocks issuance **and** historical reads. With V2, a registry off the
+  witnessed head is refused as well (§10).
+- **No "delete the bad key from history".** A compromised key is marked,
+  never removed.
 
 ## 7. Rotation
 
-### 7.1 Two kinds of rotation
+### 7.1 Two kinds
 
-| Kind | Epoch | In-flight owner proofs | Triggered by |
+| Kind | Epoch | In-flight owner proofs | Authorized by |
 | --- | --- | --- | --- |
-| **In-epoch rotation** | unchanged | **preserved.** Predecessor evidence that was already `ISSUE`d in the ledger stays reservable and admissible in the same epoch, if it lies inside the predecessor's interval. B1b-3c §7: "a routine key rotation during an in-flight approval must not burn the owner's proof" | routine policy; a key lost without suspected exposure |
-| **Epoch-advance rotation** | `counter + 1` | **burned by design.** PREPARED → `VOIDED_BY_RECOVERY`; RESERVED → `QUARANTINED_BY_RECOVERY`; E(n) evidence can never be reserved in E(n+1) | recovery (`RECOVERY_REASONS`); compromise (RR-6) |
+| **In-epoch rotation** | unchanged | **preserved** for predecessor evidence already `ISSUE`d in the authority recovery ledger inside the predecessor's interval | K-ROOT registry generation vN+1; head acceptance per RR-15 |
+| **Epoch-advance rotation** | `counter + 1` | **burned by design**: PREPARED voided, RESERVED quarantined | K-ROOT registry at the new epoch **and** `EpochAdvanceAuthorizationV1` (§9) |
 
-Epoch-advance rotation is forced by B1b-3a: a key belongs to one epoch, and a
-current key must be in the registry's epoch. It is specified in §9. This
-section defines the shared state machine and the in-epoch path.
+### 7.2 Single-current-key scope (RR-3, OWNER-ACCEPTED)
 
-### 7.2 Single-current-key scope (PROPOSED profile rule, RR-3)
+**Field truth in current source.** At protected main `069f6d1`,
+`authority_contracts.py` has:
 
-**Why the scope is not `(environment, authorityDomain)`.** Under the current
-contracts, `authorityDomain` is the **logical** context field. It appears on
-evidence only, and **never on key records**. B1b-3a's
-`AuthorityKeyRecordV1` carries `signingDomain` instead. That is the field
-the earlier B1b-3 design table called `authorityDomain` for keys.
+```text
+KEY_RECORD_FIELDS = {
+  schemaVersion, keyId, signingDomain, evidenceTypes, environment,
+  algorithm, publicKey, createdAt, notBefore, retiredAt, revokedAt,
+  revocationReason, compromisedSince, recoveryEpoch, policyVersion,
+  registryVersion }
+SIGNING_DOMAINS = { OWNER_ACTOR, PRIVACY }
+EVIDENCE_TYPES_BY_DOMAIN = { OWNER_ACTOR: {OWNER_MEMORY_OPERATION},
+                             PRIVACY:     {PRIVACY_ERASURE_AUTHORIZATION} }
+```
 
-A rule keyed on the logical `authorityDomain` cannot be expressed. One key
-serves every logical authority context in its environment and signing
-domain.
+- **The key record's cryptographic authority domain field is `signingDomain`.**
+  `AuthorityKeyRecordV1` has **no** `authorityDomain` field. Its docstring
+  says the "record carries no logical `authorityDomain`".
+- `authorityDomain` exists only on `OwnerEvidenceV2` and
+  `PrivacyAuthorizationV2`, as the **logical** context with its B2a meaning.
+  Signing-domain names are rejected there.
+- **History.** The first B1b-3a commit `a26be42` named this key-record field
+  `authorityDomain`, and the earlier B1b-3 design table did too. Commit
+  `cd92d08` ("Separate signing domain from logical authority domain")
+  renamed it to `signingDomain`.
+- **Current state.** The current B1b-3a record (Contracts, "Two different
+  domain fields") and the golden `fieldSemantics` both freeze the current
+  meaning. Any description of the key record as carrying
+  `authorityDomain = OWNER_ACTOR | PRIVACY` reflects the pre-`cd92d08` shape,
+  not current source.
+- **Not the same field.** The L2 keygen publication's
+  `publicVerificationMaterial.signingDomain` is a separate custody
+  publication. It is not the registry contract, and this rule does not rely
+  on it.
 
-**Scope.** In one verified registry (one `environment`, one
-`recoveryEpoch`), for each `(signingDomain, evidenceType)`:
+No alias is created.
 
-> at most one current key whose `evidenceTypes` contains that
-> `evidenceType`; and, in the DEV_SYNTHETIC profile, exactly one for
-> `(OWNER_ACTOR, OWNER_MEMORY_OPERATION)` and none for
-> `(PRIVACY, PRIVACY_ERASURE_AUTHORIZATION)` (B1b-3f not started).
+**Accepted invariant:**
 
-Why the evidence type is included: the verifier accepts a key when its
-`signingDomain` matches **and** `evidenceType ∈ key.evidenceTypes`, so
-ambiguity is per evidence type. Today each signing domain has exactly one
-evidence type (`EVIDENCE_TYPES_BY_DOMAIN`). The rule is therefore
-equivalent to "one current key per `(environment, signingDomain)`". It is
-stated per evidence type so that it stays correct if a domain gains a second
-type. A key covering several types counts toward each.
+> At most one current issuance key per
+> `(environment, recoveryEpoch, signingDomain, evidenceType)`.
 
-This rule is a publication-time profile check (§10). The B1b-3a verifier
-still structurally accepts several current keys, and B1b-3e does not change
-it.
+A verified registry fixes `environment` and `recoveryEpoch` (registry
+invariants). So the rule, local to a registry, is:
 
-### 7.3 Cut-over is version and state based, not time based
+> in one verified registry, for each `(signingDomain, evidenceType)`, at most
+> one current key whose `evidenceTypes` contains `evidenceType`.
 
-**The authority cut-over is not `evidence.issuedAt`**, and no signer-chosen
-time is used. Issuance authority moves from P to S in this sequence:
+- **Why `evidenceType` is part of the scope.** The verifier accepts a key when
+  its `signingDomain` matches **and** `evidenceType ∈ key.evidenceTypes`.
+  Today each domain has exactly one type, so this equals one key per
+  `signingDomain`. Stating it per type keeps it correct if a domain gains a
+  type. A multi-type key counts toward each type it lists.
+- **DEV_SYNTHETIC profile.** Exactly one current key for
+  `(OWNER_ACTOR, OWNER_MEMORY_OPERATION)`. None for
+  `(PRIVACY, PRIVACY_ERASURE_AUTHORIZATION)`, because B1b-3f has not started.
+- **Enforcement.** A publication-time profile check in
+  `verify_registry_succession` (§10.1) and in the verifier CLI. The B1b-3a
+  verifier is unchanged and still structurally accepts several current keys.
 
-1. the K-ROOT-signed registry generation vN+1 names S as the single current
-   key in scope and P as non-current;
-2. witness freshness excludes vN;
-3. independent verification confirms the signer's local issuance readiness
-   for S (§7.5, `S_CURRENT`).
+### 7.3 Cut-over: version and state, not time (RR-10, OWNER-ACCEPTED)
 
-After that, the ledger's `ISSUE` operations (witness-anchored sequence)
-decide what is issued. Before it, the hold blocks issuance.
+**Current issuance cut-over** (story 3) is state and version based, not
+wall-clock based. Issuance moves from P to S only when all of these hold:
 
-**`t_cut` remains only as a record field value.** It is the `retiredAt` of P
-and the `notBefore` of S in vN+1.
+1. K-ROOT registry generation vN+1 names S as the single current key in scope,
+   and P as `SUPERSEDED` (story 1);
+2. the witness head is vN+1 (story 2);
+3. the independent verifier has confirmed readiness and the loaded-key
+   binding, and the hold is released (story 3; `S_CURRENT`).
+
+No signer-controlled time takes part.
+
+**Historical interval cut-off.** `t_cut` is the value of P's `revokedAt` and
+S's `notBefore` in vN+1.
 
 | Aspect | Answer |
 | --- | --- |
-| Owner | the owner, who chooses it when signing vN+1 with K-ROOT. It is part of the signed authority state |
-| Used for | **historical interval verification only**: which P evidence lies inside `[notBefore, retiredAt)` |
-| Not used for | issuance authority, readiness, or ordering. Those are version and state based |
-| Selection rule (PROPOSED, RR-10) | `t_cut` is chosen after the hold is in force and the signer has stopped. It must be greater than the `issuedAt` of every P evidence recorded by an `ISSUE` in the witness-consistent ledger (read-only verifier). It must satisfy `t_cut ≤ vN+1.issuedAt` |
-| Why that rule is safe | the values compared are ledger-recorded evidence that P legitimately issued while trusted. A forged P evidence carrying `issuedAt < t_cut` has no `ISSUE` record, so it can never be reserved. If P's material was exposed, P is `COMPROMISED` (C-1), and `t_cut` is then irrelevant |
+| Authoritative owner | **the K-ROOT-signed lifecycle state in the registry** (`revokedAt` / `notBefore`). The owner chooses it when signing |
+| Used for | historical interval verification only: which P evidence lies in `[notBefore, revokedAt)` |
+| Not used for | current issuance authority, readiness, or ordering |
+| Role of recovery-ledger `ISSUE` records | **evidence the owner may use** to choose a safe value. For example, take a value above the maximum `issuedAt` of P evidence recorded by `ISSUE` in the witness-consistent authority recovery ledger, read by the verifier. **They neither own nor authorize `t_cut`.** `ledger evidence != registry authority` |
+| Constraint | `t_cut ≤ vN+1.issuedAt` (contract). Chosen while the hold is in force and the signer is stopped |
 
-Historical verification timing (`t_cut`) and current issuance authority (the
-registry generation plus freshness plus readiness) are therefore never
-conflated.
+```text
+historical interval cutoff (registry lifecycle fields)  !=  current issuance authority (state/version)
+```
 
 ### 7.4 State machine
 
-States are named for the successor **S**. The predecessor **P**'s state is
-implied at each step.
-
 ```text
- P_ACTIVE ──(1)──▶ S_PROPOSED ──(2)──▶ S_PREPARED ──(3)──▶ S_AUTHORIZED ──(4)──▶ S_PUBLISHED ──(5)──▶ S_ACTIVATED ──(6)──▶ S_CURRENT
-                       │ abort            │ abort             │ abort                  │ forward only                         (P_RETIRED)
-                       ▼                  ▼                   ▼                        ▼
-                   P_ACTIVE          destroy blob        never installed;       replace S by a
-                                     (no history)        signed history only    later generation
+ P_ACTIVE ─(1)▶ S_PROPOSED ─(2)▶ S_PREPARED ─(3)▶ S_AUTHORIZED ─(4)▶ S_PUBLISHED ─(5)▶ S_ACTIVATED ─(6)▶ S_CURRENT
+                                                                                                        (P_SUPERSEDED)
 ```
 
-| # | Transition | Caused by (state owner) | Precondition | Postcondition | Not implied |
+| # | Transition | Caused by | Story | Postcondition | Explicitly not implied |
 | --- | --- | --- | --- | --- | --- |
-| 1 | P_ACTIVE → S_PROPOSED | the **owner** decides (a transcript record, not authenticated, RR-13). **Host root** writes the local ceremony hold | `RESTORE_READY` under vN | the hold is present, so the signer refuses creating ops. P is still current, but not issuing | no authority change. The hold is not the owner's request (§9.1) |
-| 2 | S_PROPOSED → S_PREPARED | **credential custody** (host root runs the reviewed successor-keygen CLI) | the hold is present; the successor slot is empty | the successor blob is in a slot **distinct from** the unit's (B1b-3d §13 "`.next.cred`"). Public material is recorded | **S cannot sign accepted authority.** It is in no registry (`KEY_UNKNOWN`), no unit loads it, and it is not journalled |
-| 3 | S_PREPARED → S_AUTHORIZED | **the owner, offline, K-ROOT** signs vN+1. vN+1 names S current (`notBefore = t_cut`) and P `retiredAt = t_cut`. It passes the single-current-key rule and `verify_registry_succession(vN → vN+1)` | the public material from step 2 | **the authority registry state vN+1 exists** | **not witness execution.** vN is still fresh enough (the floor is still N), so both vN and vN+1 pass freshness. Nothing issues (hold). The ledger still names P |
-| 4 | S_AUTHORIZED → S_PUBLISHED | **the recovery witness** accepts vN+1 as the new freshness state on host-root request: `RAISE_REGISTRY_FLOOR{vN+1}`, plus the head binding once it exists (§10.3). **Host root** then serves vN+1 | vN+1 verifies under K-ROOT at the current epoch and is a valid successor | vN is **stale** (`REGISTRY_DOWNGRADE`). vN+1 is the freshest registry the witness allows | **not an authority grant.** The authority came from step 3. The witness excludes staleness. **Not issuance readiness**: the ledger view is still N and names P → `BROKER_REGISTRY_VIEW_STALE` / `REQUIRED_KEY_UNAVAILABLE` |
-| 5 | S_PUBLISHED → S_ACTIVATED | **credential custody** (host root) atomically moves S into the unit slot and destroys P's blob. **The signer** starts under the hold, runs the startup key-binding check (MC-1), journals `REGISTRY_VIEW{N+1,[S]}` as an observation, and asks the witness to record the ledger advance | step 4 is complete | **exact meaning:** *the signer has locally observed the fresh authorized state and reports itself ready to issue with S; this is not yet independently verified.* The hold is still in force | nothing is issued. `S_ACTIVATED` confers no authority and no permission |
-| 6 | S_ACTIVATED → S_CURRENT | **the independent verifier** (stateless, root-run, read-only) confirms `RESTORE_READY`, the loaded-key binding, and the successor facts, and emits `AuthorityKeyTransitionV1`. **Host root** removes the hold on the owner's decision | step 5 is complete | issuance is **permitted**, and still one readiness-gated ledger op at a time | no dual-current issuance: the scope has one current key, one unit slot, and one journalled key |
-| — | P_ACTIVE → P_RETIRED | **authority:** K-ROOT at step 3 (`retiredAt`). **Freshness:** effective for every verifier at step 4. **Custody:** material destroyed at step 5 | — | P evidence inside `[notBefore, t_cut)` stays valid | P is never current again: succession forbids reopening, and vN is stale |
+| 1 | P_ACTIVE → S_PROPOSED | the owner decides (unauthenticated intent, RR-13). Host root writes the ceremony hold | 4 | the signer refuses creating ops. P is current, not issuing | no authority change. `hold file != owner request` |
+| 2 | → S_PREPARED | credential custody (host root runs the successor-keygen CLI, RR-11) | 4 | the S blob sits in a slot **distinct from** the unit's. The publication `{publicKey, publicKeySha256, blobSha256}` is recorded | **S cannot sign accepted authority**: it is in no registry (`KEY_UNKNOWN`), not loadable, and not journalled |
+| 3 | → S_AUTHORIZED | the owner, offline, K-ROOT signs vN+1. S is current (`notBefore = t_cut`); P is `revokedAt = t_cut`, `SUPERSEDED`. It satisfies §7.2 and `verify_registry_succession(vN → vN+1)` | 1 | the authoritative registry state vN+1 exists | **not** witness execution or freshness. The head is still vN. Nothing issues |
+| 4 | → S_PUBLISHED | the recovery witness accepts vN+1 as its head (V2 `(version, digest)`, contiguous; the authorization basis is RR-15). Host root then serves vN+1 | 2 | vN is stale. vN+1 is the fresh head | **not** an authority grant: authority came from step 3. **Not** key activation. **Not** issuance readiness: the recovery ledger's view is still vN → `BROKER_REGISTRY_VIEW_STALE` / `REQUIRED_KEY_UNAVAILABLE` |
+| 5 | → S_ACTIVATED | credential custody moves S into the unit slot and destroys P's blob. The signer starts under the hold, reports `HEALTH` `publicKeySha256`, and journals `REGISTRY_VIEW{vN+1,[S]}` (an observation). The witness records the recovery-ledger advance | 4 | **one meaning:** *S's credential is loaded in the unit slot, and the signer has recorded its observation of the fresh head. Nothing about this is verified yet.* The hold stays | no authority, and no permission to issue. `credential loaded != current authority`; `signer claim != verification` |
+| 6 | → S_CURRENT | the independent verifier reproduces readiness **and** the loaded-key binding (§11.2), then emits `AuthorityKeyTransitionV1`. Host root releases the hold on the owner's decision | 3 | issuance is permitted, still gated by readiness per operation | **no dual-current issuance**: one current key in scope, one unit slot, one journalled key, and a binding verified equal to that key |
+| — | P → P_SUPERSEDED | authority: K-ROOT (step 3). Freshness: effective at step 4. Custody: material destroyed at step 5 | 1 / 2 / 4 | P evidence in `[notBefore, t_cut)` stays valid | P is never current again (§10.1; vN is stale) |
 
-**Are `S_ACTIVATED` and `S_CURRENT` redundant?** No. They differ by exactly
-one boundary, `execution != verification`:
+`S_ACTIVATED` and `S_CURRENT` are **not redundant**. They differ by exactly
+`execution != verification` plus the release of the hold:
 
-- `S_ACTIVATED` is the signer's own claim;
-- `S_CURRENT` is that claim, independently verified, plus the release of the
-  hold.
+- `S_ACTIVATED` is the signer's own claim.
+- `S_CURRENT` is independently verified.
 
-`S_ACTIVATED` is **not** an authority state. If the ceremony had no hold and
-no independent verifier, the two would collapse into one. B1b-3e keeps the
-verifier boundary, so both names stay, and only `S_CURRENT` permits
-issuance.
+Only `S_CURRENT` permits issuance.
 
-### 7.5 What makes a key "current"
+### 7.5 What "current" means
 
-| Sense | Established by | Verified by |
+| Sense | Established by | Story |
 | --- | --- | --- |
-| **Authorized** | the K-ROOT-signed registry generation (step 3) | `verify_authority_registry` under the pinned root |
-| **Fresh** | the witness freshness state (step 4). This is freshness of the registry state, not authority over the key | `witness_authority_context` → `REGISTRY_DOWNGRADE`, or `REGISTRY_HEAD_MISMATCH` once the head binding exists |
-| **Current for verification** | a *verification result* only: the key is current in a registry that is both authorized and fresh | the B1b-3a verifier with the witness-derived context |
-| **Issuance-ready** | the signer's local observation (step 5), independently verified (step 6) | readiness + the verifier CLI + MC-1 |
+| Authorized | the K-ROOT registry generation (step 3) | 1 |
+| Fresh | the witness head (step 4). Freshness of the registry state, not authority over a key | 2 |
+| Current for verification | a verification **result** combining 1 and 2 | 1 + 2 |
+| Issuance-ready | independently verified readiness + loaded-key binding + hold release (step 6) | 3 |
 
-### 7.6 Rotation crash and failure handling
+### 7.6 Rotation crash handling
 
-| Point | State left | Authority change | Allowed action |
+| Point | State | Authority change | Allowed action |
 | --- | --- | --- | --- |
-| crash before successor preparation | `S_PROPOSED` | none | remove the hold, or continue |
-| keygen succeeds; authorization never happens | `S_PREPARED` | none | destroy the successor blob. It was never in any registry, so it has no history |
-| crash after signing vN+1, before the witness accepts it | `S_AUTHORIZED` | vN+1 exists as authority; freshness has not moved | have the witness accept it later, or abandon it. **Never sign a different vN+1** (§10.3) |
-| crash after the witness accepts vN+1, before local observation | `S_PUBLISHED` | none further | forward only: complete step 5. If S's blob is lost, vN+2 revokes S (`ROUTINE`, zero S evidence proven) and names S′. Never return to P |
-| crash after `REGISTRY_VIEW` is journalled, before the witness records the ledger advance | `LEDGER_AHEAD_OF_WITNESS` | none | fail closed. B1b-3c/3d resolve this **only by an epoch advance** (§9). The signer must not re-submit after restart, because that is indistinguishable from a restored witness |
-| the verifier does not return `RESTORE_READY` | `S_ACTIVATED` | none | the hold stays; diagnose |
+| before successor preparation | `S_PROPOSED` | none | release the hold, or continue |
+| keygen done; authorization never comes | `S_PREPARED` | none | destroy the successor blob (it has no history) |
+| vN+1 signed; head not advanced | `S_AUTHORIZED` | vN+1 exists as authority state | advance the head later, or abandon it. **Never sign a different vN+1**: V2 would flag it as a fork, and succession refuses it |
+| head advanced; not activated | `S_PUBLISHED` | none further | forward only. If S's blob is lost: vN+2 revokes S `ROUTINE` (zero S evidence proven) and names S′ |
+| `REGISTRY_VIEW` journalled; ledger advance not witnessed | `LEDGER_AHEAD_OF_WITNESS` | none | fail closed. Resolved only by an epoch advance (B1b-3c/3d) |
+| verifier not ready, or binding mismatch | `S_ACTIVATED` | none | the hold stays; diagnose |
 
-### 7.7 `AuthorityKeyTransitionV1` (PROPOSED record, not an authority)
+### 7.7 `AuthorityKeyTransitionV1` (PROPOSED record, story 4)
 
-This is the in-epoch sibling of `RecoveryEpochTransitionV1`. The verifier
-produces it at step 6.
-
-Fields:
+The verifier emits it at step 6. Its fields:
 
 - `schemaVersion`, `kind`, `environment`;
 - `signingDomain`, `evidenceType`;
-- `predecessorKeyId`, `successorKeyId`;
+- `predecessorKeyId`, `successorKeyId`, `predecessorRevocationReason: SUPERSEDED`;
 - `fromRegistry {version, digest}`, `toRegistry {version, digest}`;
-- `recoveryEpoch` (unchanged);
-- `witnessVersionBefore`, `witnessVersionAfter`, `ledgerSequence`;
-- `tCut` (labelled `historicalIntervalOnly`);
-- `predecessorIssuedEvidenceCount`, `maxPredecessorIssuedAt`;
+- `recoveryEpoch`;
+- `witnessDigestBefore`, `witnessDigestAfter`;
+- `authorityRecoveryLedgerSequence`;
+- `tCut` (`historicalIntervalOnly: true`);
+- `loadedKeyBinding` (§11.2 result);
+- `predecessorIssuedEvidenceCount`;
 - `inFlightEvidencePreserved: true`, `historicalEvidenceRetained: true`;
-- `predecessorMaterialDestroyedFromActiveCustody` (limit in §8.4);
+- `predecessorMaterialDestroyedFromActiveCustody` (§8.4);
 - `rollbackDetectionScope: LEDGER_ONLY`, `wholeHostRollbackProtected: false`.
 
 ## 8. Restore semantics
@@ -488,307 +485,318 @@ Fields:
 RESTORE != AUTHORITY RESTORATION
 ```
 
-**Restoring bytes never restores authority.** Authority exists only in a
-K-ROOT-signed registry that current freshness accepts. Issuance exists only
-when readiness passes against a surviving witness.
+Authority exists only in K-ROOT-signed objects (story 1) that current
+freshness accepts (story 2). Issuance exists only after story 3.
 
-Restored bytes may be **adopted as state** only when a surviving freshness
-owner already attests exactly those bytes. Even then they carry no authority
-beyond what the witness attests.
+Restored bytes are story 4. They may be **adopted as state** only when the
+surviving freshness owner attests exactly those bytes, and even then they
+gain no authority.
 
 ### 8.1 Five kinds of restore
 
-| Kind | Bytes | What they can do | What they can never do |
+| Kind | Bytes | Can | Can never |
 | --- | --- | --- | --- |
-| **Data restore** | application DBs, L04 rows, memory files | serve as history, subject to the B2a/B1b-3c acceptance chain | be consulted by readiness; revive authority; block authority (B1b-3c §14) |
-| **Broker / signer-state restore** | `authority_ledger.db`; the legacy `owner_control.db` is non-authoritative | be adopted if and only if its journal `sequence/head` equals the surviving witness's values; otherwise it is evidence only | reopen a terminal row (`TERMINAL_STATE_REOPENED`); revive a PREPARED challenge after an epoch advance (`LEDGER_EPOCH_STALE`); issue while behind the witness (`LEDGER_BEHIND_WITNESS`); turn a restored `REGISTRY_VIEW` into authority |
-| **Registry restore** | an older signed `AuthorityRegistryV1` | nothing, if it is below freshness. Reinstating the retained **current** head is harmless: its authority came from K-ROOT, and its acceptance from freshness, not from the file | lift a retirement, revocation, or compromise (`REGISTRY_DOWNGRADE`); bring back a deleted record (§10) |
-| **Credential restore** | an older `.cred` blob | nothing. DEV_SYNTHETIC forbids K-ACT and K-WIT backup and restore; loss means re-key (B1b-3d §16) | turn a retired key into an issuing key: the loaded-key binding fails (MC-1, `REQUIRED_KEY_UNAVAILABLE`) |
-| **Authority restoration** | — | only through §9: an owner decision, a K-ROOT-authorized registry at a new epoch, witness execution, and independent verification | be performed by any restore of bytes, alone or combined |
+| **Data restore** | application / L04 DBs, memory files | serve as history under the acceptance chain | be consulted by readiness; revive or block authority |
+| **Signer-state restore** | the authority recovery ledger | be adopted only if its journal equals the witnessed `sequence/head` | reopen a terminal row (`TERMINAL_STATE_REOPENED`); revive PREPARED after an advance (`LEDGER_EPOCH_STALE`); issue while behind the witness; turn a restored `REGISTRY_VIEW` into authority |
+| **Registry restore** | an older signed registry | nothing below or off the witnessed head. Reinstating the retained current head bytes is harmless | lift a revocation, retirement, or compromise; restore a deleted record |
+| **Credential restore** | an older `.cred` blob | nothing. Backup and restore are forbidden in DEV_SYNTHETIC | pass the loaded-key binding (§11.2) |
+| **Authority restoration** | — | only through §9 | be performed by any restore of bytes |
+
+The legacy memory-broker ledgers are outside all five rows. Restoring them
+has no B1b-3e authority meaning.
 
 ### 8.2 Specific restore cases
 
 | Case | Detected as | Outcome |
 | --- | --- | --- |
-| An old VM snapshot holds a once-valid K-ACT blob, and only the blob is extracted onto the current host | loaded-key binding ≠ the single current key → `REQUIRED_KEY_UNAVAILABLE`. The blob is not in the unit slot | no issuance. The blob decrypts (same host key), so the retired key's material is exposed again. See §8.4 and RR-7 |
-| The whole VM boots from an old snapshot | **not detected.** Witness, ledger, registry, blob, and host key all come from the same time (B1b-3c §16, test-proven) | **unresolved** (§13) |
-| The registry rolls back; the witness is current | `REGISTRY_DOWNGRADE` | issuance and historical reads are blocked. Reinstate the retained current head |
-| The broker ledger rolls back; the witness is current | `LEDGER_BEHIND_WITNESS` (or `LEDGER_EPOCH_STALE` / `LEDGER_HEAD_MISMATCH`) | issuance is blocked; historical reads are allowed. Recovery: reinstate a preserved ledger equal to the witness (as in B1b-3d L7), or else advance the epoch |
-| Ledger **and** registry roll back together; the witness is newer | `REGISTRY_DOWNGRADE` first, then `LEDGER_BEHIND_WITNESS` | blocked. Reinstate the current head, then advance the epoch from the **witness**, never from the stale ledger (`begin_recovery`) |
-| Ledger and registry roll back to a **same-version fork** head; the witness is newer | V1: **not detected** by the floor. With the head binding: `REGISTRY_HEAD_MISMATCH` | §10.3 |
-| The witness rolls back alone | `LEDGER_AHEAD_OF_WITNESS` | blocked, and historical reads are too (`_WITNESS_SUSPECT`). Advance the epoch. The witness's own history is its append-only chain (RR-9) |
-| Every relevant owner rolls back together | not detected | **unresolved** |
+| old snapshot's K-ACT blob extracted onto the current host | slot blob hash ≠ current key publication, or binding mismatch → `REQUIRED_KEY_UNAVAILABLE` | no issuance. The material is exposed again (§8.4, RR-7) |
+| whole VM boots from an old snapshot | **not detected** | **unresolved** |
+| registry rolls back; witness current | `REGISTRY_DOWNGRADE` (V2: off-head) | blocked; reinstate the current head bytes |
+| authority recovery ledger rolls back; witness current | `LEDGER_BEHIND_WITNESS` / `LEDGER_EPOCH_STALE` / `LEDGER_HEAD_MISMATCH` | issuance blocked; history allowed. Reinstate a witnessed ledger, or advance the epoch |
+| registry + recovery ledger roll back; witness newer | `REGISTRY_DOWNGRADE`, then `LEDGER_BEHIND_WITNESS` | reinstate the head, then advance the epoch from the witness |
+| registry + recovery ledger roll back to a same-version fork; witness newer | V1: **not detected**. V2: head-digest mismatch | §10.3 |
+| witness rolls back alone | `LEDGER_AHEAD_OF_WITNESS` | blocked (history too); advance the epoch; RR-9 |
+| witness + registry + recovery ledger roll back together | not detected | **unresolved** |
 
-### 8.3 Stale-epoch owner proof after a restore
+### 8.3 Stale owner proof
 
-A restored database flag is never authority:
+- A restored `PREPARED` flag over a `CONSUMED` journal entry →
+  `TERMINAL_STATE_REOPENED`.
+- Pre-advance `PREPARED` challenges are voided.
+- Old-epoch assertions and evidence can never be consumed, signed, or
+  reserved (`STALE_EPOCH_*`).
 
-- a `CONSUMED` challenge restored as `PREPARED` → `TERMINAL_STATE_REOPENED`
-  (the journal is authoritative);
-- a pre-advance `PREPARED` challenge is voided. Its owner assertion binds the
-  old `ledgerEpoch`, so it can never be consumed or signed in the new epoch
-  (`STALE_EPOCH_CHALLENGE`, `CHALLENGE_EPOCH_NOT_CURRENT`);
-- old-epoch evidence can never be reserved (`STALE_EPOCH_EVIDENCE`), even
-  when relabelled.
+### 8.4 Host-bound credentials and snapshots
 
-### 8.4 Host-bound credentials do not solve snapshot rollback
+Host-bound systemd credentials do not solve snapshot rollback (live closure
+§11). Any post-L2b.2 disk snapshot holds both the K-ACT blob and
+`credential.secret`. No live contact was made, so whether such snapshots
+exist is unknown.
 
-The live closure already records this: "Host-bound systemd credentials do
-not, by themselves, solve whole-host or snapshot rollback." Any disk snapshot
-of `lilith-dev-01` taken after L2a/L2b.2 holds both the K-ACT blob and
-`credential.secret`. This record does **not** know whether any such snapshot
-exists, because it made no live contact.
+`predecessorMaterialDestroyedFromActiveCustody` means destruction from the
+live credential store only.
 
-Therefore `predecessorMaterialDestroyedFromActiveCustody` means only that the
-material was destroyed from the live credential store. It never means that
-the key no longer exists.
+RR-7 is still an open owner decision. The proposal: material retained inside
+the owner/root boundary counts as known debt; material outside it counts as
+compromise.
 
-**PROPOSED (RR-7).** Where retained material sits decides how it is treated:
-
-- **Inside the owner/root boundary** — for example, a same-project snapshot
-  that was never exported, which root could read anyway. This is the known
-  Level 3 and whole-host debt.
-- **Outside that boundary** — for example, exported, copied off the project,
-  loaded by a unit that is not an authority unit, or seen by `lilith` or the
-  deployer. This is **compromise**, and the key is marked `COMPROMISED`.
-
-## 9. Recovery-epoch advancement protocol
+## 9. Recovery-epoch advancement protocol (RR-2, OWNER-ACCEPTED)
 
 ```text
-Owner Request  ->  Registry-root Authorize  ->  Recovery Witness Execute  ->  Independent Verify
-   (intent)          (offline K-ROOT)            (freshness transition)          (verifier CLI)
+Owner Request ─▶ Registry-root Authorize ─▶ Recovery Witness Execute ─▶ Independent Verify
+ (intent, S4)    (EpochAdvanceAuthorizationV1   (freshness transition, S2)   (readiness + binding, S3)
+                  + registry at new epoch, S1)
 ```
 
-| Boundary | Object | Owner | Is authority? |
+### 9.1 Objects
+
+| Boundary | Object | Story | Is authority? |
 | --- | --- | --- | --- |
-| **Owner request** (intent) | **no authenticated contract exists.** The owner's decision is recorded in the owner's workstation ceremony transcript (§9.1, RR-13) | the owner | **no** |
-| **Local ceremony hold** | the root-owned hold file. Its content, `CeremonyHoldV1` (PROPOSED), is a *local gating container*: `{kind, reason ∈ RECOVERY_REASONS, environment, observedWitnessDigest, observedRegistryVersion, createdAt}`. Every field is an unauthenticated description | host root | **no.** It only blocks creating ops |
-| **Registry-root authorization** | the K-ROOT-signed `AuthorityRegistryV1` at `newEpoch = (witness.counter + 1, fresh random)`, with all of: `registryVersion > floor`; every E(n) key non-current; the §7.2 scope rule met; a valid successor under §10. This reuses the B1b-3d T-8 proposal, which the owner has not decided (RR-2) | the owner, offline | **yes: it is the first owner-authenticated object.** It permits one transition. It mutates nothing and does not advance the witness |
-| **Witness execution** | witness `ADVANCE_EPOCH` → a successor `RecoveryWitnessV1` plus `chain/<v>.json` | the witness | **no.** It executes the freshness transition that step 2 authorized. The signed witness is a freshness receipt |
-| **Resulting RecoveryEpoch** | `witness.currentRecoveryEpoch: RecoveryEpochV1`; `ledgerEpoch = "lep1." + epoch_digest(epoch, env)` | the witness (freshness) | no: it is the epoch the fresh authority must match |
-| **Verification evidence** | `ReadinessResultV1 == RESTORE_READY`, `RecoveryEpochTransitionV1`, and the MC-1 key binding, from the root-run read-only verifier CLI | nobody (stateless) | no. It gates resumption (`execution != verification`) |
+| Owner request | unauthenticated local intent for DEV_SYNTHETIC. It is recorded in the owner transcript and may be mirrored in `CeremonyHoldV1` (RR-13) | 4 | **no**. `owner request != authorization` |
+| Ceremony hold | `CeremonyHoldV1` (PROPOSED gating container) `{kind, reason, environment, observedWitnessDigest, observedRegistryVersion, createdAt}`. Every field is unauthenticated | 4 | **no**. It only blocks creating ops (fails safe). `hold file != owner request`; `root custody != owner authorization` |
+| Registry state at the new epoch | a K-ROOT-signed `AuthorityRegistryV1` at `(counter + 1, fresh random)`: `registryVersion = head + 1` (contiguous); every E(n) key non-current; §7.2 holds; succession holds | 1 | **yes**: the authoritative registry state. It is **not** permission to execute the advance: `registry publication != witness execution authorization` |
+| **Execution authorization** | **`EpochAdvanceAuthorizationV1`**, signed by K-ROOT (§9.2) | 1 | **yes**: the first authority-bearing *transition* object, and usable for exactly one transition. `authorization != execution` |
+| Recovery-ledger adoption record | the authority recovery ledger's `ADVANCE_EPOCH` journal op, written by the signer before the witness executes (§9.4, RR-5a) | 4 | **no**: destroy/narrow-only |
+| Witness execution | witness `ADVANCE_EPOCH` → successor witness (V2) plus a chain entry | 2 | **no**: it executes the authorized freshness transition. The signed witness is a receipt |
+| Resulting epoch | `witness.currentRecoveryEpoch`; `ledgerEpoch = "lep1." + epoch_digest(…)` | 2 | no |
+| Verification | the independent verifier: `RESTORE_READY` + loaded-key binding + `RecoveryEpochTransitionV1` | 3 | no. `execution != verification` |
 
-### 9.1 Owner request vs. local ceremony hold
+No new service is created: K-ROOT stays the only authorizer, the witness the
+only executor, and the verifier the only verifier.
 
-- **The hold file is storage and ceremony gating.** Being root-owned does not
-  make it owner intent. Host root, whether the owner's break-glass session or
-  any root-equivalent principal (DR-3), can write it.
-- **Its only effect fails safe.** While the hold is present, the signer
-  refuses every creating op. That is destroy-only.
-  - A forged hold costs availability only.
-  - A removed hold grants nothing, because every creating op still needs
-    `RESTORE_READY` against a fresh K-ROOT registry.
-- **The owner's request has no cryptographic provenance today.** Two
-  owner-held signing mechanisms exist, and both are deliberately **not**
-  reused here:
-  - K-ROOT has one signed artifact type, the registry.
-  - The B1c activation SSH key serves activation.
+### 9.2 `EpochAdvanceAuthorizationV1` (PROPOSED contract; accepted property)
 
-  This pass creates no owner-signature scheme.
-- The first owner-authenticated object in every transition is therefore the
-  **K-ROOT-signed registry** itself.
-- Whether an authenticated `OwnerTransitionRequest` is ever needed is RR-13.
-  Candidates:
-  - a new K-ROOT artifact type with its own separator;
-  - owner WebAuthn;
-  - no request object at all, because the registry already authorizes.
+The design shape follows. The exact schema, vectors, and reason names belong
+to B1b-3e-S.
 
-The previous draft's `AuthorityTransitionHoldV1`, described as the owner's
-request, is withdrawn. It is renamed `CeremonyHoldV1` and is only a gating
-container.
+**Signing.** Ed25519 with K-ROOT over
+`"LILITH_EPOCH_ADVANCE_AUTHORIZATION_V1\x00" ‖ JCS(all fields except
+signature)`. It is verified with the pinned `TrustedRegistryRootV1`.
 
-### 9.2 Ordering: decision C-4 (OWNER-ACCEPTED)
+The separator must be distinct from every existing separator: the B1a, B2a,
+and B1b-3a separators, and B1b-3c's `LILITH_RECOVERY_WITNESS_V1` and
+`LILITH_RECOVERY_EPOCH_V1`. B1b-3e-S must add a pinning test for this. So a registry
+signature and an authorization signature can never be confused, even though
+K-ROOT now signs two artifact types. The `test-only.` root prefix rule still
+applies.
 
-**Accepted:** the B1b-3c source succession semantics govern. The governing
-order for all future implementation is the B1b-3c source order.
-
-The B1b-3c source order (`begin_recovery`, then witness, then
-`quarantine_pre_recovery`, then witness again, as tested in
-`synthetic_b1b3c.py` `recover`):
-
-1. **Ledger adoption record.** The signer journals `ADVANCE_EPOCH`. This is
-   destroy-only (`creates_authority=False`). The new epoch is computed from
-   the **pre-advance witness** (`witness.counter + 1`), and the op carries
-   `fromWitnessDigest`. It is admitted only with a K-ROOT registry that
-   verifies at the new epoch and is above the floor.
-2. **Witness execution.** The witness records the new epoch together with the
-   **post-journal** `ledgerSequence/ledgerHead`, and it must satisfy
-   `witness_succession_reason`. This is the point of no return.
-3. **Quarantine.** `VOID_CHALLENGE` / `QUARANTINE_USE` for older-epoch work
-   (destroy-only).
-4. **Witness again**, over the post-quarantine ledger.
-5. **Independent verification** → `RESTORE_READY`. The hold is removed.
-
-**SUPERSEDED FOR B1b-3e:** a part of the B1b-3d design. The B1b-3d design
-§13 steps 7 and 9, and the §10 `ADVANCE_EPOCH {…restoredLedgerSequence,
-restoredLedgerHead…}` operation, describe the reverse order:
-
-- first, the witness advances with the *restored* sequence and head;
-- then the signer "adopts" and calls `RECORD_LEDGER_ADVANCE`.
-
-That order would violate the implemented B1b-3c checks:
-
-- **Head check.** On an advance, `witness_succession_reason` requires a head
-  that differs from the previous witness head (`WITNESS_LEDGER_REGRESSION`).
-  An advance over an unrestored ledger would therefore be refused. Cases:
-  compromise, rotation, and `LEDGER_AHEAD_OF_WITNESS` recovery.
-- **Counter.** A post-advance `begin_recovery` would compute `counter + 2`.
-
-**Status of that portion:** it is superseded for B1b-3e and for every future
-implementation. The B1b-3d record is **not edited** and stays as history.
-The witness owner operation is re-specified in B1b-3e-S (§15). It binds the
-post-journal sequence and head that the ledger adoption record produced.
-
-The ledger `ADVANCE_EPOCH` record is **not** authority and **not** witness
-execution. A compromised or restored signer that journals it arbitrarily
-causes a readiness failure only (`LEDGER_EPOCH_AHEAD_OF_WITNESS`), which means
-availability loss.
-
-**No live epoch advance is authorized.**
-
-### 9.3 Epoch rules (CANONICAL)
-
-| Rule | Source behaviour |
+| Field | Binds |
 | --- | --- |
-| Current epoch | `witness.currentRecoveryEpoch` |
-| Requested next epoch | `(witness.counter + 1, fresh random)`, taken from the witness, never from a stale ledger |
-| Monotonic counter | equal or `+1` (`WITNESS_EPOCH_NOT_SUCCESSOR`); never older (`WITNESS_EPOCH_REGRESSION`); the floor is strictly higher on an advance (`WITNESS_REGISTRY_MINIMUM_REGRESSION`) |
-| Random / fork component | same counter with a different random = `FORKED` → `WITNESS_EPOCH_REGRESSION`, `LEDGER_EPOCH_FORKED`. The new random must differ from the current one (`RECOVERY_EPOCH_NOT_ADVANCING`). B1b-3d adds "never seen before", against the chain |
-| Stale-epoch rejection | `LEDGER_EPOCH_STALE`, `STALE_EPOCH_CHALLENGE`, `STALE_EPOCH_EVIDENCE`, `CHALLENGE_EPOCH_NOT_CURRENT`; for NEW_ADMISSION, `RECOVERY_EPOCH_MISMATCH` |
-| Replay rejection | an executed authorization cannot execute again: the counter is no longer `+1`, and the floor is not strictly higher. An older registry is stale |
-| Authorization expiry | **none exists.** The registry has `issuedAt` but no `notAfter` (RR-2) |
-| At most once | the witness chain is linear: `previousWitnessDigest`, `witnessVersion + 1`, `O_EXCL` chain files, one service instance plus `flock`. After a crash, the owner **reads** the witness instead of retrying blind |
+| `protocol`, `schemaVersion` | `LILITH_EPOCH_ADVANCE_AUTHORIZATION`, `1` |
+| `authorizationId` | a unique ID with ≥ 128-bit random nonce material; recorded by the witness on execution |
+| `environment` | exactly one environment |
+| `reason` | one of `RECOVERY_REASONS` |
+| `priorRecoveryEpoch` | `RecoveryEpochV1`; must equal the witness's current epoch |
+| `successorRecoveryEpoch` | `RecoveryEpochV1`; `counter = prior.counter + 1`; `random` fresh and never seen in the chain |
+| `targetRegistryVersion`, `targetRegistryDigest` | the exact registry generation at the successor epoch; `version = witness head version + 1` |
+| `expectedPriorWitnessDigest` (+ `expectedPriorWitnessVersion`) | the exact witness state the transition starts from |
+| `registryRootKeyId` | the signing root |
+| `issuedAt`, `notAfter` | a validity window (see the limit below) |
+| `signature` | K-ROOT |
 
-### 9.4 Epoch-advance crash handling (under C-4)
+**Witness execution checks** (all must hold; any failure → refuse, no state
+change):
 
-| Crash after | Readiness | Allowed action | Authority change |
-| --- | --- | --- | --- |
-| the hold is written | issuance is held | remove the hold, or continue | none |
-| the authorization is signed, not used | unchanged | use it later, or abandon it (no expiry, RR-2) | the authority state exists; freshness has not moved |
-| the ledger `ADVANCE_EPOCH` is journalled; the witness has not executed | `LEDGER_EPOCH_AHEAD_OF_WITNESS` | witness execution with **the same** authorization. The journalled epoch equals the registry epoch, so this is completion, not a retry | none until the witness executes |
-| the witness has executed (**point of no return**) | `NONTERMINAL_PRE_RECOVERY_WORK` until quarantine | finish the quarantine (destroy-only), then swap the credential | E(n) is stale. E(n+1) is not issuing yet |
-| quarantine is journalled; the witness record is lost | `LEDGER_AHEAD_OF_WITNESS` | **another** epoch advance. This is safe by rule 2 and is the T-4 cost | none |
-| `chain/<v>.json` is written; `witness.json` has not been renamed | the witness refuses writes (B1b-3d §18) | RR-9 | none |
+1. the signature verifies under the pinned root;
+2. the environment matches;
+3. the current witness digest and version equal the expected values;
+4. `priorRecoveryEpoch == current epoch`;
+5. the successor epoch is a valid successor (counter `+1`, fresh random,
+   `compare_epochs` `NEWER`);
+6. the supplied registry verifies under K-ROOT at `successorRecoveryEpoch`;
+   its digest equals `targetRegistryDigest`; its version equals
+   `targetRegistryVersion` = head + 1; `verify_registry_succession(head →
+   target)` passes;
+7. the authority recovery ledger's journalled `ADVANCE_EPOCH` names the same
+   `authorizationId` and successor epoch (C-4 order);
+8. `authorizationId` does not appear in the witness chain;
+9. the witness's `updatedAt ≤ notAfter`.
 
-## 10. Registry succession and freshness anchoring
+**Replay safety.** The authorization is usable only for the exact
+transition:
+
+- it binds the prior witness digest, and the chain is linear, so after
+  execution the witness can never again be at that digest;
+- the chain records `authorizationId`;
+- it binds the exact target registry digest and successor epoch.
+
+**Honest limits:**
+
+- A witness restored alone to the prior digest could meet a replayed
+  authorization. The recovery ledger, which is ahead, then shows
+  `LEDGER_AHEAD_OF_WITNESS` / `LEDGER_EPOCH_AHEAD_OF_WITNESS`, and the
+  result is fail-closed.
+- A whole-host rollback that includes the witness is **not** protected.
+- **Expiry** uses the host clock through the witness's monotonic `updatedAt`.
+  It is defence in depth, not a security boundary:
+  - a fast clock can only cause refusal;
+  - a slow clock can only extend a window that the prior-witness binding
+    already limits.
+- The contract's `_instant` timestamps support this safely.
+
+### 9.3 Decision C-4: ordering (OWNER-ACCEPTED)
+
+**The B1b-3c source succession semantics govern.** The governing order for
+future implementation is:
+
+1. The owner writes the hold. K-ROOT has signed the registry at the new epoch
+   and `EpochAdvanceAuthorizationV1`.
+2. **Recovery-ledger adoption (pre-witness).** The signer journals
+   `ADVANCE_EPOCH` in the authority recovery ledger. This is `begin_recovery`,
+   with the new epoch taken from the **pre-advance** witness, plus
+   `fromWitnessDigest` and, proposed, `authorizationId`.
+3. **Witness execution** of the authorization, binding the **post-journal**
+   `ledgerSequence/ledgerHead`. This is the point of no return.
+4. Quarantine (`VOID_CHALLENGE`, `QUARANTINE_USE`), then the witness records
+   the recovery-ledger advance.
+5. Credential swap. The independent verifier confirms readiness and the
+   loaded-key binding. The hold is released.
+
+**SUPERSEDED FOR B1b-3e:** the B1b-3d design §13 steps 7 and 9, and the §10
+`ADVANCE_EPOCH {…restoredLedgerSequence, restoredLedgerHead…}` operation
+shape. They put the witness first, with the restored sequence and head. The
+implemented B1b-3c checks would refuse that:
+
+- `WITNESS_LEDGER_REGRESSION` for an unrestored ledger;
+- `counter + 2` from a post-advance `begin_recovery`.
+
+The B1b-3d record is not edited. **No live epoch advance is authorized.**
+
+### 9.4 Pre-witness `ADVANCE_EPOCH`: who and what (RR-5a, OWNER-ACCEPTED conditionally)
+
+- **Ledger.** The **authority recovery ledger**
+  (`/var/lib/lilith-authority-dev/authority_ledger.db`, the durable
+  `AuthorityLedgerStateV1`). Its sole writer is `lilith-authority-dev`, the
+  authority signer boundary.
+- **The acceptance condition is met.** This is the ledger the signer already
+  solely owns for every challenge, issue, reserve, and confirm operation
+  (B1b-3d §12). Performing recovery gives the signer **no new** mutation
+  authority.
+- **Not the legacy ledgers.** The signer **does not** and **cannot** mutate
+  the legacy memory-broker ledgers (`owner_control.db`,
+  `synthetic_evidence.db`, owner `lilith-memory-broker`, `InaccessiblePaths`
+  for the signer) or any application or L04 database.
+- **Who runs it.** The signer runs it under the hold. The old credential may
+  still be loaded, but the op needs no signing, and creating ops are refused
+  by the hold and by readiness.
+
+**The op is destroy/narrow-only.** It:
+
+- **may** record adoption of the K-ROOT-authorized successor epoch, and so
+  make every old-epoch artifact unusable for creation;
+- **may not** create or issue evidence;
+- **may not** reopen `CONSUMED` or any terminal state;
+- **may not** grant authority;
+- **may not** make any key current.
+
+The `signingKeyIds` field it records (as `REGISTRY_VIEW` also does) is a
+**story-4 observation** of the authorized registry. Readiness re-derives it
+from stories 1–3.
+
+A signer that journals a bogus `ADVANCE_EPOCH` causes only
+`LEDGER_EPOCH_AHEAD_OF_WITNESS`, which is availability loss.
+
+### 9.5 Epoch rules and crash handling
+
+| Rule | Behaviour |
+| --- | --- |
+| Next epoch | `(witness.counter + 1, fresh random)`, from the witness; bound in the authorization |
+| Monotonic / fork | counter equal or `+1`; `FORKED` rejected; the random never repeats |
+| Stale epoch | `LEDGER_EPOCH_STALE`, `STALE_EPOCH_*`, `CHALLENGE_EPOCH_NOT_CURRENT`, `RECOVERY_EPOCH_MISMATCH` |
+| Replay | §9.2 |
+| At most once | linear chain, `O_EXCL`, single instance + `flock`; after a crash, read the witness first |
+
+| Crash after | Readiness | Allowed action |
+| --- | --- | --- |
+| hold written / authorization signed | issuance held | continue, or abandon (the authorization expires at `notAfter`) |
+| ledger `ADVANCE_EPOCH` journalled | `LEDGER_EPOCH_AHEAD_OF_WITNESS` | witness executes **the same** authorization (completion) |
+| witness executed | `NONTERMINAL_PRE_RECOVERY_WORK` | finish the quarantine and the swap |
+| quarantine journalled; the witness record lost | `LEDGER_AHEAD_OF_WITNESS` | another epoch advance (with a new authorization) |
+| chain file written; `witness.json` not renamed | witness refuses writes | RR-9 |
+
+## 10. Registry succession and freshness head (RR-4, OWNER-ACCEPTED)
 
 ### 10.1 `verify_registry_succession(previous, following)` (PROPOSED)
 
-This is a pure function with a closed reason set. It adds **no** change to the
-B1b-3a verifier and **no** signed field.
+A pure function with a closed reason set.
 
-| Rule | Reason when violated |
+| Rule | Reason |
 | --- | --- |
-| same `environment`; same `registryRootKeyId` (a root change needs a new anchor ceremony) | `SUCCESSION_ROOT_OR_ENVIRONMENT_CHANGED` |
-| `following.registryVersion < previous.registryVersion` | `SUCCESSION_VERSION_REGRESSION` |
-| `following.registryVersion == previous.registryVersion` with a different digest | `SUCCESSION_SAME_VERSION_FORK` (only meaningful when `previous` is the **trusted** prior head, §10.3) |
-| `following.registryVersion != previous.registryVersion + 1`, when not equal (RR-4: whether gaps are allowed) | `SUCCESSION_VERSION_GAP` |
-| `following.issuedAt ≥ previous.issuedAt` | `SUCCESSION_TIME_REGRESSION` |
-| epoch equal, or `NEWER` with `counter + 1` | `SUCCESSION_EPOCH_INVALID` |
-| every previous `keyId` is present | `SUCCESSION_RECORD_REMOVED` |
-| per record, immutable: `signingDomain`, `evidenceTypes`, `environment`, `algorithm`, `publicKey`, `createdAt`, `notBefore`, `recoveryEpoch`, `policyVersion`, `registryVersion` | `SUCCESSION_RECORD_MUTATED` |
-| `retiredAt`: `null → t` only | `SUCCESSION_LIFECYCLE_REOPENED` |
-| `revokedAt`/`revocationReason`: `null → (t, reason)` only. The only permitted later change is `ROUTINE`/`SUPERSEDED` → `COMPROMISED` with `revokedAt` unchanged and `compromisedSince ≤ revokedAt` (RR-8) | `SUCCESSION_LIFECYCLE_REOPENED` |
-| `COMPROMISED` never changes back | `SUCCESSION_COMPROMISE_CLEARED` |
+| same `environment` and `registryRootKeyId` | `SUCCESSION_ROOT_OR_ENVIRONMENT_CHANGED` |
+| version decreased | `SUCCESSION_VERSION_REGRESSION` |
+| same version, different digest (against a **trusted** prior head) | `SUCCESSION_SAME_VERSION_FORK` |
+| `following.version ≠ previous.version + 1` (**no gaps**, accepted) | `SUCCESSION_VERSION_GAP` |
+| `issuedAt` not decreasing | `SUCCESSION_TIME_REGRESSION` |
+| epoch equal, or `NEWER` with counter `+1` | `SUCCESSION_EPOCH_INVALID` |
+| every prior `keyId` present | `SUCCESSION_RECORD_REMOVED` |
+| immutable per record: `signingDomain`, `evidenceTypes`, `environment`, `algorithm`, `publicKey`, `createdAt`, `notBefore`, `recoveryEpoch`, `policyVersion`, `registryVersion` | `SUCCESSION_RECORD_MUTATED` |
+| `retiredAt`: `null → t` only. `revokedAt`/reason: `null → (t, reason)` only; the only later change allowed is `ROUTINE`/`SUPERSEDED` → `COMPROMISED`, with `revokedAt` fixed and `compromisedSince ≤ revokedAt` | `SUCCESSION_LIFECYCLE_REOPENED` |
+| `COMPROMISED` is never cleared | `SUCCESSION_COMPROMISE_CLEARED` |
 | a non-current record never becomes current | `SUCCESSION_LIFECYCLE_REOPENED` |
-| new records carry `registryVersion == following.registryVersion` | `SUCCESSION_NEW_RECORD_VERSION` |
-| profile: the §7.2 single-current-key scope | `SUCCESSION_CURRENT_KEY_SCOPE` |
+| new records carry `registryVersion == following.version` | `SUCCESSION_NEW_RECORD_VERSION` |
+| the §7.2 single-current-key scope | `SUCCESSION_CURRENT_KEY_SCOPE` |
 
-**Limit.** The function verifies only the two inputs it is given. It proves
-additive history *between those inputs*. It does **not** establish durable
-fork protection or rollback protection. Those depend entirely on who
-supplies `previous` (§10.2).
+**Limit.** The function verifies only its inputs. It does **not** establish
+durable fork or rollback protection. That depends on who supplies
+`previous`.
 
-### 10.2 Who owns the trusted prior registry head
+### 10.2 Owner of the trusted prior head
 
-| Source of `previous` | Trusted? | What succession then proves |
-| --- | --- | --- |
-| the retained registry directory (root-owned files) | **no**: it can be restored or rolled back with the registry | internal consistency of the retained chain only |
-| the signer ledger journal (a `registryDigest` in `REGISTRY_VIEW` / `ADVANCE_EPOCH`) | **no**: it can be restored, and **no verifier consults it**. `witness_authority_context` takes its trusted inputs "from the verified witness and nowhere else". Historical reads continue under `LEDGER_BEHIND_WITNESS` without any ledger check | local consistency while the ledger survives. It is kept only as a local cross-check |
-| **the recovery witness** (proposed head binding, §10.3) | **yes**, in the ledger-only threat model, while the witness survives | fork and rollback detection across registry + ledger rollback |
-| an off-host / owner-held anchor | not designed (RR-12) | whole-host |
+| Source of `previous` | Trusted? |
+| --- | --- |
+| the retained registry directory (story 4, root files) | no: it can be restored |
+| a `registryDigest` in the authority recovery ledger journal (story 4) | no: it can be restored, and no verification context consults it (`witness_authority_context` reads only the witness). It is kept at most as a local cross-check |
+| **`RecoveryWitnessV2` registry head** (story 2) | **yes**, ledger-only threat model, while the witness survives |
+| off-host / owner-held anchor | not designed (RR-12) |
 
-The trusted prior head is therefore owned by the **recovery witness
-boundary**, which is the existing freshness owner. No new service is
-proposed.
+### 10.3 `RecoveryWitnessV2` (accepted property; exact schema follow-on)
 
-### 10.3 Same-version fork anchoring (PROPOSED; exact schema is RR-4)
-
-**Problem.** `RecoveryWitnessV1` carries only `minimumRegistryVersion`. Floor
-semantics (`registryVersion ≥ floor`) cannot tell these two apart:
-
-- `(vN, digest A)`;
-- `(vN, digest B)`.
-
-Nor can they exclude any `vN+k` that K-ROOT signed but that was never
-accepted as fresh. The previous draft proposed a `registryDigest` only in
-the restorable broker journal. That is **withdrawn as a fork-detection
-claim**, for the reasons in §10.2.
-
-**Minimum required property:**
-
-> The canonical registry head `(registryVersion, registryDigest)` is bound
-> in the surviving freshness state owner. Every verification context derived
-> from it requires the verified registry's digest to equal the bound head
-> digest, and not merely its version to be at or above the floor.
-
-Until this exists, B1b-3e **does not claim** same-version fork detection
-across a registry or ledger rollback.
-
-**`RecoveryWitnessV1` is not silently mutated.** Adding a field would change
-its signed bytes, its separator semantics, and the B1b-3c vectors. Two
-proposals, with the choice left to the source slice:
-
-| Option | Shape | Pros | Cons |
-| --- | --- | --- | --- |
-| **A. `RecoveryWitnessV2`** (recommended) | a new schema version, with `registryHead {version, digest}` added (or replacing `minimumRegistryVersion`), a new separator, `witness_authority_context_v2` requiring the head digest, and V2 succession rules: the head changes only by a valid `verify_registry_succession` step, and the same version never has a different digest | one chain and one succession function. Freshness stays in exactly one signed object | V1 → V2 migration at bootstrap (nothing is live, so this is a bootstrap choice). New vectors |
-| B. `RegistryHeadBindingV1` | a separately versioned artifact signed by K-WIT with its own separator, chained to the witness digest `{witnessDigest, registryHead}` | V1 is untouched | two artifacts that must stay mutually consistent; more crash states; the same key and boundary anyway |
-
-Either option keeps the witness in the same boundary and key, K-WIT. Neither
-makes the witness an authority, because the head is a **freshness pointer** to
-a K-ROOT-signed registry. The witness cannot author registry content.
-
-Whole-host rollback of witness + registry + ledger together stays
-**unresolved** under both options.
-
-## 11. Ledger state machine
-
-These transitions are enforced by `synthetic_recovery_ledger._step`
-(IMPLEMENTED, TEST). They are made durable with triggers by the B1b-3d schema
-(designed, not provisioned).
-
-**Challenge:**
+**Accepted.** `RecoveryWitnessV2` extends the witness freshness boundary.
+Its signed monotonic state binds the trusted authority-registry head:
 
 ```text
- (absent) ── PREPARE (ready; current ledgerEpoch) ──▶ PREPARED
- PREPARED ── CONSUME (ready; current epoch) ────────▶ CONSUMED ── ISSUE (ready; once) ──▶ CONSUMED + evidence
- PREPARED ── EXPIRE / CANCEL / FAIL ────────────────▶ EXPIRED | CANCELLED | FAILED
- PREPARED ── VOID_CHALLENGE (older epoch only) ─────▶ VOIDED_BY_RECOVERY
+registryHead = (registryVersion, registryDigest)
 ```
 
-**Evidence use:**
+It uses the same witness identity and K-WIT. It creates no new service.
+`RecoveryWitnessV1` is **not** mutated. V2 has its own schema version,
+separator, vectors, and succession rules.
+
+Required V2 properties (the exact field names come from the source slice):
+
+1. **Head succession.** The head changes only to `(v + 1, digest)`
+   (contiguous, no gaps), where
+   `verify_registry_succession(head, candidate)` passes against the
+   witnessed head. A same version with a different digest is refused.
+2. **Head change operations:**
+   - an epoch advance changes the head only under an
+     `EpochAdvanceAuthorizationV1` that names the target digest;
+   - an in-epoch head advance follows RR-15.
+3. **Verification context.** A V2 verification context requires
+   `registry.digest == head.digest` and `registry.version == head.version`
+   for NEW_ADMISSION and readiness. The historical-verification context uses
+   the same head, because history is verified against the current head
+   registry (B1b-3a).
+4. **Existing V1 rules are kept:** epoch succession, ledger position, time
+   monotonicity, and chain digest.
+5. **Freshness state:** the witness chain records the executed
+   `authorizationId`s.
 
 ```text
- (absent) ── RESERVE (ready; issued here; digest; issuing == claimed == current epoch; unused) ──▶ RESERVED
- RESERVED ── CONFIRM (ready; current epoch) ──────────────▶ CONSUMED
- RESERVED ── ABANDON ─────────────────────────────────────▶ ABANDONED
- RESERVED ── QUARANTINE_USE (older epoch only) ───────────▶ QUARANTINED_BY_RECOVERY
- QUARANTINED_BY_RECOVERY ── RECONCILE_DECISION ───────────▶ ABANDONED   (B1b-3d §14; designed)
+witness head binding  != registry authority    (the head points at K-ROOT-signed content; the witness cannot author it)
+witness freshness     != key activation
 ```
 
-**Ledger-global** (local observations, never authority):
+- Same-version fork detection is claimed **only** once V2 is implemented,
+  and only while the witness survives.
+- Whole-host rollback (witness + registry + recovery ledger together) stays
+  **unresolved**.
 
-```text
- GENESIS (seq 0 only)
- REGISTRY_VIEW   (version strictly up; sets the observed signingKeyIds)  — local observation
- ADVANCE_EPOCH   (counter strictly up; registry strictly up)             — local adoption record (C-4 step 1)
-```
+## 11. Issuance readiness
 
-### 11.1 `REGISTRY_VIEW` classification
+### 11.1 `REGISTRY_VIEW` is observation (story 4)
 
-`REGISTRY_VIEW` is **broker/ledger state**. It records which fresh,
-authorized registry the signer has observed, and which journalled signing
-key set it intends to use from it.
+`REGISTRY_VIEW` is a journal record in the **authority recovery ledger**:
 
 ```text
 REGISTRY_VIEW != authority
@@ -796,277 +804,286 @@ REGISTRY_VIEW != registry-root authorization
 REGISTRY_VIEW != witness execution
 ```
 
-- It is classified only as a **local issuance-readiness observation**,
-  recorded **after** the authoritative state has been verified
-  independently: K-ROOT signature plus witness freshness.
-- It is non-creating in source (`record_registry`,
-  `creates_authority=False`).
-- It can only **narrow** issuance. Readiness re-derives everything from the
-  authoritative inputs:
-  - `journal.registry_view == verified registry version`, where the registry
-    is verified under K-ROOT and fresh under the witness;
-  - `journalled signingKeyIds ⊆ current, uncompromised keys` in *that*
-    registry.
+- It is recorded only **after** the authoritative state has been
+  independently verified: K-ROOT signature plus witness head.
+- It is non-creating (`creates_authority=False`).
+- It can only narrow issuance. Readiness re-derives the view and the key set
+  from story 1 and story 2.
+- A compromised or restored signer that writes `REGISTRY_VIEW` naming an
+  unauthorized key gets `REQUIRED_KEY_UNAVAILABLE`,
+  `BROKER_REGISTRY_VIEW_STALE`, or `REGISTRY_DOWNGRADE`. It can **never**
+  make a successor current.
 
-A compromised or restored broker that writes `REGISTRY_VIEW` naming a key
-that the fresh K-ROOT registry does not authorize gets
-`REQUIRED_KEY_UNAVAILABLE`, `BROKER_REGISTRY_VIEW_STALE`, or
-`REGISTRY_DOWNGRADE`. It **cannot make a successor authoritative**. The worst
-case is availability loss.
+### 11.2 Loaded-key binding (RR-14, OWNER-ACCEPTED)
 
-**Missing contract (MC-1, RR-14).** Readiness checks the *journalled* key IDs
-against the registry. **No contract binds the key actually loaded by the
-signer.** B1b-3d §18 designs a startup fingerprint check, but it has no
-input or result contract, and `evaluate_restore_readiness` has no
-loaded-key input.
+**Required before `S_CURRENT`:**
 
-Issuance readiness therefore needs one more input, a
-`SignerKeyBindingObservation {loadedPublicKeySha256, keyId}`. It must be
-checked equal to the single current key in scope (§7.2). The independent
-verifier must reproduce it, for example from the `HEALTH` `publicKeySha256`
-(L2 U5).
+> the key actually loaded by the signer ==
+> the single current key selected by the K-ROOT-verified registry at the
+> fresh witness head.
 
-The schema is left to the source slice. `REGISTRY_VIEW` is **not** given any
-authority semantics to fill this gap.
+**A signer self-claim is not sufficient.** The **independent verifier**
+reproduces the comparison from inputs it obtains itself. Existing evidence is
+reused, and no new service is added.
 
-### 11.2 Required rules
+| # | Input | Source | Independent of the signer? |
+| --- | --- | --- | --- |
+| B1 | the selected key: the single in-scope current key of the registry that verifies under K-ROOT and equals the witness head | registry + witness (stories 1 + 2) | yes |
+| B2 | the unit-slot credential blob's SHA-256 | root `stat`/hash of `/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred`. **No decryption** | yes (root-observed) |
+| B3 | the keygen publication for B1's key: `{publicKey, publicKeySha256, blobSha256}` | the owner-retained transcript of the ceremony (L2 §7) | yes (ceremony record) |
+| B4 | `HEALTH` `publicKeySha256` | the running signer (L1 service; L2 U5) | **no**: a self-claim |
+
+**Binding holds** only if all of these are true:
+
+- `B3.publicKey == B1.publicKey`;
+- `B2 == B3.blobSha256`;
+- `B4 == B3.publicKeySha256 == sha256(B1.publicKey)`;
+- the systemd credential name is the fixed name (the embedded name binding,
+  B1b-3d §5);
+- no other `lilith-authority-dev` credential blob is present in the
+  credential store.
+
+B2 and B3 carry the independent part of the evidence. B4 alone would be a
+signer claim.
+
+**Limits:**
+
+- The binding proves that the unit slot holds exactly the blob minted for
+  the selected key, and that the signer reports that key.
+- It does not prove what a *compromised* signer process holds in memory.
+  That is outside this check: signer compromise means compromise (RR-6).
+- **Proof-of-possession is proposed and not accepted** (RR-14a,
+  `DEFERABLE`). A closed signer operation would sign a verifier nonce under a
+  dedicated separator. It would strengthen B4 without decryption, but it
+  gives K-ACT a new signed artifact type.
+- The exact readiness input and result schema is B1b-3e-S work.
+
+```text
+credential loaded != current authority
+signer claim      != verification
+S_ACTIVATED       != S_CURRENT
+```
+
+## 12. Authority recovery ledger state machine
+
+These transitions are enforced by `synthetic_recovery_ledger._step` (TEST). They
+are made durable in `authority_ledger.db` by the B1b-3d schema (designed).
+
+```text
+Challenge
+ (absent)  ── PREPARE (ready; current ledgerEpoch) ──▶ PREPARED
+ PREPARED  ── CONSUME (ready; current epoch) ────────▶ CONSUMED ── ISSUE (ready; once) ──▶ CONSUMED + evidence
+ PREPARED  ── EXPIRE / CANCEL / FAIL ────────────────▶ EXPIRED | CANCELLED | FAILED
+ PREPARED  ── VOID_CHALLENGE (older epoch only) ─────▶ VOIDED_BY_RECOVERY
+
+Evidence use
+ (absent)  ── RESERVE (ready; issued here; epochs equal; unused) ──▶ RESERVED
+ RESERVED  ── CONFIRM (ready; current epoch) ──▶ CONSUMED
+ RESERVED  ── ABANDON ──▶ ABANDONED
+ RESERVED  ── QUARANTINE_USE (older epoch only) ──▶ QUARANTINED_BY_RECOVERY ── RECONCILE_DECISION ──▶ ABANDONED (designed)
+
+Journal-global (story-4 observations and destroy/narrow-only records)
+ GENESIS (seq 0) · REGISTRY_VIEW (version strictly up) · ADVANCE_EPOCH (counter strictly up; destroy/narrow-only)
+```
 
 | Rule | Mechanism |
 | --- | --- |
-| PREPARED may be voided | `VOID_CHALLENGE`, older `ledgerEpoch` only, destroy-only. In-epoch: `CANCEL` / `EXPIRE` / `FAIL` |
-| CONSUMED never reopens | no transition leaves `CONSUMED`; rows showing otherwise → `TERMINAL_STATE_REOPENED`; triggers forbid terminal edits |
-| CONSUMED is never reusable | a second `ISSUE` → `EVIDENCE_ALREADY_ISSUED`; a second `RESERVE` → `EVIDENCE_ALREADY_USED` |
-| A stale epoch is rejected | `CHALLENGE_EPOCH_NOT_CURRENT`, `STALE_EPOCH_CHALLENGE`, `STALE_EPOCH_EVIDENCE`, `STALE_EPOCH_RESERVATION` |
-| An old epoch never becomes current | `ADVANCE_EPOCH` requires `counter > current`; witness succession forbids regression and forks |
-| History is additive | append-only, hash-chained journal; terminal rows kept; nothing deleted by recovery or reconciliation |
-| Restore → replayable owner proof | impossible (§8.3) |
+| **PREPARED may be voided** | `VOID_CHALLENGE` (older epoch; destroy-only); in-epoch `CANCEL` / `EXPIRE` / `FAIL` |
+| **CONSUMED never reopens** | no transition leaves it; rows showing otherwise → `TERMINAL_STATE_REOPENED`; triggers forbid terminal edits |
+| CONSUMED is never reusable | `EVIDENCE_ALREADY_ISSUED`, `EVIDENCE_ALREADY_USED` |
+| Stale epoch rejected | `CHALLENGE_EPOCH_NOT_CURRENT`, `STALE_EPOCH_CHALLENGE`, `STALE_EPOCH_EVIDENCE`, `STALE_EPOCH_RESERVATION` |
+| An old epoch never becomes current | `ADVANCE_EPOCH` counter strictly up; witness succession |
+| History is additive | an append-only hash-chained journal; terminal rows kept |
+| No journal op grants authority | readiness evaluates the journal against stories 1–2 |
 
-**Forbidden:**
+Forbidden:
 
 - `CONSUMED → PREPARED`;
 - `CONSUMED → reusable`;
 - any transition out of a terminal state;
-- `QUARANTINED_BY_RECOVERY → RESERVED / CONSUMED`;
+- `QUARANTINED_BY_RECOVERY → RESERVED/CONSUMED`;
 - `ADVANCE_EPOCH` to an older or forked epoch;
 - `REGISTRY_VIEW` to a version that is lower or equal;
-- any journal op that grants authority.
+- restore → a replayable owner proof.
 
-## 12. Failure matrix
+## 13. Failure matrix
 
 Every row reports `rollbackDetectionScope: LEDGER_ONLY` and
-`wholeHostRollbackProtected: false`. None of it is live until B1b-3d L3a–L4
-exist.
+`wholeHostRollbackProtected: false`. None of this is live until B1b-3d
+L3a–L4 exist.
 
-| # | Failure | Authoritative state owner | Allowed recovery action | Authority changes? | Historical evidence changes? | Fail-closed behaviour |
+| # | Failure | Authoritative owner | Allowed recovery | Authority changes? | Historical evidence changes? | Fail-closed behaviour |
 | --- | --- | --- | --- | --- | --- | --- |
-| F1 | crash before successor preparation | the owner decides; the hold is local gating | remove the hold, or continue | no | no | creating ops refused while the hold is present |
-| F2 | crash after successor preparation | credential custody | destroy the unpublished successor blob, or continue | no | no | S is in no registry, not loadable, and not journalled |
-| F3 | crash after registry authorization (vN+1 signed; the witness has not accepted it) | registry root (authority); witness (freshness still N) | have the witness accept it later, or abandon it. Never sign a second vN+1 | the vN+1 authority state exists; nothing issues | no | the hold is present; the ledger names P |
-| F4 | crash after the witness accepts vN+1 (or executes an epoch advance) | witness (freshness) | forward only: step 5 (in-epoch), or quarantine and swap (epoch) | P is no longer fresh / E(n) is stale | no (retirement preserves intervals) | `BROKER_REGISTRY_VIEW_STALE`, `REQUIRED_KEY_UNAVAILABLE`, or `NONTERMINAL_PRE_RECOVERY_WORK` |
-| F5 | crash after registry publication, before local observation | witness + ledger | complete step 5 | no | no | no issuance: the ledger view is stale |
-| F6 | stale authorization replay | witness | none needed | no | no | `REGISTRY_DOWNGRADE`; floor not strictly higher; counter not `+1` |
-| F7 | old credential restored (blob only) | registry + loaded-key binding (MC-1) | leave it unloaded. RR-7 decides whether this is a compromise | no | no, unless RR-7 → `COMPROMISED` (then retroactive for that key, C-1) | `REQUIRED_KEY_UNAVAILABLE` |
-| F8 | old registry restored | witness | reinstate the retained current head | no | no | `REGISTRY_DOWNGRADE`: issuance **and** historical reads blocked |
-| F9 | old broker ledger restored | witness | reinstate a preserved ledger equal to the witness, or else advance the epoch | only through an epoch advance | no | `LEDGER_BEHIND_WITNESS` / `LEDGER_EPOCH_STALE` / `LEDGER_HEAD_MISMATCH` |
-| F10 | old registry + old ledger restored, witness survives | witness | reinstate the current head, then advance the epoch from the witness | only through an epoch advance | no | `REGISTRY_DOWNGRADE`, then `LEDGER_BEHIND_WITNESS` |
-| F11 | whole-host rollback | **no owner survives** | none. The owner must distrust the host from out-of-band knowledge | **undetected**: stale authority may revive | undetected | **not fail-closed**: `RESTORE_READY` on the old state (B1b-3c §16) |
-| F12 | compromised old key | registry root | vN+1 marks it `COMPROMISED`. If it was the issuing key, advance the epoch (RR-6) | yes: the key is dead | **yes**: all of its evidence → `KEY_COMPROMISED` (C-1) | `REQUIRED_KEY_UNAVAILABLE` if it was journalled |
-| F13 | routine retirement | registry root → witness → ledger → verifier | in-epoch rotation (§7) | S replaces P after `S_CURRENT` | no (`RETIRED_AFTER_ISSUANCE`) | no issuance from step 1 to step 6 |
-| F14 | successor key lost before activation | registry root | vN+2 revokes S (`ROUTINE`, zero S evidence proven) and names S′ | no | no | S cannot issue |
-| F15 | successor key lost after activation | registry root + ledger | destroyed without exposure → retire S and rotate to S′. Exposure unknown or confirmed → `COMPROMISED` plus an epoch advance | S is replaced | retirement: no. Compromise: yes, for S's evidence | the unit fails on a missing credential |
-| F16 | same-version registry fork (two K-ROOT-signed vN) | witness head binding (§10.3, proposed) | refuse the fork; treat it as a K-ROOT operational incident | no, if detected | no | **V1: not detected** by floor semantics. With the head binding: `REGISTRY_HEAD_MISMATCH` |
-| F17 | crash between a ledger commit and the witness record | witness | advance the epoch | only through an epoch advance | no | `LEDGER_AHEAD_OF_WITNESS` |
-| F18 | compromised or restored broker writes `REGISTRY_VIEW` / `ADVANCE_EPOCH` | registry root + witness | ignore it; re-derive readiness from the authoritative inputs | **no** | no | `REQUIRED_KEY_UNAVAILABLE` / `BROKER_REGISTRY_VIEW_STALE` / `LEDGER_EPOCH_AHEAD_OF_WITNESS` |
-| F19 | root-equivalent principal forges or removes the hold | readiness | treat as a ceremony incident | no | no | a forged hold → availability loss. A removed hold → creating ops still need `RESTORE_READY` |
+| F1 | crash before successor preparation | owner (intent); hold = gating | release or continue | no | no | hold blocks creation |
+| F2 | crash after successor preparation | credential custody | destroy the unpublished blob, or continue | no | no | S is in no registry and not loadable |
+| F3 | crash after registry authorization | K-ROOT (authority); witness head still vN | advance the head later, or abandon; never sign a second vN+1 | the vN+1 state exists; nothing issues | no | hold; ledger view vN |
+| F4 | crash after witness execution (head advance or epoch advance) | witness | forward only | P not fresh / E(n) stale | no | `BROKER_REGISTRY_VIEW_STALE`, `REQUIRED_KEY_UNAVAILABLE`, `NONTERMINAL_PRE_RECOVERY_WORK` |
+| F5 | crash after registry publication, before activation | witness + authority recovery ledger | complete step 5 | no | no | ledger view stale |
+| F6 | stale authorization replay | witness | none | no | no | V2: prior-witness digest mismatch, `authorizationId` reused, `notAfter`; V1: counter / floor |
+| F7 | old credential restored | K-ROOT registry + witness head + verifier binding | leave it unloaded; RR-7 | no | no, unless → `COMPROMISED` | binding mismatch, `REQUIRED_KEY_UNAVAILABLE` |
+| F8 | old registry restored | witness | reinstate the head bytes | no | no | `REGISTRY_DOWNGRADE` / off-head; history blocked |
+| F9 | old authority recovery ledger restored | witness | reinstate a witnessed ledger, or advance the epoch | only via an advance | no | `LEDGER_BEHIND_WITNESS` etc. |
+| F10 | old registry + old recovery ledger, witness survives | witness | reinstate the head, then advance the epoch | only via an advance | no | `REGISTRY_DOWNGRADE`, then `LEDGER_BEHIND_WITNESS` |
+| F11 | whole-host rollback | **none survives** | none; out-of-band distrust | **undetected** | undetected | **not fail-closed** |
+| F12 | compromised old key | K-ROOT | mark it `COMPROMISED`; advance the epoch if it was the issuing key (RR-6) | yes | **yes**: all of its evidence (C-1) | `REQUIRED_KEY_UNAVAILABLE` |
+| F13 | ordinary rotation | K-ROOT → witness → verifier | §7 (`SUPERSEDED`) | S after `S_CURRENT` | no | no issuance, steps 1–6 |
+| F14 | successor lost before activation | K-ROOT | vN+2 revokes S `ROUTINE`; name S′ | no | no | S cannot issue |
+| F15 | successor lost after activation | K-ROOT | no exposure → `ROUTINE` + rotate; exposure → `COMPROMISED` + advance | S replaced | only on compromise | missing credential fails the unit |
+| F16 | same-version registry fork | witness V2 head | refuse; K-ROOT incident | no | no | V1: **undetected**; V2: head-digest mismatch |
+| F17 | crash between a recovery-ledger commit and its witness record | witness | epoch advance | only via an advance | no | `LEDGER_AHEAD_OF_WITNESS` |
+| F18 | compromised or restored signer writes `REGISTRY_VIEW` / `ADVANCE_EPOCH` | K-ROOT + witness | re-derive from stories 1–2 | **no** | no | `REQUIRED_KEY_UNAVAILABLE` / `BROKER_REGISTRY_VIEW_STALE` / `LEDGER_EPOCH_AHEAD_OF_WITNESS` |
+| F19 | root-equivalent principal forges or removes the hold | readiness + verifier | ceremony incident | no | no | a forged hold → availability; a removed hold → still needs readiness + binding |
+| F20 | signer reports the S fingerprint, but the slot holds another blob | verifier (B2/B3) | stop; investigate | no | no | binding fails; no `S_CURRENT` |
 
-## 13. Security boundaries and unresolved risks
-
-### Security boundaries
+## 14. Security boundaries, risks, and non-claims
 
 | Actor | Can | Cannot |
 | --- | --- | --- |
-| Owner with K-ROOT (workstation) | authorize registry generations and epoch advances | execute anything on the host without a host-root session |
-| Host root (owner break-glass, or root-equivalent under DR-3) | request witness freshness ops; install files; run ceremonies; write or remove the hold. At Level 3: read runtime credentials and forge the witness with K-WIT | authorize a registry generation or an epoch advance (that needs K-ROOT). Root custody is not owner authorization |
-| `lilith-authority-dev` (signer uid) | journal ledger ops, including observations; submit `RECORD_LEDGER_ADVANCE` | change the epoch, the floor, or the head; rewrite the witness; make any key authoritative. Worst case: availability loss |
-| `lilith-recovery-witness` | sign witness successors (freshness) | sign evidence or registries (`WITNESS_KEY_IS_AUTHORITY_KEY`); author registry content; read the ledger or K-ACT |
-| `lilith`, Hermes, the model, the routine deployer | nothing in this record | request, authorize, execute, or verify any transition |
+| Owner + K-ROOT (workstation) | sign registry generations and `EpochAdvanceAuthorizationV1` | execute on the host without a host-root session |
+| Host root (break-glass; root-equivalent under DR-3) | request witness ops; install; write or remove the hold; hash blobs. At Level 3: read credentials and forge the witness | authorize anything |
+| `lilith-authority-dev` | write the authority recovery ledger, including observations and destroy/narrow records; report `HEALTH` | mutate the legacy broker ledgers or L04; advance freshness; make a key current; pass the verifier binding on a claim alone |
+| `lilith-recovery-witness` | sign freshness successors after verifying authorizations | sign evidence, registries, or authorizations; author registry content; read the recovery ledger or K-ACT |
+| `lilith`, Hermes, the model, the routine deployer | nothing here | anything here |
 
-### Unresolved risks
+**Unresolved risks:**
 
-1. **Whole-host or whole-snapshot rollback (OPEN).** No independent
-   surviving state owner is introduced. The anchors listed in B1b-3c §16 are
-   all still unselected (RR-12).
-2. **Compromise is retroactive (C-1, accepted).** A leaked key erases the
-   historical validity of all of its evidence until re-attestation exists.
-3. **Retained key material in snapshots** (§8.4, RR-7).
-4. **Same-version registry fork** (F16) until the head binding exists
-   (RR-4).
-5. **No authorization expiry** (RR-2).
-6. **Per-transition witnessing cost** (T-4). Some crashes escalate to an
-   epoch advance.
-7. **No binding contract for the loaded key** (MC-1, RR-14).
-8. **No authenticated owner request** (RR-13). The hold is only gating.
-9. **DR-3** (`ubuntu` is root-equivalent) and Level 3 remain OPEN.
+1. Whole-host rollback (RR-12).
+2. Retroactive compromise (C-1).
+3. Snapshot-retained key material (RR-7).
+4. Same-version forks remain undetected until V2 is implemented.
+5. Expiry depends on the host clock (defence in depth only).
+6. The per-transition witnessing cost (T-4).
+7. The binding does not inspect signer memory (RR-14a).
+8. The unauthenticated owner request (RR-13).
+9. DR-3 and Level 3.
 
-## 14. Explicit non-claims and out of scope
+**Non-claims.** None of the following is claimed:
 
-B1b-3e does **not** claim, design, or authorize any of the following:
+- PROD authority, or closure of the cross-environment debt;
+- real-owner-grade custody or a real registry root;
+- First Memory;
+- signer activation or witness installation;
+- Privacy custody (B1b-3f);
+- WebAuthn changes;
+- Stage III;
+- a whole-host solution;
+- zeroization;
+- consciousness or personhood;
+- automatic recovery from backups;
+- any new owner-signature scheme beyond the reuse of K-ROOT for
+  `EpochAdvanceAuthorizationV1`;
+- any live mutation.
 
-- PROD authority, or closure of `CROSS_ENVIRONMENT_PROD_AUTHORITY_DEBT`;
-- real-owner-grade key custody, or a real registry root;
-- First Memory, or any accepted-memory transition;
-- signer activation, an activation grant, or witness installation;
-- Privacy key custody, or a Privacy boundary source (B1b-3f);
-- WebAuthn ceremony, RP, or authenticator changes;
-- a Stage III retry or arm;
-- a whole-host rollback solution;
-- memory zeroization, or remanence elimination;
-- consciousness, personhood, or identity claims about LILITH;
-- automatic authority recovery from backups (none exists);
-- a new owner-signature scheme;
-- any live mutation, key generation, rotation, revocation, restore, epoch
-  advance, or ceremony.
+## 15. Follow-on source slice (B1b-3e-S, TEST-only; not authorized here)
 
-## 15. Proposed follow-on source slice (B1b-3e-S, TEST-only)
+It lives under `services/owner-memory-control/` and `services/authority-dev/`,
+and touches neither `services/core-api/**` nor `services/memory-broker/`. It
+still needs RR-15 to be decided first.
 
-This slice is not authorized by this record. It lives under
-`services/owner-memory-control/` and `services/authority-dev/`, and nothing
-goes under `services/core-api/**` or `services/memory-broker/`.
+1. `verify_registry_succession` (§10.1), with golden vectors and a full
+   negative matrix.
+2. `RecoveryWitnessV2` with the registry head, head succession, recorded
+   `authorizationId`s, and the V2 verification context. V1 vectors and pins
+   are unchanged.
+3. `EpochAdvanceAuthorizationV1` (§9.2), with a new separator, vectors, and
+   the witness execution checks 1–9.
+4. The §7.2 scope check, using `signingDomain` and `evidenceTypes` as the
+   exact source fields.
+5. In-epoch rotation in the TEST recovery-ledger model: `SUPERSEDED`
+   predecessor; `REGISTRY_VIEW` as observation only; each §7.6 crash point;
+   F18 and F20.
+6. The loaded-key binding (§11.2) as readiness input plus verifier result.
+7. The C-4 order, with the recovery-ledger adoption record carrying
+   `authorizationId`, tested against `witness_succession_reason` on an
+   unrestored ledger.
+8. `CeremonyHoldV1` and `AuthorityKeyTransitionV1`.
+9. The B2a, B1b-3a, B1b-3b, and B1b-3c golden files and SHA-256 pins stay
+   unchanged.
 
-It depends on these decisions: RR-3, RR-4, RR-5a, RR-10, and RR-14
-(`BLOCKING_BEFORE_3E_SOURCE`, §16).
+A live rehearsal (B1b-3e-L) needs B1b-3d L3a–L4 live and accepted, the
+`BLOCKING_BEFORE_LIVE_3E` decisions resolved, and its own ladder.
 
-1. `verify_registry_succession` (§10.1), with golden vectors and a negative
-   matrix covering:
-   - a removed record;
-   - a rewritten record;
-   - a version regression;
-   - a same-version fork against a trusted head;
-   - a version gap;
-   - an epoch that is not a successor;
-   - a reopened lifecycle;
-   - a cleared compromise;
-   - the `ROUTINE → COMPROMISED` escalation;
-   - two current keys in scope.
-2. The freshness head binding, as `RecoveryWitnessV2` or
-   `RegistryHeadBindingV1` (RR-4), with its own vectors. The V1 vectors and
-   SHA-256 pins stay unchanged.
-3. The single-current-key scope check (§7.2), as a profile rule. The B1b-3a
-   verifier is unchanged.
-4. In-epoch rotation in the TEST ledger model, with `REGISTRY_VIEW` as an
-   observation only. It needs a test for every §7.6 crash point, and for
-   F18.
-5. The MC-1 loaded-key binding input to profile readiness (RR-14).
-6. The C-4 governing order, tested against `witness_succession_reason`,
-   including an advance over a **current**, unrestored ledger. The witness
-   owner op is re-specified to bind the post-journal sequence and head.
-7. The `CeremonyHoldV1` schema (a gating container) and
-   `AuthorityKeyTransitionV1`.
-8. Pins: the B2a, B1b-3a, B1b-3b, and B1b-3c golden files and their SHA-256
-   pins stay unchanged.
+## 16. Owner decisions (RR-2 … RR-15)
 
-A **live** rehearsal (B1b-3e-L) has three prerequisites:
-
-- B1b-3d L3a–L4 are live and accepted;
-- the `BLOCKING_BEFORE_LIVE_3E` decisions are resolved;
-- a separately authorized ladder with one mutation per step exists.
-
-It is not designed here.
-
-## 16. RR-2 through RR-14 (owner decisions; recommendations are not decisions)
-
-Classification:
-
-- `BLOCKING_BEFORE_3E_SOURCE`: needed before the B1b-3e-S tests can be
-  written without rework.
-- `BLOCKING_BEFORE_LIVE_3E`: needed before any live rehearsal.
-- `DEFERABLE`: neither.
-
-| # | Exact question | Current proposed / default | Alternatives | Consequences | Class | Recommendation (why) |
-| --- | --- | --- | --- | --- | --- | --- |
-| RR-2 | Is the K-ROOT-signed registry at the new epoch sufficient epoch-advance authorization, or is a separate owner-signed `EpochAdvanceAuthorization` needed, binding the predecessor witness digest, the reason, and a `notAfter`? | the registry is the authorization (B1b-3d T-8 proposal; not an owner decision) | (a) registry only; (b) a new K-ROOT artifact type with its own separator; (c) registry plus a `notAfter` convention outside the signed bytes | (a) no expiry; not bound to the predecessor random; replay bounded by witness succession. (b) exact binding and expiry, but a new signed contract and a second K-ROOT artifact type. (c) not enforceable | `BLOCKING_BEFORE_LIVE_3E` | (a) for DEV_SYNTHETIC, because witness succession already rejects replay and forks. Revisit (b) before any real authority |
-| RR-3 | Must a registry have exactly one current key per `(environment, signingDomain, evidenceType)` (§7.2)? | exactly one for OWNER_ACTOR in the profile | (a) exactly one; (b) at most two during a bounded overlap; (c) no rule (B1b-3a as is) | (a) no dual-current ambiguity, but a hold-based cut-over. (b) issuance-free rotation, but an ambiguous "which key issues" and a more complex state machine. (c) ambiguity is left to signer configuration | `BLOCKING_BEFORE_3E_SOURCE` | (a): it makes S_CURRENT unambiguous. In-flight proofs are still preserved by interval semantics |
-| RR-4 | Where, and in which schema, is the canonical registry head `(version, digest)` bound? Are version gaps allowed? | the witness boundary, in a new schema version; no gaps | (a) `RecoveryWitnessV2`; (b) `RegistryHeadBindingV1` under K-WIT; (c) journal digest only; (d) owner discipline only | (a) one chain, fork detection while the witness survives, new vectors. (b) same detection, two artifacts to keep consistent. (c)/(d) **no** fork detection across ledger rollback | `BLOCKING_BEFORE_3E_SOURCE` | (a), with no gaps: freshness stays in one signed object, and a complete retained chain is checkable |
-| RR-5 | Epoch-advance ordering | **resolved by owner decision C-4**: the B1b-3c order governs | — | — | resolved | — |
-| RR-5a (residual of C-4) | Which actor journals the ledger `ADVANCE_EPOCH` before witness execution, and with which credential loaded? | the signer, under the hold, with the old credential still loaded (destroy-only op) | (a) the signer under the hold; (b) a root offline tool on the stopped DB; (c) the signer started with no credential slot | (a) keeps the ledger single-writer. The old key is loaded but refused by the hold. (b) breaks the ledger's owner. (c) needs a unit variant without `LoadCredentialEncrypted` | `BLOCKING_BEFORE_3E_SOURCE` | (a): no new writer. Creating ops are refused by the hold and by readiness |
-| RR-6 | Does compromise of the issuing key force an epoch advance (`KEY_COMPROMISE`)? | yes | (a) always; (b) only if ledger tampering is suspected; (c) never; rotate in-epoch | (a) in-flight proofs are burned, and any work the attacker touched is voided. (b) needs a judgement the system cannot make. (c) PREPARED work touched by the attacker survives | `BLOCKING_BEFORE_LIVE_3E` | (a): fail closed. A compromise usually implies the signer uid |
-| RR-7 | Is retained or restored key material a compromise? | inside the owner/root boundary: known debt. Outside it: compromise | (a) the boundary rule; (b) any retained copy is a compromise; (c) never | (a) matches the Level 3 debt already carried. (b) every snapshot kills all history (C-1). (c) leaked keys stay trusted | `BLOCKING_BEFORE_LIVE_3E` | (a): honest about the existing trust boundary |
-| RR-8 | `compromisedSince ≤ revokedAt` when compromise follows a routine revocation | accept an imprecise forensic field in V1 | (a) accept; (b) a new key-record version | (a) the verdict is correct and the forensics imprecise. (b) contract churn | `DEFERABLE` | (a): the verdict is unaffected (C-1) |
-| RR-9 | Witness crash between the `chain/<v>` write and the `witness.json` rename | roll forward only to a verified signed chain successor; otherwise break-glass | (a) roll forward; (b) always refuse (break-glass); (c) roll back to `witness.json` | (a) automatic, bounded completion. (b) availability cost. (c) **unsafe**: it discards a signed successor | `BLOCKING_BEFORE_LIVE_3E` | (a): the chain is the append-only record |
-| RR-10 | Which lifecycle fields and reasons does rotation use, and how is `t_cut` chosen? | `retiredAt` for rotation; `ROUTINE` for lost or unused keys; `SUPERSEDED` unused. `t_cut` from the witness-consistent ledger's `ISSUE` records (§7.3), historical use only | (a) as proposed; (b) `SUPERSEDED` for rotation; (c) `t_cut` = hold time | (a) matches the B1b-3c recovery ceremony. (b) the verifier treats it the same, but the audit narrative differs. (c) relies on clocks | `BLOCKING_BEFORE_3E_SOURCE` | (a) |
-| RR-11 | Release-set and keygen contract for a successor credential slot | a new reviewed release; defined with B1b-3e-L | (a) a new release plus a successor keygen form; (b) reuse the L2b keygen | (a) reviewable. (b) impossible: it refuses a non-empty credstore, and `RELEASE_SET` is initial-custody only | `BLOCKING_BEFORE_LIVE_3E` | (a) |
-| RR-12 | An owner-held checkpoint as the first whole-host anchor | not selected | (a) an owner-held last-witness digest; (b) an off-host witness; (c) a hardware counter; (d) none yet | (a) detection only at the next owner check. (b) a new trust dependency. (c) vTPM coupling | `DEFERABLE` | (d) for now; (a) first when whole-host protection becomes required |
-| RR-13 (new) | Does an owner transition request need authenticated provenance? | none; the K-ROOT registry is the first authenticated object | (a) none; (b) a new K-ROOT artifact type; (c) owner WebAuthn over the request | (a) intent lives only in transcripts. (b)/(c) are new signature schemes, out of scope for this pass | `DEFERABLE` (DEV_SYNTHETIC) | (a) for DEV_SYNTHETIC. Revisit with RR-2 before real authority |
-| RR-14 (new) | Contract for binding the signer's loaded key to the single current key (MC-1) | missing; required | (a) a profile readiness input plus verifier reproduction; (b) keep the startup check without a contract | (a) testable and independently verifiable. (b) the loaded key is unverified by any contract | `BLOCKING_BEFORE_3E_SOURCE` | (a) |
+| # | Question | Status | Class | Result / recommendation |
+| --- | --- | --- | --- | --- |
+| RR-2 | Epoch-advance execution authorization | **OWNER-ACCEPTED** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | a distinct K-ROOT-signed `EpochAdvanceAuthorizationV1` (§9.2) |
+| RR-3 | Single current key | **OWNER-ACCEPTED** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | at most one current key per `(environment, recoveryEpoch, signingDomain, evidenceType)` (§7.2) |
+| RR-4 | Registry head anchor; version gaps | **OWNER-ACCEPTED** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | `RecoveryWitnessV2` binds `(registryVersion, registryDigest)`; contiguous versions. The schema is follow-on work |
+| RR-5 | Epoch-advance ordering | resolved by **C-4** | — | the B1b-3c order |
+| RR-5a | Owner of the pre-witness `ADVANCE_EPOCH` | **OWNER-ACCEPTED (conditional; condition met, §9.4)** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | the signer, on the **authority recovery ledger** only; destroy/narrow-only |
+| RR-6 | Does issuing-key compromise force an epoch advance? | open | `BLOCKING_BEFORE_LIVE_3E` | recommend always (fail closed) |
+| RR-7 | Is retained or restored key material a compromise? | open | `BLOCKING_BEFORE_LIVE_3E` | recommend the boundary rule (§8.4) |
+| RR-8 | `compromisedSince ≤ revokedAt` friction | deferred | `DEFERABLE` | accept imprecise forensics in V1; the verdict is unaffected |
+| RR-9 | Witness crash between the chain write and the rename | open | `BLOCKING_BEFORE_LIVE_3E` | recommend roll-forward to a verified signed successor only |
+| RR-10 | Rotation lifecycle and `t_cut` | **OWNER-ACCEPTED** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | `SUPERSEDED` for rotation; `ROUTINE` for administrative ends; `t_cut` owned by the K-ROOT lifecycle fields; ledger records are evidence only (§6.1, §7.3) |
+| RR-10a (residual) | Should B1b-3c epoch-advance predecessors keep `retiredAt`, or use `SUPERSEDED`? | open | `DEFERABLE` | verifier-identical. Recommend keeping the B1b-3c `retiredAt` until the source slice revisits the ceremony |
+| RR-11 | Successor keygen slot and release set | open | `BLOCKING_BEFORE_LIVE_3E` | recommend a new reviewed release plus a successor keygen form |
+| RR-12 | First whole-host anchor | deferred | `DEFERABLE` | none yet |
+| RR-13 | Authenticated owner request | deferred | `DEFERABLE` | unauthenticated intent for DEV_SYNTHETIC; K-ROOT objects are the first authority |
+| RR-14 | Loaded-key binding | **OWNER-ACCEPTED** | `BLOCKING_BEFORE_3E_SOURCE` (satisfied) | the independent verifier reproduces B1–B4 (§11.2) |
+| RR-14a (residual) | Proof-of-possession op for K-ACT | open | `DEFERABLE` | not recommended now: it adds a K-ACT artifact type; B2/B3 already give independent evidence |
+| RR-15 (new) | Does an **in-epoch** V2 head advance (rotation step 4) also need a K-ROOT execution authorization, like RR-2? Or does the contiguous K-ROOT-signed registry suffice? | open | **`BLOCKING_BEFORE_3E_SOURCE`** (it shapes the V2 witness operations) | recommend **yes**: generalize to a transition authorization (for example a sibling `RegistryHeadAdvanceAuthorizationV1`, or a `kind` in the same contract family). The RR-2 reasoning applies too: a registry that was signed and then abandoned should not become the fresh head merely because it exists. **Not decided here** |
 
 Carried forward unchanged:
 
-- B1b-3c open decision 3: the off-host anchor;
-- B1b-3c open decision 5: witness write frequency (T-4 kept);
-- B1b-3c open decision 6: reconciliation;
-- B1b-3c open decision 7: the Privacy boundary (B1b-3f);
-- B1b-3d T-6 (the reboot test) and T-9 (`ubuntu`).
+- B1b-3c open decisions 3, 5 (T-4), 6, and 7;
+- B1b-3d T-6 and T-9.
 
 ## 17. Owner-accepted decisions and review history
 
 | Decision | Result |
 | --- | --- |
-| **C-1: compromise** (was RR-1) | **ACCEPTED: the current B1b-3a source semantics.** `COMPROMISED` → `KEY_COMPROMISED` for all evidence from that key, including evidence that claims `issuedAt < compromisedSince`. Routine retirement and non-compromise revocation keep their interval rules. Pre-compromise survival is deferred until an unforgeable timestamp, admission-time attestation, or re-attestation contract exists. The B1b-3a source is unchanged |
-| **C-4: epoch-advance order** (was RR-5) | **ACCEPTED: the B1b-3c source succession semantics govern.** The B1b-3d §13 steps 7 and 9 and the §10 `ADVANCE_EPOCH` shape are **superseded for B1b-3e** (§9.2). The B1b-3d record is not edited. No live epoch advance is authorized |
+| C-1 | B1b-3a retroactive compromise is kept. Pre-compromise survival is deferred |
+| C-4 | The B1b-3c succession order governs. The B1b-3d §13 steps 7 and 9, and its §10 `ADVANCE_EPOCH` shape, are superseded for B1b-3e |
+| RR-2 | A distinct K-ROOT `EpochAdvanceAuthorizationV1`. The owner request stays unauthenticated intent |
+| RR-3 | At most one current issuance key per cryptographic authority scope. In source that is `(signingDomain, evidenceType)` within one registry |
+| RR-4 | `RecoveryWitnessV2` binds the registry head `(registryVersion, registryDigest)`; no gaps |
+| RR-5a | The signer's pre-witness `ADVANCE_EPOCH` runs only on the authority recovery ledger it already solely owns. It is destroy/narrow-only |
+| RR-10 | `SUPERSEDED` for rotation and `ROUTINE` for administrative ends. `t_cut` is owned by K-ROOT lifecycle fields |
+| RR-14 | Independently verified loaded-key binding before `S_CURRENT` |
 
-**Second review pass: corrections to the first draft (`fff4ea2`):**
+**Review passes:**
 
-- **Witness vs. authority.** "Verification-current = floor raise" and "the
-  witness owns the effective registry" are withdrawn. The witness owns
-  freshness only, and "current for verification" is a combined verification
-  result (§4, §7.5).
-- **`REGISTRY_VIEW` vs. authority.** "Issuance-current = witnessed
-  `REGISTRY_VIEW`" is withdrawn. `REGISTRY_VIEW` is a local observation, and
-  the missing loaded-key contract MC-1 is identified (§11.1).
-- **Fork detection via the journal.** The claim that a journal
-  `registryDigest` detects same-version forks is withdrawn. Detection needs a
-  head binding at the freshness owner (§10.3).
-- **Hold vs. owner request.** `AuthorityTransitionHoldV1` "as the owner's
-  request" is withdrawn. It is now `CeremonyHoldV1`, a gating container only
-  (§9.1).
-- **Cut-over.** The cut-over is now version and state based. `t_cut` is
-  restricted to historical interval use (§7.3). The single-current-key scope
-  is defined (§7.2).
-- **State machine.** Every transition names its causing owner.
-  `S_ACTIVATED` and `S_CURRENT` are distinguished only by independent
-  verification (§7.4).
+- **`fff4ea2` — first draft.**
+- **`2d9d57b` — authority story separated from freshness and observation.**
+  - The witness is freshness only.
+  - `REGISTRY_VIEW` is observation.
+  - The hold is gating.
+  - Forks need a witness-bound head.
+- **This pass — source-blocking decisions resolved.**
+  - RR-2, RR-3, RR-4, RR-5a, RR-10, and RR-14 are recorded as accepted.
+  - The ledgers are named unambiguously.
+  - The key-record field truth is established from source.
+  - RR-10a, RR-14a, and RR-15 are raised as residual or new open items.
 
 ## 18. Acceptance criteria for design closure
 
-1. §1 is correct: K-ACT is custody only, and no registry, witness, or ledger
-   is live.
-2. The authority / freshness / readiness / storage separation (§1, §4) is
-   accepted.
-3. C-1 and C-4 are recorded as accepted (§17).
-4. The §7.2 scope and the §7.3 cut-over rule are accepted, and RR-3 and
-   RR-10 are decided.
-5. The §7.4 state machine and its owners are accepted.
-6. The §10 succession function, its stated limit, and the witness-boundary
-   ownership of the trusted head are accepted, and RR-4 is decided.
-7. The §11.1 `REGISTRY_VIEW` classification is accepted, and RR-14 is
-   decided.
-8. The §9.1 hold vs. request separation is accepted.
-9. The §8 restore taxonomy is accepted without exception.
-10. The §12 matrix is accepted, with F11 and F16 acknowledged as not
-    fail-closed (F16 until the head binding exists).
-11. The §14 non-claims are unchanged.
-12. All remaining `BLOCKING_BEFORE_3E_SOURCE` items are decided before
-    B1b-3e-S begins.
+1. The four stories (§1) are kept distinct throughout. No story takes over
+   another's role.
+2. The accepted decisions in §17 are reflected exactly.
+3. RR-15 is decided before B1b-3e-S begins.
+4. The pinned invariants in §2 hold everywhere:
+   - PREPARED may be voided;
+   - CONSUMED never reopens;
+   - `restore != authority restoration`;
+   - `registry publication != activation`;
+   - `witness freshness != authority`;
+   - `REGISTRY_VIEW != authority`;
+   - `loaded credential != accepted/current authority`.
+5. F11 is acknowledged as not fail-closed. F16 is acknowledged as not
+   fail-closed until V2 is implemented.
+6. The non-claims in §14 are unchanged.
+7. The `BLOCKING_BEFORE_LIVE_3E` decisions (RR-6, RR-7, RR-9, RR-11) are
+   decided before any live B1b-3e step is designed.
 
 ## Explicitly not done
 
 - No DEV or PROD contact. No gcloud, SSH, IAP, systemctl, systemd-creds, or
   sudo.
-- No key, credential, registry, witness, ledger, or blob was generated,
-  rotated, revoked, restored, encrypted, decrypted, installed, or activated.
-- No change to source, tests, golden vectors, workflows, IAM, WIF, sudoers,
-  the broker runtime, Stage III, or activation.
-- No edit of the B1b-3a, B1b-3c, or B1b-3d records. The superseded B1b-3d
-  portion is recorded here only (§9.2).
+- No key, credential, registry, witness, ledger, or blob was touched.
+- No change to source, tests, vectors, workflows, IAM, WIF, sudoers, the
+  broker, Stage III, or activation.
+- No edit of the B1b-3a, B1b-3c, or B1b-3d records.
 - No claim of real authority, real-owner custody, First Memory, same-version
-  fork detection, or whole-host rollback protection.
+  fork detection before V2, or whole-host rollback protection.
