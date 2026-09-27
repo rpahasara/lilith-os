@@ -5,10 +5,11 @@ Status:
 - **DESIGN CLOSURE** (SW-1, SW-2, SW-9; RR-11-D1, RR-11-D2)
 - **SOURCE NOT IMPLEMENTED**
 - **LIVE REHEARSAL NOT AUTHORIZED**
-- **OWNER DECISIONS ACCEPTED:** RR-11-D1, RR-11-D2, RR-22 … RR-29, and the
-  derived compromise-epoch readiness rule (§18). First draft `8e3643c`; this
-  revision is the owner-decision closure pass
-- **ONE DETAIL PENDING:** RR-30, the initial-custody hold record (§10.6)
+- **OWNER DECISIONS ACCEPTED:** RR-11-D1, RR-11-D2, RR-22 … RR-30, and the
+  derived compromise-epoch readiness rule (§18). First draft `8e3643c`;
+  owner-decision closure `7411a53`; this revision closes RR-30
+- **NO PENDING OWNER DECISION** remains for Source Prep B. What is left is
+  SOURCE DETAIL only (§18)
 - **WHOLE-HOST ROLLBACK UNRESOLVED**
 - **REAL AUTHORITY ABSENT**
 
@@ -50,7 +51,8 @@ Labels:
 | **ALREADY_DETERMINED** | fixed by an accepted record or by current source; not reopened |
 | **DERIVED** | follows necessarily from accepted decisions and current source; not a new choice |
 | **OWNER-ACCEPTED** | accepted in the owner-decision closure pass (§18). Binding for Source Prep B source; exact schemas stay source work |
-| **PENDING_OWNER_DECISION** | a new choice. A recommendation is given; nothing is accepted |
+| **PENDING_OWNER_DECISION** | a new choice. A recommendation is given; nothing is accepted. None remains in this record |
+| **SOURCE DETAIL** | an implementation choice that does not alter authority, state ownership, the custody boundary, or failure semantics. It is fixed and reviewed in the Source Prep B source slice |
 
 ## 1. Controlling source facts
 
@@ -730,10 +732,10 @@ Source Prep B. Every field is unauthenticated (design §9.1).
 | `protocol`, `schemaVersion` | parse strictly; an unknown version fails closed |
 | `environment` | refuse a hold from another environment |
 | `ceremonyId` | a ceremony step refuses unless the hold names its own ceremony |
-| `transitionKind` | closed: `ROTATION`, `KEY_COMPROMISE_RECOVERY` (selects the ladder) |
+| `transitionKind` | closed: `INITIAL_CUSTODY`, `ROTATION`, `KEY_COMPROMISE_RECOVERY` (selects the ladder) |
 | `state` | **closed: `HELD`, `RELEASED`** |
 | `reason` | closed set, informational |
-| `expectedPredecessorKeyId` | refuse a ceremony run against another P |
+| `expectedPredecessorKeyId` | refuse a ceremony run against another P. `null` is valid **only** for `INITIAL_CUSTODY` |
 | `expectedSuccessorKeyId` | null only in phases where it is not yet known (before preparation); fixed after |
 | `observedWitnessDigest` | `HELD`: the head observed when the hold was engaged. `RELEASED`: the independently verified head at which `S_CURRENT` was established |
 
@@ -756,9 +758,12 @@ corresponds to the independently verified state:
 
 - `environment` equals the store environment;
 - `ceremonyId` equals the verified `SuccessorCeremonyRecordV1` for the
-  successor;
-- `transitionKind` equals the ladder the chain history shows (`ROTATION`, or
-  `KEY_COMPROMISE_RECOVERY` when §10.3 applied);
+  successor, or, for `INITIAL_CUSTODY`, the deterministic initial ceremony ID
+  (below);
+- `transitionKind` equals the ladder the chain history shows:
+  - `INITIAL_CUSTODY` when the head registry is the genesis registry;
+  - `ROTATION` after a rotation;
+  - `KEY_COMPROMISE_RECOVERY` when §10.3 applied;
 - `expectedPredecessorKeyId` equals the predecessor of the verified
   transition;
 - `expectedSuccessorKeyId` equals the authority-current key at the head, and
@@ -772,14 +777,96 @@ corresponds to the independently verified state:
 requires a valid, bound `RELEASED` hold, and absence fails closed. The Prep A
 source is not changed by this design pass.
 
-**RR-30 (PENDING_OWNER_DECISION).** The rule "absence fails closed" means the
-initial custody (B1b-3d K-ACT, before any rotation) also needs a `RELEASED`
-hold record, but the accepted field set assumes a predecessor.
+**Hold-release eligibility vs full readiness (no circularity).** Two logical
+evaluations exist. Both are pure, over the same verified inputs, with no new
+authority owner.
 
-**Recommendation:** add `transitionKind INITIAL_CUSTODY`, permitted only with
-`expectedPredecessorKeyId = null` and `expectedSuccessorKeyId` = the initial
-key. It would be written once, when the initial custody first reaches
-readiness in PR-1.
+- **A. `HOLD_RELEASE_ELIGIBILITY`.** Every applicable readiness condition
+  **except** "the hold is already `RELEASED`". It still requires a valid,
+  bound `HELD` hold of the same ceremony. It includes every Source Prep A
+  condition:
+  - the verified K-ROOT registry and its current key;
+  - the exact `RecoveryWitnessV2` genesis and head, with a valid witness
+    signature;
+  - the owner genesis pin;
+  - the single-current-key rule;
+  - the loaded-key / current-key binding;
+  - the credential inventory;
+  - authority-ledger consistency;
+  - the compromise-epoch rule, where it applies.
+- **B. `FULL_READINESS`.** Every applicable condition **plus** a valid,
+  bound `RELEASED` hold of the same ceremony, matching the same verified
+  custody, witness, and key state.
+
+The order is always:
+
+```text
+HELD -> HOLD_RELEASE_ELIGIBILITY passes -> explicit owner release -> RELEASED -> FULL_READINESS re-run
+```
+
+It is never "release because full readiness passed": full readiness itself
+requires the release. This applies to every transition kind. For a rotation,
+gate L3e-10 is eligibility, L3e-11 is the release, and `S_CURRENT` needs the
+re-run full readiness.
+
+```text
+hold-release eligibility != readiness
+hold release             != authority
+hold release             != S_CURRENT
+missing hold             != released
+```
+
+**`INITIAL_CUSTODY` (RR-30, OWNER-ACCEPTED).** The initial B1b-3d custody
+key takes part in the same fail-closed hold model as later rotations. No
+separate bootstrap authority object is introduced.
+
+| Field | Rule for `INITIAL_CUSTODY` |
+| --- | --- |
+| `transitionKind` | `INITIAL_CUSTODY`: the **only** kind for which `expectedPredecessorKeyId = null` is valid |
+| `expectedPredecessorKeyId` | `null` (required) |
+| `expectedSuccessorKeyId` | the initial / current custody key: for the DEV_SYNTHETIC baseline, the existing initial OWNER_ACTOR K-ACT `test-only.dev-synthetic.actor.b1b3d.1` (PB-9), not new successor material. It must be the authority-current key at the genesis registry head and the key the loaded-key binding names |
+| `ceremonyId` | closed and deterministic, derived only from fixed context: the environment plus the initial key identity. Not operator text, a timestamp, or a random name. The exact canonical encoding is SOURCE DETAIL; the input space is closed |
+| `observedWitnessDigest` | `HELD`: the accepted `RecoveryWitnessV2` genesis digest, equal to the owner genesis pin (SW-8). `RELEASED`: a verified chain entry rooted at that pinned genesis, with the **genesis registry head** (genesis itself, or a later ledger-only entry) |
+| `environment`, `state`, `reason`, `protocol`, `schemaVersion` | as for every hold |
+
+**Initial lifecycle.** Absence never becomes `RELEASED` directly:
+
+```text
+missing -> INITIAL_CUSTODY / HELD -> HOLD_RELEASE_ELIGIBILITY -> INITIAL_CUSTODY / RELEASED -> FULL_READINESS
+```
+
+- A missing, malformed, or unknown hold always fails closed.
+- The existence of the older B1b-3d credential does **not** grandfather it
+  into a released state.
+
+**Still non-authority.** An `INITIAL_CUSTODY` hold, in either state, does
+not:
+
+- create registry authority;
+- substitute for K-ROOT or K-WIT;
+- make a credential current;
+- grant issuance authority.
+
+**Responsibility.**
+
+- **Source Prep B source may implement:**
+  - `INITIAL_CUSTODY` parsing and validation;
+  - the `HELD` / `RELEASED` state rules;
+  - `HOLD_RELEASE_ELIGIBILITY`;
+  - full-readiness hold validation;
+  - the deterministic initial ceremony-ID derivation;
+  - synthetic tests.
+
+  It **must not** create any live hold record.
+- **PR-1 (B1b-3d L3a–L4) owns the future live bootstrap:**
+  1. establish and verify the V2 genesis;
+  2. create `INITIAL_CUSTODY / HELD`;
+  3. prove hold-release eligibility;
+  4. perform the explicit owner acceptance step;
+  5. persist `RELEASED`;
+  6. re-run full readiness.
+
+  This record does not authorize PR-1.
 
 ## 11. SW-9 crash matrix
 
@@ -932,7 +1019,7 @@ TEST-only first and with no DEV contact:
 | 4 | same-filesystem (`st_dev`) cutover precondition (RR-26) | keygen preflight + the custody transition verifier |
 | 5 | current credential never overwritten during PREPARE (§7.3) | keygen before/after re-hash + a before/after inventory check |
 | 6 | non-authority `SuccessorCeremonyRecordV1` (§9.2) | a pure parser and verifier |
-| 7 | `CeremonyHoldV1` with `HELD` / `RELEASED` and the `RELEASED` bindings (§10.6); it replaces the Prep A boolean in readiness | a pure parser and verifier |
+| 7 | `CeremonyHoldV1` with `HELD` / `RELEASED`, the `RELEASED` bindings, `INITIAL_CUSTODY` (null predecessor only there; deterministic initial ceremony ID), and the `HOLD_RELEASE_ELIGIBILITY` / `FULL_READINESS` split (§10.6). It replaces the Prep A boolean in readiness. No live hold record is created | a pure parser and verifier + synthetic tests |
 | 8 | the compromise-epoch derived readiness rule `COMPROMISE_EPOCH_ADVANCE_REQUIRED` (§10.3) | pure readiness |
 | 9 | the current-key compromise recovery evaluator for the §10.2 order | pure evaluator |
 | 10 | the narrow C-4 compromised-key recovery gate (§10.4) | pure evaluator; runtime wiring with the ledger in PR-1 |
@@ -955,7 +1042,8 @@ Optional, and only if implemented as a derived non-authority output:
 **Outside Source Prep B:**
 
 - PR-1: B1b-3d L3a–L4 designed for V2, installed, and accepted, including
-  the signer's authority ledger and the runtime wiring of the §10.4 gate;
+  the signer's authority ledger, the runtime wiring of the §10.4 gate, and
+  the live `INITIAL_CUSTODY` bootstrap (§10.6);
 - PR-2: the snapshot inventory;
 - PR-3: the owner's real off-host register and material (including the
   ceremony register of burned ordinals);
@@ -1009,7 +1097,17 @@ This record does not claim, create, or authorize any of the following:
 | RR-27 | provenance | the existing publication is unchanged (no v2 unless proven necessary). A separate non-authority `SuccessorCeremonyRecordV1` carries `ceremonyId`, `successorOrdinal`, `keyId`, `publicationDigest`, `credentialBlobSha256`, `reviewedReleaseSha`, `createdForRole = PREPARED` (historical) (§9.2) | **OWNER-ACCEPTED** (with minimality refinement) |
 | RR-28 | SW-9 containment vs C-4 | P may stay physically in CURRENT, only for the narrow C-4 step, after the marking head, under the hold. A narrow recovery gate permits only the destroy/narrow-only ledger ops; issuance and signing are denied. Required Source Prep B work; no credential-less mode (§10.4) | **OWNER-ACCEPTED** (strict containment) |
 | RR-29 | predecessor destruction | the mandatory next custody-cleanup step after verified `S_CURRENT`, with the §13 evidence. On failure: no authority rollback, no restore of P, availability hold, `KNOWN_CUSTODY_DEBT`, owner retry (§4.1, §13) | **OWNER-ACCEPTED** |
-| RR-30 | initial-custody hold record | recommendation: `transitionKind INITIAL_CUSTODY` with `expectedPredecessorKeyId = null` only in that kind (§10.6) | **PENDING_OWNER_DECISION** |
+| RR-30 | initial-custody hold record | `transitionKind INITIAL_CUSTODY`, the only kind with `expectedPredecessorKeyId = null`. `expectedSuccessorKeyId` = the existing initial K-ACT. It binds the pinned V2 genesis. It has a deterministic closed ceremony ID and a lifecycle of missing → `HELD` → eligibility → `RELEASED` → full readiness; no grandfathering; no bootstrap authority object. It stays non-authority. PR-1 owns the live bootstrap (§10.6) | **OWNER-ACCEPTED** |
+
+**No PENDING_OWNER_DECISION remains for Source Prep B.**
+
+**SOURCE DETAIL** (does not alter authority, state ownership, the custody
+boundary, or failure semantics):
+
+- the exact canonical encoding of the initial and successor ceremony IDs;
+- the exact closed `reason` values for `CeremonyHoldV1`;
+- the file locations of hold and ceremony records;
+- the refusal-reason names.
 
 **ALREADY_DETERMINED (not reopened):**
 
