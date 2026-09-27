@@ -468,6 +468,14 @@ The two rules of §7 still hold:
 - The next normal main candidate uses `ef17e6b`'s validator as its trusted
   parent.
 
+**Phase-aware preservation (N-45, 2026-09-27).** From B1b-3d L1b.1 onward,
+broker continuity against this accepted baseline is checked with
+`verify_broker_dev_current_incarnation.py preservation`. That operation pins
+`42af2691b8d24ee5a92a286197c5444c` and `3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5`,
+and it does not treat legitimate authority-custody paths as broker drift.
+`baseline` keeps the pre-custody meaning recorded here. See the
+[L2 runbook](slice-15b2b-b1b3d-l2-custody-preparation.md#n-45-preservation_verifier_phase_mismatch).
+
 ## Evidence limitations
 
 - The observation is point-in-time. No file-integrity monitoring ran between
