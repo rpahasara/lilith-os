@@ -1,0 +1,220 @@
+{
+  "chainEntryNames": [
+    "1.json",
+    "2.json",
+    "3.json"
+  ],
+  "genesisExpectation": {
+    "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+    "ledgerSequence": 5,
+    "policyVersion": "policy.synthetic.v2",
+    "recoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "registryHead": {
+      "registryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+      "registryVersion": 3
+    }
+  },
+  "genesisPin": {
+    "environment": "test",
+    "genesisWitnessDigest": "03402a3cd1e868f333359bcf1ccd37591d33b4595e20f1595fca7604d1bd3baa",
+    "pinType": "LILITH_RECOVERY_WITNESS_V2_GENESIS_PIN",
+    "schemaVersion": 1
+  },
+  "genesisWitness": {
+    "consumedAuthorizationId": null,
+    "currentRecoveryEpoch": {
+      "counter": 2,
+      "random": "5f555e13717eb989f6d87e685eaaeba2"
+    },
+    "environment": "test",
+    "ledgerHead": "b16c5fc997f82c77fe1e3ffe6346b43fb2a3efc889eda7b439bda18d3c645f59",
+    "ledgerSequence": 5,
+    "policyVersion": "policy.synthetic.v2",
+    "previousWitnessDigest": null,
+    "protocol": "LILITH_RECOVERY_WITNESS",
+    "registryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+    "registryVersion": 3,
+    "schemaVersion": 2,
+    "signature": "NfkUGCCYAF8TPIivVzUonFJZ9ZjAExXnd5hamhr5PWUcHCgu7OsSd3QsTspqqhsCSHvsg-I2juB_Qx6395W0Bg",
+    "updatedAt": "2026-09-27T08:01:00Z",
+    "witnessKeyId": "test-only.witness.b1b3e-v2-1",
+    "witnessVersion": 1
+  },
+  "genesisWitnessDigest": "03402a3cd1e868f333359bcf1ccd37591d33b4595e20f1595fca7604d1bd3baa",
+  "note": "TEST_ONLY synthetic vectors for 15B2b-B1b-3e Source Prep A. No real key, witness, or authority.",
+  "ownerRegister": {
+    "authorizations": [
+      {
+        "authorizationId": "rhaa.b1b3e-rotation-1",
+        "authorizationSha256": "a3b4ab3df2f7afee09ece46eb4adf07dfa2519a83f11592940826febc4074683",
+        "kind": "REGISTRY_HEAD_ADVANCE"
+      }
+    ],
+    "environment": "test",
+    "headRegistries": [
+      {
+        "registryDigest": "974701d710bdde47e9dd0057252f52f0d0fd672511a6d8ea8987cf991227343d",
+        "registryVersion": 3
+      },
+      {
+        "registryDigest": "ae59c33ddd90cbf2895dc77bcd9b9147921550c184fe7471e8f761843181a972",
+        "registryVersion": 4
+      }
+    ],
+    "registerType": "LILITH_OWNER_AUTHORIZATION_REGISTER",
+    "schemaVersion": 1
+  },
+  "retainedAuthorizationName": "8616b291a76ade0a32abf4d48f09b1faf988eb15f72f16398bd4ae0b2bfba942.json",
+  "retainedAuthorizationSha256": "a3b4ab3df2f7afee09ece46eb4adf07dfa2519a83f11592940826febc4074683",
+  "rotationOperationLog": [
+    [
+      "lock"
+    ],
+    [
+      "mkdir",
+      "chain"
+    ],
+    [
+      "mkdir",
+      "authorizations"
+    ],
+    [
+      "fsync_dir",
+      ""
+    ],
+    [
+      "create",
+      "chain",
+      "1.json"
+    ],
+    [
+      "fsync_file",
+      "chain",
+      "1.json"
+    ],
+    [
+      "fsync_dir",
+      "chain"
+    ],
+    [
+      "write",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "fsync_file",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "replace",
+      "",
+      ".witness.json.tmp",
+      "witness.json"
+    ],
+    [
+      "fsync_dir",
+      ""
+    ],
+    [
+      "unlock"
+    ],
+    [
+      "lock"
+    ],
+    [
+      "create",
+      "authorizations",
+      "8616b291a76ade0a32abf4d48f09b1faf988eb15f72f16398bd4ae0b2bfba942.json"
+    ],
+    [
+      "fsync_file",
+      "authorizations",
+      "8616b291a76ade0a32abf4d48f09b1faf988eb15f72f16398bd4ae0b2bfba942.json"
+    ],
+    [
+      "fsync_dir",
+      "authorizations"
+    ],
+    [
+      "create",
+      "chain",
+      "2.json"
+    ],
+    [
+      "fsync_file",
+      "chain",
+      "2.json"
+    ],
+    [
+      "fsync_dir",
+      "chain"
+    ],
+    [
+      "write",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "fsync_file",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "replace",
+      "",
+      ".witness.json.tmp",
+      "witness.json"
+    ],
+    [
+      "fsync_dir",
+      ""
+    ],
+    [
+      "unlock"
+    ],
+    [
+      "lock"
+    ],
+    [
+      "create",
+      "chain",
+      "3.json"
+    ],
+    [
+      "fsync_file",
+      "chain",
+      "3.json"
+    ],
+    [
+      "fsync_dir",
+      "chain"
+    ],
+    [
+      "write",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "fsync_file",
+      "",
+      ".witness.json.tmp"
+    ],
+    [
+      "replace",
+      "",
+      ".witness.json.tmp",
+      "witness.json"
+    ],
+    [
+      "fsync_dir",
+      ""
+    ],
+    [
+      "unlock"
+    ]
+  ]
+}
