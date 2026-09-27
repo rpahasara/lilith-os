@@ -1,9 +1,9 @@
 # Slice 15B2b-B1b-3d — DEV_SYNTHETIC Custody Preparation Live Closure
 
-Status: CLOSED  
-Environment: DEV_SYNTHETIC  
-Closure date: 2026-09-27  
-Authority class: synthetic OWNER_ACTOR custody only  
+Status: CLOSED
+Environment: DEV_SYNTHETIC
+Closure date: 2026-09-27
+Authority class: synthetic OWNER_ACTOR custody only
 Next slice: B1b-3e — rotation, revocation, restore, and recovery semantics
 
 ## 1. Purpose
@@ -158,8 +158,8 @@ Activation remains deliberately dark:
 
 Therefore:
 
-credential custody != signer activation  
-signer installation != signing availability  
+credential custody != signer activation
+signer installation != signing availability
 activation darkness remains preserved
 
 ## 7. DR-5 routine deployer boundary
