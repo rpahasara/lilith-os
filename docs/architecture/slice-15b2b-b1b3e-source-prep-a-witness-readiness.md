@@ -35,7 +35,7 @@ directory.
 | `services/owner-memory-control/lilith_owner_memory/witness_readiness.py` | **new, pure.** SW-3 binding, SW-4 genesis, SW-8 pin, SW-7 register and history re-verification, SW-5 recovery scan, SW-6 inventory, readiness aggregation. Reads no file, holds no key, never produces a signature |
 | `services/owner-memory-control/lilith_authority_signer/synthetic_witness_store.py` | **new, TEST-only.** `DurableWitnessV2WriterV1` (RR-9 commit order over `WitnessStoragePortV1`) and `recover_witness_store` (applies the scan; holds no key). No I/O of its own |
 | `services/owner-memory-control/tests/synthetic_b1b3e_prep_a.py` | **new.** `SimulatedDurableStorage` (explicit durability model with `crash()`), `TempDirectoryStorage` (real temp directory, POSIX), `DurableScenario`, owner-input builders, golden generator |
-| `services/owner-memory-control/tests/test_b1b3e_source_prep_a.py` | **new.** 129 tests |
+| `services/owner-memory-control/tests/test_b1b3e_source_prep_a.py` | **new.** 134 tests |
 | `services/owner-memory-control/tests/b1b3e_prep_a_golden.json` | **new.** Golden vectors, SHA-256 pinned in the test |
 | `docs/architecture/README.md` | one index row |
 
@@ -238,9 +238,17 @@ root. No real off-host storage is built.
   They are stored at `authorizations/<sha256(authorizationId)>.json`.
 - The file is written write-once (`O_EXCL`), then the file is fsynced, then
   the directory is fsynced, **before** the chain entry is created.
-- An identical earlier copy is kept, which allows a retry after a fault
-  before commit. Different bytes under the same ID are refused
-  (`RETAINED_AUTHORIZATION_CONFLICT`).
+- `RETAINED != CONSUMED` (owner-accepted). The exact same authorization
+  ID, kind, canonical bytes, and digest presented again, after a fault or a
+  planner refusal and before any chain entry consumed it, is
+  `ALREADY_RETAINED`. No second copy is made; the copy is fsynced again, and
+  execution continues if every other check now passes. This is not a replay.
+- The same ID with different bytes is refused
+  (`RETAINED_AUTHORIZATION_CONFLICT`), and the same ID with a different
+  digest or kind in the register is refused
+  (`AUTHORIZATION_REGISTER_MISMATCH`). Both refusals repeat on every attempt.
+- Once a chain entry has consumed an ID, any later attempt to execute it is
+  refused `AUTHORIZATION_CONSUMED` before retention is touched.
 - The scan accepts a retained file only if its bytes are canonical and name
   the same ID as the filename; otherwise the result is `RETENTION_CORRUPT`.
 - Retained copies are story 4. They count only when their digest equals the
@@ -412,15 +420,15 @@ false`.
 
 ## 11. Tests
 
-`test_b1b3e_source_prep_a.py` has **129 tests**. With them the
-owner-memory-control suite has 417 tests.
+`test_b1b3e_source_prep_a.py` has **134 tests**. With them the
+owner-memory-control suite has 422 tests.
 
 | Area | Coverage |
 | --- | --- |
 | SW-3 | valid; RR-14 still required; each GC-3 input missing; wrong unit; two or zero references; plaintext directive; wrong name; wrong path; blob minted under another name; second credstore blob (`.bak`, `.next`); prepared blob outside its phase; inventory hash ≠ B2; `CUTOVER_INSTALLED` passes and a retained P never binds; RR-14 taxonomy and signature unchanged |
 | SW-4 | valid; each expectation field; wrong environment; non-genesis shapes (previous digest, consumed ID, version 2); invalid and rogue signatures; V1 refused; registry missing or not the head; bound planner refusals incl. two current keys; bootstrap refused over existing state and over a pointer-only store; unbound genesis writes nothing; interrupted bootstrap stays `UNINITIALIZED`; genesis is no transition permission |
 | SW-8 | exact pass; one-bit mismatch; wrong environment; missing; malformed; later-witness pin; not a K-ROOT substitute; not a K-WIT substitute; second genesis; minimal unsigned shape |
-| SW-7 | head and epoch: valid, wrong root, wrong ID, wrong prior / target head, wrong predecessor and successor witness, wrong epoch, expired, not-yet-valid, replay, tampered bytes, register digest mismatch, missing copy, unregistered, same bytes re-encoded, duplicate ID, head not registered, wrong kind, register environment, register missing; K-WIT-only chain fails readiness; unexecuted authorization never current; unregistered and mismatching copies refused before any write; write-once conflict |
+| SW-7 | head and epoch: valid, wrong root, wrong ID, wrong prior / target head, wrong predecessor and successor witness, wrong epoch, expired, not-yet-valid, replay, tampered bytes, register digest mismatch, missing copy, unregistered, same bytes re-encoded, duplicate ID, head not registered, wrong kind, register environment, register missing; K-WIT-only chain fails readiness; unexecuted authorization never current; unregistered and mismatching copies refused before any write; write-once conflict; exact-byte retry after a planner refusal is `ALREADY_RETAINED` and executes with one retained artifact; same ID with other bytes, digest, or kind refused on every attempt; retry after consumption `AUTHORIZATION_CONSUMED` (head and epoch) |
 | SW-5 order | full op-log order (retention → chain → directory fsync → pointer); ledger-only retains nothing; retention not durable ⇒ no chain op; plan refusal after retention leaves an executable unexecuted copy; writer refuses non-`CONSISTENT` stores; single-writer lock |
 | SW-5 recovery | clean genesis and linear chain; uninitialized; the ten §6.4 cases; pointer missing, empty, garbage, re-encoded; never backward; torn, empty, and corrupt tails; corruption below the head; file fsynced but directory not; contents lost but entry persisted; visible head made durable before publication; pointer ahead; forks via pointer and scratch; registry unavailable (freshness forward, readiness `REGISTRY_MISSING`); authorization unavailable; replay; gaps, unlinked, and headless orphans; missing and corrupt genesis; missing chain; scratch rules; nine unexpected-entry shapes; retention corruption; swapped filenames; no mtime and no listing-order dependence; idempotence; recovery holds no key |
 | Fault seams | all 12 writer seams with and without a crash; every recovery seam with a restart; scratch-discard restart; epoch-advance seams |
@@ -448,17 +456,20 @@ owner-memory-control suite has 417 tests.
 
 ## 13. Ambiguities found and how they were resolved
 
+U-1, U-2, U-5, and U-9 were **owner-accepted** in the pre-PR audit. U-3 was
+audited and its retry semantics are pinned (§7.2).
+
 | # | Point | Resolution |
 | --- | --- | --- |
-| U-1 | The brief's case "valid successor, required registry unavailable → fail closed" vs gate §6.4 "roll forward freshness; readiness `NOT_READY (REGISTRY_MISSING)`" | followed the gate (binding): recovery rolls the pointer forward; readiness fails closed (`HEAD_REGISTRY` and `REGISTRY_HISTORY` = `REGISTRY_MISSING`) |
-| U-2 | A head that is visible but not durable, after an in-process fault with no crash | recovery fsyncs the file and `chain/` **before** publishing the pointer. So the entry is claimed committed only once all four commit conditions hold. The writer never returned it, and re-presenting its authorization then fails `PRIOR_HEAD_MISMATCH` (the gate's expected POST evidence). After a real crash, the same state recovers to the predecessor |
-| U-3 | The brief's order puts retention before target-registry verification | implemented as ordered. A planner refusal after retention leaves an unexecuted, still-executable retained copy (reported, not fatal). An unreferenced retained file that is unparseable or misnamed is `RETENTION_CORRUPT` (fail closed; the gate is silent, the stricter reading was chosen) |
+| U-1 | The brief's case "valid successor, required registry unavailable → fail closed" vs gate §6.4 "roll forward freshness; readiness `NOT_READY (REGISTRY_MISSING)`" | **OWNER-ACCEPTED.** Recovery may restore the derived pointer to the valid chain head; readiness then fails closed (`HEAD_REGISTRY` and `REGISTRY_HISTORY` = `REGISTRY_MISSING`). Pointer recovery grants no authority: `freshness != authority` |
+| U-2 | A head that is visible but not durable, after an in-process fault with no crash | recovery fsyncs the file and `chain/` **before** publishing the pointer. So the entry is claimed committed only once all four commit conditions hold. The writer never returned it, and re-presenting its authorization then fails `AUTHORIZATION_CONSUMED`. After a real crash, the same state recovers to the predecessor. **OWNER-ACCEPTED** as monotonic roll-forward: only for a candidate that is fully present writer bytes, parses, verifies under K-WIT, has unique valid lineage and valid authorization history, with no fork or ambiguity. Recovery never signs, never invents a successor, never rolls backward, and never chooses among candidates; corrupt, truncated, orphaned, forked, or ambiguous candidates fail closed |
+| U-3 | The brief's order puts retention before target-registry verification | implemented as ordered. A planner refusal after retention leaves an unexecuted, still-executable retained copy (reported, not fatal). An unreferenced retained file that is unparseable or misnamed is `RETENTION_CORRUPT` (fail closed; the gate is silent, the stricter reading was chosen). **Audited:** an exact retry is `ALREADY_RETAINED` and executes; see §7.2 |
 | U-4 | The retained filename | `sha256(authorizationId).json`, because authorization IDs may contain `:`. The name is never authority; the scan checks the ID inside |
-| U-5 | §6.8 lists the pinned genesis digest inside the owner register | the pin is one separate SW-8 input, used by both recovery and readiness, rather than a second copy inside the register that could disagree with it |
+| U-5 | §6.8 lists the pinned genesis digest inside the owner register | the pin is one separate SW-8 input, used by both recovery and readiness, rather than a second copy inside the register that could disagree with it. **OWNER-ACCEPTED:** the pin stays a distinct owner-controlled input for lineage genesis anchoring only. A matching pin and a valid K-WIT signature remain separate checks; the witness wire contract is unchanged |
 | U-6 | A torn tail when the pointer is not at H | `CHAIN_CORRUPT`. `TORN_TAIL` is used only for "INVALID at H+1, pointer == H" (both fail closed) |
 | U-7 | RETIRED at `S_CURRENT` | allowed only in `CUTOVER_INSTALLED`, per gate L3e-10/11. When P is destroyed is SW-1 (not implemented) |
 | U-8 | "two valid successors from one predecessor" inside `chain/` | cannot coexist by name (one entry per version, `O_EXCL`). Forks are detected across chain, pointer, and scratch. A copy under another number is INVALID |
-| U-9 | SW-4's "DEV_SYNTHETIC V2 witness writer profile" | not built. The writer here is TEST-only (`environment=test`, `test-only.witness.` keys). The genesis contracts are environment-agnostic. A DEV_SYNTHETIC profile and a live adapter belong to PR-1 (B1b-3d L3a–L4) |
+| U-9 | SW-4's "DEV_SYNTHETIC V2 witness writer profile" | not built. The writer here is TEST-only (`environment=test`, `test-only.witness.` keys). The genesis contracts are environment-agnostic. A DEV_SYNTHETIC profile and a live adapter belong to PR-1 (B1b-3d L3a–L4). **OWNER-ACCEPTED** |
 | U-10 | A wrong-environment genesis | it surfaces as `GENESIS_WITNESS_UNVERIFIED (WITNESS_ENVIRONMENT_MISMATCH)`, because witness verification is environment-bound first; the parsed-level check `GENESIS_ENVIRONMENT_MISMATCH` also exists |
 
 None of these required stopping.

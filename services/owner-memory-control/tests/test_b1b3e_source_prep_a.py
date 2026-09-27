@@ -640,6 +640,83 @@ class AuthorizationHistoryTests(unittest.TestCase):
         self.assertEqual(scenario.storage.names(CHAIN), ["1.json"])
 
 
+# ------------------------------------ retention retry (RETAINED != CONSUMED) ---
+
+class RetentionRetryTests(unittest.TestCase):
+    """Owner-accepted ambiguity 3: an exact retained-but-unconsumed authorization retries idempotently."""
+
+    NAME = WR.retained_authorization_name("rhaa.b1b3e-rotation-1")
+
+    def retained_then_refused(self):
+        scenario = P.DurableScenario()
+        authorization = scenario.issue_head_advance()
+        with self.assertRaises(WS.DurableWitnessRefusal) as caught:  # B. planning then fails
+            scenario.publish(authorization, target=F.v4_fork())
+        self.assertEqual(caught.exception.detail, "TARGET_REGISTRY_MISMATCH")
+        self.assertEqual(scenario.writer.last_retention, "RETAINED")  # A. first retention succeeded
+        self.assertEqual(scenario.storage.names(AUTHS), [self.NAME])
+        self.assertEqual(scenario.storage.names(CHAIN), ["1.json"])  # no witness consumed A
+        return scenario, authorization
+
+    def refusal(self, scenario, authorization, **overrides):
+        with self.assertRaises(WS.DurableWitnessRefusal) as caught:
+            scenario.publish(authorization, **overrides)
+        return caught.exception
+
+    def test_exact_retry_is_already_retained_and_executes(self):
+        scenario, authorization = self.retained_then_refused()
+        original = scenario.storage.read(AUTHS, self.NAME)
+        mark = len(scenario.storage.log)
+        scenario.publish(copy.deepcopy(authorization))  # C. the same exact A, target now valid
+        self.assertEqual(scenario.writer.last_retention, "ALREADY_RETAINED")
+        self.assertFalse([op for op in scenario.storage.log[mark:] if op[:2] == ("create", AUTHS)])
+        self.assertEqual(scenario.storage.names(AUTHS), [self.NAME])  # D. one retained artifact
+        self.assertEqual(scenario.storage.read(AUTHS, self.NAME), original)
+        scan = scenario.scan()
+        self.assertEqual((scan.classification, scan.head.registry_version), (WR.CONSISTENT, 4))
+        self.assertEqual(scan.head.consumed_authorization_id, "rhaa.b1b3e-rotation-1")
+
+    def test_same_id_with_altered_bytes_fails_permanently(self):
+        scenario, _ = self.retained_then_refused()
+        altered = F.head_authorization(nonce=F.nonce("altered body same id"))
+        scenario.issued.update([P.register_entry(altered, WR.REGISTRY_HEAD_ADVANCE)])  # even when registered
+        for _ in range(2):  # E.
+            self.assertEqual(self.refusal(scenario, altered).reason, "RETAINED_AUTHORIZATION_CONFLICT")
+        self.assertEqual(scenario.storage.names(CHAIN), ["1.json"])
+
+    def test_same_id_with_altered_digest_or_kind_fails_permanently(self):
+        scenario, authorization = self.retained_then_refused()
+        digest = scenario.issued["rhaa.b1b3e-rotation-1"][1]
+        for registered in ((WR.REGISTRY_HEAD_ADVANCE, F.digest("altered digest")),  # F.
+                           (WR.EPOCH_ADVANCE, digest)):
+            with self.subTest(registered=registered):
+                scenario.issued["rhaa.b1b3e-rotation-1"] = registered
+                for _ in range(2):
+                    self.assertEqual(self.refusal(scenario, authorization).reason, "AUTHORIZATION_REGISTER_MISMATCH")
+        self.assertEqual(scenario.storage.names(AUTHS), [self.NAME])
+        self.assertEqual(scenario.storage.names(CHAIN), ["1.json"])
+
+    def test_retry_after_consumption_is_replay(self):
+        scenario, authorization = self.retained_then_refused()
+        scenario.publish(authorization)
+        mark = len(scenario.storage.log)
+        refused = self.refusal(scenario, authorization, prior=F.v3())  # G.
+        self.assertEqual((refused.reason, refused.detail), ("AUTHORIZATION_CONSUMED", "rhaa.b1b3e-rotation-1"))
+        self.assertFalse([op for op in scenario.storage.log[mark:] if op[0] in {"create", "write", "fsync_file"}])
+        self.assertEqual(scenario.storage.names(CHAIN), ["1.json", "2.json"])
+
+    def test_epoch_authorization_retry_after_consumption_is_replay(self):
+        scenario = _rotated()
+        scenario.epoch_advance()
+        authorization = F.epoch_authorization(scenario.scan().chain.witnesses[-2], F.v5())
+        with self.assertRaises(WS.DurableWitnessRefusal) as caught:
+            scenario.writer.execute_epoch_advance(
+                authorization=authorization, prior_registry=F.v4(), target_registry=F.v5(),
+                adoption_record=scenario.ledger.log[-1], ledger_sequence=scenario.ledger.sequence,
+                ledger_head=scenario.ledger.head, context=scenario.context(), updated_at=scenario.tick())
+        self.assertEqual(caught.exception.reason, "AUTHORIZATION_CONSUMED")
+
+
 # --------------------------------------------- SW-5 durable write ordering ---
 
 class DurableWriteOrderTests(unittest.TestCase):
@@ -769,7 +846,7 @@ class WitnessRecoveryTests(unittest.TestCase):
         self.assertFalse(run.facts["producedWitness"])
         with self.assertRaises(WS.DurableWitnessRefusal) as caught:
             scenario.publish(authorization)
-        self.assertIn(caught.exception.detail, {"PRIOR_HEAD_MISMATCH", "AUTHORIZATION_CONSUMED"})
+        self.assertEqual(caught.exception.reason, "AUTHORIZATION_CONSUMED")
 
     def test_pointer_missing_or_corrupt_rolls_forward(self):
         for pointer in (None, b"", b"{not json", b'{"a":1}'):

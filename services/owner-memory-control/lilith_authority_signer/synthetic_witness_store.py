@@ -133,6 +133,7 @@ WRITER_REFUSAL_REASONS = (
     "STORE_NOT_CONSISTENT",
     "GENESIS_REFUSED",
     "AUTHORIZATION_NOT_VERIFIED",
+    "AUTHORIZATION_CONSUMED",
     "AUTHORIZATION_NOT_REGISTERED",
     "AUTHORIZATION_REGISTER_MISMATCH",
     "RETAINED_AUTHORIZATION_CONFLICT",
@@ -174,6 +175,7 @@ class DurableWitnessV2WriterV1:
         self.environment = environment
         self._storage = storage
         self._fault = fault_hook or _no_fault
+        self.last_retention: str | None = None  # RETAINED | ALREADY_RETAINED (TEST observation)
 
     def __reduce__(self):
         raise TypeError("the TEST witness writer is not serializable")
@@ -227,8 +229,14 @@ class DurableWitnessV2WriterV1:
         return dict(signed)
 
     def _retain(self, authorization: Mapping[str, Any], kind: str, authorization_id: str,
-                context: WR.WitnessStoreContextV1) -> None:
-        """Owner register check, then a durable write-once copy (RR-20a §6.8)."""
+                context: WR.WitnessStoreContextV1) -> str:
+        """Owner register check, then a durable write-once copy (RR-20a §6.8).
+
+        `RETAINED != CONSUMED`. The exact same ID, kind, canonical bytes, and
+        digest seen again (a retry after a fault or a planner refusal, before
+        any chain entry consumed it) is `ALREADY_RETAINED`: no second copy is
+        made and execution may continue. The same ID with other bytes, digest,
+        or kind is refused every time."""
         try:
             register = WR.parse_owner_register(context.owner_register)
             data = WR.document_bytes(authorization)
@@ -246,14 +254,22 @@ class DurableWitnessV2WriterV1:
             # before commit) is kept; any other bytes are a conflict.
             if existing[name].data != data:
                 raise DurableWitnessRefusal("RETAINED_AUTHORIZATION_CONFLICT", authorization_id)
+            status = "ALREADY_RETAINED"
         else:
             self._fault("BEFORE_RETENTION_CREATE")
             self._storage.create_exclusive(WR.AUTHORIZATION_DIRECTORY, name, data)
             self._fault("AFTER_RETENTION_WRITE")
+            status = "RETAINED"
         self._storage.fsync_file(WR.AUTHORIZATION_DIRECTORY, name)
         self._fault("AFTER_RETENTION_FILE_FSYNC")
         self._storage.fsync_directory(WR.AUTHORIZATION_DIRECTORY)
         self._fault("AFTER_RETENTION_DIRECTORY_FSYNC")
+        return status
+
+    def _unconsumed(self, chain: RC.WitnessChainFactsV1, authorization_id: str) -> None:
+        # Consumption by a chain entry, not retention, is the single-use boundary.
+        if authorization_id in chain.consumed_authorization_ids:
+            raise DurableWitnessRefusal("AUTHORIZATION_CONSUMED", authorization_id)
 
     # --------------------------------------------------------- operations ---
 
@@ -301,7 +317,9 @@ class DurableWitnessV2WriterV1:
                 authorization=authorization, registry_root=context.registry_root, environment=self.environment)
             if not checked.verified:
                 raise DurableWitnessRefusal("AUTHORIZATION_NOT_VERIFIED", checked.reason)
-            self._retain(authorization, WR.REGISTRY_HEAD_ADVANCE, checked.authorization.authorization_id, context)
+            self._unconsumed(chain, checked.authorization.authorization_id)
+            self.last_retention = self._retain(authorization, WR.REGISTRY_HEAD_ADVANCE,
+                                               checked.authorization.authorization_id, context)
             plan = RC.plan_registry_head_advance(chain=chain, authorization=authorization,
                                                  registry_root=context.registry_root, prior_registry=prior_registry,
                                                  target_registry=target_registry, updated_at=updated_at)
@@ -319,7 +337,9 @@ class DurableWitnessV2WriterV1:
                 authorization=authorization, registry_root=context.registry_root, environment=self.environment)
             if not checked.verified:
                 raise DurableWitnessRefusal("AUTHORIZATION_NOT_VERIFIED", checked.reason)
-            self._retain(authorization, WR.EPOCH_ADVANCE, checked.authorization.authorization_id, context)
+            self._unconsumed(chain, checked.authorization.authorization_id)
+            self.last_retention = self._retain(authorization, WR.EPOCH_ADVANCE,
+                                               checked.authorization.authorization_id, context)
             plan = RC.plan_epoch_advance(chain=chain, authorization=authorization,
                                          registry_root=context.registry_root, prior_registry=prior_registry,
                                          target_registry=target_registry, adoption_record=adoption_record,
