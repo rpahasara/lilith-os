@@ -624,8 +624,10 @@ class ProvenanceAndPreservationTests(unittest.TestCase):
             host, system = self.l1b1_host(d, Path(out), wheels)
             report = I.status(system, "L1b.1", SHA)
             self.assertEqual(report["result"], "PASS", report["failures"])
-            self.assertEqual(report["releaseSha"], SHA)
-            self.assertNotIn("candidateSha", report)
+            self.assertEqual(report["releaseSha"], SHA)  # canonical consumer
+            self.assertEqual(report["candidateSha"], report["releaseSha"])  # deprecated V1 alias
+            self.assertEqual(report["schemaVersion"], 1)
+            self.assertFalse(any("control" in key.lower() for key in report))  # no CONTROL_SHA in status
             # Presence of custody paths alone establishes no later stage.
             for later in ("L1b.2", "L1c.1", "L1c.3"):
                 self.assertEqual(I.status(system, later, SHA)["result"], "FAIL", later)
@@ -663,6 +665,38 @@ class ProvenanceAndPreservationTests(unittest.TestCase):
         code = code_only(INSTALLER_SOURCE)
         for forbidden in ("git", "rev-parse", "__file__"):
             self.assertNotIn(forbidden, code, forbidden)
+
+    def test_v1_consumers_of_candidate_sha_remain_valid(self):
+        def v1_consumer(report):  # how existing owner evidence tooling reads status
+            return report["schemaVersion"] == 1 and report["result"] == "PASS" and report["candidateSha"] == SHA
+
+        def canonical_consumer(report):  # how new tooling reads it
+            return report["result"] == "PASS" and report["releaseSha"] == SHA
+
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels:
+            host, system = self.l1b1_host(d, Path(out), wheels)
+            for stage in ("L1a", "L1b.1"):
+                report = I.status(system, stage, SHA if stage != "L1a" else None)
+                self.assertEqual(report["candidateSha"], report["releaseSha"])
+            report = I.status(system, "L1b.1", SHA)
+            self.assertTrue(v1_consumer(report))
+            self.assertTrue(canonical_consumer(report))
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertEqual(I.main(["status", "--expect", "L1b.1", SHA], system), 0)
+            parsed = json.loads(printed.getvalue())
+            self.assertTrue(v1_consumer(parsed) and canonical_consumer(parsed))
+        self.assertIn("`releaseSha`", RUNBOOK)
+        self.assertIn("deprecated compatibility alias", RUNBOOK)
+
+    def test_release_set_is_an_initial_custody_ceremony_invariant_only(self):
+        self.assertIn("B1b-3d *initial-custody* ceremony invariant", INSTALLER_SOURCE)
+        self.assertIn("permanent release-retention or rotation policy", INSTALLER_SOURCE)
+        self.assertIn("`RELEASE_SET`", RUNBOOK)
+        section = RUNBOOK.split("`RELEASE_SET`", 1)[1][:900]
+        self.assertIn("initial-custody", section)
+        self.assertIn("not a permanent", section)
+        self.assertEqual(INSTALLER_SOURCE.count('failures.append("RELEASE_SET")'), 1)
 
     def test_control_tooling_is_never_release_payload(self):
         with fake_wheels() as wheels:

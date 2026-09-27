@@ -369,14 +369,29 @@ class PreservationTests(unittest.TestCase):
             self.assertEqual(result["authorityCustody"]["brokerVerifierAssessment"], "NOT_ASSESSED_BY_BROKER_VERIFIER")
             self.assertEqual(result["authorityCustody"]["exactAuthorityState"],
                              "install_authority_dev.py status --expect <stage> <RELEASE_SHA>")
-            keys = {key.lower() for key in walk_keys(result)}
-            self.assertFalse(any("maturity" in key or "stage" == key for key in keys))
+            self.assertEqual(result["authorityCustodyJudgment"], "NOT_PERFORMED")
+            self.assertEqual(result["authorityMaturity"], "NOT_ESTABLISHED_BY_PRESERVATION")
+            keys = [key for key in walk_keys(result) if "maturity" in key.lower() or key.lower() == "stage"]
+            self.assertEqual(keys, ["authorityMaturity"])  # the only maturity field, and it disclaims one
             self.assertNotIn("L1b", json.dumps(result))
         # Unexpected authority state is visible verbatim, so the separately required
         # installer status (not this verifier) can refuse it.
         self.assertEqual(unexpected["authorityCustody"]["observedPaths"]["/etc/lilith-authority-dev"],
                          {"present": True, "uid": 1001, "gid": 1002, "mode": 0o777})
         self.assertEqual(clean["baselineCandidateSha256"], custody["baselineCandidateSha256"])
+
+    def test_preservation_pass_cannot_be_read_as_authority_maturity(self) -> None:
+        for obs in (observation(), with_l1b1_custody(observation()), {}):
+            result = preserve(obs)
+            self.assertEqual(result["authorityCustodyJudgment"], "NOT_PERFORMED")
+            self.assertEqual(result["authorityMaturity"], "NOT_ESTABLISHED_BY_PRESERVATION")
+            self.assertNotIn("AUTHORITY_BOUNDARY_PROOF", json.dumps(result))
+            self.assertFalse(any(value in json.dumps(result) for value in ('"L1a"', '"L1b.1"', '"PRE_L1A"')))
+        # The two scope fields are constants, independent of the verdict.
+        self.assertEqual(preserve(observation())["authorityMaturity"], preserve({})["authorityMaturity"])
+        self.assertIn('"authorityCustodyJudgment": "NOT_PERFORMED"', SOURCE)
+        # `baseline` output is unchanged and carries no such fields.
+        self.assertNotIn("authorityMaturity", gate.evaluate(observation()))
 
     def test_real_pins_match_the_accepted_runtime_baseline_record(self) -> None:
         record = (ROOT / "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md").read_text(encoding="utf-8")

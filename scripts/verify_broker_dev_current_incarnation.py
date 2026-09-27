@@ -512,6 +512,9 @@ def evaluate_preservation(obs: dict, *, accepted_incarnation: str = ACCEPTED_CUR
         "schema": PRESERVATION_SCHEMA,
         "operation": "READ_ONLY_BROKER_PRESERVATION",
         "BROKER_PRESERVATION": "PASS" if not failures else "FAIL",
+        # Scope, machine-readable: a PASS is broker continuity only.
+        "authorityCustodyJudgment": "NOT_PERFORMED",
+        "authorityMaturity": "NOT_ESTABLISHED_BY_PRESERVATION",
         "failures": failures,
         **checked["facts"],
         "runtimeIncarnation": checked["invocation"],

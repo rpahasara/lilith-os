@@ -438,7 +438,11 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
         entries = sorted(entry.name for entry in system.path(RELEASES).iterdir())
         observed["releaseEntries"] = entries
         if entries != [sha]:
-            failures.append("RELEASE_SET")  # exactly RELEASE_SHA; no second release or staging leftover
+            # RELEASE_SET is the B1b-3d *initial-custody* ceremony invariant: exactly
+            # one installed release, RELEASE_SHA, and no staging leftover. It is not a
+            # permanent release-retention or rotation policy; later rotation/restore
+            # work (B1b-3e) may define a different accepted release-set contract.
+            failures.append("RELEASE_SET")
     if sha and STAGES.index(stage) >= STAGES.index("L1b.2"):
         target = os.readlink(system.path(CURRENT)) if system.path(CURRENT).is_symlink() else None
         observed["currentTarget"] = target
@@ -469,7 +473,11 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
         failures.append("CREDSTORE_NOT_EMPTY")
     observed["credentialBlobSha256"] = _file_sha(system, CREDENTIAL)
     observed["hostPrerequisites"] = prerequisites
-    return {"schemaVersion": 1, "stage": stage, "releaseSha": sha,
+    # `releaseSha` is canonical. `candidateSha` is a deprecated compatibility
+    # alias kept for existing V1 consumers; it always meant the installed release
+    # artifact SHA and always equals `releaseSha`. Control-tool provenance
+    # (CONTROL_SHA) is deliberately absent: status owns installed release state.
+    return {"schemaVersion": 1, "stage": stage, "releaseSha": sha, "candidateSha": sha,
             "result": "PASS" if not failures else "FAIL", "failures": failures, "observed": observed}
 
 

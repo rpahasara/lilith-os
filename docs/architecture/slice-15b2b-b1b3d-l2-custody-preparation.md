@@ -276,13 +276,27 @@ publicVerificationMaterial           -> later AuthorityKeyRecordV1 (L3a, offline
     2. `install_authority_dev.py status --expect <stage> <RELEASE_SHA>` shows
        `PASS` for the current authority ladder stage. This alone owns exact
        authority state. It fails on any unexpected or out-of-order authority
-       object, including a second release directory.
+       object, including a second release directory (`RELEASE_SET`).
+       - **`RELEASE_SET` scope:** a B1b-3d initial-custody ceremony
+         invariant. Exactly one installed release, `RELEASE_SHA`, and no
+         staging leftover. It is not a permanent release-retention or
+         rotation policy; later rotation/restore work (B1b-3e) may define a
+         different accepted release-set contract.
+       - **Status field:** read `releaseSha`, which is canonical.
+         `candidateSha` is a deprecated compatibility alias, kept for
+         existing V1 consumers with `schemaVersion` still 1. It always meant
+         the installed release artifact SHA and always equals `releaseSha`.
+         Status carries no CONTROL_SHA: it owns installed release state, not
+         control-tool provenance.
     3. DR-5 evidence where the ladder requires it (a routine or control-only
        run with `AUTHORITY_BOUNDARY_PROOF=PASS maturity=<stage>`).
 
     The broker verifier does **not** own authority custody. `preservation`
     reports custody paths verbatim and never judges them or derives a
-    maturity. Custody presence is never read as broker drift, nor as
+    maturity. Its output says so explicitly:
+    `authorityCustodyJudgment=NOT_PERFORMED` and
+    `authorityMaturity=NOT_ESTABLISHED_BY_PRESERVATION`. A
+    `BROKER_PRESERVATION=PASS` is broker continuity only. Custody presence is never read as broker drift, nor as
     authority progress.
   - Always: the B1c helper, library, verifier, and sudoers hashes are
     unchanged; activation is `NOT_ACCEPTED reason=GRANT_ABSENT`; the Stage
