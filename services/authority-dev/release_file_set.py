@@ -33,7 +33,8 @@ RUNTIME_MODULES = frozenset({
 DEPLOY_ASSETS = frozenset({
     "lilith-authority-dev.service", "lilith-authority-dev.socket", "lilith-authority-dev.tmpfiles.conf",
 })
-TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_preparation.py"})
+TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_preparation.py",
+                        "test_successor_custody.py"})
 # Owner ceremony tooling (B1b-3d L2). Never runtime payload; the keygen is
 # shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
