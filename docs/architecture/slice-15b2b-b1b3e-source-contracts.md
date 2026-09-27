@@ -29,7 +29,7 @@ real owner authority, First Memory, Privacy custody, or Stage III.
 | `services/owner-memory-control/lilith_owner_memory/rotation_contracts.py` | **new.** Holds all B1b-3e contracts and pure verifiers: the registry digest, the single-current-key rule, `verify_registry_succession`, both K-ROOT execution authorizations, `RecoveryWitnessV2` with its chain and head verification, the witness execution planners, the authority recovery ledger position check, the loaded-key binding, and the rotation state machine |
 | `services/owner-memory-control/lilith_authority_signer/synthetic_witness_v2.py` | **new, TEST-only.** Holds the `RecoveryWitnessV2` writer (`SyntheticWitnessV2SignerV1`), the pre-witness `adopt_authorized_epoch` on the authority recovery ledger, and `observe_authority_recovery_ledger` |
 | `services/owner-memory-control/tests/synthetic_b1b3e.py` | **new.** TEST_ONLY fixtures and the golden generator |
-| `services/owner-memory-control/tests/test_b1b3e_rotation_recovery.py` | **new.** 81 tests |
+| `services/owner-memory-control/tests/test_b1b3e_rotation_recovery.py` | **new.** 84 tests |
 | `services/owner-memory-control/tests/b1b3e_golden.json` | **new.** Golden vectors, SHA-256 pinned in the test |
 | `docs/architecture/README.md` | one index row |
 
@@ -451,7 +451,7 @@ edited. The V1 `begin_recovery` path is unchanged and still used by B1b-3c.
 
 ## 13. Test coverage
 
-`test_b1b3e_rotation_recovery.py` has **81 tests**. Coverage by area:
+`test_b1b3e_rotation_recovery.py` has **84 tests**. Coverage by area:
 
 | Area | Coverage |
 | --- | --- |
@@ -459,6 +459,7 @@ edited. The V1 `begin_recovery` path is unchanged and still used by B1b-3c.
 | `EpochAdvanceAuthorizationV1` | valid; tamper of every signed field; wrong separator (registry, head, witness, none); wrong root; non-test-only root; forked, non-successor, and reused-random epochs; window; nonce, ID, digest, and version validation; environment; cross-type |
 | Epoch execution | stale prior witness; wrong prior epoch; wrong target and target epoch; expiry and not-yet-valid; missing adoption record (C-4); prior not the head; replay inside the clock window; a fresh authorization reusing a consumed ID; reused epoch random |
 | `RegistryHeadAdvanceAuthorizationV1` | valid N→N+1; N→N; N→N+2; stale prior head; target digest mismatch; authorization epoch and target epoch mismatch; non-additive target; clock window; consumed ID with a matching head; competing authorizations (the first executed wins, the second fails the prior-head check); staged registry never the head; tamper of every field; cross-type; wrong separator and root |
+| Non-adjacent authorization replay | A→B→A, A→B→C→A, and a replay across ledger-only entries: each W3 passes the pairwise `witness_v2_succession_reason`, but is rejected by the chain history (`CHAIN_AUTHORIZATION_REPLAYED`) and by the planner and writer (`AUTHORIZATION_CONSUMED`) |
 | `RecoveryWitnessV2` | valid chain; V1 and V2 never parse as each other; signature tamper per field; rogue writer; authority key as witness; all 15 succession reasons; forked chain; not-from-genesis; replayed consumed ID; writer refusals; V2 context floor; head digest mismatch; downgrade |
 | Registry succession | valid; every additive-history violation listed in §8; compromise escalation allowed |
 | Single current key | the source terminology; one Actor plus separate Privacy; superseded predecessor plus successor; two current, including one before `notBefore`; scope mismatch; no current key; no `issuedAt` input |

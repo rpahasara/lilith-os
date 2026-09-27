@@ -562,6 +562,83 @@ class RecoveryWitnessV2Tests(unittest.TestCase):
                                                             registry_root=F.root()).reason, "REGISTRY_MISSING")
 
 
+class NonAdjacentAuthorizationReplayTests(unittest.TestCase):
+    """Authorization IDs are single-use across the whole verified chain, not
+    merely different from the immediately preceding witness."""
+
+    def setUp(self):
+        self.s = F.Scenario()                      # W0: genesis at v3
+        self.registries = {3: F.v3(), 4: F.v4()}
+        for version in range(5, 9):                # in-epoch, additive, contiguous successors
+            self.registries[version] = F.registry_from(F._keys(F.v4()), registryVersion=version,
+                                                       issuedAt=F.stamp(100 + version))
+
+    def auth(self, version: int, authorization_id: str) -> dict:
+        return F.head_authorization(self.registries[version - 1], self.registries[version],
+                                    authorizationId=authorization_id, nonce=F.nonce(authorization_id))
+
+    def advance(self, version: int, authorization_id: str) -> None:
+        self.s.writer.execute_registry_head_advance(
+            authorization=self.auth(version, authorization_id), prior_registry=self.registries[version - 1],
+            target_registry=self.registries[version], registry_root=F.root(), updated_at=self.s.tick())
+
+    def forged_replay(self, version: int, replayed_id: str) -> dict:
+        """An otherwise-valid successor, signed by the real TEST witness key,
+        that re-consumes an earlier authorization ID."""
+        plan = RC.plan_registry_head_advance(
+            chain=self.s.writer.facts(), authorization=self.auth(version, "rhaa.fresh-probe"),
+            registry_root=F.root(), prior_registry=self.registries[version - 1],
+            target_registry=self.registries[version], updated_at=self.s.tick())
+        self.assertTrue(plan.planned, plan)
+        unsigned = {**plan.successor_unsigned, "consumedAuthorizationId": replayed_id,
+                    "witnessKeyId": F.WITNESS_KEY_ID}
+        return {**unsigned, "signature": SA.b64(F.private("witness").sign(RC.witness_v2_signing_bytes(unsigned)))}
+
+    def verify(self, chain):
+        return RC.verify_witness_v2_chain(anchor=F.anchor(), chain=list(chain), environment=F.ENV,
+                                          registry_root=F.root(),
+                                          authority_public_keys=RC._authority_keys(*self.registries.values()))
+
+    def assert_replay_rejected(self, sequence: tuple[str, ...], replayed: str) -> None:
+        for offset, authorization_id in enumerate(sequence):
+            self.advance(4 + offset, authorization_id)
+        chain = self.s.writer.chain
+        self.assertTrue(self.verify(chain).verified)
+        target = 4 + len(sequence)
+        replay = self.forged_replay(target, replayed)
+        previous = RC.RecoveryWitnessV2.from_verified_dict(chain[-1])
+        following = RC.RecoveryWitnessV2.from_verified_dict(replay)
+        # The pairwise check alone would accept it: the previous witness consumed a different ID.
+        self.assertNotEqual(previous.consumed_authorization_id, replayed)
+        self.assertIsNone(RC.witness_v2_succession_reason(previous, following))
+        # The verified chain history rejects it.
+        result = self.verify(list(chain) + [replay])
+        self.assertEqual((result.reason, result.detail), ("CHAIN_AUTHORIZATION_REPLAYED", replayed))
+        # The executor refuses a correctly bound authorization that reuses the ID.
+        plan = RC.plan_registry_head_advance(
+            chain=self.s.writer.facts(), authorization=self.auth(target, replayed), registry_root=F.root(),
+            prior_registry=self.registries[target - 1], target_registry=self.registries[target],
+            updated_at=self.s.tick())
+        self.assertEqual(plan.reason, "AUTHORIZATION_CONSUMED")
+        with self.assertRaises(W2.WitnessV2Refusal) as caught:
+            self.advance(target, replayed)
+        self.assertEqual(caught.exception.reason, "AUTHORIZATION_CONSUMED")
+
+    def test_a_b_a_is_rejected(self):
+        self.assert_replay_rejected(("rhaa.A", "rhaa.B"), "rhaa.A")
+
+    def test_a_b_c_a_is_rejected(self):
+        self.assert_replay_rejected(("rhaa.A", "rhaa.B", "rhaa.C"), "rhaa.A")
+
+    def test_replay_across_ledger_only_advances_is_rejected(self):
+        self.advance(4, "rhaa.A")
+        self.s.commit(lambda st: st.record_registry(4, (F.SUCCESSOR,), F.POLICY))  # ledger-only witness entry
+        self.advance(5, "rhaa.B")
+        replay = self.forged_replay(6, "rhaa.A")
+        result = self.verify(list(self.s.writer.chain) + [replay])
+        self.assertEqual((result.reason, result.detail), ("CHAIN_AUTHORIZATION_REPLAYED", "rhaa.A"))
+
+
 # ------------------------------------------------------------- registry succession ---
 
 class RegistrySuccessionTests(unittest.TestCase):
