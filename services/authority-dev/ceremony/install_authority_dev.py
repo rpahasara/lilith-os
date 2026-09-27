@@ -33,10 +33,15 @@ correcting existing state.
 | `units` | L1c.1 | install unit, socket, and tmpfiles files (no reload, no enable) |
 | `cli` | L1c.3 | install `/usr/local/sbin/lilith-authority-keygen-dev` |
 | `credstore` | L2b.1 | create `/etc/credstore.encrypted` `root:root 0700` if absent; adopt it unchanged if already exactly secure and empty |
+| `custody` | L2c | B1b-3e (RR-26): create `/etc/lilith-authority-custody` and its `prepared/` and `retired/` directories, each `root:root 0700`, on the credstore's filesystem |
 
 `systemctl daemon-reload` (L1c.2), `systemd-creds setup` (L2a), and the
 keygen ceremony (L2b.2) are separate owner commands in the runbook; this
-installer never runs them. It never creates a key, a credential, the host
+installer never runs them. The `custody` stage (L2c) belongs to the B1b-3e
+successor-capable release and is SOURCE ONLY until a separately authorized
+PR-1 install: docs/architecture/slice-15b2b-b1b3e-source-prep-b-successor-custody.md.
+It creates empty directories only; it never writes, moves, or deletes a
+credential blob. It never creates a key, a credential, the host
 credential key, `/etc/lilith-authority-dev`, `/var/lib/lilith-authority-dev`,
 `/run/lilith-authority-dev`, or anything for the recovery witness, and it
 never starts, enables, or reloads a unit.
@@ -81,6 +86,12 @@ TMPFILES = "/etc/tmpfiles.d/lilith-authority-dev.conf"
 KEYGEN_CLI = "/usr/local/sbin/lilith-authority-keygen-dev"
 CREDSTORE = "/etc/credstore.encrypted"
 CREDENTIAL = CREDSTORE + "/lilith-authority-dev.owner-actor.cred"
+# B1b-3e RR-26 side-by-side custody. Referenced by no unit directive; the
+# signer unit denies the whole root (`InaccessiblePaths=`).
+CUSTODY_ROOT = "/etc/lilith-authority-custody"
+PREPARED_DIR = CUSTODY_ROOT + "/prepared"
+RETIRED_DIR = CUSTODY_ROOT + "/retired"
+CUSTODY_DIRS = (CUSTODY_ROOT, PREPARED_DIR, RETIRED_DIR)
 HOST_KEY = "/var/lib/systemd/credential.secret"
 NEEDRESTART = "/etc/needrestart/conf.d/lilith-authority-sensitive.conf"
 NEEDRESTART_SHA256 = "503279315ccc884d8a68505c86b51dfd09387b393c9becba684b1fa1c28068d2"
@@ -345,7 +356,7 @@ def verify_account_contract(system: System) -> dict:
 
 # ------------------------------------------------- expected state per stage ---
 
-STAGES = ("L0", "L1a", "L1b.1", "L1b.2", "L1c.1", "L1c.2", "L1c.3", "L2a", "L2b.1", "L2b.2")
+STAGES = ("L0", "L1a", "L1b.1", "L1b.2", "L1c.1", "L1c.2", "L1c.3", "L2a", "L2b.1", "L2b.2", "L2c")
 
 # AMBIENT HOST PREREQUISITE != LILITH CEREMONY ARTIFACT != LILITH MATURITY
 # EVIDENCE. These generic systemd paths may pre-exist (run 36264031829). Before
@@ -379,6 +390,7 @@ def expected_paths(stage: str, sha: str | None) -> dict[str, tuple | None]:
         HOST_KEY: HOST_PREREQUISITES[HOST_KEY] if at("L2a") else HostPrerequisite(HOST_PREREQUISITES[HOST_KEY]),
         CREDSTORE: HOST_PREREQUISITES[CREDSTORE] if at("L2b.1") else HostPrerequisite(HOST_PREREQUISITES[CREDSTORE]),
         CREDENTIAL: ("file", 0, 0, "0600") if at("L2b.2") else None,
+        **{path: ("dir", 0, 0, "0700") if at("L2c") else None for path in CUSTODY_DIRS},
         **{path: None for path in DEFERRED_PATHS},
     }
     if release:
@@ -438,10 +450,12 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
         entries = sorted(entry.name for entry in system.path(RELEASES).iterdir())
         observed["releaseEntries"] = entries
         if entries != [sha]:
-            # RELEASE_SET is the B1b-3d *initial-custody* ceremony invariant: exactly
-            # one installed release, RELEASE_SHA, and no staging leftover. It is not a
-            # permanent release-retention or rotation policy; later rotation/restore
-            # work (B1b-3e) may define a different accepted release-set contract.
+            # RELEASE_SET began as the B1b-3d *initial-custody* ceremony invariant:
+            # exactly one installed release, RELEASE_SHA, and no staging leftover.
+            # It was not a permanent release-retention or rotation policy. B1b-3e
+            # RR-25 accepted it as the single-installed-release contract: exactly
+            # one executable release (the successor-capable one), and no retained
+            # executable release for rollback. Release rollback != authority rollback.
             failures.append("RELEASE_SET")
     if sha and STAGES.index(stage) >= STAGES.index("L1b.2"):
         target = os.readlink(system.path(CURRENT)) if system.path(CURRENT).is_symlink() else None
@@ -472,6 +486,8 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
             and any(system.path(CREDSTORE).iterdir()):
         failures.append("CREDSTORE_NOT_EMPTY")
     observed["credentialBlobSha256"] = _file_sha(system, CREDENTIAL)
+    if STAGES.index(stage) >= STAGES.index("L2c"):
+        failures.extend(custody_failures(system))
     observed["hostPrerequisites"] = prerequisites
     # `releaseSha` is canonical. `candidateSha` is a deprecated compatibility
     # alias kept for existing V1 consumers; it always meant the installed release
@@ -479,6 +495,26 @@ def status(system: System, stage: str, sha: str | None = None) -> dict:
     # (CONTROL_SHA) is deliberately absent: status owns installed release state.
     return {"schemaVersion": 1, "stage": stage, "releaseSha": sha, "candidateSha": sha,
             "result": "PASS" if not failures else "FAIL", "failures": failures, "observed": observed}
+
+
+def custody_failures(system: System) -> list[str]:
+    """RR-26 POST facts beyond owner and mode: exact names, empty slot
+    directories, and one filesystem with the credstore (renames only)."""
+    failures: list[str] = []
+    root = system.path(CUSTODY_ROOT)
+    if root.is_dir() and not root.is_symlink() and sorted(p.name for p in root.iterdir()) != ["prepared", "retired"]:
+        failures.append("CUSTODY_ROOT_UNEXPECTED_ENTRY")
+    for directory in (PREPARED_DIR, RETIRED_DIR):
+        path = system.path(directory)
+        if path.is_dir() and not path.is_symlink() and any(path.iterdir()):
+            failures.append("CUSTODY_NOT_EMPTY:" + directory)
+    try:
+        devices = {os.lstat(system.path(p)).st_dev for p in (CREDSTORE, PREPARED_DIR, RETIRED_DIR)}
+    except OSError:
+        devices = set()
+    if len(devices) != 1:
+        failures.append("CUSTODY_FILESYSTEM_MISMATCH")
+    return failures
 
 
 # ------------------------------------------------------ mutating stages ---
@@ -614,6 +650,32 @@ def stage_credstore(system: System, sha: str) -> dict:
     return report
 
 
+def stage_custody(system: System, sha: str) -> dict:
+    """L2c (B1b-3e RR-26): create the empty PREPARED and RETIRED custody directories.
+
+    Requires the exact L2b.2 POST (the successor-capable release installed and
+    the CURRENT blob present). Creates `/etc/lilith-authority-custody`,
+    `prepared/`, and `retired/`, each root:root 0700, and nothing else. It
+    never writes, moves, or deletes a credential blob, and a directory that
+    already exists is a collision (the L2b.2 POST requires all three absent).
+    """
+    require_dev_root(system)
+    _require(status(system, "L2b.2", sha))
+    for directory in CUSTODY_DIRS:
+        _mkdir(system, directory, 0o700)
+    for directory in (CUSTODY_ROOT, "/etc"):
+        _fsync_directory(system, directory)
+    return status(system, "L2c", sha)
+
+
+def _fsync_directory(system: System, absolute: str) -> None:
+    fd = os.open(system.path(absolute), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def main(argv: list[str], system: System | None = None) -> int:
     system = system or System()
     try:
@@ -638,6 +700,8 @@ def main(argv: list[str], system: System | None = None) -> int:
             report = stage_cli(system, rest[0])
         elif stage == "credstore" and len(rest) == 1:
             report = stage_credstore(system, rest[0])
+        elif stage == "custody" and len(rest) == 1:
+            report = stage_custody(system, rest[0])
         else:
             raise InstallError("USAGE")
     except InstallError as exc:
