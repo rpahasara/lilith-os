@@ -66,6 +66,22 @@ class SuccessorFormContractTests(unittest.TestCase):
         self.assertEqual((SC.SUCCESSOR_ORDINAL_MIN, SC.SUCCESSOR_ORDINAL_MAX), (2, 9999))
         self.assertEqual(G.ENCRYPT_ARGV[3], "--name=owner-actor-signing-key")  # never ordinal-specific
 
+    def test_authority_dev_profile_is_dev_synthetic_only(self):
+        self.assertEqual((PR.PROFILE, PR.ENVIRONMENT, G.ENVIRONMENT), ("DEV_SYNTHETIC", "dev", "dev"))
+        self.assertEqual(SC.DEV_SYNTHETIC_CUSTODY_PROFILE.environment, "dev")
+        for environment in ("test", "prod"):
+            with self.assertRaises(PR.ProfileError):
+                PR.DevSyntheticSignerProfileV1(environment, PR.PROPOSED_K_ACT_KEY_ID, "authority.dev.memory",
+                                               "owner.dev-synthetic.v1", "policy.dev-synthetic.v1").validate()
+        publication = G.publication(bytes(range(32)), b"c", G.DEV_MACHINE_ID, key_id=G.successor_key_id(2),
+                                    credential_path=G.PREPARED_PATH)
+        raw = G.canonical(publication)
+        record = SC.build_successor_ceremony_record(publication_bytes=raw, reviewed_release_sha=SHA)
+        test_profile = SC.custody_profile("test")
+        self.assertEqual(SC.verify_successor_ceremony_record(record=record, publication_bytes=raw,
+                                                             reviewed_release_sha=SHA, profile=test_profile).reason,
+                         "PUBLICATION_PROFILE_MISMATCH")  # a DEV publication never passes a TEST context
+
     def test_keygen_and_owner_derivations_agree_for_every_ordinal(self):
         seen_keys, seen_ceremonies = set(), set()
         for n in range(G.SUCCESSOR_ORDINAL_MIN, G.SUCCESSOR_ORDINAL_MAX + 1):

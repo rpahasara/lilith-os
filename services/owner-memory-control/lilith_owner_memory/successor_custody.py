@@ -115,19 +115,29 @@ DEV_SYNTHETIC_CUSTODY_PROFILE = CustodyProfileV1(
     current_path=CURRENT_PATH, prepared_path=PREPARED_PATH, retired_path=RETIRED_PATH)
 
 
-# `test` is admitted only as the TEST-only stand-in environment of every
-# B1b-3e synthetic writer (the TEST witness writers refuse any other). Every
-# other profile value must equal DEV_SYNTHETIC exactly; `prod` never passes.
-_DEV_SYNTHETIC_ENVIRONMENTS = frozenset({ENVIRONMENT, "test"})
+# Environment isolation. `CustodyProfileV1.environment` is the caller's
+# explicit, trusted EXPECTED environment, and every record (hold, ceremony
+# record, publication, register, witness store, registry) is compared with
+# it exactly. This module maps no environment onto another and names no TEST
+# environment: live-capable callers pass `DEV_SYNTHETIC_CUSTODY_PROFILE`
+# (`dev`); TEST fixtures bind their own exact value with `custody_profile`.
+# `prod` is never a DEV_SYNTHETIC environment. Every other field is fixed.
+_NEVER_DEV_SYNTHETIC = frozenset({"prod"})
 
 
 def is_dev_synthetic(profile: Any) -> bool:
-    return (isinstance(profile, CustodyProfileV1) and profile.environment in _DEV_SYNTHETIC_ENVIRONMENTS
+    return (isinstance(profile, CustodyProfileV1) and profile.environment in DEPLOYMENT_ENVIRONMENTS
+            and profile.environment not in _NEVER_DEV_SYNTHETIC
             and dataclasses.replace(profile, environment=ENVIRONMENT) == DEV_SYNTHETIC_CUSTODY_PROFILE)
 
 
+def custody_profile(expected_environment: str) -> CustodyProfileV1:
+    """The DEV_SYNTHETIC profile bound to one exact expected environment."""
+    return require_dev_synthetic(dataclasses.replace(DEV_SYNTHETIC_CUSTODY_PROFILE, environment=expected_environment))
+
+
 def require_dev_synthetic(profile: Any) -> CustodyProfileV1:
-    """The only accepted profile. PROD and any other value are refused."""
+    """The only accepted profile shape. PROD and any other value are refused."""
     if not is_dev_synthetic(profile):
         raise ContractViolation("PROFILE_NOT_DEV_SYNTHETIC")
     return profile
@@ -940,17 +950,44 @@ HOLD_STATES = frozenset({HELD, RELEASED})
 INITIAL_CUSTODY = "INITIAL_CUSTODY"
 ROTATION = "ROTATION"
 KEY_COMPROMISE_RECOVERY = "KEY_COMPROMISE_RECOVERY"
-TRANSITION_KINDS = frozenset({INITIAL_CUSTODY, ROTATION, KEY_COMPROMISE_RECOVERY})
+# RR-31: an authorized in-epoch head change that keeps the same current key.
+REGISTRY_MAINTENANCE = "REGISTRY_MAINTENANCE"
+TRANSITION_KINDS = frozenset({INITIAL_CUSTODY, ROTATION, KEY_COMPROMISE_RECOVERY, REGISTRY_MAINTENANCE})
+SUCCESSOR_KINDS = frozenset({ROTATION, KEY_COMPROMISE_RECOVERY})
 # SOURCE DETAIL: closed, informational reason taxonomy.
 INITIAL_CUSTODY_BOOTSTRAP = "INITIAL_CUSTODY_BOOTSTRAP"
 ROTATION_IN_PROGRESS = "ROTATION_IN_PROGRESS"
 KEY_COMPROMISE_RECOVERY_IN_PROGRESS = "KEY_COMPROMISE_RECOVERY_IN_PROGRESS"
+REGISTRY_MAINTENANCE_IN_PROGRESS = "REGISTRY_MAINTENANCE_IN_PROGRESS"
 PREDECESSOR_DESTRUCTION_INCOMPLETE = "PREDECESSOR_DESTRUCTION_INCOMPLETE"
 OWNER_RELEASE_AFTER_ELIGIBILITY = "OWNER_RELEASE_AFTER_ELIGIBILITY"
 HOLD_REASONS = frozenset({INITIAL_CUSTODY_BOOTSTRAP, ROTATION_IN_PROGRESS, KEY_COMPROMISE_RECOVERY_IN_PROGRESS,
-                          PREDECESSOR_DESTRUCTION_INCOMPLETE, OWNER_RELEASE_AFTER_ELIGIBILITY})
+                          REGISTRY_MAINTENANCE_IN_PROGRESS, PREDECESSOR_DESTRUCTION_INCOMPLETE,
+                          OWNER_RELEASE_AFTER_ELIGIBILITY})
 _HELD_REASON = {INITIAL_CUSTODY: INITIAL_CUSTODY_BOOTSTRAP, ROTATION: ROTATION_IN_PROGRESS,
-                KEY_COMPROMISE_RECOVERY: KEY_COMPROMISE_RECOVERY_IN_PROGRESS}
+                KEY_COMPROMISE_RECOVERY: KEY_COMPROMISE_RECOVERY_IN_PROGRESS,
+                REGISTRY_MAINTENANCE: REGISTRY_MAINTENANCE_IN_PROGRESS}
+_MAINTENANCE_SUFFIX = re.compile(r"\.registry-maintenance\.[1-9][0-9]{0,15}\.[0-9a-f]{32}\Z")
+
+
+def registry_maintenance_ceremony_id(*, environment: str, current_key_id: str, prior_head: RC.RegistryHeadV1,
+                                     target_head: RC.RegistryHeadV1, authorization_id: str) -> str:
+    """RR-31: the one REGISTRY_MAINTENANCE ceremony ID for one head change.
+
+    SOURCE DETAIL encoding: `<env>.registry-maintenance.<targetVersion>.<h>`
+    where `h` is the first 128 bits of SHA-256 over the RFC 8785 bytes of
+    {environment, currentKeyId, priorHead, targetHead, authorizationId}. It
+    is derived only from immutable, verified context (no timestamp, no
+    operator text), so one maintenance hold can never serve another change.
+    """
+    _choice(environment, DEPLOYMENT_ENVIRONMENTS, "environment")
+    if not isinstance(prior_head, RC.RegistryHeadV1) or not isinstance(target_head, RC.RegistryHeadV1):
+        raise ContractViolation("MAINTENANCE_CONTEXT_MALFORMED")
+    material = WR.document_bytes({"environment": environment, "currentKeyId": _id(current_key_id, "key_id"),
+                                  "priorHead": prior_head.to_dict(), "targetHead": target_head.to_dict(),
+                                  "authorizationId": _id(authorization_id, "authorization_id")})
+    return _id(f"{environment}.registry-maintenance.{target_head.version}."
+               f"{hashlib.sha256(material).hexdigest()[:32]}", "ceremony_id")
 
 # Closed, ordered hold taxonomy.
 HOLD_REASON_CODES = (
@@ -970,6 +1007,7 @@ HOLD_REASON_CODES = (
     "HOLD_SUCCESSOR_REQUIRED",
     "HOLD_SUCCESSOR_NOT_DERIVED",
     "HOLD_PREDECESSOR_IS_SUCCESSOR",
+    "HOLD_MAINTENANCE_KEY_CHANGED",
 )
 
 
@@ -997,7 +1035,7 @@ class CeremonyHoldV1:
 
     @property
     def custody_debt(self) -> bool:
-        return self.ceremony_id.endswith(CUSTODY_DEBT_SUFFIX)
+        return self.transition_kind in SUCCESSOR_KINDS and self.ceremony_id.endswith(CUSTODY_DEBT_SUFFIX)
 
     @classmethod
     def from_dict(cls, value: Any, *, profile: CustodyProfileV1 = DEV_SYNTHETIC_CUSTODY_PROFILE) -> CeremonyHoldV1:
@@ -1033,7 +1071,7 @@ class CeremonyHoldV1:
         return hold
 
     def _structure_reason(self, profile: CustodyProfileV1) -> str | None:
-        debt = self.custody_debt and self.transition_kind != INITIAL_CUSTODY
+        debt = self.custody_debt
         if self.state == RELEASED:
             expected_reason = OWNER_RELEASE_AFTER_ELIGIBILITY
         else:
@@ -1047,6 +1085,19 @@ class CeremonyHoldV1:
                 return "HOLD_INITIAL_SUCCESSOR_MISMATCH"
             if self.ceremony_id != initial_ceremony_id(profile.environment, profile.initial_key_id):
                 return "HOLD_INITIAL_CEREMONY_MISMATCH"
+            return None
+        if self.transition_kind == REGISTRY_MAINTENANCE:
+            # expectedPredecessorKeyId == expectedSuccessorKeyId == the unchanged current key.
+            if self.expected_predecessor_key_id is None:
+                return "HOLD_PREDECESSOR_REQUIRED"
+            if self.expected_successor_key_id is None:
+                return "HOLD_SUCCESSOR_REQUIRED"
+            prefix = profile.environment
+            if not self.ceremony_id.startswith(prefix) or _MAINTENANCE_SUFFIX.fullmatch(
+                    self.ceremony_id[len(prefix):]) is None:
+                return "HOLD_CEREMONY_NOT_DERIVED"
+            if self.expected_predecessor_key_id != self.expected_successor_key_id:
+                return "HOLD_MAINTENANCE_KEY_CHANGED"
             return None
         # ROTATION / KEY_COMPROMISE_RECOVERY: null predecessor is never valid here.
         if self.expected_predecessor_key_id is None:
@@ -1127,6 +1178,110 @@ def hold_transition_reason(previous: Any, proposed: Any, *,
         return "HOLD_BINDING_CHANGED"
     if new.state == HELD and new.observed_witness_digest != old.observed_witness_digest:
         return "HOLD_BINDING_CHANGED"
+    return None
+
+
+# ------------------------------------------------ the hold store (dominance) ---
+
+_HOLD_RECORD_NAME = re.compile(r"[0-9a-f]{64}\.json\Z")
+
+
+def hold_record_name(ceremony_id: str) -> str:
+    """One deterministic store name per ceremony: `<sha256(ceremonyId)>.json`.
+
+    Naming only; the bytes inside must name the same ceremony. One name per
+    ceremony means a deterministic (e.g. custody-debt) identity can never be
+    duplicated or forked inside one store. SOURCE DETAIL; the directory's
+    host location is fixed with PR-1.
+    """
+    return hashlib.sha256(_id(ceremony_id, "ceremony_id").encode("utf-8")).hexdigest() + ".json"
+
+
+def hold_record_bytes(record: Mapping[str, Any]) -> bytes:
+    """The one on-store byte form of a hold record: RFC 8785 JCS."""
+    return WR.document_bytes(record)
+
+
+@dataclass(frozen=True)
+class HoldStoreObservationV1:
+    """Story 4: the complete root-observed listing of the local hold store.
+
+    Readiness judges the whole set, never a caller-selected record, so a newer
+    unresolved hold cannot be hidden behind an older RELEASED one. Like every
+    root observation (the credential inventory, the witness store), the
+    listing's completeness is an observation property; nothing here is
+    authority.
+    """
+
+    entries: tuple[WR.StoreEntryV1, ...]
+
+
+HOLD_STORE_REASONS = (
+    "HOLD_STORE_UNOBSERVED",
+    "HOLD_STORE_ENTRY_INVALID",
+    "HOLD_STORE_NAME_MISMATCH",
+    "HOLD_SET_CEREMONY_DUPLICATED",
+)
+
+
+def hold_store(*records: Mapping[str, Any]) -> HoldStoreObservationV1:
+    """A listing built from records (TEST and owner-tooling convenience)."""
+    return HoldStoreObservationV1(tuple(
+        WR.StoreEntryV1(hold_record_name(record["ceremonyId"]), WR.REGULAR, hold_record_bytes(record))
+        for record in records))
+
+
+def parse_hold_store(observation: Any, *, profile: CustodyProfileV1 = DEV_SYNTHETIC_CUSTODY_PROFILE
+                     ) -> tuple[dict[str, CeremonyHoldV1] | None, str | None, str | None]:
+    """({ceremonyId: hold}, None, None) or (None, reason, detail).
+
+    Every entry must be a regular file under its deterministic name holding
+    canonical bytes of a structurally valid hold for the expected environment.
+    One invalid, misnamed, or duplicated record fails the whole set closed.
+    """
+    if not isinstance(observation, HoldStoreObservationV1):
+        return None, "HOLD_STORE_UNOBSERVED", None
+    holds: dict[str, CeremonyHoldV1] = {}
+    names: set[str] = set()
+    for entry in observation.entries:
+        if not isinstance(entry, WR.StoreEntryV1) or entry.kind != WR.REGULAR or entry.name in names \
+                or _HOLD_RECORD_NAME.fullmatch(str(entry.name)) is None or not isinstance(entry.data, bytes):
+            return None, "HOLD_STORE_ENTRY_INVALID", str(getattr(entry, "name", "?"))
+        names.add(entry.name)
+        try:
+            document = WR.parse_document_bytes(entry.data)
+        except OwnerProofError:
+            return None, "HOLD_STORE_ENTRY_INVALID", entry.name
+        hold, reason = parse_ceremony_hold(document, profile=profile)
+        if hold is None:
+            return None, reason, entry.name
+        if hold_record_name(hold.ceremony_id) != entry.name:
+            return None, "HOLD_STORE_NAME_MISMATCH", entry.name
+        if hold.ceremony_id in holds:
+            return None, "HOLD_SET_CEREMONY_DUPLICATED", hold.ceremony_id
+        holds[hold.ceremony_id] = hold
+    return holds, None, None
+
+
+def hold_store_transition_reason(previous: Any, proposed: Any, *,
+                                 profile: CustodyProfileV1 = DEV_SYNTHETIC_CUSTODY_PROFILE) -> str | None:
+    """None when every record step between two store listings is a permitted
+    hold lifecycle step. No record may disappear (absence is never a release),
+    a new ceremony starts HELD, and RELEASED never returns to HELD."""
+    old, _, _ = parse_hold_store(previous, profile=profile)
+    if old is None:
+        return "HOLD_PREVIOUS_INVALID"
+    new, _, _ = parse_hold_store(proposed, profile=profile)
+    if new is None:
+        return "HOLD_PROPOSED_INVALID"
+    for ceremony_id in old:
+        if ceremony_id not in new:
+            return "HOLD_RECORD_REMOVED"
+    for ceremony_id, hold in new.items():
+        reason = hold_transition_reason(old[ceremony_id].to_dict() if ceremony_id in old else None, hold.to_dict(),
+                                        profile=profile)
+        if reason is not None:
+            return reason
     return None
 
 

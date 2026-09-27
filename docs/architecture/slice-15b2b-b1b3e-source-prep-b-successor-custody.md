@@ -10,6 +10,9 @@ Status:
 - **LIVE REHEARSAL NOT AUTHORIZED**
 - **WHOLE-HOST ROLLBACK UNRESOLVED**
 - **REAL AUTHORITY ABSENT**
+- **PRE-PR AUDIT CLOSED:** `ROTATION` kind name, custody-debt dominance,
+  RR-31 `REGISTRY_MAINTENANCE`, RR-32 fail-closed epoch reasons, and TEST
+  environment isolation (§21). **No PENDING_OWNER_DECISION remains.**
 
 Base: protected main `3453f0d28f4d84aa3388647b9354a5d201014f74`.
 
@@ -89,10 +92,10 @@ authority-dev).
 
 Where this prompt and the merged design differ, the merged design governs:
 
-- **transition kind name.** The design's closed set is `INITIAL_CUSTODY`,
-  `ROTATION`, `KEY_COMPROMISE_RECOVERY` (§10.6). The source uses `ROTATION`,
-  not `ROUTINE_ROTATION`. A hold naming `ROUTINE_ROTATION` fails closed as
-  `HOLD_TRANSITION_KIND_UNKNOWN` (tested).
+- **transition kind name (OWNER-ACCEPTED in the pre-PR audit).** The exact
+  kind is the design's `ROTATION` (§10.6), not `ROUTINE_ROTATION`. A hold
+  naming `ROUTINE_ROTATION` fails closed as `HOLD_TRANSITION_KIND_UNKNOWN`
+  (tested).
 - **ceremonyId encoding.** The design pins
   `dev-synthetic.owner-actor.successor.<N>`. The environment and profile are
   carried by the fixed `dev-synthetic` label, and the keyId is a bijective
@@ -288,8 +291,8 @@ successor hash; P is never restored.
 | Closed set | Values |
 | --- | --- |
 | `state` | `HELD`, `RELEASED` |
-| `transitionKind` | `INITIAL_CUSTODY`, `ROTATION`, `KEY_COMPROMISE_RECOVERY` |
-| `reason` (SOURCE DETAIL) | `INITIAL_CUSTODY_BOOTSTRAP`, `ROTATION_IN_PROGRESS`, `KEY_COMPROMISE_RECOVERY_IN_PROGRESS` (HELD, by kind); `PREDECESSOR_DESTRUCTION_INCOMPLETE` (HELD, custody debt); `OWNER_RELEASE_AFTER_ELIGIBILITY` (RELEASED) |
+| `transitionKind` | `INITIAL_CUSTODY`, `ROTATION`, `KEY_COMPROMISE_RECOVERY`, `REGISTRY_MAINTENANCE` (RR-31) |
+| `reason` (SOURCE DETAIL) | `INITIAL_CUSTODY_BOOTSTRAP`, `ROTATION_IN_PROGRESS`, `KEY_COMPROMISE_RECOVERY_IN_PROGRESS`, `REGISTRY_MAINTENANCE_IN_PROGRESS` (HELD, by kind); `PREDECESSOR_DESTRUCTION_INCOMPLETE` (HELD, custody debt); `OWNER_RELEASE_AFTER_ELIGIBILITY` (RELEASED) |
 
 Structure (all fail closed; unknown values and versions never parse):
 `INITIAL_CUSTODY` is the only kind with `expectedPredecessorKeyId = null`, its
@@ -297,6 +300,9 @@ successor is the initial K-ACT, and its ceremony is the deterministic initial
 ID. `ROTATION` / `KEY_COMPROMISE_RECOVERY` need a predecessor, a successor
 ceremony (or its custody-debt derivative), and a successor equal to the
 ordinal's derived keyId (null only while HELD before preparation).
+`REGISTRY_MAINTENANCE` needs `expectedPredecessorKeyId ==
+expectedSuccessorKeyId` (the unchanged current key; the equality is
+intentional) and a derived maintenance ceremony ID (§21.3).
 
 **Lifecycle** (`hold_transition_reason`): missing → HELD → RELEASED only.
 Refused: missing → RELEASED, RELEASED → HELD, RELEASED → RELEASED with other
@@ -308,13 +314,25 @@ except filling a null successor once. A new ceremony starts again from HELD.
 `<environment>.initial-custody.<initialKeyId>`, for DEV
 `dev.initial-custody.test-only.dev-synthetic.actor.b1b3d.1`.
 
-**Custody-debt ceremony** (SOURCE DETAIL). The design's destruction-failure
-rule engages an availability hold after `S_CURRENT`, when the ceremony's own
-hold is already RELEASED; RELEASED → HELD is refused for a ceremony. The
-availability hold is therefore the one deterministic derivative
-`<successorCeremonyId>.custody-debt`, HELD with reason
-`PREDECESSOR_DESTRUCTION_INCOMPLETE`. It is still non-authority. Its RELEASED
-form passes only once the inventory is STEADY (destruction complete).
+**Custody-debt ceremony** (OWNER-ACCEPTED in the pre-PR audit, with the
+dominance rule of §21.2). The design's destruction-failure rule engages an
+availability hold after `S_CURRENT`, when the ceremony's own hold is already
+RELEASED; RELEASED → HELD is refused for a ceremony. The availability hold is
+therefore the one deterministic derivative `<successorCeremonyId>.custody-debt`,
+HELD with the closed reason `PREDECESSOR_DESTRUCTION_INCOMPLETE`, binding the
+same environment, predecessor, successor, and the `S_CURRENT` head. It is
+non-authority, never authorizes rollback, and never makes the predecessor
+current. Its RELEASED form passes only once the inventory is STEADY
+(destruction complete).
+
+**The hold store.** Readiness reads the complete root-observed listing of the
+local hold store (`HoldStoreObservationV1`), never one caller-selected record.
+Each record lives under the deterministic name `<sha256(ceremonyId)>.json` as
+RFC 8785 bytes, so a deterministic identity cannot be duplicated or forked;
+one invalid, misnamed, or duplicated record fails the whole set closed.
+`hold_store_transition_reason` extends the lifecycle to the set: no record may
+disappear (absence is never a release), a new ceremony starts HELD, and
+RELEASED never returns to HELD. The store's host location is fixed with PR-1.
 
 ## 9. Hold-release eligibility, full readiness, `S_CURRENT`
 
@@ -328,7 +346,7 @@ Prep A check except `CEREMONY_HOLD`, and adds:
 | `KEY_TRANSITION` | the ladder the verified history shows for the head's current key (§11) |
 | `COMPROMISE_EPOCH` | §10 |
 | `CEREMONY_PROVENANCE` | INITIAL: the initial publication (CURRENT path), no record. Otherwise: the verified record, naming the head successor, registered once |
-| `CEREMONY_HOLD` | a parsed hold bound to exactly this verified state |
+| `CEREMONY_HOLD` | the governing record of the complete hold store, bound to exactly this verified state (§21.2) |
 
 | Mode | Hold required | Means |
 | --- | --- | --- |
@@ -440,8 +458,9 @@ credential-less signer mode was added.
 - `FULL_READINESS` is READY with the RELEASED primary hold, the loaded-key
   binding names S, the head's current key is S, and the derived transition is
   this ceremony; or, for an owner retry after a failure,
-  `HOLD_RELEASE_ELIGIBILITY` is READY under the custody-debt HELD hold and the
-  ceremony's own RELEASED hold binds the same keys;
+  `HOLD_RELEASE_ELIGIBILITY` is READY over a hold store in which the
+  custody-debt HELD hold governs and the ceremony's own RELEASED record is
+  present;
 - custody is exactly state C with RETIRED = P's hash, and every §6 fact holds.
 
 Otherwise `DESTRUCTION_BEFORE_S_CURRENT`, `DESTRUCTION_CEREMONY_MISMATCH`,
@@ -533,18 +552,16 @@ Unchanged: `AuthorityKeyRecordV1`, `AuthorityRegistryV1`, `OwnerEvidenceV2`,
 `RegistryHeadAdvanceAuthorizationV1`, the key publication v1, and every
 B1b-3a / 3b / 3c / 3e / Prep A golden. No new golden was introduced. Existing
 COMPROMISED behaviour is unchanged: all evidence under a COMPROMISED key
-rejects `KEY_COMPROMISED`. The durable TEST witness writers still accept only
-environment `test`; Source Prep B profiles admit `test` solely as that TEST
-stand-in, and every other profile value must equal DEV_SYNTHETIC.
+rejects `KEY_COMPROMISED`. Environment isolation is in §21.5.
 
 ## 18. Tests
 
 | Suite | Result |
 | --- | --- |
-| `test_b1b3e_source_prep_b.py` (new) | 55 passed |
-| `test_successor_custody.py` (new) | 23 passed |
-| owner-memory-control, complete | 477 passed (422 before) |
-| authority-dev, complete | 108 passed (85 before) |
+| `test_b1b3e_source_prep_b.py` (new) | 67 passed (55 + 12 from the pre-PR audit) |
+| `test_successor_custody.py` (new) | 24 passed (23 + 1 from the pre-PR audit) |
+| owner-memory-control, complete | 489 passed (422 before) |
+| authority-dev, complete | 109 passed (85 before) |
 | both new suites as a non-root user | passed |
 | `compileall`, `release_file_set.py`, `systemd-analyze verify`, `validate_repository.py`, `git diff --check` | passed |
 
@@ -566,20 +583,120 @@ no dependency was installed into the repository.
 - Whole-host rollback remains unresolved. No PROD authority, no Privacy
   custody (B1b-3f), no Stage III, no First Memory.
 
-## 20. Unresolved SOURCE DETAIL (fail closed today)
+## 20. Remaining SOURCE DETAIL
 
-- Epoch advances for reasons other than `KEY_COMPROMISE`
-  (`LEDGER_RESTORE_DETECTED`, `WITNESS_LEDGER_MISMATCH`, `OPERATOR_RECOVERY`)
-  have no accepted hold kind: readiness reports
-  `TRANSITION_KIND_NOT_SUPPORTED`.
-- An in-epoch head advance after `S_CURRENT` that does not change the current
-  key (administrative revocation, a non-current marking) moves the registry
-  head; the RELEASED hold then no longer binds and cannot be re-released for
-  the same ceremony. No accepted ceremony form exists for it yet.
 - `PREPARED_ABSENT` is reachable only by a race: the custody-root entry check
   refuses first.
+- The hold store's host location and the completeness of its root listing are
+  PR-1 observation work (like the credential inventory).
 
-## 21. Nonclaims
+The two items previously listed here are closed by RR-31 and RR-32 (§21).
+
+## 21. Pre-PR audit closure
+
+### 21.1 Hold kind name
+
+`ROTATION` is the accepted exact kind (OWNER-ACCEPTED). It is not renamed.
+
+### 21.2 Custody-debt dominance (OWNER-ACCEPTED)
+
+**Gap found.** Before the audit, `SuccessorReadinessInputsV1` carried one
+caller-selected hold record. A caller presenting only the original RELEASED
+hold while the derived custody-debt hold was HELD would have passed
+FULL_READINESS.
+
+**Fix.** `evaluate_successor_readiness` now judges the complete hold store
+(§8) with `governing_hold_reason`:
+
+- if the custody-debt identity derived from the base successor ceremony is
+  present, it DOMINATES and governs; the base ceremony's own RELEASED record
+  must also be present (`HOLD_DEBT_WITHOUT_RELEASED_CEREMONY` otherwise);
+- otherwise the governing record is the derived ceremony (the latest
+  REGISTRY_MAINTENANCE change, or the base ceremony);
+- a HELD record anywhere in the set blocks FULL_READINESS
+  (`CEREMONY_HOLD_HELD` for the governing one, `HOLD_SET_OTHER_HELD`
+  otherwise); in eligibility only the governing record may be HELD;
+- earlier RELEASED ceremonies are history and grant nothing.
+
+The debt hold moves HELD → RELEASED under the same fail-closed rules once the
+§13 evidence is complete and the inventory is STEADY. The original ceremony
+never moves RELEASED → HELD. `verify_destruction_order` reads the governing
+hold from the same set (the separate `released_hold` argument is gone).
+
+```text
+historical RELEASED hold != permission to ignore a newer fail-safe hold
+custody-debt hold        != authority
+destruction-debt release != authority
+```
+
+### 21.3 RR-31 — `REGISTRY_MAINTENANCE` (OWNER-ACCEPTED)
+
+An authorized in-epoch head change that keeps the same current issuance key
+(for example an administrative lifecycle change to a non-current key, or a
+non-current `COMPROMISE_MARKING`) moves the registry head, so the earlier
+hold, bound to the earlier head, no longer governs. Readiness derives the
+change from verified history: every authority step after the base ceremony is
+an in-epoch head advance whose current key before and after is the same. The
+latest such change governs and needs its own fresh HELD →
+HOLD_RELEASE_ELIGIBILITY → explicit release → RELEASED → FULL_READINESS
+cycle at the new head.
+
+- `expectedPredecessorKeyId = expectedSuccessorKeyId =` the current key.
+- Ceremony ID (SOURCE DETAIL): `<env>.registry-maintenance.<targetVersion>.<h>`,
+  `h` = the first 128 bits of SHA-256 over the RFC 8785 bytes of
+  {environment, currentKeyId, priorHead, targetHead, authorizationId}. Immutable
+  verified context only; no timestamp, no operator text; one hold can never
+  serve another change.
+- HELD binds an entry at the prior or the new head of that change; RELEASED
+  binds the new head.
+- A key-changing or epoch-changing transition is never maintenance.
+- The hold is not registry authority, does not authorize the head change,
+  does not replace `RegistryHeadAdvanceAuthorizationV1` (still re-verified
+  independently), does not rotate custody, and does not make the current key
+  authoritative. It only re-establishes local readiness at the new verified
+  head. The ceremony record and base kind stay those of the base ceremony.
+
+### 21.4 RR-32 — other epoch-advance reasons (OWNER-ACCEPTED)
+
+An epoch advance for any reason other than `KEY_COMPROMISE`
+(`LEDGER_RESTORE_DETECTED`, `WITNESS_LEDGER_MISMATCH`, `OPERATOR_RECOVERY`)
+fails closed: `KEY_TRANSITION = EPOCH_ADVANCE_REASON_UNSUPPORTED`, NOT_READY,
+for every hold kind. It is never reinterpreted as `ROTATION`,
+`REGISTRY_MAINTENANCE`, `INITIAL_CUSTODY`, or `KEY_COMPROMISE_RECOVERY`, and no
+generic `EPOCH_ADVANCE` / `RECOVERY` kind exists. Source Prep B does not
+authorize live rehearsal of another epoch-advance reason until that reason has
+an explicit accepted custody/readiness design. This is a local
+readiness/custody scope boundary, not an authority-contract limitation.
+
+### 21.5 TEST environment isolation
+
+**Gap found.** Before the audit, `is_dev_synthetic` admitted `{"dev",
+"test"}` as one DEV_SYNTHETIC set.
+
+**Fix.** `CustodyProfileV1.environment` is now the caller's explicit, trusted
+expected environment, and every record (hold, hold store, ceremony record,
+publication, register, witness store, registry) is compared with it exactly.
+The pure modules contain no `test` literal and map no environment onto
+another; they refuse only `prod` structurally and require every other profile
+field to equal DEV_SYNTHETIC. Live-capable callers use
+`DEV_SYNTHETIC_CUSTODY_PROFILE` (`dev`); TEST fixtures bind
+`custody_profile("test")` (the TEST witness writers still accept only
+`test`). The authority-dev signer profile and keygen remain `dev` only. Tests
+prove: a TEST context accepts `test`; a DEV context rejects `test` holds,
+stores, publications, registers, readiness, the C-4 gate, and custody steps;
+a TEST context rejects `dev` records; DEV and TEST initial ceremony IDs
+differ.
+
+### 21.6 Unchanged
+
+`AuthorityRegistryV1`, `AuthorityKeyRecordV1`, `RecoveryWitnessV1`,
+`RecoveryWitnessV2`, `EpochAdvanceAuthorizationV1`,
+`RegistryHeadAdvanceAuthorizationV1`, the key publication v1, compromise
+semantics, SW-1 forward-only custody, SW-2 `successor <N>`, and the SW-9
+`KEY_COMPROMISE` ordering. No authority root and no generic recovery
+authority contract was introduced.
+
+## 22. Nonclaims
 
 This slice does not claim or authorize: a live step; a key; a rotation; a
 revocation; an epoch advance; a custody move; an installed or active release;

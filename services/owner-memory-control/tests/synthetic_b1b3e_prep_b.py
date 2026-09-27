@@ -45,7 +45,8 @@ from lilith_owner_memory import witness_readiness as WR
 
 ENV = F.ENV                                    # "test": the TEST writers' only environment
 POLICY = "policy.dev-synthetic.v1"
-PROFILE = dataclasses.replace(SC.DEV_SYNTHETIC_CUSTODY_PROFILE, environment=ENV)
+# The TEST fixture binds its own exact expected environment; nothing maps it onto DEV.
+PROFILE = SC.custody_profile(ENV)
 P0 = SC.INITIAL_KEY_ID                          # test-only.dev-synthetic.actor.b1b3d.1
 S2 = SC.successor_identity(2).key_id            # test-only.dev-synthetic.actor.b1b3e.2
 S3 = SC.successor_identity(3).key_id
@@ -204,7 +205,8 @@ def hold(*, kind: str = SC.ROTATION, state: str = SC.HELD, ceremony: str = C2, p
             reason = SC.PREDECESSOR_DESTRUCTION_INCOMPLETE
         else:
             reason = {SC.INITIAL_CUSTODY: SC.INITIAL_CUSTODY_BOOTSTRAP, SC.ROTATION: SC.ROTATION_IN_PROGRESS,
-                      SC.KEY_COMPROMISE_RECOVERY: SC.KEY_COMPROMISE_RECOVERY_IN_PROGRESS}[kind]
+                      SC.KEY_COMPROMISE_RECOVERY: SC.KEY_COMPROMISE_RECOVERY_IN_PROGRESS,
+                      SC.REGISTRY_MAINTENANCE: SC.REGISTRY_MAINTENANCE_IN_PROGRESS}[kind]
     return {"protocol": SC.HOLD_PROTOCOL, "schemaVersion": SC.HOLD_SCHEMA_VERSION, "environment": ENV,
             "ceremonyId": ceremony, "transitionKind": kind, "state": state, "reason": reason,
             "expectedPredecessorKeyId": predecessor, "expectedSuccessorKeyId": successor,
@@ -400,6 +402,7 @@ class PrepBScenario:
 
     # readiness -------------------------------------------------------------
     def readiness_inputs(self, *, key_id: str = S2, hold_value: dict[str, Any] | None = None,
+                         holds: tuple[dict[str, Any], ...] | None = None, store_value: Any = "default",
                          phase: str = WR.CUTOVER_INSTALLED, inventory_value: Any = None,
                          record: dict[str, Any] | None | str = "default", register: Any = "default",
                          release: str | None = RELEASE_SHA, pub: bytes | None = None,
@@ -421,7 +424,12 @@ class PrepBScenario:
                      unit_credentials=P.unit_credentials(),
                      credential_inventory=inventory_value, inventory_phase=phase, hold_present=False)
         value.update(base)
-        return SR.SuccessorReadinessInputsV1(WR.WitnessReadinessInputsV1(**value), hold_value, pub, record, release,
+        if holds is None:
+            holds = () if hold_value is None else (hold_value,)
+        if store_value == "default":
+            store_value = SC.hold_store(*holds)
+        return SR.SuccessorReadinessInputsV1(WR.WitnessReadinessInputsV1(**value), store_value, pub, record,
+                                             release,
                                              register, PROFILE)
 
     def readiness(self, mode: str, **overrides: Any) -> SR.SuccessorReadinessResultV1:

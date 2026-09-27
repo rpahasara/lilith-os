@@ -86,6 +86,8 @@ class TransitionStepV1:
     prior_current: str | None       # OWNER_ACTOR issuance key before
     current: str | None             # OWNER_ACTOR issuance key after
     marked_compromised: tuple[str, ...]
+    prior_head: RC.RegistryHeadV1
+    head: RC.RegistryHeadV1
 
 
 @dataclass(frozen=True)
@@ -174,7 +176,8 @@ def verify_history(*, store: WR.WitnessStoreContextV1, witness_store: WR.Witness
                 entry.witness_version, EPOCH_ADVANCE if epoch_changed else HEAD_ADVANCE,
                 documents[entry.consumed_authorization_id]["reason"], entry.consumed_authorization_id,
                 before.current_recovery_epoch, entry.current_recovery_epoch, _current_key(prior_registry),
-                _current_key(registry), tuple(sorted(_compromised(registry) - _compromised(prior_registry)))))
+                _current_key(registry), tuple(sorted(_compromised(registry) - _compromised(prior_registry))),
+                before.registry_head, entry.registry_head))
         _current_key(parsed[-1])
     except _Reject as rejected:
         return None, rejected.reason, rejected.detail
@@ -329,7 +332,8 @@ AUTHORITY_KEY_TRANSITION_SCHEMA_VERSION = 1
 KEY_TRANSITION_REASONS = (
     "NO_CURRENT_ISSUANCE_KEY",
     "INITIAL_KEY_MISMATCH",
-    "TRANSITION_KIND_NOT_SUPPORTED",
+    "EPOCH_ADVANCE_REASON_UNSUPPORTED",
+    "EPOCH_ADVANCE_WITHOUT_KEY_CHANGE",
     "TRANSITION_SAME_EPOCH_AFTER_MARKING",
     "COMBINED_COMPROMISE_AND_SUCCESSOR",
     "TRANSITION_REASON_UNEXPECTED",
@@ -342,14 +346,24 @@ KEY_TRANSITION_REASONS = (
 
 @dataclass(frozen=True)
 class KeyTransitionV1:
-    """The ladder the verified history shows for the head's current key."""
+    """What the verified history shows for the head's current key (derived).
 
-    kind: str
-    predecessor_key_id: str | None
-    successor_key_id: str
-    ceremony_id: str
+    The BASE is the ceremony that made the current key current (INITIAL,
+    ROTATION, or KEY_COMPROMISE_RECOVERY). When authorized in-epoch head
+    changes followed that keep the same current key (RR-31), the GOVERNING
+    ceremony is the latest REGISTRY_MAINTENANCE one; otherwise it is the base.
+    """
+
+    kind: str                               # governing kind
+    predecessor_key_id: str | None          # governing expected predecessor
+    successor_key_id: str                   # the head's current key
+    ceremony_id: str                        # governing ceremony
+    ceremony_start_witness_version: int     # a primary HELD hold must predate this entry
+    base_kind: str
+    base_predecessor_key_id: str | None
+    base_ceremony_id: str
     establishing_witness_version: int
-    ceremony_start_witness_version: int   # a primary HELD hold must predate this entry
+    maintenance_prior_head: RC.RegistryHeadV1 | None = None
 
     authority_granted: ClassVar[bool] = False
 
@@ -360,40 +374,63 @@ def derive_key_transition(history: VerifiedHistoryV1, *,
     try:
         successor = _current_key(history.head_registry)
         _require(successor is not None, "NO_CURRENT_ISSUANCE_KEY")
-        if history.head.registry_head == history.genesis.registry_head:
-            _require(successor == profile.initial_key_id, "INITIAL_KEY_MISMATCH", successor)
-            return KeyTransitionV1(SC.INITIAL_CUSTODY, None, successor,
-                                   SC.initial_ceremony_id(profile.environment, profile.initial_key_id), 1, 1), None, None
         establishing = next((step for step in reversed(history.steps) if step.current != step.prior_current), None)
-        _require(establishing is not None, "TRANSITION_KIND_NOT_SUPPORTED", "HEAD_MOVED_WITHOUT_KEY_CHANGE")
-        if establishing.kind == HEAD_ADVANCE:
-            _require(establishing.prior_current is not None, "TRANSITION_SAME_EPOCH_AFTER_MARKING")
-            _require(establishing.prior_current not in establishing.marked_compromised,
-                     "COMBINED_COMPROMISE_AND_SUCCESSOR")
-            _require(establishing.reason == SUCCESSOR_ROTATION, "TRANSITION_REASON_UNEXPECTED", establishing.reason)
-            index = [w.witness_version for w in history.chain.witnesses].index(establishing.witness_version)
-            record = history.registries[index].keys[establishing.prior_current]
-            _require(record.revocation_reason == "SUPERSEDED", "TRANSITION_PREDECESSOR_NOT_SUPERSEDED")
-            kind, predecessor, start = SC.ROTATION, establishing.prior_current, establishing.witness_version
+        if establishing is None:
+            _require(successor == profile.initial_key_id, "INITIAL_KEY_MISMATCH", successor)
+            base = (SC.INITIAL_CUSTODY, None, SC.initial_ceremony_id(profile.environment, profile.initial_key_id), 1)
+            later = history.steps
         else:
-            _require(establishing.reason == KEY_COMPROMISE, "TRANSITION_KIND_NOT_SUPPORTED", establishing.reason)
-            marking = next((step for step in reversed(history.steps)
-                            if step.witness_version < establishing.witness_version and step.kind == HEAD_ADVANCE
-                            and step.epoch == establishing.prior_epoch and step.prior_current is not None
-                            and step.prior_current in step.marked_compromised), None)
-            _require(marking is not None, "EPOCH_ADVANCE_WITHOUT_MARKING")
-            recovery = evaluate_compromise_recovery(history, predecessor_key_id=marking.prior_current)
-            _require(recovery.phase == RECOVERY_EPOCH_ADVANCED and recovery.facts.get("successorKeyId") == successor
-                     and recovery.facts.get("epochAdvanceWitnessVersion") == establishing.witness_version,
-                     "COMPROMISE_RECOVERY_SEQUENCE_INVALID", recovery.reason)
-            kind, predecessor, start = SC.KEY_COMPROMISE_RECOVERY, marking.prior_current, marking.witness_version
-        ordinal = SC.successor_ordinal_of_key_id(successor)
-        _require(ordinal is not None, "SUCCESSOR_KEY_ID_NOT_DERIVED", successor)
-        identity = SC.successor_identity(ordinal)
+            base = _successor_base(history, establishing, successor)
+            later = tuple(step for step in history.steps if step.witness_version > establishing.witness_version)
+        # RR-32: an epoch advance under any reason other than KEY_COMPROMISE has
+        # no accepted custody/readiness ceremony. It is never reinterpreted as
+        # ROTATION, REGISTRY_MAINTENANCE, INITIAL_CUSTODY, or recovery.
+        for step in later:
+            _require(step.kind == HEAD_ADVANCE, "EPOCH_ADVANCE_WITHOUT_KEY_CHANGE", str(step.witness_version))
     except _Reject as rejected:
         return None, rejected.reason, rejected.detail
-    return KeyTransitionV1(kind, predecessor, successor, identity.ceremony_id, establishing.witness_version,
-                           start), None, None
+    kind, predecessor, ceremony, start = base
+    transition = KeyTransitionV1(kind, predecessor, successor, ceremony, start, kind, predecessor, ceremony,
+                                 establishing.witness_version if establishing else 1)
+    if later:
+        # RR-31: every in-epoch head change after the base keeps the same key;
+        # the latest one needs its own fresh REGISTRY_MAINTENANCE cycle.
+        last = later[-1]
+        maintenance = SC.registry_maintenance_ceremony_id(
+            environment=profile.environment, current_key_id=successor, prior_head=last.prior_head,
+            target_head=last.head, authorization_id=last.authorization_id)
+        transition = dataclasses.replace(transition, kind=SC.REGISTRY_MAINTENANCE, predecessor_key_id=successor,
+                                         ceremony_id=maintenance, ceremony_start_witness_version=last.witness_version,
+                                         maintenance_prior_head=last.prior_head)
+    return transition, None, None
+
+
+def _successor_base(history: VerifiedHistoryV1, establishing: TransitionStepV1,
+                    successor: str) -> tuple[str, str, str, int]:
+    if establishing.kind == HEAD_ADVANCE:
+        _require(establishing.prior_current is not None, "TRANSITION_SAME_EPOCH_AFTER_MARKING")
+        _require(establishing.prior_current not in establishing.marked_compromised,
+                 "COMBINED_COMPROMISE_AND_SUCCESSOR")
+        _require(establishing.reason == SUCCESSOR_ROTATION, "TRANSITION_REASON_UNEXPECTED", establishing.reason)
+        index = [w.witness_version for w in history.chain.witnesses].index(establishing.witness_version)
+        record = history.registries[index].keys[establishing.prior_current]
+        _require(record.revocation_reason == "SUPERSEDED", "TRANSITION_PREDECESSOR_NOT_SUPERSEDED")
+        kind, predecessor, start = SC.ROTATION, establishing.prior_current, establishing.witness_version
+    else:
+        _require(establishing.reason == KEY_COMPROMISE, "EPOCH_ADVANCE_REASON_UNSUPPORTED", establishing.reason)
+        marking = next((step for step in reversed(history.steps)
+                        if step.witness_version < establishing.witness_version and step.kind == HEAD_ADVANCE
+                        and step.epoch == establishing.prior_epoch and step.prior_current is not None
+                        and step.prior_current in step.marked_compromised), None)
+        _require(marking is not None, "EPOCH_ADVANCE_WITHOUT_MARKING")
+        recovery = evaluate_compromise_recovery(history, predecessor_key_id=marking.prior_current)
+        _require(recovery.phase == RECOVERY_EPOCH_ADVANCED and recovery.facts.get("successorKeyId") == successor
+                 and recovery.facts.get("epochAdvanceWitnessVersion") == establishing.witness_version,
+                 "COMPROMISE_RECOVERY_SEQUENCE_INVALID", recovery.reason)
+        kind, predecessor, start = SC.KEY_COMPROMISE_RECOVERY, marking.prior_current, marking.witness_version
+    ordinal = SC.successor_ordinal_of_key_id(successor)
+    _require(ordinal is not None, "SUCCESSOR_KEY_ID_NOT_DERIVED", successor)
+    return kind, predecessor, SC.successor_identity(ordinal).ceremony_id, start
 
 
 def authority_key_transition(transition: KeyTransitionV1, history: VerifiedHistoryV1, *, readiness_digest: str,
@@ -408,11 +445,13 @@ def authority_key_transition(transition: KeyTransitionV1, history: VerifiedHisto
     else:
         versions = [w.witness_version for w in witnesses]
         before = witnesses[versions.index(transition.ceremony_start_witness_version) - 1]
+    base = {"kind": transition.base_kind, "predecessorKeyId": transition.base_predecessor_key_id,
+            "ceremonyId": transition.base_ceremony_id}
     return {
         "recordType": AUTHORITY_KEY_TRANSITION_TYPE, "schemaVersion": AUTHORITY_KEY_TRANSITION_SCHEMA_VERSION,
         "authorityGranted": False, "authorityProof": False, "kind": transition.kind,
         "predecessorKeyId": transition.predecessor_key_id, "successorKeyId": transition.successor_key_id,
-        "ceremonyId": transition.ceremony_id, "fromHead": before.registry_head.to_dict(),
+        "ceremonyId": transition.ceremony_id, "baseCeremony": base, "fromHead": before.registry_head.to_dict(),
         "toHead": history.head.registry_head.to_dict(),
         "fromEpoch": before.current_recovery_epoch.to_dict(), "toEpoch": history.head.current_recovery_epoch.to_dict(),
         "fromWitnessDigest": before.digest, "toWitnessDigest": history.head.digest,
@@ -438,31 +477,39 @@ HOLD_BINDING_REASONS = (
     "HOLD_ENGAGED_AFTER_TRANSITION",
     "HOLD_WITNESS_HEAD_MISMATCH",
     "HOLD_CUSTODY_DEBT_OPEN",
+    "HOLD_SET_OTHER_HELD",
+    "HOLD_DEBT_WITHOUT_RELEASED_CEREMONY",
 )
 
 
 def hold_binding_reason(hold: SC.CeremonyHoldV1, *, mode: str, transition: KeyTransitionV1,
                         history: VerifiedHistoryV1, inventory_phase: str) -> tuple[str | None, str | None]:
-    """Does this parsed hold correspond to exactly the verified state?
+    """Does this governing hold correspond to exactly the verified state?
 
     - ELIGIBILITY needs HELD; FULL needs RELEASED (HELD -> CEREMONY_HOLD_HELD).
-    - kind, ceremony, predecessor, and successor equal the derived transition.
+    - kind, ceremony, predecessor, and successor equal the derived governing
+      transition (the custody-debt hold binds the base successor ceremony).
     - `observedWitnessDigest` names a verified chain entry: for a primary HELD
-      hold, an entry before the ceremony's first authority step (INITIAL: the
-      pinned genesis itself); for RELEASED, and for the custody-debt HELD
-      hold, an entry with the head's exact registry head (later ledger-only
-      entries allowed; another head is not).
+      successor hold, an entry before the ceremony's first authority step
+      (INITIAL: the pinned genesis itself); for a HELD REGISTRY_MAINTENANCE
+      hold, an entry at the prior or the new head of that change; for
+      RELEASED, and for the custody-debt HELD hold, an entry with the head's
+      exact registry head (later ledger-only entries allowed).
     - a RELEASED custody-debt hold also needs the STEADY inventory.
     """
     if mode == HOLD_RELEASE_ELIGIBILITY and hold.state != SC.HELD:
         return "HOLD_NOT_HELD", hold.state
     if mode == FULL_READINESS and hold.state != SC.RELEASED:
         return "CEREMONY_HOLD_HELD", hold.reason
-    if hold.transition_kind != transition.kind:
-        return "HOLD_TRANSITION_KIND_MISMATCH", f"{hold.transition_kind}!={transition.kind}"
-    if SC.primary_ceremony_id(hold.ceremony_id) != transition.ceremony_id:
+    if hold.custody_debt:
+        expected = (transition.base_kind, transition.base_ceremony_id, transition.base_predecessor_key_id)
+    else:
+        expected = (transition.kind, transition.ceremony_id, transition.predecessor_key_id)
+    if hold.transition_kind != expected[0]:
+        return "HOLD_TRANSITION_KIND_MISMATCH", f"{hold.transition_kind}!={expected[0]}"
+    if SC.primary_ceremony_id(hold.ceremony_id) != expected[1]:
         return "HOLD_CEREMONY_MISMATCH", hold.ceremony_id
-    if hold.expected_predecessor_key_id != transition.predecessor_key_id:
+    if hold.expected_predecessor_key_id != expected[2]:
         return "HOLD_PREDECESSOR_MISMATCH", str(hold.expected_predecessor_key_id)
     if hold.expected_successor_key_id != transition.successor_key_id:
         return "HOLD_SUCCESSOR_MISMATCH", str(hold.expected_successor_key_id)
@@ -470,9 +517,12 @@ def hold_binding_reason(hold: SC.CeremonyHoldV1, *, mode: str, transition: KeyTr
     if entry is None:
         return "HOLD_WITNESS_NOT_IN_CHAIN", None
     if hold.state == SC.HELD and not hold.custody_debt:
-        if transition.kind == SC.INITIAL_CUSTODY:
+        if hold.transition_kind == SC.INITIAL_CUSTODY:
             if entry.digest != history.genesis.digest:
                 return "HOLD_WITNESS_NOT_GENESIS", str(entry.witness_version)
+        elif hold.transition_kind == SC.REGISTRY_MAINTENANCE:
+            if entry.registry_head not in (transition.maintenance_prior_head, history.head.registry_head):
+                return "HOLD_WITNESS_HEAD_MISMATCH", str(entry.witness_version)
         elif entry.witness_version >= transition.ceremony_start_witness_version:
             return "HOLD_ENGAGED_AFTER_TRANSITION", str(entry.witness_version)
         return None, None
@@ -481,6 +531,45 @@ def hold_binding_reason(hold: SC.CeremonyHoldV1, *, mode: str, transition: KeyTr
     if hold.state == SC.RELEASED and hold.custody_debt and inventory_phase != WR.STEADY:
         return "HOLD_CUSTODY_DEBT_OPEN", inventory_phase
     return None, None
+
+
+def governing_hold_reason(holds: Mapping[str, SC.CeremonyHoldV1], *, mode: str, transition: KeyTransitionV1,
+                          history: VerifiedHistoryV1, inventory_phase: str
+                          ) -> tuple[SC.CeremonyHoldV1 | None, str | None, str | None]:
+    """Dominance over the complete hold set (not a caller-selected record).
+
+    - The custody-debt ceremony derived from the base successor ceremony, when
+      present, DOMINATES: it governs, and the base ceremony's own RELEASED
+      record must also be present (S_CURRENT was established before the debt).
+      An older RELEASED record never overrides a newer HELD one.
+    - Otherwise the governing ceremony is the derived one (the latest
+      REGISTRY_MAINTENANCE change, or the base ceremony).
+    - A HELD record anywhere in the set blocks FULL_READINESS; in
+      ELIGIBILITY only the governing record may be HELD.
+    Unrelated RELEASED records (earlier ceremonies) are history: they must be
+    valid but grant nothing.
+
+        historical RELEASED hold != permission to ignore a newer fail-safe hold
+    """
+    debt = SC.custody_debt_ceremony_id(transition.base_ceremony_id) \
+        if transition.base_kind in SC.SUCCESSOR_KINDS else None
+    if debt is not None and debt in holds:
+        governing = holds[debt]
+        base = holds.get(transition.base_ceremony_id)
+        if base is None or base.state != SC.RELEASED:
+            return governing, "HOLD_DEBT_WITHOUT_RELEASED_CEREMONY", transition.base_ceremony_id
+    else:
+        governing = holds.get(transition.ceremony_id)
+        if governing is None:
+            return None, "HOLD_MISSING", transition.ceremony_id
+    reason, detail = hold_binding_reason(governing, mode=mode, transition=transition, history=history,
+                                         inventory_phase=inventory_phase)
+    if reason is not None:
+        return governing, reason, detail
+    for ceremony_id, hold in sorted(holds.items()):
+        if hold.state == SC.HELD and hold is not governing:
+            return governing, "HOLD_SET_OTHER_HELD", ceremony_id
+    return governing, None, None
 
 
 # ------------------------------------------------- successor readiness ---
@@ -498,10 +587,11 @@ SUCCESSOR_READINESS_CHECKS = tuple(name for name in WR.READINESS_CHECKS if name 
 @dataclass(frozen=True)
 class SuccessorReadinessInputsV1:
     """Prep A inputs plus the Source Prep B ones. `base.hold_present` is
-    superseded and ignored: only a bound `CeremonyHoldV1` passes the hold."""
+    superseded and ignored: only the complete observed hold store, with its
+    governing record bound to the verified state, passes the hold check."""
 
     base: WR.WitnessReadinessInputsV1
-    hold: Mapping[str, Any] | None
+    hold_store: SC.HoldStoreObservationV1 | None
     publication_bytes: bytes | None
     ceremony_record: Mapping[str, Any] | None = None
     reviewed_release_sha: str | None = None
@@ -571,7 +661,8 @@ def evaluate_successor_readiness(inputs: SuccessorReadinessInputsV1, *, mode: st
     for key in ("witnessClassification", "witnessedHead", "loadedKeyBinding"):
         if key in base.facts:
             facts[key] = base.facts[key]
-    if not SC.is_dev_synthetic(profile) or base_inputs.environment != profile.environment:
+    if not SC.is_dev_synthetic(profile) or base_inputs.environment != profile.environment \
+            or base_inputs.store.environment != profile.environment:
         for name in ("PUBLICATION_BYTES", "KEY_TRANSITION", "COMPROMISE_EPOCH", "CEREMONY_PROVENANCE",
                      "CEREMONY_HOLD"):
             record(name, "PROFILE_NOT_DEV_SYNTHETIC")
@@ -603,8 +694,9 @@ def evaluate_successor_readiness(inputs: SuccessorReadinessInputsV1, *, mode: st
         skip("CEREMONY_PROVENANCE", "KEY_TRANSITION")
         skip("CEREMONY_HOLD", "KEY_TRANSITION")
         return _finish(mode, checks, facts, history, None)
-    facts["keyTransition"] = {"kind": transition.kind, "predecessorKeyId": transition.predecessor_key_id,
-                              "successorKeyId": transition.successor_key_id, "ceremonyId": transition.ceremony_id}
+    facts["keyTransition"] = {"kind": transition.base_kind, "predecessorKeyId": transition.base_predecessor_key_id,
+                              "successorKeyId": transition.successor_key_id, "ceremonyId": transition.base_ceremony_id}
+    facts["governingCeremony"] = {"kind": transition.kind, "ceremonyId": transition.ceremony_id}
 
     # CEREMONY_PROVENANCE: INITIAL_CUSTODY is the initial keygen publication
     # (CURRENT path) with no successor record; every successor needs its
@@ -612,7 +704,7 @@ def evaluate_successor_readiness(inputs: SuccessorReadinessInputsV1, *, mode: st
     # once in the burned-ordinal register.
     try:
         _require(published is not None, "PUBLICATION_MISSING")
-        if transition.kind == SC.INITIAL_CUSTODY:
+        if transition.base_kind == SC.INITIAL_CUSTODY:
             _require(inputs.ceremony_record is None, "CEREMONY_RECORD_UNEXPECTED")
             code = SC.publication_profile_reason(published_value, published, profile=profile,
                                                  key_id=profile.initial_key_id, credential_path=profile.current_path)
@@ -624,7 +716,8 @@ def evaluate_successor_readiness(inputs: SuccessorReadinessInputsV1, *, mode: st
                                                            profile=profile)
             _require(verified.verified, verified.reason or "", verified.detail)
             _require(verified.record.key_id == transition.successor_key_id
-                     and verified.record.ceremony_id == transition.ceremony_id, "CEREMONY_RECORD_NOT_HEAD_SUCCESSOR")
+                     and verified.record.ceremony_id == transition.base_ceremony_id,
+                     "CEREMONY_RECORD_NOT_HEAD_SUCCESSOR")
             registered = SC.verify_registered_ceremony(inputs.ceremony_register, inputs.ceremony_record,
                                                        profile=profile)
             _require(registered.ok, registered.reason or "", registered.detail)
@@ -632,13 +725,18 @@ def evaluate_successor_readiness(inputs: SuccessorReadinessInputsV1, *, mode: st
     except _Reject as rejected:
         record("CEREMONY_PROVENANCE", rejected.reason, rejected.detail)
 
-    hold, reason = SC.parse_ceremony_hold(inputs.hold, profile=profile)
-    if hold is None:
-        record("CEREMONY_HOLD", reason)
+    holds, reason, detail = SC.parse_hold_store(inputs.hold_store, profile=profile)
+    if holds is None:
+        record("CEREMONY_HOLD", reason, detail)
     else:
-        facts["hold"] = {"state": hold.state, "ceremonyId": hold.ceremony_id, "custodyDebt": hold.custody_debt}
-        record("CEREMONY_HOLD", *hold_binding_reason(hold, mode=mode, transition=transition, history=history,
-                                                     inventory_phase=base_inputs.inventory_phase))
+        governing, reason, detail = governing_hold_reason(holds, mode=mode, transition=transition, history=history,
+                                                          inventory_phase=base_inputs.inventory_phase)
+        if governing is not None:
+            base_record = holds.get(transition.base_ceremony_id)
+            facts["hold"] = {"state": governing.state, "ceremonyId": governing.ceremony_id,
+                             "custodyDebt": governing.custody_debt,
+                             "baseCeremonyReleased": bool(base_record and base_record.state == SC.RELEASED)}
+        record("CEREMONY_HOLD", reason, detail)
     return _finish(mode, checks, facts, history, transition)
 
 
@@ -660,7 +758,7 @@ def _finish(mode: str, checks: dict[str, WR.CheckOutcomeV1], facts: dict[str, An
         facts["holdReleaseEligible"] = mode == HOLD_RELEASE_ELIGIBILITY
         facts["issuanceReady"] = facts["successorCurrent"] = mode == FULL_READINESS
     if transition is not None and history is not None:
-        material = "NONE" if transition.kind == SC.INITIAL_CUSTODY else (
+        material = "NONE" if transition.base_kind == SC.INITIAL_CUSTODY else (
             "DESTROYED_FROM_ACTIVE_CUSTODY" if facts.get("inventoryPhase") == WR.STEADY else "RETAINED")
         facts["authorityKeyTransition"] = authority_key_transition(transition, history, readiness_digest=digest,
                                                                    predecessor_material=material)
@@ -886,7 +984,7 @@ class DestructionOrderResultV1:
 
 
 def verify_destruction_order(*, readiness: SuccessorReadinessResultV1, custody: SC.CustodyObservationV1,
-                             ceremony: SC.CustodyCeremonyV1, released_hold: Mapping[str, Any] | None = None,
+                             ceremony: SC.CustodyCeremonyV1,
                              profile: SC.CustodyProfileV1 = SC.DEV_SYNTHETIC_CUSTODY_PROFILE
                              ) -> DestructionOrderResultV1:
     """SW-1 / RR-29: may P's RETIRED blob be logically destroyed now?
@@ -894,10 +992,10 @@ def verify_destruction_order(*, readiness: SuccessorReadinessResultV1, custody: 
     Only after an independently reproduced `S_CURRENT`: a FULL_READINESS READY
     result at the head naming S, with P in RETIRED only (state C) and not
     authority-current. A retry after a failed destruction runs under the
-    custody-debt HELD hold: then HOLD_RELEASE_ELIGIBILITY READY for that hold
-    plus the ceremony's own RELEASED hold (which only an owner release after
-    eligibility writes) are required. Before S_CURRENT: always denied. No
-    rollback to P is ever permitted.
+    custody-debt HELD hold: then HOLD_RELEASE_ELIGIBILITY READY over the hold
+    set in which that debt hold governs and the ceremony's own RELEASED record
+    (which only an owner release after eligibility writes) is present. Before
+    S_CURRENT: always denied. No rollback to P is ever permitted.
     """
     facts = {"authorityGranted": False, "rollbackToPredecessorPermitted": False,
              "destructionIsRevocation": False}
@@ -920,13 +1018,7 @@ def verify_destruction_order(*, readiness: SuccessorReadinessResultV1, custody: 
             _require(hold.get("state") == SC.HELD and hold.get("custodyDebt") is True
                      and hold.get("ceremonyId") == SC.custody_debt_ceremony_id(ceremony.ceremony_id),
                      "DESTRUCTION_BEFORE_S_CURRENT", "NOT_A_CUSTODY_DEBT_RETRY")
-            released, reason = SC.parse_ceremony_hold(released_hold, profile=profile)
-            _require(released is not None and released.state == SC.RELEASED and not released.custody_debt
-                     and released.ceremony_id == ceremony.ceremony_id
-                     and released.transition_kind == transition.get("kind")
-                     and released.expected_predecessor_key_id == ceremony.predecessor_key_id
-                     and released.expected_successor_key_id == ceremony.successor_key_id,
-                     "RELEASED_HOLD_NOT_BOUND", reason)
+            _require(hold.get("baseCeremonyReleased") is True, "RELEASED_HOLD_NOT_BOUND")
         state = SC.custody_state(custody, ceremony)
         _require(state.verified and state.state == SC.STATE_C_INSTALLED, "PREDECESSOR_NOT_RETIRED",
                  state.reason or state.state)

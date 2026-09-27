@@ -400,20 +400,25 @@ class InitialCustodyTests(unittest.TestCase):
     def test_initial_hold_failures(self):
         cases = {
             "missing": (ELIGIBILITY, None, "HOLD_MISSING"),
-            "malformed": (ELIGIBILITY, {"state": "HELD"}, "HOLD_UNSUPPORTED_VERSION"),
+            "malformed": (ELIGIBILITY, "MALFORMED", "HOLD_UNSUPPORTED_VERSION"),
             "HELD not at genesis": (ELIGIBILITY, None, "HOLD_WITNESS_NOT_GENESIS"),
             "RELEASED for another witness": (FULL, B.initial_hold(state=SC.RELEASED, witness="f" * 64),
                                              "HOLD_WITNESS_NOT_IN_CHAIN"),
             "RELEASED in eligibility": (ELIGIBILITY, B.initial_hold(state=SC.RELEASED, witness=self.genesis),
                                         "HOLD_NOT_HELD"),
-            "rotation hold at genesis": (ELIGIBILITY, B.hold(witness=self.genesis), "HOLD_TRANSITION_KIND_MISMATCH"),
+            "rotation hold at genesis": (ELIGIBILITY, B.hold(witness=self.genesis), "HOLD_MISSING"),
         }
         ledger_only(self.s)
         cases["HELD not at genesis"] = (ELIGIBILITY, B.initial_hold(witness=self.s.head.digest),
                                         "HOLD_WITNESS_NOT_GENESIS")
         for name, (mode, value, expected) in cases.items():
             with self.subTest(name):
-                result = self.readiness(mode, value)
+                if value == "MALFORMED":
+                    store = SC.HoldStoreObservationV1((WR.StoreEntryV1(
+                        SC.hold_record_name(B.INITIAL_CEREMONY), WR.REGULAR, WR.document_bytes({"state": "HELD"})),))
+                    result = self.s.readiness(mode, key_id=B.P0, phase=WR.STEADY, store_value=store)
+                else:
+                    result = self.readiness(mode, value)
                 self.assertFalse(result.ready)
                 self.assertEqual(check(result, "CEREMONY_HOLD").reason, expected)
 
@@ -469,7 +474,7 @@ class RotationReadinessTests(unittest.TestCase):
             "predecessor mismatch": (FULL, {**rotated_released(s), "expectedPredecessorKeyId": B.S3},
                                      "HOLD_PREDECESSOR_MISMATCH"),
             "ceremony mismatch": (FULL, B.hold(state=SC.RELEASED, ceremony=B.C3, successor=B.S3,
-                                               witness=s.digests["successorHead"]), "HOLD_CEREMONY_MISMATCH"),
+                                               witness=s.digests["successorHead"]), "HOLD_MISSING"),
             "kind mismatch": (FULL, B.hold(kind=SC.KEY_COMPROMISE_RECOVERY, state=SC.RELEASED,
                                            witness=s.digests["successorHead"]), "HOLD_TRANSITION_KIND_MISMATCH"),
             "witness not in chain": (FULL, B.hold(state=SC.RELEASED, witness="e" * 64), "HOLD_WITNESS_NOT_IN_CHAIN"),
@@ -531,7 +536,10 @@ class RotationReadinessTests(unittest.TestCase):
         self.assertTrue(result.ready, result.reasons)
         old = s.readiness(FULL, key_id=B.S3, hold_value=rotated_released(s), record=record, register=register,
                           inventory_value=B.inventory(current=B.BLOB[B.S3], retired=B.BLOB[B.S2]))
-        self.assertEqual(check(old, "CEREMONY_HOLD").reason, "HOLD_CEREMONY_MISMATCH")
+        self.assertEqual(check(old, "CEREMONY_HOLD").reason, "HOLD_MISSING")
+        both = s.readiness(FULL, key_id=B.S3, holds=(rotated_released(s), hold), record=record, register=register,
+                           inventory_value=B.inventory(current=B.BLOB[B.S3], retired=B.BLOB[B.S2]))
+        self.assertTrue(both.ready, both.reasons)  # earlier RELEASED ceremonies are history only
         self.assertNotEqual(engaged, s.head.digest)
 
 
@@ -572,7 +580,7 @@ class CompromiseEpochRuleTests(unittest.TestCase):
         result = wrong.readiness(FULL, hold_value=kcr_hold(wrong, state=SC.RELEASED))
         self.assertFalse(result.ready)
         self.assertEqual(check(result, "COMPROMISE_EPOCH").reason, SR.COMPROMISE_EPOCH_ADVANCE_REQUIRED)
-        self.assertEqual(check(result, "KEY_TRANSITION").reason, "TRANSITION_KIND_NOT_SUPPORTED")
+        self.assertEqual(check(result, "KEY_TRANSITION").reason, "EPOCH_ADVANCE_REASON_UNSUPPORTED")
 
     def test_rule_is_recomputed_not_latched(self):
         marked = B.PrepBScenario().mark()
@@ -592,9 +600,10 @@ class CompromiseEpochRuleTests(unittest.TestCase):
         result = s.readiness(FULL, hold_value=B.hold(state=SC.RELEASED, witness=s.head.digest))
         self.assertEqual(check(result, "COMPROMISE_EPOCH").status, WR.PASS)
         self.assertEqual(check(result, "KEY_TRANSITION").status, WR.PASS)
-        # The earlier release is bound to the earlier head and no longer passes.
+        self.assertEqual(result.facts["governingCeremony"]["kind"], SC.REGISTRY_MAINTENANCE)
+        # The earlier rotation release governs nothing at the new head.
         stale = s.readiness(FULL, hold_value=rotated_released(s))
-        self.assertEqual(check(stale, "CEREMONY_HOLD").reason, "HOLD_WITNESS_HEAD_MISMATCH")
+        self.assertEqual(check(stale, "CEREMONY_HOLD").reason, "HOLD_MISSING")
 
 
 # ----------------------------------------------- SW-9 recovery sequence ---
@@ -982,7 +991,9 @@ class DestructionTests(unittest.TestCase):
         self.steady = B.custody(current=self.c.successor_blob_sha256)
 
     def full(self, **overrides):
-        return self.s.readiness(FULL, hold_value=overrides.pop("hold_value", rotated_released(self.s)), **overrides)
+        if "holds" not in overrides:
+            overrides.setdefault("hold_value", rotated_released(self.s))
+        return self.s.readiness(FULL, **overrides)
 
     def evidence(self, **overrides):
         value = dict(before=B.slot(self.c.predecessor_blob_sha256), unlink_succeeded=True, directory_fsynced=True,
@@ -1062,24 +1073,28 @@ class DestructionTests(unittest.TestCase):
         self.assertEqual(debt["state"], SC.HELD)
         self.assertIsNone(SC.hold_transition_reason(rotated_released(self.s), debt, profile=B.PROFILE))
         # Issuance fails closed; the authority head is untouched; S stays current.
-        blocked = self.full(hold_value=debt)
+        blocked = self.full(holds=(rotated_released(self.s), debt))
         self.assertEqual(reasons(blocked), {"CEREMONY_HOLD": "CEREMONY_HOLD_HELD"})
         self.assertEqual(blocked.facts["headCurrentKeyId"], B.S2)
         self.assertEqual(self.s.history().head.registry_head, RC.registry_head(B.rot2()))
         # Owner retry: eligibility under the debt hold plus the ceremony's own release.
-        retry = self.s.readiness(ELIGIBILITY, hold_value=debt)
+        retry = self.s.readiness(ELIGIBILITY, holds=(rotated_released(self.s), debt))
         self.assertTrue(retry.ready, retry.reasons)
         order = SR.verify_destruction_order(readiness=retry, custody=self.installed, ceremony=self.c,
-                                            released_hold=rotated_released(self.s), profile=B.PROFILE)
+                                            profile=B.PROFILE)
         self.assertTrue(order.permitted, order.reason)
-        unbound = SR.verify_destruction_order(readiness=retry, custody=self.installed, ceremony=self.c,
-                                              released_hold=None, profile=B.PROFILE)
-        self.assertEqual(unbound.reason, "RELEASED_HOLD_NOT_BOUND")
+        debt_alone = self.s.readiness(ELIGIBILITY, holds=(debt,))
+        self.assertEqual(check(debt_alone, "CEREMONY_HOLD").reason, "HOLD_DEBT_WITHOUT_RELEASED_CEREMONY")
+        self.assertFalse(SR.verify_destruction_order(readiness=debt_alone, custody=self.installed, ceremony=self.c,
+                                                     profile=B.PROFILE).permitted)
         # The debt hold releases only once destruction is complete.
         debt_released = {**debt, "state": SC.RELEASED, "reason": SC.OWNER_RELEASE_AFTER_ELIGIBILITY}
-        open_debt = self.full(hold_value=debt_released)
+        self.assertIsNone(SC.hold_store_transition_reason(
+            SC.hold_store(rotated_released(self.s), debt), SC.hold_store(rotated_released(self.s), debt_released),
+            profile=B.PROFILE))
+        open_debt = self.full(holds=(rotated_released(self.s), debt_released))
         self.assertEqual(check(open_debt, "CEREMONY_HOLD").reason, "HOLD_CUSTODY_DEBT_OPEN")
-        closed = self.full(hold_value=debt_released, phase=WR.STEADY)
+        closed = self.full(holds=(rotated_released(self.s), debt_released), phase=WR.STEADY)
         self.assertTrue(closed.ready, closed.reasons)
         self.assertEqual(closed.facts["authorityKeyTransition"]["predecessorMaterial"],
                          "DESTROYED_FROM_ACTIVE_CUSTODY")
@@ -1169,9 +1184,9 @@ class CrashMatrixTests(unittest.TestCase):
         h = B.PrepBScenario()
         held = kcr_hold(h, witness=h.digests["genesis"])
         row1 = h.readiness(FULL, key_id=B.P0, phase=WR.STEADY, hold_value=held, record=None, register=None)
-        self.assert_not_ready(row1, "CEREMONY_HOLD", "CEREMONY_HOLD_HELD")
+        self.assert_not_ready(row1, "CEREMONY_HOLD", "HOLD_MISSING")
         row1e = h.readiness(ELIGIBILITY, key_id=B.P0, phase=WR.STEADY, hold_value=held, record=None, register=None)
-        self.assert_not_ready(row1e, "CEREMONY_HOLD", "HOLD_TRANSITION_KIND_MISMATCH")
+        self.assert_not_ready(row1e, "CEREMONY_HOLD", "HOLD_MISSING")
         self.assertEqual(SC.custody_state(B.custody(current=p), c).state, SC.PREDECESSOR_STEADY)
         # 2. successor prepared, marking not yet done: S is KEY_UNKNOWN to the head.
         row2 = h.readiness(ELIGIBILITY, hold_value=held, phase=WR.SUCCESSOR_PREPARED,
@@ -1241,7 +1256,7 @@ class CrashMatrixTests(unittest.TestCase):
                          (SC.DESTRUCTION_INCOMPLETE, SC.KNOWN_CUSTODY_DEBT))
         debt = SR.destruction_failure_outcome(outcome, ceremony=c, transition_kind=kind,
                                               head_witness_digest=s.head.digest, profile=B.PROFILE)
-        self.assert_not_ready(s.readiness(FULL, hold_value=debt), "CEREMONY_HOLD", "CEREMONY_HOLD_HELD")
+        self.assert_not_ready(s.readiness(FULL, holds=(released, debt)), "CEREMONY_HOLD", "CEREMONY_HOLD_HELD")
         self.assertEqual(s.history().head.digest, s.head.digest)
         # 12a. credential-only restore of P after S_CURRENT: the binding refuses it.
         self.assert_not_ready(s.readiness(FULL, hold_value=released, blob=p, health_value=B.health(B.P0),
@@ -1276,7 +1291,8 @@ class CompatibilityTests(unittest.TestCase):
         result = SR.evaluate_successor_readiness(inputs, mode=FULL)
         self.assertEqual(check(result, "CEREMONY_HOLD").reason, "HOLD_MISSING")  # absence never releases
         forced = SR.evaluate_successor_readiness(dataclasses.replace(
-            inputs, base=dataclasses.replace(inputs.base, hold_present=True), hold=rotated_released(s)), mode=FULL)
+            inputs, base=dataclasses.replace(inputs.base, hold_present=True),
+            hold_store=SC.hold_store(rotated_released(s))), mode=FULL)
         self.assertTrue(forced.ready, forced.reasons)  # the boolean is ignored either way
 
     def test_new_modules_are_pure(self):
@@ -1295,6 +1311,294 @@ class CompatibilityTests(unittest.TestCase):
                                    profile=dataclasses.replace(B.PROFILE, environment="prod"))
         self.assertEqual(check(SR.evaluate_successor_readiness(prod, mode=FULL), "CEREMONY_HOLD").reason,
                          "PROFILE_NOT_DEV_SYNTHETIC")
+
+
+# ------------------------------------------- custody-debt dominance (audit) ---
+
+class CustodyDebtDominanceTests(unittest.TestCase):
+    """historical RELEASED hold != permission to ignore a newer fail-safe hold."""
+
+    def setUp(self):
+        self.s = B.rotated()
+        self.released = rotated_released(self.s)
+        self.debt = B.hold(ceremony=B.C2 + SC.CUSTODY_DEBT_SUFFIX, witness=self.s.head.digest)
+
+    def full(self, *holds, **overrides):
+        return self.s.readiness(FULL, holds=holds, **overrides)
+
+    def test_debt_held_dominates_the_original_release(self):
+        self.assertTrue(self.full(self.released).ready)
+        dominated = self.full(self.released, self.debt)
+        self.assertFalse(dominated.ready)
+        self.assertEqual(reasons(dominated), {"CEREMONY_HOLD": "CEREMONY_HOLD_HELD"})
+        self.assertEqual(dominated.facts["hold"]["ceremonyId"], B.C2 + SC.CUSTODY_DEBT_SUFFIX)
+        self.assertEqual(self.full(self.debt, self.released).checks["CEREMONY_HOLD"].reason, "CEREMONY_HOLD_HELD")
+        self.assertIs(SC.CeremonyHoldV1.authority_granted, False)  # custody-debt hold != authority
+
+    def test_debt_record_cannot_be_dropped_forked_or_rewound(self):
+        both = SC.hold_store(self.released, self.debt)
+        self.assertEqual(SC.hold_store_transition_reason(both, SC.hold_store(self.released), profile=B.PROFILE),
+                         "HOLD_RECORD_REMOVED")  # absence is never a release
+        self.assertEqual(SC.hold_store_transition_reason(
+            both, SC.hold_store({**self.released, "state": SC.HELD, "reason": SC.ROTATION_IN_PROGRESS,
+                                 "observedWitnessDigest": self.s.digests["holdEngaged"]}, self.debt),
+            profile=B.PROFILE), "HOLD_ALREADY_RELEASED")  # no RELEASED -> HELD on the original ceremony
+        debt_released = {**self.debt, "state": SC.RELEASED, "reason": SC.OWNER_RELEASE_AFTER_ELIGIBILITY}
+        self.assertIsNone(SC.hold_store_transition_reason(both, SC.hold_store(self.released, debt_released),
+                                                          profile=B.PROFILE))
+        self.assertEqual(SC.hold_store_transition_reason(SC.hold_store(self.released),
+                                                         SC.hold_store(self.released, debt_released),
+                                                         profile=B.PROFILE), "HOLD_MUST_START_HELD")
+        # One deterministic name per ceremony: a second (forked) debt record cannot coexist.
+        fork = WR.StoreEntryV1("f" * 64 + ".json", WR.REGULAR, SC.hold_record_bytes(
+            {**self.debt, "observedWitnessDigest": self.s.digests["holdEngaged"]}))
+        forked = SC.HoldStoreObservationV1(both.entries + (fork,))
+        self.assertEqual(SC.parse_hold_store(forked, profile=B.PROFILE)[1], "HOLD_STORE_NAME_MISMATCH")
+        twice = SC.HoldStoreObservationV1(both.entries + (both.entries[1],))
+        self.assertEqual(SC.parse_hold_store(twice, profile=B.PROFILE)[1], "HOLD_STORE_ENTRY_INVALID")
+        result = self.s.readiness(FULL, store_value=forked)
+        self.assertEqual(check(result, "CEREMONY_HOLD").reason, "HOLD_STORE_NAME_MISMATCH")
+
+    def test_debt_binding_and_store_hygiene(self):
+        cases = {
+            "debt without the original release": ((self.debt,), "HOLD_DEBT_WITHOUT_RELEASED_CEREMONY"),
+
+            "debt with a custody reason": ((self.released, {**self.debt, "reason": SC.ROTATION_IN_PROGRESS}),
+                                           "HOLD_REASON_STATE_MISMATCH"),
+            "another ceremony still HELD": ((self.released, B.hold(ceremony=B.C3, predecessor=B.S2, successor=B.S3,
+                                                                   witness=self.s.head.digest)),
+                                            "HOLD_SET_OTHER_HELD"),
+            "empty store": ((), "HOLD_MISSING"),
+        }
+        for name, (holds, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(check(self.full(*holds), "CEREMONY_HOLD").reason, expected)
+        # Retry-eligibility binding of the governing debt hold.
+        for name, (debt, expected) in {
+                "debt for another predecessor": ({**self.debt, "expectedPredecessorKeyId": B.S3},
+                                                 "HOLD_PREDECESSOR_MISMATCH"),
+                "debt at an earlier head": ({**self.debt, "observedWitnessDigest": self.s.digests["holdEngaged"]},
+                                            "HOLD_WITNESS_HEAD_MISMATCH")}.items():
+            with self.subTest(name):
+                result = self.s.readiness(ELIGIBILITY, holds=(self.released, debt))
+                self.assertEqual(check(result, "CEREMONY_HOLD").reason, expected)
+        for store, expected in ((None, "HOLD_STORE_UNOBSERVED"),
+                                (SC.HoldStoreObservationV1((WR.StoreEntryV1(SC.hold_record_name(B.C2), WR.SYMLINK),)),
+                                 "HOLD_STORE_ENTRY_INVALID"),
+                                (SC.HoldStoreObservationV1((WR.StoreEntryV1(SC.hold_record_name(B.C2), WR.REGULAR,
+                                                                            json.dumps(self.released).encode()),)),
+                                 "HOLD_STORE_ENTRY_INVALID")):
+            with self.subTest(store=expected):
+                self.assertEqual(check(self.s.readiness(FULL, store_value=store), "CEREMONY_HOLD").reason, expected)
+
+
+# --------------------------------------------- RR-31 REGISTRY_MAINTENANCE ---
+
+class RegistryMaintenanceTests(unittest.TestCase):
+    AUTH = "rhaa.prep-b-noncurrent-1"
+
+    def maintained(self) -> B.PrepBScenario:
+        s = B.rotated()
+        s.digests["priorHead"] = s.head.digest
+        s.publish(s.issue_head_advance(B.mark_noncurrent3(), reason=SR.COMPROMISE_MARKING, authorization_id=self.AUTH),
+                  B.mark_noncurrent3())
+        s.activate(B.S2)
+        return s
+
+    def ceremony(self, authorization_id: str = AUTH, key_id: str = B.S2) -> str:
+        return SC.registry_maintenance_ceremony_id(environment=B.ENV, current_key_id=key_id,
+                                                   prior_head=RC.registry_head(B.rot2()),
+                                                   target_head=RC.registry_head(B.mark_noncurrent3()),
+                                                   authorization_id=authorization_id)
+
+    def maint(self, s, *, state=SC.HELD, witness=None, ceremony=None, key=B.S2):
+        return B.hold(kind=SC.REGISTRY_MAINTENANCE, state=state, ceremony=ceremony or self.ceremony(),
+                      predecessor=key, successor=key, witness=witness or s.head.digest)
+
+    def test_same_key_new_head_needs_a_fresh_cycle(self):
+        s = self.maintained()
+        stale = s.readiness(FULL, holds=(rotated_released(s),))
+        self.assertEqual(reasons(stale), {"CEREMONY_HOLD": "HOLD_MISSING"})  # no new hold -> NOT_READY
+        self.assertEqual(stale.facts["governingCeremony"], {"kind": SC.REGISTRY_MAINTENANCE,
+                                                            "ceremonyId": self.ceremony()})
+        self.assertEqual(stale.facts["keyTransition"]["kind"], SC.ROTATION)  # the base is unchanged
+        for witness in (s.digests["priorHead"], s.head.digest):
+            held = s.readiness(ELIGIBILITY, holds=(rotated_released(s), self.maint(s, witness=witness)))
+            self.assertTrue(held.ready, held.reasons)
+        released = self.maint(s, state=SC.RELEASED)
+        self.assertIsNone(SC.hold_transition_reason(self.maint(s), released, profile=B.PROFILE))
+        full = s.readiness(FULL, holds=(rotated_released(s), released))
+        self.assertTrue(full.ready, full.reasons)
+        self.assertEqual(full.facts["authorityKeyTransition"]["kind"], SC.REGISTRY_MAINTENANCE)
+        self.assertIs(full.facts["authorityKeyTransition"]["authorityGranted"], False)
+        held_full = s.readiness(FULL, holds=(rotated_released(s), self.maint(s)))
+        self.assertEqual(check(held_full, "CEREMONY_HOLD").reason, "CEREMONY_HOLD_HELD")
+
+    def test_maintenance_hold_binds_exactly_one_change(self):
+        s = self.maintained()
+        cases = {
+            "released for the prior head": (self.maint(s, state=SC.RELEASED, witness=s.digests["priorHead"]),
+                                            "HOLD_WITNESS_HEAD_MISMATCH"),
+            "hold for another change": (self.maint(s, state=SC.RELEASED, ceremony=self.ceremony("rhaa.other")),
+                                        "HOLD_MISSING"),
+            "different current key": (self.maint(s, state=SC.RELEASED, key=B.P0), "HOLD_PREDECESSOR_MISMATCH"),
+        }
+        for name, (value, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(check(s.readiness(FULL, holds=(rotated_released(s), value)), "CEREMONY_HOLD").reason,
+                                 expected)
+        changed = {**self.maint(s), "expectedSuccessorKeyId": B.S3}
+        self.assertEqual(SC.parse_ceremony_hold(changed, profile=B.PROFILE)[1], "HOLD_MAINTENANCE_KEY_CHANGED")
+        for ceremony in ("test.registry-maintenance.by-hand", self.ceremony() + SC.CUSTODY_DEBT_SUFFIX,
+                         "dev" + self.ceremony()[len(B.ENV):]):
+            self.assertEqual(SC.parse_ceremony_hold({**self.maint(s), "ceremonyId": ceremony}, profile=B.PROFILE)[1],
+                             "HOLD_CEREMONY_NOT_DERIVED", ceremony)
+        self.assertEqual(SC.parse_ceremony_hold({**self.maint(s), "expectedPredecessorKeyId": None},
+                                                profile=B.PROFILE)[1], "HOLD_PREDECESSOR_REQUIRED")
+
+    def test_key_changing_and_epoch_changing_transitions_are_not_maintenance(self):
+        rotated = B.rotated()
+        rotation_change = SC.registry_maintenance_ceremony_id(
+            environment=B.ENV, current_key_id=B.S2, prior_head=RC.registry_head(B.g1()),
+            target_head=RC.registry_head(B.rot2()), authorization_id="rhaa.prep-b-rotation-1")
+        hold = B.hold(kind=SC.REGISTRY_MAINTENANCE, state=SC.RELEASED, ceremony=rotation_change, predecessor=B.S2,
+                      successor=B.S2, witness=rotated.head.digest)
+        result = rotated.readiness(FULL, holds=(hold,))
+        self.assertEqual(check(result, "CEREMONY_HOLD").reason, "HOLD_MISSING")
+        self.assertEqual(result.facts["governingCeremony"]["kind"], SC.ROTATION)
+        recovered = B.recovered()
+        epoch_change = SC.registry_maintenance_ceremony_id(
+            environment=B.ENV, current_key_id=B.S2, prior_head=RC.registry_head(B.mark2()),
+            target_head=RC.registry_head(B.rec3()), authorization_id="eaa.prep-b-recovery-1")
+        hold = B.hold(kind=SC.REGISTRY_MAINTENANCE, state=SC.RELEASED, ceremony=epoch_change, predecessor=B.S2,
+                      successor=B.S2, witness=recovered.head.digest)
+        result = recovered.readiness(FULL, holds=(hold,))
+        self.assertEqual(check(result, "CEREMONY_HOLD").reason, "HOLD_MISSING")
+        self.assertEqual(result.facts["governingCeremony"]["kind"], SC.KEY_COMPROMISE_RECOVERY)
+
+    def test_registry_authorization_is_still_independently_required(self):
+        s = self.maintained()
+        s.storage.drop(WR.AUTHORIZATION_DIRECTORY, WR.retained_authorization_name(self.AUTH))
+        result = s.readiness(FULL, holds=(rotated_released(s), self.maint(s, state=SC.RELEASED)))
+        self.assertFalse(result.ready)
+        self.assertEqual(check(result, "KEY_TRANSITION").reason, "HISTORY_WITNESS_NOT_CONSISTENT")
+        self.assertEqual(check(result, "CEREMONY_HOLD").status, WR.NOT_EVALUATED)
+
+    def test_maintenance_after_initial_custody(self):
+        s = B.PrepBScenario()
+        prior = RC.registry_head(s.registry)
+        target = B.registry(2, [B.key(B.P0, version=1),
+                                B.key(B.S5, version=2, created=B.T_CUT, revokedAt=B.T_CUT, revocationReason="ROUTINE")])
+        s.publish(s.issue_head_advance(target, reason="ADMINISTRATIVE_REVOCATION", authorization_id="rhaa.admin-1"),
+                  target)
+        s.activate(B.P0)
+        initial = B.initial_hold(state=SC.RELEASED, witness=s.digests["genesis"])
+        self.assertEqual(reasons(s.readiness(FULL, key_id=B.P0, phase=WR.STEADY, holds=(initial,))),
+                         {"CEREMONY_HOLD": "HOLD_MISSING"})
+        ceremony = SC.registry_maintenance_ceremony_id(environment=B.ENV, current_key_id=B.P0, prior_head=prior,
+                                                       target_head=RC.registry_head(target),
+                                                       authorization_id="rhaa.admin-1")
+        maint = B.hold(kind=SC.REGISTRY_MAINTENANCE, state=SC.RELEASED, ceremony=ceremony, predecessor=B.P0,
+                       successor=B.P0, witness=s.head.digest)
+        result = s.readiness(FULL, key_id=B.P0, phase=WR.STEADY, holds=(initial, maint))
+        self.assertTrue(result.ready, result.reasons)
+        self.assertEqual(result.facts["keyTransition"]["kind"], SC.INITIAL_CUSTODY)
+
+
+# ------------------------------------- RR-32 other epoch reasons fail closed ---
+
+class UnsupportedEpochReasonTests(unittest.TestCase):
+    def advanced(self, reason: str) -> B.PrepBScenario:
+        s = B.PrepBScenario()
+        target = B.registry(2, [B.key(B.P0, version=1, retiredAt=B.T_REC),
+                                B.key(B.S2, version=2, epoch=B.EN, created=B.T_REC)], epoch=B.EN)
+        authorization = s.issue_epoch_advance(target, reason=reason, authorization_id="eaa.prep-b-" + reason.lower())
+        s.adopt(authorization, target)
+        s.execute_epoch_advance(authorization, target)
+        s.quarantine()
+        return s
+
+    def test_every_other_reason_is_unsupported_for_every_hold_kind(self):
+        for reason in sorted(RC.EPOCH_ADVANCE_REASONS - {SR.KEY_COMPROMISE}):
+            s = self.advanced(reason)
+            head = s.head.digest
+            candidates = {
+                SC.ROTATION: B.hold(state=SC.RELEASED, witness=head),
+                SC.KEY_COMPROMISE_RECOVERY: B.hold(kind=SC.KEY_COMPROMISE_RECOVERY, state=SC.RELEASED, witness=head),
+                SC.INITIAL_CUSTODY: B.initial_hold(state=SC.RELEASED, witness=head),
+                SC.REGISTRY_MAINTENANCE: B.hold(kind=SC.REGISTRY_MAINTENANCE, state=SC.RELEASED, predecessor=B.S2,
+                                                ceremony=SC.registry_maintenance_ceremony_id(
+                                                    environment=B.ENV, current_key_id=B.S2,
+                                                    prior_head=RC.registry_head(B.g1()),
+                                                    target_head=s.head.registry_head,
+                                                    authorization_id="eaa.prep-b-" + reason.lower()),
+                                                witness=head),
+            }
+            for kind, value in candidates.items():
+                with self.subTest(reason=reason, kind=kind):
+                    result = s.readiness(FULL, holds=(value,))
+                    self.assertFalse(result.ready)
+                    self.assertEqual(check(result, "KEY_TRANSITION").reason, "EPOCH_ADVANCE_REASON_UNSUPPORTED")
+                    self.assertEqual(check(result, "CEREMONY_HOLD").status, WR.NOT_EVALUATED)
+            self.assertEqual(SR.derive_key_transition(s.history(), profile=B.PROFILE)[1:],
+                             ("EPOCH_ADVANCE_REASON_UNSUPPORTED", reason))
+        for name in ("EPOCH_ADVANCE", "RECOVERY", "ROUTINE_ROTATION"):
+            self.assertNotIn(name, SC.TRANSITION_KINDS)
+
+
+# ------------------------------------------------ environment isolation ---
+
+class EnvironmentIsolationTests(unittest.TestCase):
+    DEV = SC.DEV_SYNTHETIC_CUSTODY_PROFILE
+
+    def test_no_environment_is_mapped_onto_another(self):
+        for module in (SC, SR):
+            source = Path(module.__file__).read_text(encoding="utf-8")
+            self.assertNotIn('"test"', source, module.__name__)
+            self.assertNotIn("'test'", source, module.__name__)
+        self.assertEqual(SC.custody_profile("dev"), self.DEV)
+        self.assertEqual(B.PROFILE.environment, "test")
+        with self.assertRaises(Exception):
+            SC.custody_profile("prod")
+        self.assertFalse(SC.is_dev_synthetic(dataclasses.replace(self.DEV, environment="staging")))
+
+    def test_hold_records_bind_the_exact_expected_environment(self):
+        test_hold = B.hold(witness="a" * 64)
+        self.assertIsNotNone(SC.parse_ceremony_hold(test_hold, profile=B.PROFILE)[0])        # TEST accepts test
+        self.assertEqual(SC.parse_ceremony_hold(test_hold, profile=self.DEV)[1], "HOLD_ENVIRONMENT_MISMATCH")
+        dev_hold = {**test_hold, "environment": "dev"}
+        self.assertIsNotNone(SC.parse_ceremony_hold(dev_hold, profile=self.DEV)[0])
+        self.assertEqual(SC.parse_ceremony_hold(dev_hold, profile=B.PROFILE)[1], "HOLD_ENVIRONMENT_MISMATCH")
+        self.assertNotEqual(SC.initial_ceremony_id("dev", SC.INITIAL_KEY_ID), B.INITIAL_CEREMONY)
+        dev_initial = {**B.initial_hold(witness="a" * 64), "environment": "dev"}
+        self.assertEqual(SC.parse_ceremony_hold(dev_initial, profile=self.DEV)[1], "HOLD_INITIAL_CEREMONY_MISMATCH")
+        self.assertEqual(SC.parse_hold_store(SC.hold_store(test_hold), profile=self.DEV)[1],
+                         "HOLD_ENVIRONMENT_MISMATCH")
+
+    def test_records_and_readiness_are_environment_exact(self):
+        record = B.ceremony_record()
+        publication = B.publication_bytes(B.S2)
+        self.assertTrue(SC.verify_successor_ceremony_record(record=record, publication_bytes=publication,
+                                                            reviewed_release_sha=B.RELEASE_SHA,
+                                                            profile=B.PROFILE).verified)
+        self.assertEqual(SC.verify_successor_ceremony_record(record=record, publication_bytes=publication,
+                                                             reviewed_release_sha=B.RELEASE_SHA,
+                                                             profile=self.DEV).reason, "PUBLICATION_PROFILE_MISMATCH")
+        self.assertEqual(SC.check_ordinal_unburned(B.ceremony_register(record), 3, profile=self.DEV).reason,
+                         "REGISTER_ENVIRONMENT_MISMATCH")
+        s = B.rotated()
+        inputs = dataclasses.replace(s.readiness_inputs(hold_value=rotated_released(s)), profile=self.DEV)
+        result = SR.evaluate_successor_readiness(inputs, mode=FULL)
+        self.assertFalse(result.ready)
+        self.assertEqual(check(result, "CEREMONY_HOLD").reason, "PROFILE_NOT_DEV_SYNTHETIC")
+        gate = s.gate(SR.ADVANCE_EPOCH, kcr_hold(s), profile=self.DEV)
+        self.assertEqual(gate.reason, "PROFILE_NOT_DEV_SYNTHETIC")
+        custody = SR.authorize_custody_step(step=SC.VACATE, custody=B.custody(current=B.BLOB[B.P0],
+                                                                                prepared=B.BLOB[B.S2]),
+                                            ceremony=B.ceremony(), hold=B.hold(witness=s.digests["holdEngaged"]),
+                                            store=s.context(), witness_store=s.observation(),
+                                            head_registries=tuple(s.registries), profile=self.DEV)
+        self.assertEqual(custody.reason, "PROFILE_NOT_DEV_SYNTHETIC")
 
 
 if __name__ == "__main__":
