@@ -5,8 +5,10 @@ Status:
 - **DESIGN CLOSURE** (SW-1, SW-2, SW-9; RR-11-D1, RR-11-D2)
 - **SOURCE NOT IMPLEMENTED**
 - **LIVE REHEARSAL NOT AUTHORIZED**
-- **OWNER DECISIONS PENDING:** RR-11-D1, RR-11-D2, RR-22 … RR-29 (§18).
-  Recommendations here are not owner decisions
+- **OWNER DECISIONS ACCEPTED:** RR-11-D1, RR-11-D2, RR-22 … RR-29, and the
+  derived compromise-epoch readiness rule (§18). First draft `8e3643c`; this
+  revision is the owner-decision closure pass
+- **ONE DETAIL PENDING:** RR-30, the initial-custody hold record (§10.6)
 - **WHOLE-HOST ROLLBACK UNRESOLVED**
 - **REAL AUTHORITY ABSENT**
 
@@ -47,7 +49,8 @@ Labels:
 | **SOURCE FACT** | read from current source at the base |
 | **ALREADY_DETERMINED** | fixed by an accepted record or by current source; not reopened |
 | **DERIVED** | follows necessarily from accepted decisions and current source; not a new choice |
-| **PENDING_OWNER_DECISION** | a new choice. A recommendation is given; nothing is accepted here |
+| **OWNER-ACCEPTED** | accepted in the owner-decision closure pass (§18). Binding for Source Prep B source; exact schemas stay source work |
+| **PENDING_OWNER_DECISION** | a new choice. A recommendation is given; nothing is accepted |
 
 ## 1. Controlling source facts
 
@@ -97,6 +100,20 @@ cryptographic ability to sign != authorization to issue
 logical destruction    != media zeroization
 ```
 
+Pinned by the owner-decision closure pass:
+
+```text
+owner signing error                        != valid readiness
+private key loaded                         != issuance authority
+COMPROMISED key loaded for recovery        != valid evidence issuer
+hold                                       != authority
+hold release                               != authority
+hold release                               != S_CURRENT
+missing hold                               != released
+destruction failure                        != authority rollback
+release rollback                           != authority rollback
+```
+
 ## 3. Logical custody roles
 
 The minimum set is three roles plus absence. Prep A already uses the names
@@ -111,7 +128,7 @@ fourth loadable-looking location without adding a property.
 | Role | Holds | Created by | Readable by | systemd may load? | Signer may observe? | Deployer may observe? | Authority? | Survives restart? | May be destroyed? | Contract |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **CURRENT** | exactly one blob: the one the unit loads | the initial keygen (B1b-3d L2b); later, only the cutover install (a same-filesystem rename of PREPARED) | root only | **yes, the only one** (PB-3) | no (`InaccessiblePaths`). It sees only the decrypted `$CREDENTIALS_DIRECTORY` copy | no | **no**. Its blob is current only if its hash equals the head key's publication (B2 = B3) | yes | only by the cutover vacate. Never overwritten | `root:root 0600` regular file in `root:root 0700` `/etc/credstore.encrypted` |
-| **PREPARED** | at most one successor blob | the successor keygen only | root only | **no**: referenced by no unit | **no**: must be `InaccessiblePaths` in the successor release (§9) | no | no. The key is `KEY_UNKNOWN` until a head names it | yes | yes, while `NOT_IN_HEAD` (abandon); otherwise it is emptied by the cutover install | `root:root 0600` regular file in a `root:root 0700` directory, on the credstore's filesystem |
+| **PREPARED** | at most one successor blob | the successor keygen only | root only | **no**: referenced by no unit | **no**: must be `InaccessiblePaths` in the successor release (§8) | no | no. The key is `KEY_UNKNOWN` until a head names it | yes | yes, while `NOT_IN_HEAD` (abandon); otherwise it is emptied by the cutover install | `root:root 0600` regular file in a `root:root 0700` directory, on the credstore's filesystem |
 | **RETIRED** | at most one predecessor blob | the cutover vacate only (a same-filesystem rename of CURRENT) | root only | **no** | **no** (`InaccessiblePaths`) | no | no. The key is non-current at the head. Class `KNOWN_CUSTODY_DEBT`, or `COMPROMISED` in SW-9 | yes | **only after independently verified `S_CURRENT`** (§4) | as PREPARED |
 | **ABSENT** | nothing | — | — | a unit whose CURRENT is absent fails to start (fail safe) | — | — | — | — | — | Prep A `ABSENT` |
 
@@ -165,10 +182,16 @@ RETIRED.
   `SUPERSEDED` at the witnessed head and can never be current again (gate SF-10).
   A loaded P can only fail the binding.
 - **When destruction becomes permissible.** Only after the independent
-  verifier reproduced `S_CURRENT`, i.e. every Prep A readiness check `PASS`
-  at head vN+1 with the binding naming S. The hold may be released or still
-  in place. Destruction is permitted, not required, at that point.
-  RR-29 asks how long P may remain.
+  verifier reproduced `S_CURRENT`: every readiness check `PASS` at head vN+1,
+  with the binding naming S. **OWNER-ACCEPTED (RR-29):** destruction is then
+  the **mandatory next custody-cleanup step**. It is not part of authority
+  establishment.
+- **When logical destruction fails after `S_CURRENT`.** Do not roll back the
+  authority head, and do not restore P to CURRENT. S stays the
+  authority-current key. Fail closed by engaging a local availability hold
+  (`CeremonyHoldV1` state `HELD`), which stops issuance. Report
+  `KNOWN_CUSTODY_DEBT`. Completing the destruction needs owner intervention or
+  a retry. `destruction failure != authority rollback`.
 - **Evidence and zeroization.** See §13.
 
 ```text
@@ -179,9 +202,15 @@ S_CURRENT independently verified -> then, and only then, predecessor destruction
 ```
 
 **SW-1 source requirement.** A pure destruction-ordering verifier refuses
-destruction unless it is given a Prep A readiness result that is `READY` at
-the same head, with a binding naming the successor, and an inventory in
-`CUTOVER_INSTALLED` whose RETIRED hash equals P's publication. The rotation
+destruction unless it is given all of:
+
+- a readiness result that is `READY` at the same head, with a binding naming
+  the successor;
+- an inventory in `CUTOVER_INSTALLED` whose RETIRED hash equals P's
+  publication.
+
+The destruction evidence of §13 decides `DESTROYED`. Anything short of it
+decides `DESTRUCTION_INCOMPLETE`, which requires the availability hold. The rotation
 assessment and `AuthorityKeyTransitionV1` report `predecessorMaterial:
 RETAINED | DESTROYED_FROM_ACTIVE_CUSTODY`. A retained P never satisfies
 readiness: that is already proven by Prep A (the CURRENT hash must equal the
@@ -237,10 +266,11 @@ rotations, or does every rotation need its own reviewed release?
 | Future PROD suitability | no | burdensome | reasonable template (a PROD profile is its own review) |
 | Operational burden | low | **high**: review, build, attest, install, and select before every rotation, and the gate forbids a selector switch inside a custody ceremony | low |
 
-**Recommendation: C** (PENDING_OWNER_DECISION).
+**OWNER-ACCEPTED: C.** One reusable, reviewed, **closed** successor-capable
+release. Its only successor form is `successor <N>`.
 
-Varies per ceremony: **one** argument, the successor ordinal `N`, with
-`N ≥ 2`. N is decimal, no leading zero, bounded to four digits, and parsed
+Varies per ceremony: **one** argument, the bounded positive successor
+ordinal `N`, with `N ≥ 2`. N is decimal, no leading zero, bounded to four digits, and parsed
 strictly. From N the tool derives:
 
 - `keyId = test-only.dev-synthetic.actor.b1b3e.<N>`. It keeps the profile's
@@ -266,6 +296,20 @@ option.
 Not an input: timestamps, random filenames, and anything read from the
 registry. The keygen never reads or judges authority state.
 
+**Ordinals are burned (OWNER-ACCEPTED).** Once an ordinal has produced
+credential material or a publication, that ordinal, its `keyId`, and its
+`ceremonyId` are permanently burned. They must never be reused, even if the
+ceremony is later abandoned. Enforcement is layered, and none of it is
+authority:
+
+- **Registry history** stays the authority boundary for key identity: K-ROOT
+  cannot publish a second record under an existing `keyId` (§9.3).
+- The **owner ceremony register** (PR-3) records every burned ordinal. It
+  prevents reuse before any registry publication.
+- The Source Prep B **ceremony-record verifier** refuses a second
+  `SuccessorCeremonyRecordV1` for an ordinal, `keyId`, or `ceremonyId` it has
+  already seen.
+
 ## 6. RR-11-D2 — credential name vs slot
 
 **Question.** Does the systemd runtime credential name stay fixed across
@@ -282,8 +326,11 @@ rotations?
 | Restart semantics | a restart loads whatever is in CURRENT, and the binding decides | ditto, plus a unit-generation mismatch risk | ditto |
 | Accidental dual loading | impossible: the unit references one path (Prep A inventory + binding) | two directives possible during transition | as A |
 
-**Recommendation: A** (PENDING_OWNER_DECISION). It is the option the gate
-itself noted as meeting both RR-11-D2 constraints.
+**OWNER-ACCEPTED: A.** The runtime systemd credential name stays
+`owner-actor-signing-key` across all rotations. No successor gets a new
+runtime credential ID. The signer keeps requesting exactly one runtime
+credential, `owner-actor-signing-key`. Only the CURRENT encrypted source slot
+may back it.
 
 The consequence is that systemd name binding no longer distinguishes P from
 S. It still distinguishes K-ACT from K-WIT. What distinguishes P from S is
@@ -296,11 +343,12 @@ B4 = the head key's fingerprint.
 | --- | --- | --- | --- | --- |
 | `credentialName` | the systemd runtime credential ID: the file name inside `$CREDENTIALS_DIRECTORY`, and the name embedded in the ciphertext by `--name` | profile constant; unit directive; publication `custodyEvidence` | **no** (A) | no |
 | `keyId` | the registry identity of one key | the `AuthorityKeyRecordV1` and the publication's `publicVerificationMaterial` | **yes**: one per key, derived from N | the K-ROOT registry record is authority. The ID alone is not |
-| `ceremonyId` | the identity of one successor ceremony | the ceremony record, owner register, and publication (RR-27) | yes | no (provenance) |
+| `ceremonyId` | the identity of one successor ceremony | `SuccessorCeremonyRecordV1` and the owner ceremony register (RR-27); **not** the key publication | yes; burned once used | no (provenance) |
 | logical slot role | CURRENT / PREPARED / RETIRED | inventory observation | the blob moves between roles | no |
 | filesystem path | where the bytes of a role sit | fixed per role (RR-26) | no; the blob moves | no |
 
-A blob is identified by `blobSha256`, never by name or path.
+A blob is identified by `blobSha256`, never by name or path. These five
+identifiers are not aliases (OWNER-ACCEPTED).
 
 ## 7. SW-2 — the successor-capable release
 
@@ -313,10 +361,25 @@ The release contains:
 - a new closed form, `successor <N>`;
 - an installer stage that creates the PREPARED and RETIRED directories;
 - the unit change `InaccessiblePaths += <custody root>`;
-- the new release-set contract (RR-25).
+- the new release-set contract (RR-25): this release becomes the **single**
+  installed authority-dev release.
 
 `actor` stays exactly as PB-4 describes: initial custody only, refused if the
 credstore is non-empty. The successor form never writes CURRENT.
+
+**Release set (OWNER-ACCEPTED, RR-25).**
+
+- Only **one** executable authority-dev release is installed on the host. No
+  second executable release is retained merely for operational rollback.
+- The prior reviewed release (`9ac7de2`) is preserved by immutable
+  repository history, by its release SHA and provenance record, and by the
+  existing reviewed-artifact process.
+- Before any authority point of no return, reinstalling a prior reviewed
+  release may be a separately reviewed operational recovery.
+- After an authority point of no return, a release rollback never implies an
+  authority rollback. `release rollback != authority rollback`.
+- The installer's `RELEASE_SET` check therefore keeps "exactly one entry",
+  now naming the successor-capable release.
 
 ### 7.2 `successor <N>` preconditions (all refuse closed, and none generate anything)
 
@@ -329,7 +392,11 @@ credstore is non-empty. The successor form never writes CURRENT.
 4. The PREPARED directory exists, is `root:root 0700`, is not a symlink, and
    is **empty**. The RETIRED directory is empty.
 5. The derived `keyId` is not the initial K-ACT ID. See §9.3 for why this is
-   the only local uniqueness check.
+   the only local check of identity. Ordinal burning is enforced by the owner
+   ceremony register and the ceremony-record verifier (§5), not by keygen
+   state.
+6. PREPARED, RETIRED, and the credstore report the same `st_dev`. This proves
+   that every later cutover rename is a same-filesystem rename (RR-26).
 
 ### 7.3 One run
 
@@ -359,33 +426,41 @@ The keygen refuses on each of:
 - RETIRED non-empty;
 - the credstore not exactly CURRENT;
 - CURRENT not regular or wrongly moded;
+- PREPARED, RETIRED, and the credstore on different filesystems (`st_dev`);
 - CURRENT changed during the run;
 - not root, not DEV, swap active, or host key custody wrong;
 - the ciphertext containing the plaintext;
 - an existing target (`O_EXCL`).
 
-## 8. Side-by-side slot paths (RR-26)
+## 8. Side-by-side slot paths (RR-26, OWNER-ACCEPTED)
 
-Exact paths are an open detail (gate §7.2).
-
-**Recommendation** (PENDING_OWNER_DECISION): one root-only custody root on
-the same filesystem as `/etc/credstore.encrypted`, so that renames are
-atomic:
-
-| Path | Role |
+| Role | Path |
 | --- | --- |
-| `/etc/lilith-authority-custody/` | `root:root 0700` |
-| `/etc/lilith-authority-custody/prepared/` | PREPARED |
-| `/etc/lilith-authority-custody/retired/` | RETIRED |
+| CURRENT | `/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred` (unchanged, PB-3) |
+| PREPARED | `/etc/lilith-authority-custody/prepared/lilith-authority-dev.owner-actor.cred` |
+| RETIRED | `/etc/lilith-authority-custody/retired/lilith-authority-dev.owner-actor.cred` |
 
-The blob keeps a fixed name, `lilith-authority-dev.owner-actor.cred`, in
-every role. The successor unit adds `InaccessiblePaths=/etc/lilith-authority-custody`.
+Requirements:
+
+- CURRENT stays the **only** `LoadCredentialEncrypted=` source.
+- `/etc/lilith-authority-custody`, `prepared/`, and `retired/` are all
+  `root:root 0700` directories.
+- Blobs are `root:root` regular `0600` files.
+- No symlinks anywhere on these paths, and no extra blobs.
+- Same filesystem (`st_dev`) must be proven before any rename-based cutover.
+  The keygen proves it at preparation (§7.2); the cutover proves it again
+  before each rename.
+- PREPARED and RETIRED are inaccessible to the authority service: the unit
+  adds `InaccessiblePaths=/etc/lilith-authority-custody`.
+- Root ceremony tooling alone performs the custody moves.
 
 **Not inside `/etc/credstore.encrypted`**, because:
 
 - systemd searches credstore directories for credentials by name;
 - the B1b-3d §13 `…next.cred` placement is superseded (GC-2);
 - Prep A treats any second credstore name as `UNEXPECTED_CREDENTIAL_BLOB`.
+
+Filesystem role and path never determine authority.
 
 ## 9. Provenance: release, ceremony, key (RR-27)
 
@@ -398,27 +473,44 @@ The produced blob and its publication must be bound to four things:
 - **the release:** the reviewed `RELEASE_SHA`;
 - **the profile:** environment, domain, and type.
 
-### 9.2 Where each binding lives
+### 9.2 Where each binding lives (RR-27, OWNER-ACCEPTED with minimality)
+
+The existing key publication contract stays **unchanged**. No
+`KeyPublicationV2` is created merely to carry ceremony or release
+provenance, unless implementation proves the existing publication cannot
+remain stable.
 
 | Binding | Carried by | Verified by |
 | --- | --- | --- |
 | keyId, domain, type, environment, publicKey | publication `publicVerificationMaterial` (unchanged) | Prep A binding (B3 = B1) |
-| blob | publication `custodyEvidence.blobSha256` (unchanged) | Prep A binding and inventory (B2 = B3) |
-| ceremony | **proposed:** publication `custodyEvidence.ceremonyId` and `custodyEvidence.slotRole = PREPARED`, under a publication `schemaVersion` 2. **Source design change**, not implemented | ceremony record + owner register |
-| release | **not in the publication.** The keygen cannot know its own reviewed git SHA without a self-reference. Instead, the non-authority `SuccessorCeremonyRecordV1` (owner transcript) binds the items listed below | the owner / verifier reproduces each hash |
+| blob, credential name | publication `custodyEvidence.blobSha256`, `credentialName` (unchanged) | Prep A binding and inventory (B2 = B3) |
+| ceremony, ordinal, release | a separate non-authority `SuccessorCeremonyRecordV1` | the ceremony-record verifier + the owner ceremony register |
 
-`SuccessorCeremonyRecordV1` binds:
+`SuccessorCeremonyRecordV1` binds only the successor-ceremony provenance:
 
-- `ceremonyId` and `keyId`;
-- `releaseSha` (from installer `status`: the release directory and selector);
-- `keygenCliSha256` (installer `CLI_BYTES` check, PB-7);
-- `publicationSha256`, `preparedBlobSha256`, and `currentBlobSha256Before` /
-  `After`.
+| Field | Meaning |
+| --- | --- |
+| `ceremonyId` | derived from the ordinal |
+| `successorOrdinal` | N |
+| `keyId` | derived from the ordinal; must equal the publication's |
+| `publicationDigest` | SHA-256 of the exact canonical publication bytes |
+| `credentialBlobSha256` | must equal the publication's `blobSha256` |
+| `reviewedReleaseSha` | the reviewed release that produced it |
+| `createdForRole = PREPARED` | **historical creation provenance only.** It records where the keygen wrote the blob. It is not the credential's current dynamic slot role, which only the inventory observes |
 
-The release hash is **provenance / readiness evidence, not authority**. A
-correct blob from an unreviewed release is detected as a mismatch between
-the installed CLI bytes and the reviewed release member. That is not
-authority either, but it blocks the ceremony record.
+- It does not duplicate other publication fields.
+- `reviewedReleaseSha` is meaningful only together with the existing
+  installer evidence: the release directory, the selector, and the
+  `CLI_BYTES` check (PB-7).
+- The record is **not** registry authority, **not** a K-ROOT authorization,
+  **not** witness freshness, and it **cannot make a key current**.
+- That CURRENT was not overwritten during PREPARE is proven by the keygen's
+  own before/after re-hash (§7.3) and the before/after inventory. The record
+  does not prove it.
+
+A correct blob from an unreviewed release shows up as a mismatch between the
+installed CLI bytes and the reviewed release member. That blocks the
+ceremony record. It is not authority either way.
 
 No cryptographic authority contract (registry, authorization, witness) is
 enlarged.
@@ -433,9 +525,11 @@ enlarged.
 3. Owner side: the register records each issued `ceremonyId` and `keyId`
    (PR-3).
 4. The keygen does not consult the registry: `REGISTRY_VIEW != authority`,
-   and the keygen must not judge authority. A reused N yields a new key with
-   an existing ID, which K-ROOT will refuse to publish. The blob is then
-   `NOT_IN_HEAD` custody debt, destroyed as an abandoned successor.
+   and the keygen must not judge authority.
+5. Burned ordinals (§5) are refused by the owner ceremony register and the
+   ceremony-record verifier. If a burned ordinal is misused anyway, it yields
+   a new key under an existing ID. K-ROOT will refuse to publish it, and the
+   blob is `NOT_IN_HEAD` custody debt, destroyed as an abandoned successor.
 
 ## 10. SW-9 — current-key compromise recovery
 
@@ -455,91 +549,149 @@ does it live inside the `KEY_COMPROMISE` epoch-advance target?
 | Recovery clarity | two single-purpose steps: *reject P*, then *re-anchor state and name S* | one step with two purposes | — |
 | Hold | blocks issuance throughout, and after the marking the registry itself also blocks it | blocks issuance throughout; the registry does not until the advance | — |
 
-**Recommendation: A** (PENDING_OWNER_DECISION). It minimizes the time during
-which P's evidence still verifies. It needs nothing from the suspect state
-domain. Both of its steps use existing contracts unchanged. Current source
-supports both A and B (gate §4.4), so B stays a valid alternative if the
-owner prefers fewer steps.
+**OWNER-ACCEPTED: A.** Current-key compromise uses two authority
+transitions:
 
-### 10.2 The accepted path, in order (with A)
+1. **A separate in-epoch `COMPROMISE_MARKING` registry-head advance.** It
+   marks P `COMPROMISED` as early as possible, so all of P's evidence stays
+   `KEY_COMPROMISED` under existing semantics. It creates no successor. The
+   compromise-epoch rule (§10.3) stops any other same-epoch successor from
+   becoming ready.
+2. **A `KEY_COMPROMISE` RecoveryEpoch advance** into the recovery-successor
+   path.
 
-1. **Containment.** Write the hold (`kind KEY_COMPROMISE_RECOVERY`). Stop the
-   signer. Classify under RR-6. S9, S10, and S11 mean STOP; SW-9 applies only
-   to S3 / S12.
-2. **Marking (authority).** K-ROOT signs vN+1: P `revokedAt`, `COMPROMISED`,
-   `compromisedSince`, and no current Actor key. It also signs an RHAA vN → vN+1
-   with reason `COMPROMISE_MARKING`. The witness executes it: the **first
-   authority PONR**. P's evidence is rejected from here.
-3. **Successor preparation (custody).** `successor <N>` → PREPARED (§7). P
-   stays in CURRENT, not running (§10.4).
-4. **Epoch authority.** K-ROOT signs vN+2 at E(n+1) with S current. P stays
-   `COMPROMISED`, and every other E(n) key is non-current. It also signs an
-   `EpochAdvanceAuthorizationV1` (`KEY_COMPROMISE`) bound to the current
-   witness.
-5. **C-4.** Start the signer under the hold. It journals `ADVANCE_EPOCH` (no
-   signing). The witness executes: the **second authority PONR**. Quarantine
-   follows, and the witness records the ledger advance. Stop the signer.
-6. **Cutover.** P CURRENT → RETIRED, then S PREPARED → CURRENT (as 8a/8b).
-7. **Activation and verification.** Start under the hold. `HEALTH` = S. Prep A
-   readiness at vN+2 passes, plus the compromise-epoch rule (§10.3). Release
-   the hold: `S_CURRENT`.
-8. **P destruction** (§4.1 rule; class `COMPROMISED`, RR-7 action "yes, from
-   active custody").
+The marking is **not** collapsed into the target epoch registry. Option B is
+not used.
 
-### 10.3 Compromise-epoch rule (DERIVED from RR-6; SW-9 source requirement)
+### 10.2 The accepted SW-9 order (OWNER-ACCEPTED)
 
-Readiness must refuse any successor reached **in-epoch** after a
-current-key compromise.
+```text
+engage hold (CeremonyHoldV1 HELD, transitionKind KEY_COMPROMISE_RECOVERY)
+ -> stop normal signer activity
+ -> K-ROOT registry vN+1 marks P COMPROMISED (no current Actor key)
+ -> RegistryHeadAdvanceAuthorizationV1 vN -> vN+1, reason COMPROMISE_MARKING
+ -> witness commits the COMPROMISE_MARKING head          [first authority PONR]
+ -> compromise-epoch readiness rule becomes active       (derived, §10.3)
+ -> prepare the recovery successor: successor <N> -> PREPARED (§7)
+ -> K-ROOT registry vN+2 at E(n+1) (S current; P stays COMPROMISED)
+    + EpochAdvanceAuthorizationV1, reason KEY_COMPROMISE
+ -> C-4: authority-ledger ADVANCE_EPOCH through the narrow recovery gate (§10.4)
+ -> witness commits the authorized new epoch/registry head [second authority PONR]
+ -> C-4 continues unchanged: quarantine, then the witness records the ledger advance
+ -> serve and verify the new registry
+ -> forward-only credential cutover: P CURRENT -> RETIRED, then S PREPARED -> CURRENT
+ -> S_ACTIVATED
+ -> independent S_CURRENT (all readiness checks, incl. §10.3 and a RELEASED hold)
+ -> predecessor logical destruction (mandatory, RR-29)
+ -> destruction evidence (§13)
+```
 
-**The rule.** Suppose the witnessed chain contains a head change where a key
-K that was the single current key in scope at the predecessor head becomes
-`COMPROMISED`. Then:
+The B1b-3c / C-4 quarantine and witness ordering is preserved exactly
+wherever extra witness updates are needed. C-4 is not rewritten.
 
-1. no key may be issuance-ready at any head whose `recoveryEpoch` equals the
-   epoch in which K was current;
-2. the current head must lie at a strictly newer epoch;
-3. that epoch must have been reached by an `EpochAdvanceAuthorizationV1` with
-   reason `KEY_COMPROMISE`, whose retained copy re-verifies (Prep A history).
+Classification comes first, under RR-6: S9, S10, and S11 mean STOP, and this
+path applies only to S3 and S12. P is destroyed from active custody as class
+`COMPROMISED` (RR-7).
 
-Under B, the marking head is itself the epoch advance, so the rule holds by
-construction.
+### 10.3 Compromise-epoch readiness rule (DERIVED from RR-6; OWNER-ACCEPTED; required Source Prep B source)
 
-Without this rule, K-ROOT could (by owner error) sign an in-epoch head
-advance adding S after the marking. The witness planner would execute it,
-because it does not know policy, and Prep A readiness would pass. The rule
-closes that gap.
+**Condition.** The rule applies when the **verified** witness, registry, and
+authorization history (Prep A chain, registry history, and authorization
+re-verification) proves all three of:
 
-It also implements the gate's SW-9 test: "current-key compromise without an
-epoch advance never reaches `S_CURRENT`". The existing `evaluate_rotation`
-already refuses such a path (`PREDECESSOR_NOT_SINGLE_CURRENT` /
-`CANDIDATE_PREDECESSOR_NOT_SUPERSEDED`). Readiness must refuse it
-independently.
+1. a key K was the current `OWNER_ACTOR` issuance key at a witnessed head
+   in epoch E;
+2. a subsequent `COMPROMISE_MARKING` head transition, whose
+   `RegistryHeadAdvanceAuthorizationV1` re-verifies, marks K `COMPROMISED`;
+3. `RecoveryEpoch` has not yet advanced beyond E through a re-verified
+   `EpochAdvanceAuthorizationV1` with reason `KEY_COMPROMISE`.
 
-It applies only when K was current at the marking. A non-current key's
-compromise is in-epoch marking only (RR-6 rule 4).
+**Effect.** No successor in epoch E may reach issuance readiness or
+`S_CURRENT`. Readiness fails with `COMPROMISE_EPOCH_ADVANCE_REQUIRED`. This
+holds even if K-ROOT mistakenly signs another same-epoch registry that names
+a new current successor, and the witness executes it: the planner does not
+know policy, and Prep A readiness alone would pass.
 
-### 10.4 Containment vs C-4 (RR-28)
+`owner signing error != valid readiness`.
 
-C-4 needs the running signer to journal `ADVANCE_EPOCH` and the quarantine
-(PB-13). The signer refuses to start without a credential (PB-6). So the
-compromised P cannot be vacated from CURRENT at containment unless the runtime
-gains a credential-less recovery mode, which is a runtime change.
+**Clearing.** The condition clears only when the witnessed chain contains the
+accepted `KEY_COMPROMISE` epoch advance out of E, with its authorization
+re-verified. The ready key must then be current at the newer epoch.
 
-**Recommendation** (PENDING_OWNER_DECISION): keep P in CURRENT, with the
-signer stopped except during step 5. Keeping P loaded in the signer adds no
-exposure: in S3/S12 the private key is already outside. Issuance is
-impossible for several reasons:
+**Not a latch.** No mutable compromise latch, flag file, or new state owner is
+created. The condition is recomputed from the verified history on every
+evaluation: it is a pure function of chain entries, head registries, and
+retained authorizations. There is no new authority state.
+
+**Scope.**
+
+- It applies only when K was **current** at the marking. A non-current key's
+  compromise is in-epoch marking only (RR-6 rule 4).
+- It is independent of `evaluate_rotation`. That function already refuses
+  this path (`PREDECESSOR_NOT_SINGLE_CURRENT` /
+  `CANDIDATE_PREDECESSOR_NOT_SUPERSEDED`), but readiness must refuse it on
+  its own.
+- It implements the gate's SW-9 test: "current-key compromise without an
+  epoch advance never reaches `S_CURRENT`".
+
+### 10.4 Containment vs C-4 (RR-28, OWNER-ACCEPTED with strict containment)
+
+C-4 requires the signer-owned authority ledger to journal `ADVANCE_EPOCH`
+(PB-13), and the signer refuses to start without a credential (PB-6). So the
+compromised P **may remain physically in CURRENT temporarily**. That does
+**not** mean it remains issuance-authorized.
+
+Sequence requirements:
+
+1. The compromise hold is engaged (`HELD`, `KEY_COMPROMISE_RECOVERY`).
+2. The signer is normally stopped.
+3. The `COMPROMISE_MARKING` head transition is already committed before any
+   recovery start.
+4. P stays in CURRENT only for the narrow C-4 recovery step.
+5. A narrowly gated recovery execution may start the signer, but only
+   enough to perform the destroy/narrow-only authority-ledger operations
+   C-4 requires: the `ADVANCE_EPOCH` adoption, then quarantine.
+6. OwnerEvidence issuance and signing stay denied. No generic signer
+   operation becomes available merely because the private key is loaded.
+7. After the required ledger operations, the ladder proceeds forward through
+   the epoch and witness recovery (§10.2).
+
+```text
+private key loaded                  != issuance authority
+COMPROMISED key loaded for recovery != valid evidence issuer
+```
+
+**Current source cannot enforce this yet.** L1 has no authority ledger and
+refuses every signing request (`NOT_READY`, PB-6), so there is nothing to
+gate today. The ledger and its operations arrive with PR-1 (B1b-3d L3a–L4).
+The gate is therefore **required Source Prep B implementation work** in two
+parts:
+
+- **A pure evaluator.** It permits an operation only under all of:
+  - a valid `HELD` hold of kind `KEY_COMPROMISE_RECOVERY` naming P as
+    `expectedPredecessorKeyId`;
+  - a verified committed `COMPROMISE_MARKING` head that marks P;
+  - the operation is in the closed set {`ADVANCE_EPOCH` adoption bound to the
+    re-verified `KEY_COMPROMISE` authorization, `VOID_CHALLENGE`,
+    `QUARANTINE_USE`}.
+
+  It refuses everything else, including `ISSUE`, every signing operation, and
+  `REGISTRY_VIEW` naming a current key.
+- **The runtime wiring into the future signer.** It is designed and tested
+  here as a pure contract, and wired with the ledger in PR-1.
+
+No credential-less signer mode is invented.
+
+Issuance is also impossible independently of the gate, because of each of:
 
 - the hold;
 - after the marking head, `NO_CURRENT_ISSUANCE_KEY`;
 - the binding (B1 has no current key);
+- the compromise-epoch rule;
 - P's evidence is `KEY_COMPROMISED`.
 
-If the owner judges the signer process itself untrustworthy, that is S9, which
-means STOP, not SW-9.
-
-The alternative, a credential-less signer mode for ledger-only operations, is
-a runtime and release change and is not recommended.
+If the owner judges the signer process itself untrustworthy, that is RR-6
+S9, which means STOP, not SW-9.
 
 ### 10.5 `AuthorityKeyTransitionV1` (RR-23)
 
@@ -549,77 +701,108 @@ a runtime and release change and is not recommended.
 | **B. Non-authority record only** | an evidence summary emitted by the verifier after `S_CURRENT`. It is what design §7.7 already defines (story 4) |
 | C. Authority-bearing | **rejected.** No property is missing. It would be a second authority story, able to disagree with the registry |
 
-The non-authority status is ALREADY_DETERMINED (PB-12). Only whether to
-implement it is open.
+**OWNER-ACCEPTED.** No new authority-bearing `AuthorityKeyTransitionV1` is
+introduced. Existing authority stays `AuthorityRegistryV1`,
+`RegistryHeadAdvanceAuthorizationV1`, and `EpochAdvanceAuthorizationV1`.
+`RecoveryWitnessV2` stays freshness and execution evidence.
 
-**Recommendation: B, minimal.** Implement the §7.7 record as a verifier
-**output** that grants nothing. Its fields: `authorityGranted: false`;
+If Source Prep B implements `AuthorityKeyTransitionV1`, it is only:
+
+- a pure, derived ceremony / readiness record;
+- non-authority, with `authorityGranted = false`;
+- reproducible from the authoritative inputs.
+
+It must never become required cryptographic authority for acceptance.
+
+It is the §7.7 record as a verifier **output** that grants nothing. Its fields: `authorityGranted: false`;
 `kind ROTATION | KEY_COMPROMISE_RECOVERY`; predecessor and successor keyIds;
 from and to heads; epoch(s); witness digests; the `ceremonyId`; the
 readiness result digest; and `predecessorMaterial`. It is consumed by nothing
 that decides authority.
 
-### 10.6 `CeremonyHoldV1` (RR-24)
+### 10.6 `CeremonyHoldV1` (RR-24, OWNER-ACCEPTED with state refinement)
 
-Design §9.1 proposed these fields: `{kind, reason, environment,
-observedWitnessDigest, observedRegistryVersion, createdAt}`. Every field is
-unauthenticated, and the object is non-authority (ALREADY_DETERMINED).
-
-**Recommendation** (PENDING_OWNER_DECISION): **A. a versioned, pure,
-non-authority data contract**, with the fields trimmed to those that have a
-purpose:
+It is a versioned, **pure, non-authority** data contract, implemented in
+Source Prep B. Every field is unauthenticated (design §9.1).
 
 | Field | Purpose |
 | --- | --- |
-| `schemaVersion`, `holdType` | parse strictly |
+| `protocol`, `schemaVersion` | parse strictly; an unknown version fails closed |
 | `environment` | refuse a hold from another environment |
 | `ceremonyId` | a ceremony step refuses unless the hold names its own ceremony |
-| `kind` | `ROTATION`, or `KEY_COMPROMISE_RECOVERY` (selects the ladder) |
+| `transitionKind` | closed: `ROTATION`, `KEY_COMPROMISE_RECOVERY` (selects the ladder) |
+| `state` | **closed: `HELD`, `RELEASED`** |
 | `reason` | closed set, informational |
 | `expectedPredecessorKeyId` | refuse a ceremony run against another P |
-| `expectedSuccessorKeyId` | null until preparation, then fixed |
-| `observedWitnessDigest` | the head at hold time; a ceremony step refuses if the chain does not descend from it |
+| `expectedSuccessorKeyId` | null only in phases where it is not yet known (before preparation); fixed after |
+| `observedWitnessDigest` | `HELD`: the head observed when the hold was engaged. `RELEASED`: the independently verified head at which `S_CURRENT` was established |
 
-**Dropped:** `createdAt` (timestamps are not authority, and it has no
-consumer) and `observedRegistryVersion` (it is implied by the witness
-digest).
+There is no `createdAt`: nothing uses it, and timestamps are not authority.
+`observedRegistryVersion` is implied by the witness digest.
 
-Semantics:
+**Semantics.**
 
 ```text
-hold present (valid or unparseable)     -> issuance NOT_READY (fail safe)
-hold absent where a ceremony step needs it -> that step refuses
-hold unparseable                          -> treated as present; ceremony steps refuse
-hold release != authority
-hold release != S_CURRENT                  (S_CURRENT additionally needs every readiness check)
+valid HELD                                  -> issuance NOT_READY; ceremony steps may run (if bound)
+valid RELEASED, every phase binding holds   -> the hold check passes (still not authority, not S_CURRENT)
+missing / malformed / unknown-version       -> fail closed; NEVER interpreted as RELEASED
+file absence                                != proof of release
+hold != authority;  hold release != authority;  hold release != S_CURRENT;  missing hold != released
 ```
 
-Prep A's boolean `hold_present` stays the readiness input. `CeremonyHoldV1`
-adds the ceremony-step preconditions only.
+**`RELEASED` bindings.** For a valid `RELEASED` hold, the Source Prep B
+verifier requires every phase-specific binding that proves the hold
+corresponds to the independently verified state:
+
+- `environment` equals the store environment;
+- `ceremonyId` equals the verified `SuccessorCeremonyRecordV1` for the
+  successor;
+- `transitionKind` equals the ladder the chain history shows (`ROTATION`, or
+  `KEY_COMPROMISE_RECOVERY` when §10.3 applied);
+- `expectedPredecessorKeyId` equals the predecessor of the verified
+  transition;
+- `expectedSuccessorKeyId` equals the authority-current key at the head, and
+  the key the loaded-key binding names;
+- `observedWitnessDigest` names a verified chain entry with the **same
+  registry head** as the current head. Later ledger-only entries are
+  allowed; a different head is not.
+
+**Consequence for readiness.** Prep A's boolean `hold_present` input
+(`False` → `PASS`) is superseded in Source Prep B. The `CEREMONY_HOLD` check
+requires a valid, bound `RELEASED` hold, and absence fails closed. The Prep A
+source is not changed by this design pass.
+
+**RR-30 (PENDING_OWNER_DECISION).** The rule "absence fails closed" means the
+initial custody (B1b-3d K-ACT, before any rotation) also needs a `RELEASED`
+hold record, but the accepted field set assumes a predecessor.
+
+**Recommendation:** add `transitionKind INITIAL_CUSTODY`, permitted only with
+`expectedPredecessorKeyId = null` and `expectedSuccessorKeyId` = the initial
+key. It would be written once, when the initial custody first reaches
+readiness in PR-1.
 
 ## 11. SW-9 crash matrix
 
-The head is the witnessed head. "Issue?" means may the signer issue. Rows 1–9
-assume composition A.
+The head is the witnessed head. "Issue?" means may the signer issue. The
+composition is the accepted RR-22 A.
 
 | # | State | Head (authority) | Loadable (CURRENT) | Issue? | Rollback to P? | Recovery | Destroy P? |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | hold engaged, nothing prepared | vN (P current) | P | no (hold) | P was never moved. But P is compromised, so it never resumes | owner: continue to marking | no |
 | 2 | successor prepared, marking not yet done | vN | P | no | as 1 | owner: marking, or destroy S (`NOT_IN_HEAD`) and restart | no |
 | 3 | vN+1 marking signed, RHAA absent | vN | P | no | as 1 | owner: sign the RHAA; vN+1 stays staged | no |
-| 4 | marking committed; EAA exists, witness not advanced | vN+1 (no current key; P `COMPROMISED`) | P | no (no current key) | **no**: P is compromised at the head | owner: C-4 step 5. If the adoption is already journalled: `LEDGER_EPOCH_AHEAD_OF_WITNESS` → the witness executes **the same** EAA | no |
+| 4 | marking committed; EAA exists, witness not advanced | vN+1 (no current key; P `COMPROMISED`) | P | no (no current key; §10.3) | **no**: P is compromised at the head | owner: C-4 through the narrow recovery gate (§10.4). If the adoption is already journalled: `LEDGER_EPOCH_AHEAD_OF_WITNESS` → the witness executes **the same** EAA | no |
 | 5 | epoch advance committed; custody still P | vN+2 (E(n+1), S current) | P | no (binding: B1 = S) | no | forward: quarantine, witness, cutover | no |
 | 6 | P → RETIRED, S not installed | vN+2 | — (the unit cannot start) | no | **no** | forward: install S (automatic within the owner's ceremony; no authority step) | no |
 | 7 | S installed, signer not started | vN+2 | S | no (no `HEALTH`, hold) | no | start under the hold | no |
 | 8 | `HEALTH` reports the wrong key | vN+2 | wrong blob | no (binding) | no | stop; diagnose the inventory; restore **S** from PREPARED / RETIRED knowledge. P never | no |
 | 9 | `HEALTH` = S, binding fails | vN+2 | S? | no | no | the hold stays; diagnose B2 / B3 (F20) | no |
-| 10 | `S_CURRENT`, P retained | vN+2 | S | yes (per-operation readiness) | no | destroy P (§4.1) | **yes, permitted** |
-| 11 | crash during destruction | vN+2 | S | yes | no | re-run destruction idempotently. A file that reappears after a crash (unlink not yet fsynced) has the same hash and is deleted again. Inventory `CUTOVER_INSTALLED` stays a readiness phase | yes (continue) |
+| 10 | `S_CURRENT`, P retained | vN+2 | S | yes (per-operation readiness) | no | destroy P: the **mandatory next step** (RR-29) | **yes, required** |
+| 11 | crash or failure during destruction | vN+2 (unchanged) | S | **no**: the availability hold is engaged (`HELD`) | **no**, and the head is never rolled back | owner: retry the destruction idempotently. A file that reappears after a crash (unlink not yet fsynced) has the same hash and is deleted again. Report `KNOWN_CUSTODY_DEBT` until the §13 evidence is complete, then release the hold (a bound `RELEASED` record) | yes (complete it) |
 | 12 | old snapshot restored after `S_CURRENT` | as restored | as restored | if witness, registry, and ledger are all restored: **undetected** (whole-host rollback). If only the credential is restored: the binding fails (`STALE_CREDENTIAL_PRESENT`) | no | if detected: STOP, classify the snapshot (RR-17). A snapshot with both halves outside the accepted boundary → RR-20b | n/a |
 
-Under composition B, rows 3–4 merge into the single epoch advance. Until it
-commits, the head is still vN with P current, and only the hold and a stopped
-signer contain.
+The rotation (RR-6 S1) uses the same rows 6–12 after its single head
+advance. Row 11 applies identically to a rotation.
 
 ## 12. Dual-current / dual-load prevention
 
@@ -679,11 +862,21 @@ What Source Prep B may honestly prove for P's blob in RETIRED:
    SHA-256 equalled P's publication `blobSha256`.
 2. The unlink succeeded.
 3. The RETIRED directory was fsynced.
-4. **After:** `lstat` is absent, and the inventory is `STEADY` with
-   CURRENT(S).
+4. **After:** `lstat` is absent, and the credential inventory is `STEADY`
+   with CURRENT(S).
 5. A `PredecessorDestructionRecordV1` (non-authority) holds these facts plus
    the `S_CURRENT` readiness result it depended on. It is reported as
    `predecessorMaterialDestroyedFromActiveCustody: true`.
+
+This list is the **required** destruction evidence (OWNER-ACCEPTED, RR-29).
+If any item is missing, the destruction is incomplete, and §4.1's
+failure rule applies:
+
+- the availability hold;
+- `KNOWN_CUSTODY_DEBT`;
+- owner retry;
+- no authority rollback;
+- no restore of P.
 
 **Not proven:**
 
@@ -726,55 +919,53 @@ the binding at verification time.
 | in-epoch successor after a current-key compromise | K-ROOT signed it; the witness executed it | the compromise-epoch rule (§10.3) |
 | re-encryption at cutover | "just rename the credential" | forbidden (plaintext); RR-11-D2 A keeps a rename |
 
-## 15. Future Source Prep B implementation boundary
+## 15. Source Prep B source implementation boundary (per the accepted decisions)
 
-Minimized to what the accepted semantics require.
+Source Prep B source contains only what is needed to prove the following,
+TEST-only first and with no DEV contact:
 
-**`services/authority-dev` (a reviewed successor-capable release; a release
-change):**
+| # | Responsibility | Where |
+| --- | --- | --- |
+| 1 | the reusable closed successor keygen form `successor <N>` (§7); `actor` unchanged | `services/authority-dev` ceremony tooling (a reviewed release change) |
+| 2 | ordinal → `keyId` / `ceremonyId` derivation and anti-reuse (burned ordinals, §5) | keygen (derivation) + a pure ceremony-record verifier |
+| 3 | PREPARED / CURRENT / RETIRED custody observation and transition verification (§3, §4.1) | a pure verifier over the Prep A inventory; the installer stage for the custody directories; the unit's `InaccessiblePaths`; a single-release `RELEASE_SET` (RR-25) |
+| 4 | same-filesystem (`st_dev`) cutover precondition (RR-26) | keygen preflight + the custody transition verifier |
+| 5 | current credential never overwritten during PREPARE (§7.3) | keygen before/after re-hash + a before/after inventory check |
+| 6 | non-authority `SuccessorCeremonyRecordV1` (§9.2) | a pure parser and verifier |
+| 7 | `CeremonyHoldV1` with `HELD` / `RELEASED` and the `RELEASED` bindings (§10.6); it replaces the Prep A boolean in readiness | a pure parser and verifier |
+| 8 | the compromise-epoch derived readiness rule `COMPROMISE_EPOCH_ADVANCE_REQUIRED` (§10.3) | pure readiness |
+| 9 | the current-key compromise recovery evaluator for the §10.2 order | pure evaluator |
+| 10 | the narrow C-4 compromised-key recovery gate (§10.4) | pure evaluator; runtime wiring with the ledger in PR-1 |
+| 11 | the predecessor destruction-order verifier and the destruction evidence (§4.1, §13) | pure verifier + non-authority `PredecessorDestructionRecordV1` |
+| 12 | crash and failure matrices: every §4.1 row, every §11 row, the §7.4 refusal matrix, every §14 case | tests |
 
-1. keygen `successor <N>` (§7). The `actor` form is unchanged.
-2. Installer: a stage that creates the custody root, `prepared/`, and
-   `retired/` (`root:root 0700`). A status contract for them. The new
-   release-set contract (RR-25). CLI byte checks unchanged.
-3. Unit: `InaccessiblePaths += /etc/lilith-authority-custody` (RR-26). No
-   credential directive change (RR-11-D2 A).
-4. `release_file_set.py`: file-set and hash updates only.
+Optional, and only if implemented as a derived non-authority output:
+`AuthorityKeyTransitionV1` (RR-23).
 
-**`services/owner-memory-control` (pure verifiers; TEST-proven):**
-
-5. A custody transition verifier: the allowed inventory-phase sequence
-   (§4.1) and the destruction-ordering rule (SW-1).
-6. The compromise-epoch rule in readiness (§10.3), and
-   `evaluate_compromise_recovery` for the §10.2 ladder, including an explicit
-   check that the marking precedes or accompanies the advance.
-7. A `CeremonyHoldV1` parser plus the ceremony-step preconditions (§10.6).
-8. Non-authority outputs: `AuthorityKeyTransitionV1`,
-   `PredecessorDestructionRecordV1`, and `SuccessorCeremonyRecordV1`
-   verification (§9). The publication v2 parser if RR-27 is accepted.
-9. Tests: every §4.1 row, every §11 row, the §7.4 refusal matrix, and every
-   §14 case.
-
-**Explicitly not needed:**
+**Not added:**
 
 - a new authority contract;
-- a witness change;
-- a registry schema change;
-- a new inventory phase (the compromise path reuses the rotation phases,
-  given RR-28's recommendation);
+- a witness or registry schema change;
+- a `KeyPublicationV2` (RR-27);
+- a new inventory phase;
+- a credential-less signer mode;
 - a DEV_SYNTHETIC witness profile (PR-1);
-- a credential-less signer mode.
+- any live execution.
 
 **Outside Source Prep B:**
 
-- PR-1: B1b-3d L3a–L4 designed for V2, installed, and accepted;
+- PR-1: B1b-3d L3a–L4 designed for V2, installed, and accepted, including
+  the signer's authority ledger and the runtime wiring of the §10.4 gate;
 - PR-2: the snapshot inventory;
-- PR-3: the owner's real off-host register and material;
-- any actual DEV_SYNTHETIC rotation or compromise rehearsal;
+- PR-3: the owner's real off-host register and material (including the
+  ceremony register of burned ordinals);
+- any actual DEV_SYNTHETIC rotation or recovery rehearsal;
 - PROD authority;
-- Privacy (B1b-3f);
+- B1b-3f Privacy custody;
 - Stage III;
 - First Memory.
+
+**Whole-host rollback remains unresolved.**
 
 ## 16. Nonclaims
 
@@ -791,7 +982,8 @@ This record does not claim, create, or authorize any of the following:
 - whole-host rollback protection;
 - real-owner-grade custody;
 - PROD authority;
-- that any recommendation here is accepted.
+- that accepting these decisions authorizes any source, release, or live
+  step beyond the Source Prep B source boundary of §15.
 
 ## 17. Destruction and custody evidence summary
 
@@ -802,29 +994,29 @@ This record does not claim, create, or authorize any of the following:
 | binding (Prep A) | the loaded blob = the head key's blob, and the signer reports that key | the signer's memory; authority |
 | destruction record | a logical unlink plus a directory fsync of a known blob | media erasure; the absence of copies |
 
-## 18. Owner decision table
+## 18. Owner decisions
 
-Every row below is **PENDING_OWNER_DECISION** unless stated.
-
-| # | Question | Options | Security consequence | Operational consequence | Recommendation |
-| --- | --- | --- | --- | --- | --- |
-| RR-11-D1 | one successor-capable release for many rotations, or one per rotation? | A free inputs / B per-rotation release / C closed reusable form `successor <N>` | A is a generic keygen (reject); B and C are closed | B needs review + install + selector switch per rotation; C needs one reviewed install | **C** |
-| RR-11-D2 | fixed runtime credential name? | A fixed `owner-actor-signing-key` / B per-successor name / C re-encrypt at cutover | A: P vs S distinguished by the binding; C re-exposes plaintext (reject) | A: no unit or signer change; B: unit + release per rotation | **A** |
-| RR-22 | SW-9 marking: a separate head advance, or inside the epoch target? | A separate `COMPROMISE_MARKING` first / B combined | A rejects P's evidence earliest, without the suspect domain | A: 2 authorizations, 2 witness steps; B: 1 | **A** |
-| RR-23 | is `AuthorityKeyTransitionV1` needed? | A none / B non-authority record / C authority contract | C creates a second authority story (reject) | B: one verifier output | **B** (its non-authority status is ALREADY_DETERMINED, design §7.7) |
-| RR-24 | `CeremonyHoldV1` representation? | A versioned pure non-authority contract / B untyped local file / C none | A lets ceremony steps bind to one ceremony; every option fails safe | A: small parser | **A**, trimmed (§10.6) (non-authority status ALREADY_DETERMINED, design §9.1) |
-| RR-25 | the successor release-set contract replacing PB-7 `RELEASE_SET` | exactly {successor release}; or {successor release + retained 9ac7de2 as inert history}; selector → successor | extra entries are inert only if the selector and CLI bytes pin the reviewed one | retention aids forensics | {successor} + at most the previous accepted release, inert; selector and CLI pinned to the successor |
-| RR-26 | exact PREPARED / RETIRED paths | inside the credstore (reject, GC-2) / a separate root-only custody root on the same filesystem | outside the credstore, systemd name search and the Prep A inventory stay unambiguous | one installer stage + one unit line | `/etc/lilith-authority-custody/{prepared,retired}` |
-| RR-27 | where ceremony and release provenance live | publication v2 (`ceremonyId`, `slotRole`) + a separate ceremony record for the release / everything in the publication / everything in the record | the release hash is never authority in either | v2 needs a parser update | publication v2 for `ceremonyId` / `slotRole`; release SHA in `SuccessorCeremonyRecordV1` |
-| RR-28 | SW-9 containment: vacate P at containment, or keep it in CURRENT until the post-witness cutover? | vacate early (needs a credential-less signer mode) / keep P, signer stopped except for C-4 | no added exposure: P is already outside; issuance is impossible | early vacate is a runtime change | **keep P in CURRENT**, signer stopped except C-4 step 5 |
-| RR-29 | how long may P stay RETIRED after `S_CURRENT`? | immediately in the same ceremony (L3e-12) / an owner-chosen bounded window | a longer window = longer custody debt (the backdating residual, §12) | immediate is simplest | **immediately after the `S_CURRENT` POST, in the same ceremony** |
+| # | Question | Accepted outcome | Classification |
+| --- | --- | --- | --- |
+| RR-11-D1 | one successor-capable release for many rotations, or one per rotation? | one reusable, reviewed, **closed** release with form `successor <N>`. N (a bounded positive ordinal) derives `keyId` and `ceremonyId`. No other input. A used ordinal, `keyId`, or `ceremonyId` is burned forever, even if abandoned. Registry history stays the authority boundary for key identity; the owner ceremony register prevents reuse but is not authority (§5) | **OWNER-ACCEPTED** |
+| RR-11-D2 | fixed runtime credential name? | `owner-actor-signing-key`, fixed across rotations. The signer requests exactly that one credential; only the CURRENT source slot backs it. The five identifiers are not aliases (§6) | **OWNER-ACCEPTED** |
+| — | compromise-epoch readiness rule | after a verified `COMPROMISE_MARKING` of the current key, no same-epoch successor is ever ready: `COMPROMISE_EPOCH_ADVANCE_REQUIRED`. Derived from verified history; no latch; clears only on the verified `KEY_COMPROMISE` epoch advance (§10.3) | **DERIVED (RR-6), OWNER-ACCEPTED** |
+| RR-22 | SW-9 marking composition | two transitions: a separate in-epoch `COMPROMISE_MARKING` head advance first, then the `KEY_COMPROMISE` epoch advance. Not combined (§10.1) | **OWNER-ACCEPTED** |
+| RR-23 | `AuthorityKeyTransitionV1` | no new authority-bearing contract. If implemented: a pure, derived, reproducible, non-authority record, `authorityGranted = false`, never required for acceptance (§10.5) | **OWNER-ACCEPTED** |
+| RR-24 | `CeremonyHoldV1` | a versioned pure non-authority contract with explicit `HELD` / `RELEASED`; missing, malformed, or unknown-version fails closed and is never `RELEASED`; `RELEASED` must be bound to the verified state (§10.6) | **OWNER-ACCEPTED** (with state refinement) |
+| RR-25 | release set | exactly one installed executable authority-dev release (the successor-capable one). No retained executable release for rollback. The prior release is preserved by history and provenance. Release rollback never implies authority rollback (§7.1) | **OWNER-ACCEPTED** |
+| RR-26 | custody paths | CURRENT `/etc/credstore.encrypted/…owner-actor.cred`; PREPARED `/etc/lilith-authority-custody/prepared/…`; RETIRED `/etc/lilith-authority-custody/retired/…`; `root:root 0700` directories, `0600` regular blobs, no symlinks, no extra blobs, `st_dev` proven before renames, inaccessible to the service, root tooling only (§8) | **OWNER-ACCEPTED** |
+| RR-27 | provenance | the existing publication is unchanged (no v2 unless proven necessary). A separate non-authority `SuccessorCeremonyRecordV1` carries `ceremonyId`, `successorOrdinal`, `keyId`, `publicationDigest`, `credentialBlobSha256`, `reviewedReleaseSha`, `createdForRole = PREPARED` (historical) (§9.2) | **OWNER-ACCEPTED** (with minimality refinement) |
+| RR-28 | SW-9 containment vs C-4 | P may stay physically in CURRENT, only for the narrow C-4 step, after the marking head, under the hold. A narrow recovery gate permits only the destroy/narrow-only ledger ops; issuance and signing are denied. Required Source Prep B work; no credential-less mode (§10.4) | **OWNER-ACCEPTED** (strict containment) |
+| RR-29 | predecessor destruction | the mandatory next custody-cleanup step after verified `S_CURRENT`, with the §13 evidence. On failure: no authority rollback, no restore of P, availability hold, `KNOWN_CUSTODY_DEBT`, owner retry (§4.1, §13) | **OWNER-ACCEPTED** |
+| RR-30 | initial-custody hold record | recommendation: `transitionKind INITIAL_CUSTODY` with `expectedPredecessorKeyId = null` only in that kind (§10.6) | **PENDING_OWNER_DECISION** |
 
 **ALREADY_DETERMINED (not reopened):**
 
 - no restore of P after the authority PONR (§4.2, gate §11);
 - P not destroyed before `S_CURRENT` (RR-11);
 - `AuthorityKeyTransitionV1` and `CeremonyHoldV1` are non-authority;
-- the compromise-epoch rule (§10.3), which is DERIVED from RR-6;
+- C-4 unchanged;
 - no ABANDONED role.
 
 ## Explicitly not done
