@@ -1504,7 +1504,11 @@ class CompatibilityAndStructureTests(unittest.TestCase):
         self.assertTrue(runtime)
         for path in runtime:
             text = path.read_text(encoding="utf-8", errors="ignore")
-            for forbidden in ("witness_readiness", "synthetic_witness_store"):
+            # B1b-3e PR-1S (S-4..S-15) imports the pure readiness contracts in the authority-dev
+            # release; the TEST durable writer stays unreachable everywhere.
+            authority = "authority-dev" in path.parts
+            for forbidden in ("synthetic_witness_store",) if authority else ("witness_readiness",
+                                                                              "synthetic_witness_store"):
                 with self.subTest(path=path.name, forbidden=forbidden):
                     self.assertIsNone(re.search(rf"(?<![A-Za-z0-9_]){forbidden}(?![A-Za-z0-9_])", text))
 

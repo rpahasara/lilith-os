@@ -13,11 +13,18 @@ always `NOT_READY` and every signing request is refused before any key could
 be touched. The core stores only the credential status. It retains no
 private-key object and constructs no minter. Process-memory zeroization is
 NOT_PROVEN.
+
+B1b-3e PR-1S wires two optional collaborators, still with no key and no
+minter: a readiness self-view (`state.self_view`, always NOT_READY: the
+signer cannot observe its credential inventory or the root hold store, and
+issuance is unwired, RR-39) and the narrow C-4 recovery handler
+(`recovery.RecoveryHandlerV1`), reachable only through the three closed
+recovery operations. `ISSUE_OWNER_EVIDENCE` is refused in every state.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from . import protocol as W
 from .credential import CREDENTIAL_ABSENT, CREDENTIAL_INVALID, CredentialStatusV1
@@ -46,10 +53,19 @@ def readiness_reasons(credential: CredentialStatusV1) -> tuple[str, ...]:
 
 
 class DevAuthoritySignerCoreV1:
-    def __init__(self, credential: CredentialStatusV1):
+    def __init__(self, credential: CredentialStatusV1, *, recovery: Any = None,
+                 self_view: Callable[[], dict[str, Any]] | None = None):
         if not isinstance(credential, CredentialStatusV1):
             raise TypeError("credential status is required")
         self._credential = credential
+        self._recovery = recovery
+        self._self_view = self_view
+
+    def _reasons(self) -> list[str]:
+        if self._self_view is None:
+            return list(readiness_reasons(self._credential))
+        reasons = [self._credential.state] if self._credential.state in (CREDENTIAL_ABSENT, CREDENTIAL_INVALID) else []
+        return reasons + list(self._self_view()["reasons"])
 
     def health(self) -> dict[str, Any]:
         return {
@@ -61,7 +77,7 @@ class DevAuthoritySignerCoreV1:
             "publicKeySha256": self._credential.public_key_sha256,
             "signing": SIGNING_NOT_AVAILABLE,
             "readiness": NOT_READY,
-            "reasons": list(readiness_reasons(self._credential)),
+            "reasons": self._reasons(),
         }
 
     def dispatch(self, message: W.AuthorityMessageV1) -> dict[str, Any]:
@@ -69,6 +85,10 @@ class DevAuthoritySignerCoreV1:
             return {"status": REFUSED, "reason": "UNSUPPORTED_OPERATION"}
         if message.operation == W.HEALTH:
             return {"status": OK, "health": self.health()}
+        if message.operation in W.RECOVERY_OPERATIONS:
+            if self._recovery is None:
+                return {"status": REFUSED, "reason": "RECOVERY_NOT_WIRED"}
+            return self._recovery.handle(message.operation, message.payload)
         # ISSUE_OWNER_EVIDENCE: re-validate the structured request, then refuse.
         # L1 has no path from here to a key: readiness is never READY.
         try:
@@ -79,5 +99,5 @@ class DevAuthoritySignerCoreV1:
             "status": REFUSED,
             "reason": SIGNING_NOT_AVAILABLE,
             "readiness": NOT_READY,
-            "reasons": list(readiness_reasons(self._credential)),
+            "reasons": self._reasons(),
         }

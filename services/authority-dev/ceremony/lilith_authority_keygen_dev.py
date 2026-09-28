@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -IB
-"""LILITH 15B2b-B1b-3d L2b / B1b-3e SW-2: DEV_SYNTHETIC OWNER_ACTOR key ceremony CLI.
+"""LILITH 15B2b-B1b-3d L2b / B1b-3e SW-2 / PR-1S S-6: DEV_SYNTHETIC key ceremony CLI.
 
 Installed as `/usr/local/sbin/lilith-authority-keygen-dev` (root:root 0755)
 from a verified authority release. Run only by the owner, as root, on
@@ -7,11 +7,12 @@ from a verified authority release. Run only by the owner, as root, on
 
     lilith-authority-keygen-dev actor
     lilith-authority-keygen-dev successor <N>
+    lilith-authority-keygen-dev witness
 
-There are exactly two forms. `witness` is refused (the recovery witness is a
-later slice). There is no algorithm, domain, key ID, environment, path,
-output, export, seed, or force option. The only variable input anywhere is
-the successor ordinal `N` (decimal, no leading zero, 2..9999).
+There are exactly three forms. There is no algorithm, domain, key ID,
+environment, path, output, export, seed, or force option. The only variable
+input anywhere is the successor ordinal `N` (decimal, no leading zero,
+2..9999).
 
 `actor` (B1b-3d L2b, docs/architecture/slice-15b2b-b1b3d-l2-custody-preparation.md)
 is the initial custody form, unchanged. `successor <N>` (B1b-3e Source Prep B,
@@ -27,6 +28,22 @@ until a witnessed K-ROOT head names it.
     credential exists   != authority
     PREPARED successor  != current successor
     filesystem path     != authority
+
+`witness` (B1b-3e PR-1S, docs/architecture/slice-15b2b-b1b3e-pr1s-runtime-wiring.md,
+RR-36) is the closed K-WIT form: one Ed25519 key for the RecoveryWitness
+only, keyId `test-only.witness.dev-synthetic.b1b3d.1`, encrypted
+`--with-key=host` under the runtime name `recovery-witness-signing-key`, and
+written only to `/etc/lilith-recovery-witness/credentials/lilith-recovery-witness.witness.cred`,
+never into the K-ACT credstore. Its preflight requires the credstore to hold
+exactly the CURRENT K-ACT slot (observed before and after, unchanged), the
+witness parent and credentials directories root:root 0700 and not symlinks,
+and the credentials directory empty. It is one-time: an existing K-WIT blob
+is a refusal, and a blob left by a failed run is destroyed and the key
+burned (a new key), never reused. It prints the K-WIT publication, a
+different publication type from the K-ACT one. K-WIT signs only
+RecoveryWitnessV2; nothing here can make it an authority key.
+
+    K-WIT credential exists != witness exists
 
 One `actor` run does exactly this:
 
@@ -119,6 +136,16 @@ PREPARED_PATH = PREPARED_DIR + "/" + SLOT_NAME
 RETIRED_PATH = RETIRED_DIR + "/" + SLOT_NAME
 PUBLICATION_TYPE = "LILITH_AUTHORITY_KEY_PUBLICATION"
 PUBLICATION_SCHEMA_VERSION = 1
+# B1b-3e PR-1S (RR-36): the K-WIT form. Tests pin every value against the
+# pure `pr1_bootstrap` witness profile and publication.
+WITNESS_KEY_ID = "test-only.witness.dev-synthetic.b1b3d.1"
+WITNESS_CREDENTIAL_NAME = "recovery-witness-signing-key"
+WITNESS_PARENT = "/etc/lilith-recovery-witness"
+WITNESS_CREDENTIAL_DIR = WITNESS_PARENT + "/credentials"
+WITNESS_BLOB_NAME = "lilith-recovery-witness.witness.cred"
+WITNESS_BLOB_PATH = WITNESS_CREDENTIAL_DIR + "/" + WITNESS_BLOB_NAME
+WITNESS_ENCRYPT_ARGV = (SYSTEMD_CREDS, "encrypt", "--with-key=host", "--name=" + WITNESS_CREDENTIAL_NAME, "-", "-")
+WITNESS_PUBLICATION_TYPE = "LILITH_WITNESS_KEY_PUBLICATION"
 MAX_CIPHERTEXT = 64 * 1024
 ENCRYPT_TIMEOUT_SECONDS = 30
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}
@@ -245,6 +272,7 @@ class Host:
 
 ACTOR = "actor"
 SUCCESSOR = "successor"
+WITNESS = "witness"
 
 
 @dataclass(frozen=True)
@@ -258,8 +286,8 @@ class Form:
 def parse_argv(argv: list[str]) -> Form:
     if argv == [ACTOR]:
         return Form(ACTOR)
-    if argv == ["witness"]:
-        raise Refused("WITNESS_NOT_IN_SCOPE")
+    if argv == [WITNESS]:
+        return Form(WITNESS)
     if argv[:1] == [SUCCESSOR]:
         if len(argv) != 2:
             raise Refused("USAGE_SUCCESSOR_ORDINAL")
@@ -271,7 +299,7 @@ def parse_argv(argv: list[str]) -> Form:
         if not SUCCESSOR_ORDINAL_MIN <= int(text) <= SUCCESSOR_ORDINAL_MAX:
             raise Refused("SUCCESSOR_ORDINAL_OUT_OF_RANGE")
         return Form(SUCCESSOR, int(text))
-    raise Refused("USAGE_ONLY_ACTOR")
+    raise Refused("USAGE_ONLY_ACTOR")  # historical code name (L2 runbook); every unknown form
 
 
 def _root_owned(host: Host, path: Path, *, kind: str, mode: int, missing: str, bad: str) -> None:
@@ -386,6 +414,112 @@ def successor_preflight(host: Host, ordinal: int, *, euid: int, isolated: bool,
     except OSError as exc:
         raise Refused("CURRENT_CUSTODY") from exc
     return machine_id, before
+
+
+def witness_publication(public_key: bytes, ciphertext: bytes, machine_id: str) -> dict:
+    """The K-WIT public output. Holds no private material; never a registry record."""
+    if not isinstance(public_key, bytes) or len(public_key) != 32:
+        raise ValueError("public key must be 32 raw Ed25519 bytes")
+    if not isinstance(ciphertext, bytes) or not 0 < len(ciphertext) <= MAX_CIPHERTEXT:
+        raise ValueError("ciphertext is empty or oversized")
+    return {
+        "publicationType": WITNESS_PUBLICATION_TYPE,
+        "schemaVersion": PUBLICATION_SCHEMA_VERSION,
+        "profile": PROFILE,
+        "witnessKey": {
+            "witnessKeyId": WITNESS_KEY_ID,
+            "environment": ENVIRONMENT,
+            "algorithm": ALGORITHM,
+            "publicKey": _b64u(public_key),
+            "publicKeySha256": hashlib.sha256(public_key).hexdigest(),
+        },
+        "custodyEvidence": {
+            "credentialName": WITNESS_CREDENTIAL_NAME,
+            "credentialPath": WITNESS_BLOB_PATH,
+            "withKey": "host",
+            "machineId": machine_id,
+            "blobByteSize": len(ciphertext),
+            "blobSha256": hashlib.sha256(ciphertext).hexdigest(),
+        },
+    }
+
+
+def witness_preflight(host: Host, *, euid: int, isolated: bool, hostname: str) -> tuple[str, CurrentFacts]:
+    """`witness`: read-only checks. Returns the machine ID and CURRENT "before"."""
+    machine_id = _host_preflight(host, euid=euid, isolated=isolated, hostname=hostname)
+    if sorted(entry.name for entry in host.path(CREDSTORE).iterdir()) != [SLOT_NAME]:
+        raise Refused("CREDSTORE_NOT_EXACTLY_CURRENT")
+    _root_owned(host, host.path(CREDENTIAL_PATH), kind="file", mode=0o600,
+                missing="CURRENT_ABSENT", bad="CURRENT_CUSTODY")
+    _root_owned(host, host.path(WITNESS_PARENT), kind="dir", mode=0o700,
+                missing="WITNESS_PARENT_ABSENT", bad="WITNESS_PARENT_CUSTODY")
+    if sorted(entry.name for entry in host.path(WITNESS_PARENT).iterdir()) != ["credentials"]:
+        raise Refused("WITNESS_PARENT_UNEXPECTED_ENTRY")
+    _root_owned(host, host.path(WITNESS_CREDENTIAL_DIR), kind="dir", mode=0o700,
+                missing="WITNESS_CREDENTIAL_DIR_ABSENT", bad="WITNESS_CREDENTIAL_DIR_CUSTODY")
+    if any(host.path(WITNESS_CREDENTIAL_DIR).iterdir()):
+        raise Refused("WITNESS_CREDENTIAL_ALREADY_PRESENT")
+    try:
+        before = current_facts(host)
+    except OSError as exc:
+        raise Refused("CURRENT_CUSTODY") from exc
+    return machine_id, before
+
+
+def write_witness_blob(host: Host, ciphertext: bytes) -> None:
+    """Create the K-WIT blob exclusively, through a descriptor of its directory."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        directory = os.open(host.path(WITNESS_CREDENTIAL_DIR), flags)
+    except OSError as exc:
+        raise Failed("WITNESS_CREDENTIAL_DIR_CUSTODY") from exc
+    try:
+        meta = os.fstat(directory)
+        if (not stat.S_ISDIR(meta.st_mode) or (meta.st_uid, meta.st_gid) != (host.owner_uid, host.owner_gid)
+                or stat.S_IMODE(meta.st_mode) != 0o700):
+            raise Failed("WITNESS_CREDENTIAL_DIR_CUSTODY")
+        if os.listdir(directory):
+            raise Failed("WITNESS_CREDENTIAL_ALREADY_PRESENT")
+        create = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(WITNESS_BLOB_NAME, create, 0o600, dir_fd=directory)
+        except FileExistsError as exc:
+            raise Failed("WITNESS_CREDENTIAL_ALREADY_PRESENT") from exc
+        try:
+            view = memoryview(ciphertext)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fchmod(fd, 0o600)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def witness_encrypt(plaintext: bytes) -> bytes:
+    """Plaintext goes only to the child's stdin, under the fixed K-WIT name."""
+    try:
+        result = subprocess.run(WITNESS_ENCRYPT_ARGV, input=plaintext, capture_output=True, env=FIXED_ENV,
+                                timeout=ENCRYPT_TIMEOUT_SECONDS, check=False, close_fds=True)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Failed("ENCRYPT_FAILED") from exc
+    if result.returncode != 0:
+        raise Failed("ENCRYPT_FAILED")  # stderr is never echoed
+    return result.stdout
+
+
+def witness_ceremony(host: Host, machine_id: str, before: CurrentFacts, *,
+                     key_factory: Callable[[], Ed25519PrivateKey] = Ed25519PrivateKey.generate,
+                     encrypt: Callable[[bytes], bytes] = witness_encrypt) -> dict:
+    """Write the K-WIT blob only; CURRENT must be unchanged before and after."""
+    public, ciphertext = _encrypted_key(key_factory, encrypt)
+    _require_current_unchanged(host, before)
+    write_witness_blob(host, ciphertext)
+    _require_current_unchanged(host, before)
+    return witness_publication(public, ciphertext, machine_id)
 
 
 def restrict_process() -> None:
@@ -532,6 +666,8 @@ def main(argv: list[str] | None = None, *, host: Host = Host()) -> int:
         facts = dict(euid=os.geteuid(), isolated=bool(sys.flags.isolated), hostname=os.uname().nodename)
         if form.kind == SUCCESSOR:
             machine_id, before = successor_preflight(host, form.ordinal, **facts)
+        elif form.kind == WITNESS:
+            machine_id, before = witness_preflight(host, **facts)
         else:
             machine_id = preflight(host, **facts)
         restrict_process()
@@ -541,6 +677,8 @@ def main(argv: list[str] | None = None, *, host: Host = Host()) -> int:
     try:
         if form.kind == SUCCESSOR:
             result = successor_ceremony(host, machine_id, form.ordinal, before)
+        elif form.kind == WITNESS:
+            result = witness_ceremony(host, machine_id, before)
         else:
             result = ceremony(host, machine_id)
     except Failed as failed:

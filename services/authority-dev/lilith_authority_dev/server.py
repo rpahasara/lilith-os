@@ -33,8 +33,8 @@ from typing import Callable
 
 from . import protocol as W
 from .core import DevAuthoritySignerCoreV1
-from .credential import CREDENTIAL_ABSENT, CREDENTIAL_INVALID, inspect_owner_actor_credential
-from .profile import DISTINCT_PRINCIPALS, OWNER_SOCKET_PATH, SERVICE_GROUP, SERVICE_USER
+from .credential import CREDENTIAL_ABSENT, CREDENTIAL_INVALID, CredentialStatusV1, inspect_owner_actor_credential
+from .profile import DISTINCT_PRINCIPALS, ENVIRONMENT, LEDGER_PATH, OWNER_SOCKET_PATH, SERVICE_GROUP, SERVICE_USER
 
 AUTHORIZED_PEER_UID = 0
 CONNECTION_TIMEOUT_SECONDS = 3.0
@@ -194,6 +194,27 @@ def _process_identity() -> tuple[int, int, list[int]]:
     return os.getuid(), os.getgid(), os.getgroups()  # Linux-only
 
 
+def build_core(credential: CredentialStatusV1) -> DevAuthoritySignerCoreV1:
+    """The PR-1S runtime: fixed-path readers, the durable ledger (never
+    created here), the witness signer-socket client, and the C-4 handler.
+    Construction performs no I/O; every read happens per request."""
+    from . import state
+    from . import witness_client
+    from .ledger import DurableAuthorityLedgerV1
+    from .recovery import RecoveryHandlerV1
+
+    def view():
+        return state.signer_view(environment=ENVIRONMENT)
+
+    def open_ledger():
+        return DurableAuthorityLedgerV1.open_existing(LEDGER_PATH, environment=ENVIRONMENT)
+
+    recovery = RecoveryHandlerV1(view=view, open_ledger=open_ledger,
+                                 record_ledger_advance=witness_client.record_ledger_advance)
+    return DevAuthoritySignerCoreV1(credential, recovery=recovery,
+                                    self_view=lambda: state.self_view(view(), open_ledger))
+
+
 def main() -> int:
     """Operational entrypoint for a later, separately authorized DEV install."""
     try:
@@ -211,7 +232,7 @@ def main() -> int:
         print("lilith-authority-dev: CREDENTIAL_INVALID", file=sys.stderr)
         return EXIT_CREDENTIAL_INVALID
     try:
-        serve_forever(DevAuthoritySignerCoreV1(credential))
+        serve_forever(build_core(credential))
     except ServerError as exc:
         print(f"lilith-authority-dev: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED

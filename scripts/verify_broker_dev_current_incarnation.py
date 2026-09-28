@@ -187,6 +187,25 @@ CUSTODY_PATHS = (
     "/etc/systemd/system/lilith-authority-dev.service",
     "/etc/systemd/system/lilith-recovery-witness.service",
     "/opt/lilith-authority-dev",
+) + (
+    # B1b-3e PR-1S (preflight §9): every PR-1 authority, custody, witness, and
+    # hold path, so the preservation transcript records their presence while
+    # the broker is proven unchanged. Reported, never judged; outside the
+    # pinned `baselineCandidate` (its SHA-256 is unchanged).
+    "/etc/lilith-authority-custody", "/etc/lilith-authority-custody/prepared",
+    "/etc/lilith-authority-custody/retired",
+    "/var/lib/lilith-authority-custody", "/var/lib/lilith-authority-custody/holds",
+    "/etc/lilith-recovery-witness", "/etc/lilith-recovery-witness/credentials",
+    "/etc/lilith-recovery-witness/credentials/lilith-recovery-witness.witness.cred",
+    "/etc/lilith-authority-dev/trust", "/etc/lilith-authority-dev/registry", "/etc/lilith-authority-dev/owner",
+    "/var/lib/lilith-authority-dev/authority_ledger.db",
+    "/etc/systemd/system/lilith-authority-dev.socket",
+    "/etc/systemd/system/lilith-recovery-witness-owner.socket",
+    "/etc/systemd/system/lilith-recovery-witness-signer.socket",
+    "/etc/tmpfiles.d/lilith-authority-dev.conf", "/etc/tmpfiles.d/lilith-recovery-witness.conf",
+    "/usr/local/sbin/lilith-authority-keygen-dev", "/usr/local/sbin/lilith-authority-ledger-dev",
+    "/usr/local/sbin/lilith-authority-hold-dev", "/usr/local/sbin/lilith-authority-verify-dev",
+    "/usr/local/sbin/lilith-authority-recovery-dev", "/usr/local/sbin/lilith-recovery-witness-owner-dev",
 )
 AUTHORITY_SENSITIVE_SERVICES = ("lilith-memory-broker", "lilith-authority-dev",
                                 "lilith-recovery-witness")

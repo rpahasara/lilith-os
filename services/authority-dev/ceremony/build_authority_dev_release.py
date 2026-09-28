@@ -52,6 +52,10 @@ def build_payloads(root: Path, wheelhouse: Path) -> dict[str, bytes]:
     if cli.is_symlink() or not cli.is_file():
         raise I.InstallError("KEYGEN_SOURCE_MISSING")
     payloads[I.CLI_PATH] = cli.read_bytes()
+    # B1b-3e PR-1S: the fixed root CLIs (`services/authority-dev/bin/<name>`).
+    for member, data in RFS.cli_payloads(root).items():
+        if member != I.CLI_PATH:
+            payloads[member] = data
     if not wheelhouse.is_dir() or {p.name for p in wheelhouse.iterdir()} != set(I.WHEEL_HASHES):
         raise I.InstallError("WHEEL_SET_MISMATCH")
     for name in I.WHEEL_HASHES:

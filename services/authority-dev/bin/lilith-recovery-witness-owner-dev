@@ -1,0 +1,16 @@
+#!/opt/lilith-authority-dev/current/venv/bin/python -IB
+"""LILITH 15B2b-B1b-3e PR-1S fixed root CLI: `lilith-recovery-witness-owner-dev`.
+
+Installed from the reviewed release as `/usr/local/sbin/lilith-recovery-witness-owner-dev` (root:root
+0755) by the installer `upgrade-cli` stage. It imports only the selected
+release tree. Forms and rules: `lilith_authority_root.cli`. SOURCE PREPARED /
+NOT INSTALLED.
+"""
+
+import sys
+
+sys.path.insert(0, "/opt/lilith-authority-dev/current")
+
+from lilith_authority_root.cli import main  # noqa: E402
+
+sys.exit(main("lilith-recovery-witness-owner-dev", sys.argv[1:]))

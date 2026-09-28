@@ -32,255 +32,35 @@ authority key; the readiness gate and the witness verifier enforce that.
 from __future__ import annotations
 
 import base64
-import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from lilith_memory.owner_proof import OwnerProofError, _id, _instant
+from lilith_memory.owner_proof import OwnerProofError
 
 from lilith_owner_memory import authority_contracts as A
 from lilith_owner_memory import authority_verifier as AV
 from lilith_owner_memory import recovery_contracts as R
-from lilith_owner_memory.contracts import _canonical
 
-LEDGER_HEAD_DOMAIN_SEPARATOR = b"LILITH_AUTHORITY_LEDGER_HEAD_V1\x00"
-
-# Journal operations.
-GENESIS = "GENESIS"
-PREPARE = "PREPARE"
-CONSUME = "CONSUME"
-EXPIRE = "EXPIRE"
-CANCEL = "CANCEL"
-FAIL = "FAIL"
-ISSUE = "ISSUE"
-RESERVE = "RESERVE"
-CONFIRM = "CONFIRM"
-ABANDON = "ABANDON"
-REGISTRY_VIEW = "REGISTRY_VIEW"
-ADVANCE_EPOCH = "ADVANCE_EPOCH"
-VOID_CHALLENGE = "VOID_CHALLENGE"
-QUARANTINE_USE = "QUARANTINE_USE"
-
-# Owner challenge states. B1a/B2a PREPARED | CONSUMED | CANCELLED | EXPIRED,
-# plus FAILED and the PROPOSED recovery terminal VOIDED_BY_RECOVERY.
-PREPARED = "PREPARED"
-CONSUMED = "CONSUMED"
-EXPIRED = "EXPIRED"
-CANCELLED = "CANCELLED"
-FAILED = "FAILED"
-VOIDED_BY_RECOVERY = "VOIDED_BY_RECOVERY"
-CHALLENGE_TERMINAL = frozenset({CONSUMED, EXPIRED, CANCELLED, FAILED, VOIDED_BY_RECOVERY})
-
-# Evidence-use states. B1b-3b RESERVED | CONSUMED | ABANDONED, plus the
-# PROPOSED recovery terminal QUARANTINED_BY_RECOVERY.
-RESERVED = "RESERVED"
-USE_CONSUMED = "CONSUMED"
-ABANDONED = "ABANDONED"
-QUARANTINED_BY_RECOVERY = "QUARANTINED_BY_RECOVERY"
-USE_TERMINAL = frozenset({USE_CONSUMED, ABANDONED, QUARANTINED_BY_RECOVERY})
-
-# Closed set of recognized reasons for an epoch advance.
-RECOVERY_REASONS = frozenset({
-    "LEDGER_RESTORE_DETECTED", "WITNESS_LEDGER_MISMATCH", "KEY_COMPROMISE", "OPERATOR_RECOVERY",
-})
-
-# Closed, ordered ledger refusal taxonomy.
-LEDGER_REASONS = (
-    "LEDGER_MALFORMED",
-    "LEDGER_INTEGRITY_FAILED",
-    "NOT_READY_FOR_ISSUANCE",
-    "CHALLENGE_ALREADY_KNOWN",
-    "CHALLENGE_EPOCH_NOT_CURRENT",
-    "CHALLENGE_UNKNOWN",
-    "CHALLENGE_NOT_PREPARED",
-    "CHALLENGE_NOT_CONSUMED",
-    "STALE_EPOCH_CHALLENGE",
-    "EVIDENCE_ALREADY_ISSUED",
-    "EVIDENCE_NOT_ISSUED_HERE",
-    "EVIDENCE_DIGEST_MISMATCH",
-    "STALE_EPOCH_EVIDENCE",
-    "EVIDENCE_ALREADY_USED",
-    "USE_NOT_RESERVED",
-    "STALE_EPOCH_RESERVATION",
-    "REGISTRY_VIEW_NOT_ADVANCING",
-    "RECOVERY_REASON_INVALID",
-    "RECOVERY_WITNESS_INVALID",
-    "RECOVERY_EPOCH_NOT_ADVANCING",
-    "RECOVERY_REGISTRY_NOT_ADVANCING",
-    "RECOVERY_REGISTRY_UNVERIFIED",
-    "RECOVERY_NO_SIGNING_KEY",
-    "NOT_PRE_RECOVERY_WORK",
+# The journal itself (operations, states, head function, replay, refusals)
+# is the shared pure `authority_ledger_journal`, which the durable B1b-3e
+# PR-1S ledger also uses. Re-exported here unchanged, so this TEST model and
+# the durable ledger cannot diverge.
+from lilith_owner_memory.authority_ledger_journal import (  # noqa: E402,F401
+    ABANDON, ABANDONED, ADVANCE_EPOCH, CANCEL, CANCELLED, CHALLENGE_TERMINAL, CONFIRM, CONSUME, CONSUMED,
+    EXPIRE, EXPIRED, FAIL, FAILED, GENESIS, ISSUE, LEDGER_HEAD_DOMAIN_SEPARATOR, LEDGER_REASONS, PREPARE,
+    PREPARED, QUARANTINE_USE, QUARANTINED_BY_RECOVERY, RECOVERY_REASONS, REGISTRY_VIEW, RESERVE, RESERVED,
+    USE_CONSUMED, USE_TERMINAL, VOID_CHALLENGE, VOIDED_BY_RECOVERY, LedgerRefusal, replay,
 )
-
-
-class LedgerRefusal(Exception):
-    def __init__(self, reason: str, detail: str | None = None):
-        assert reason in LEDGER_REASONS, reason
-        super().__init__(reason)
-        self.reason = reason
-        self.detail = detail
-
-
-def _refuse_unless(condition: bool, reason: str, detail: str | None = None) -> None:
-    if not condition:
-        raise LedgerRefusal(reason, detail)
+from lilith_owner_memory.authority_ledger_journal import JournalReplay as _Replay  # noqa: E402,F401
+from lilith_owner_memory.authority_ledger_journal import _epoch_dict, _refuse_unless, _valid_id  # noqa: E402,F401
+from lilith_owner_memory.authority_ledger_journal import next_head as _next_head  # noqa: E402,F401
+from lilith_owner_memory.authority_ledger_journal import step as _step  # noqa: E402,F401
 
 
 def _b64(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
-
-
-def _epoch_dict(value: Any) -> dict[str, Any]:
-    try:
-        return A.RecoveryEpochV1.from_dict(value).to_dict()
-    except (OwnerProofError, TypeError, AttributeError) as exc:
-        raise LedgerRefusal("LEDGER_MALFORMED") from exc
-
-
-def _valid_id(value: Any) -> str:
-    try:
-        return _id(value, "ledger_id")
-    except OwnerProofError as exc:
-        raise LedgerRefusal("LEDGER_MALFORMED") from exc
-
-
-def _next_head(head: str, op: Mapping[str, Any]) -> str:
-    return hashlib.sha256(LEDGER_HEAD_DOMAIN_SEPARATOR + bytes.fromhex(head) + _canonical(op)).hexdigest()
-
-
-# ------------------------------------------------------------ replay ---
-
-@dataclass
-class _Replay:
-    environment: str = ""
-    epoch: A.RecoveryEpochV1 | None = None
-    policy_version: str = ""
-    registry_view: int = 0
-    signing_key_ids: tuple[str, ...] = ()
-    challenges: dict[str, dict[str, Any]] = field(default_factory=dict)
-    uses: dict[str, dict[str, Any]] = field(default_factory=dict)
-    issued: dict[str, dict[str, Any]] = field(default_factory=dict)
-    digests: set[str] = field(default_factory=set)
-    sequence: int = 0
-    head: str = R.LEDGER_HEAD_GENESIS
-
-    @property
-    def ledger_epoch(self) -> str:
-        return R.ledger_epoch_id(self.epoch, self.environment)
-
-    def rows(self) -> dict[str, Any]:
-        return {"challenges": {k: dict(v) for k, v in self.challenges.items()},
-                "uses": {k: dict(v) for k, v in self.uses.items()}}
-
-
-def _challenge(r: _Replay, challenge_id: Any) -> dict[str, Any]:
-    entry = r.challenges.get(challenge_id) if isinstance(challenge_id, str) else None
-    _refuse_unless(entry is not None, "CHALLENGE_UNKNOWN")
-    return entry
-
-
-def _use(r: _Replay, evidence_id: Any) -> dict[str, Any]:
-    entry = r.uses.get(evidence_id) if isinstance(evidence_id, str) else None
-    _refuse_unless(entry is not None and entry["state"] == RESERVED, "USE_NOT_RESERVED")
-    return entry
-
-
-def _step(r: _Replay, op: Mapping[str, Any]) -> None:
-    kind = op.get("op") if isinstance(op, Mapping) else None
-    _refuse_unless(isinstance(kind, str), "LEDGER_MALFORMED")
-    _refuse_unless((kind == GENESIS) == (r.sequence == 0), "LEDGER_MALFORMED")
-    if kind == GENESIS:
-        r.environment = op["environment"]
-        _refuse_unless(r.environment in {"test", "dev", "prod"}, "LEDGER_MALFORMED")
-        r.epoch = A.RecoveryEpochV1.from_dict(_epoch_dict(op["recoveryEpoch"]))
-        r.policy_version, r.registry_view = _valid_id(op["policyVersion"]), op["registryVersion"]
-        r.signing_key_ids = tuple(_valid_id(k) for k in op["signingKeyIds"])
-    elif kind == PREPARE:
-        challenge_id = _valid_id(op["challengeId"])
-        _refuse_unless(challenge_id not in r.challenges, "CHALLENGE_ALREADY_KNOWN")
-        _refuse_unless(op["ledgerEpoch"] == r.ledger_epoch, "CHALLENGE_EPOCH_NOT_CURRENT")
-        r.challenges[challenge_id] = {"ledgerEpoch": op["ledgerEpoch"], "state": PREPARED, "evidenceId": None}
-    elif kind == CONSUME:
-        entry = _challenge(r, op["challengeId"])
-        _refuse_unless(entry["state"] == PREPARED, "CHALLENGE_NOT_PREPARED")
-        _refuse_unless(entry["ledgerEpoch"] == r.ledger_epoch, "STALE_EPOCH_CHALLENGE")
-        entry["state"] = CONSUMED
-    elif kind in {EXPIRE, CANCEL, FAIL}:
-        entry = _challenge(r, op["challengeId"])
-        _refuse_unless(entry["state"] == PREPARED, "CHALLENGE_NOT_PREPARED")
-        entry["state"] = {EXPIRE: EXPIRED, CANCEL: CANCELLED, FAIL: FAILED}[kind]
-    elif kind == ISSUE:
-        entry = _challenge(r, op["challengeId"])
-        _refuse_unless(entry["state"] == CONSUMED, "CHALLENGE_NOT_CONSUMED")
-        _refuse_unless(entry["evidenceId"] is None, "EVIDENCE_ALREADY_ISSUED")
-        _refuse_unless(entry["ledgerEpoch"] == r.ledger_epoch, "STALE_EPOCH_CHALLENGE")
-        evidence_id, digest = _valid_id(op["evidenceId"]), op["evidenceDigest"]
-        _refuse_unless(isinstance(digest, str) and len(digest) == 64, "LEDGER_MALFORMED")
-        _refuse_unless(evidence_id not in r.issued and digest not in r.digests, "EVIDENCE_ALREADY_ISSUED")
-        entry["evidenceId"] = evidence_id
-        r.issued[evidence_id] = {"challengeId": op["challengeId"], "evidenceDigest": digest,
-                                 "recoveryEpoch": r.epoch.to_dict()}
-        r.digests.add(digest)
-    elif kind == RESERVE:
-        evidence_id = _valid_id(op["evidenceId"])
-        issued = r.issued.get(evidence_id)
-        _refuse_unless(issued is not None, "EVIDENCE_NOT_ISSUED_HERE")
-        _refuse_unless(op["evidenceDigest"] == issued["evidenceDigest"], "EVIDENCE_DIGEST_MISMATCH")
-        claimed = _epoch_dict(op["recoveryEpoch"])
-        _refuse_unless(claimed == issued["recoveryEpoch"] == r.epoch.to_dict(), "STALE_EPOCH_EVIDENCE")
-        _refuse_unless(evidence_id not in r.uses, "EVIDENCE_ALREADY_USED")
-        r.uses[evidence_id] = {"evidenceDigest": issued["evidenceDigest"], "recoveryEpoch": claimed,
-                               "proposalRefId": _valid_id(op["proposalRefId"]), "state": RESERVED,
-                               "admissionId": None, "revisionId": None}
-    elif kind == CONFIRM:
-        entry = _use(r, op["evidenceId"])
-        _refuse_unless(entry["recoveryEpoch"] == r.epoch.to_dict(), "STALE_EPOCH_RESERVATION")
-        entry.update(state=USE_CONSUMED, admissionId=_valid_id(op["admissionId"]),
-                     revisionId=_valid_id(op["revisionId"]))
-    elif kind == ABANDON:
-        _use(r, op["evidenceId"])["state"] = ABANDONED
-    elif kind == REGISTRY_VIEW:
-        _refuse_unless(type(op["registryVersion"]) is int and op["registryVersion"] > r.registry_view,
-                       "REGISTRY_VIEW_NOT_ADVANCING")
-        r.registry_view, r.policy_version = op["registryVersion"], _valid_id(op["policyVersion"])
-        r.signing_key_ids = tuple(_valid_id(k) for k in op["signingKeyIds"])
-    elif kind == ADVANCE_EPOCH:
-        _refuse_unless(op["reason"] in RECOVERY_REASONS, "RECOVERY_REASON_INVALID")
-        _refuse_unless(_epoch_dict(op["previousEpoch"]) == r.epoch.to_dict(), "LEDGER_MALFORMED")
-        new_epoch = A.RecoveryEpochV1.from_dict(_epoch_dict(op["newEpoch"]))
-        _refuse_unless(new_epoch.counter > r.epoch.counter, "RECOVERY_EPOCH_NOT_ADVANCING")
-        _refuse_unless(type(op["registryVersion"]) is int and op["registryVersion"] > r.registry_view,
-                       "RECOVERY_REGISTRY_NOT_ADVANCING")
-        r.epoch, r.registry_view = new_epoch, op["registryVersion"]
-        r.policy_version = _valid_id(op["policyVersion"])
-        r.signing_key_ids = tuple(_valid_id(k) for k in op["signingKeyIds"])
-    elif kind == VOID_CHALLENGE:
-        entry = _challenge(r, op["challengeId"])
-        _refuse_unless(entry["state"] == PREPARED and entry["ledgerEpoch"] != r.ledger_epoch,
-                       "NOT_PRE_RECOVERY_WORK")
-        entry["state"] = VOIDED_BY_RECOVERY
-    elif kind == QUARANTINE_USE:
-        entry = _use(r, op["evidenceId"])
-        _refuse_unless(entry["recoveryEpoch"] != r.epoch.to_dict(), "NOT_PRE_RECOVERY_WORK")
-        entry["state"] = QUARANTINED_BY_RECOVERY
-    else:
-        raise LedgerRefusal("LEDGER_MALFORMED")
-    r.sequence += 1
-    r.head = _next_head(r.head, op)
-
-
-def replay(log: tuple[Mapping[str, Any], ...]) -> _Replay:
-    """Rebuild authority-side state from its journal. Raises `LedgerRefusal`."""
-    _refuse_unless(isinstance(log, tuple) and len(log) > 0, "LEDGER_MALFORMED")
-    r = _Replay()
-    for op in log:
-        try:
-            _step(r, op)
-        except (KeyError, TypeError, ValueError, AttributeError, OwnerProofError) as exc:
-            raise LedgerRefusal("LEDGER_MALFORMED") from exc
-    return r
 
 
 # ------------------------------------------------------------- state ---

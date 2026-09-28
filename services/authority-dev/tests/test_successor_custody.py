@@ -449,7 +449,11 @@ class UnitCustodyBoundaryTests(unittest.TestCase):
             self.assertNotIn("lilith-authority-custody", line)
         self.assertNotIn(SC.PREPARED_PATH, UNIT)
         self.assertNotIn(SC.RETIRED_PATH, UNIT)
-        self.assertEqual(UNIT.count("lilith-authority-custody"), 1)
+        # PR-1S: the credential custody root and the separate hold root (RR-34), each denied once.
+        self.assertEqual(UNIT.count("/etc/lilith-authority-custody"), 1)
+        self.assertEqual(UNIT.count("/var/lib/lilith-authority-custody"), 1)
+        self.assertIn("/var/lib/lilith-authority-custody", paths)
+        self.assertIn("/etc/lilith-recovery-witness", paths)  # RR-36: the K-WIT credential root
 
     def test_prep_a_unit_binding_contract_still_matches(self):
         contract = WR.DEV_SYNTHETIC_SLOT_CONTRACT
@@ -544,7 +548,9 @@ class InstallerCustodyStageTests(unittest.TestCase):
         self.assertIn("exactly\n            # one executable release", INSTALLER_SOURCE)
         self.assertIn("Release rollback != authority rollback", INSTALLER_SOURCE)
         self.assertEqual(INSTALLER_SOURCE.count('failures.append("RELEASE_SET")'), 1)
-        self.assertEqual(I.STAGES[-2:], ("L2b.2", "L2c"))
+        # PR-1S: the B1b-3d ladder ends L2b.2 -> L2c; only PR-1 phase contracts follow.
+        self.assertEqual(I.STAGES[I.STAGES.index("L2b.2"):I.STAGES.index("L2c") + 1], ("L2b.2", "L2c"))
+        self.assertTrue(all(stage.startswith(("P1A-", "P1B-")) for stage in I.STAGES[I.STAGES.index("L2c") + 1:]))
         code = "\n".join(line for line in INSTALLER_SOURCE.splitlines() if not line.lstrip().startswith("#"))
         for needle in ('"enable"', '"start"', '"daemon-reload"', "Ed25519PrivateKey", "os.rename(system.path(CREDENTIAL",
                        "unlink"):
@@ -568,6 +574,11 @@ class ReleaseFileSetTests(unittest.TestCase):
         for marker in (b".generate()", b"Ed25519PrivateKey.generate", b"lilith_owner_memory.successor"):
             for name, data in payloads.items():
                 self.assertNotIn(marker, data, name)
+        # PR-1S (S-10): the C-4 gate is wired into the signer ONLY through `recovery.py`, which imports no minter.
+        wired = [name for name, data in payloads.items() if name.startswith("lilith_authority_dev/")
+                 and b"successor_readiness" in data]
+        self.assertEqual(wired, ["lilith_authority_dev/recovery.py"])
+        self.assertNotIn(b"evidence_minter", payloads["lilith_authority_dev/recovery.py"])
 
     def test_source_release_identity_is_deterministic(self):
         first, second = source_release_identity(), source_release_identity()

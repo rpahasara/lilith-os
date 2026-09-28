@@ -27,7 +27,7 @@ DEPLOYER = "sa_112096412008414111981"
 UNITS = ("lilith-authority-dev.service", "lilith-authority-dev.socket")
 SHA = "a" * 40
 
-PARENTS = ("/opt", "/etc", "/etc/systemd/system", "/etc/tmpfiles.d", "/usr/local/sbin", "/var/lib/systemd",
+PARENTS = ("/opt", "/etc", "/etc/systemd/system", "/etc/tmpfiles.d", "/usr/local/sbin", "/var/lib", "/var/lib/systemd",
            "/etc/needrestart/conf.d", "/usr/local/lib/lilith-dev-deploy")
 ROOT_FILES = ("/etc/passwd", "/etc/group", "/usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh",
               "/etc/needrestart/conf.d/lilith-authority-sensitive.conf")
@@ -41,6 +41,29 @@ LADDER = {
               "/etc/tmpfiles.d/lilith-authority-dev.conf": "regular file|0|0|644"},
     "L1c.3": {"/usr/local/sbin/lilith-authority-keygen-dev": "regular file|0|0|755"},
 }
+# B1b-3e PR-1S: the PR-1 ladder, valid only on top of L1c.3 (own report line).
+WITNESS_USER = "lilith-recovery-witness"
+WITNESS_UNITS = ("lilith-recovery-witness.service", "lilith-recovery-witness-owner.socket",
+                 "lilith-recovery-witness-signer.socket")
+PR1_CLIS = tuple(f"/usr/local/sbin/{name}" for name in (
+    "lilith-authority-ledger-dev", "lilith-authority-hold-dev", "lilith-authority-verify-dev",
+    "lilith-authority-recovery-dev", "lilith-recovery-witness-owner-dev"))
+PR1_LADDER = {
+    "P1A-5": {cli: "regular file|0|0|755" for cli in PR1_CLIS},
+    "P1A-7": {"/etc/lilith-authority-custody": "directory|0|0|700"},
+    "P1A-8a": {},
+    "P1A-8b": {"/etc/systemd/system/lilith-recovery-witness.service": "regular file|0|0|644",
+               "/etc/systemd/system/lilith-recovery-witness-owner.socket": "regular file|0|0|644",
+               "/etc/systemd/system/lilith-recovery-witness-signer.socket": "regular file|0|0|644",
+               "/etc/tmpfiles.d/lilith-recovery-witness.conf": "regular file|0|0|644"},
+    "P1A-9": {"/etc/lilith-authority-dev": "directory|0|0|755", "/etc/lilith-authority-dev/trust": "directory|0|0|755",
+              "/etc/lilith-authority-dev/registry": "directory|0|0|755",
+              "/etc/lilith-authority-dev/owner": "directory|0|0|755",
+              "/etc/lilith-recovery-witness": "directory|0|0|700",
+              "/var/lib/lilith-authority-custody": "directory|0|0|700"},
+}
+PR1_ORDER = list(PR1_LADDER)
+STAGING = "." + "b" * 40 + ".staging"
 # Generic host prerequisites: observable, never LILITH maturity.
 SECURE_PREREQS = {"/var/lib/systemd/credential.secret": "regular file|0|0|400",
                   "/etc/credstore.encrypted": "directory|0|0|700"}
@@ -72,7 +95,7 @@ ab_main
 '''
 
 
-def host(step: str = "PRE_L1A", *, credstore: bool = False, host_key: bool = False) -> dict:
+def host(step: str = "PRE_L1A", *, credstore: bool = False, host_key: bool = False, pr1: str | None = None) -> dict:
     """A healthy DEV host at ladder `step`, as the routine deployer sees it."""
     stat = {path: "directory|0|0|755" for path in PARENTS}
     stat.update({path: "regular file|0|0|644" for path in ROOT_FILES})
@@ -88,6 +111,11 @@ def host(step: str = "PRE_L1A", *, credstore: bool = False, host_key: bool = Fal
         stat["/etc/credstore.encrypted"] = SECURE_PREREQS["/etc/credstore.encrypted"]
     if host_key:
         stat["/var/lib/systemd/credential.secret"] = SECURE_PREREQS["/var/lib/systemd/credential.secret"]
+    if pr1 is not None:
+        for name in PR1_ORDER[:PR1_ORDER.index(pr1) + 1]:
+            stat.update(PR1_LADDER[name])
+        if PR1_ORDER.index(pr1) >= PR1_ORDER.index("P1A-8a"):
+            spec["users"].add(WITNESS_USER)
     if "/opt/lilith-authority-dev/releases" in stat:
         spec["ls"]["/opt/lilith-authority-dev/releases"] = [SHA]
     if "/opt/lilith-authority-dev/current" in stat:
@@ -119,9 +147,10 @@ class ProofLogicTests(unittest.TestCase):
             calls = (d / "sudo_calls").read_text().splitlines()
         return result.returncode, result.stdout, calls
 
-    def assertPass(self, spec, maturity):
+    def assertPass(self, spec, maturity, pr1="PR1_ABSENT"):
         rc, out, _ = self.run_proof(spec)
         self.assertEqual(out.splitlines()[-1], f"AUTHORITY_BOUNDARY_PROOF=PASS maturity={maturity}", out)
+        self.assertEqual(out.splitlines()[-2], f"PR1_AUTHORITY_BOUNDARY maturity={pr1}", out)
         self.assertEqual(rc, 0)
         self.assertNotIn("FAIL:", out)
         return out
@@ -332,6 +361,75 @@ class ProofLogicTests(unittest.TestCase):
         self.assertIn("DENIED: test -r /var/lib/lilith-authority-dev", out)
         spec["can"].add("-r /var/lib/lilith-authority-dev")
         self.assertFails(spec, "ALLOWED(unexpected) test -r /var/lib/lilith-authority-dev")
+
+    # B1b-3e PR-1S: the PR-1 ladder (preflight section 9), on its own line; the final line keeps its vocabulary.
+    def test_pr1_ladder_is_cumulative_on_top_of_l1c3(self):
+        out = self.assertPass(host("L1c.3", credstore=True, host_key=True, pr1="P1A-9"), "L1c.3", "P1A-9")
+        for needle in ("DENIED: test -w /usr/local/sbin/lilith-authority-hold-dev",
+                       "DENIED: sudo /usr/local/sbin/lilith-authority-hold-dev",
+                       "DENIED: test -r /etc/lilith-authority-custody", "DENIED: test -x /etc/lilith-recovery-witness",
+                       "DENIED: test -x /var/lib/lilith-authority-custody",
+                       f"DENIED: sudo -u {WITNESS_USER} /usr/bin/true",
+                       "DENIED: test -w /etc/systemd/system/lilith-recovery-witness-signer.socket",
+                       "UNOBSERVABLE_BY_DESIGN: /etc/lilith-recovery-witness/credentials/"
+                       "lilith-recovery-witness.witness.cred",
+                       "UNOBSERVABLE_BY_DESIGN: /var/lib/lilith-authority-custody/holds"):
+            self.assertIn(needle, out)
+        # Every fixed PR-1 CLI (and the keygen) is a root-owned leaf the deployer can neither write nor sudo.
+        for cli in PR1_CLIS + ("/usr/local/sbin/lilith-authority-keygen-dev",):
+            self.assertIn(f"DENIED: test -w {cli}", out)
+        for cli in PR1_CLIS:
+            self.assertIn(f"DENIED: sudo {cli}", out)
+        for step in PR1_ORDER:
+            self.assertPass(host("L1c.3", credstore=True, host_key=True, pr1=step), "L1c.3", step)
+        out = self.assertPass(host("L1c.3", credstore=True, host_key=True), "L1c.3")
+        self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: /etc/lilith-authority-custody (P1A-7)", out)
+        self.assertIn(f"DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u {WITNESS_USER} (proxy: lilith-memory-broker)", out)
+
+    def test_pr1_objects_before_l1c3_or_out_of_order_fail(self):
+        self.assertFails(host("L1c.1", pr1="P1A-5"), "PR1_OBJECT_BEFORE_L1C3 pr1=P1A-5 maturity=L1c.1")
+        spec = host("L1c.3", pr1="P1A-9")
+        del spec["stat"][PR1_CLIS[2]]
+        self.assertFails(spec, f"LADDER_OBJECT_MISSING {PR1_CLIS[2]}")
+        spec = host("L1c.3", pr1="P1A-9")
+        spec["users"].discard(WITNESS_USER)
+        self.assertFails(spec, f"LADDER_OBJECT_MISSING account {WITNESS_USER}")
+        spec = host("L1c.3")
+        spec["users"].add(WITNESS_USER)  # the account alone raises P1A-8a, which needs P1A-7 beneath it
+        self.assertFails(spec, "LADDER_OBJECT_MISSING /etc/lilith-authority-custody")
+        spec = host("L1c.3", pr1="P1A-9")
+        spec["stat"]["/etc/lilith-recovery-witness"] = "directory|0|0|755"
+        self.assertFails(spec, "LADDER_OBJECT_CONTRACT /etc/lilith-recovery-witness")
+        spec = host("L1c.3", pr1="P1A-5")
+        spec["stat"][PR1_CLIS[0]] = "regular file|3826947836|0|755"
+        self.assertFails(spec, f"LADDER_OBJECT_CONTRACT {PR1_CLIS[0]}")
+
+    def test_pr1_capabilities_are_failures(self):
+        spec = host("L1c.3", pr1="P1A-9")
+        spec["can"].add("-r /etc/lilith-authority-custody")
+        self.assertFails(spec, "ALLOWED(unexpected) test -r /etc/lilith-authority-custody")
+        spec = host("L1c.3", pr1="P1A-9")
+        spec["sudo_allow"].add(f"-u {WITNESS_USER} /usr/bin/true")
+        self.assertFails(spec, f"ALLOWED(unexpected) sudo -u {WITNESS_USER}")
+        spec = host("L1c.3", pr1="P1A-5")
+        spec["sudo_allow"].add(PR1_CLIS[1])
+        self.assertFails(spec, f"ALLOWED(unexpected) sudo {PR1_CLIS[1]}")
+        for unit in WITNESS_UNITS:
+            spec = host("L1c.3", pr1="P1A-8b")
+            spec["sudo_allow"].add(f"/usr/bin/systemctl start {unit}")
+            self.assertFails(spec, f"ALLOWED(unexpected) sudo /usr/bin/systemctl start {unit}")
+        _rc, _out, calls = self.run_proof(host())
+        for unit in WITNESS_UNITS:
+            self.assertIn(f"/usr/bin/systemctl restart {unit}", calls)  # queried, never run
+        spec = host("L1c.3", pr1="P1A-9")
+        spec["stat"]["/var/lib/lilith-recovery-witness"] = "directory|985|990|2750"
+        spec["can"].add("-x /var/lib/lilith-recovery-witness")
+        self.assertFails(spec, "ALLOWED(unexpected) test -x /var/lib/lilith-recovery-witness")
+
+    def test_mid_upgrade_staging_entry_still_fails(self):
+        spec = host("L1c.3", pr1="P1A-5")
+        spec["ls"]["/opt/lilith-authority-dev/releases"].append(STAGING)
+        self.assertFails(spec, f"UNEXPECTED_RELEASE_ENTRY {STAGING}")
 
     def test_identity_and_group_checks(self):
         spec = host()

@@ -38,6 +38,18 @@
 # It proves the routine deployer boundary only. It says nothing about host
 # root (DR-3: `ubuntu` is root-equivalent through sudo/lxd).
 #
+# B1b-3e PR-1S (docs/architecture/slice-15b2b-b1b3e-pr1s-runtime-wiring.md,
+# preflight §9) adds a SECOND ladder for the PR-1 objects (new fixed CLIs,
+# the custody root, the witness account and units, the skeleton), with the
+# same cumulative rule and root-owned-object derivation, and no marker. It is
+# valid only on top of a complete B1b-3d ladder (L1c.3). It is reported on
+# its own line, `PR1_AUTHORITY_BOUNDARY maturity=<step>`, just before the
+# final line; the final line and its B1b-3d `maturity=` vocabulary are
+# unchanged, and ANY PR-1 failure still makes the final line FAIL. Objects
+# beneath a root-only directory the deployer can stat are
+# UNOBSERVABLE_BY_DESIGN, never "denied". A `releases/.<sha>.staging` entry
+# still fails the proof: no routine deployment runs mid-upgrade (owner freeze).
+#
 # The last line is `AUTHORITY_BOUNDARY_PROOF=PASS maturity=<step>` or
 # `AUTHORITY_BOUNDARY_PROOF=FAIL ...`; the exit status is 0 only on PASS. The
 # workflow also requires the exact PASS line, so a truncated or skipped run
@@ -47,16 +59,18 @@ set -u
 
 readonly AB_DEPLOYER="sa_112096412008414111981"
 readonly AB_SERVICE_USER="lilith-authority-dev"
+readonly AB_WITNESS_USER="lilith-recovery-witness"
 readonly AB_BROKER_USER="lilith-memory-broker"
 readonly AB_SYSTEMCTL="/usr/bin/systemctl"
 readonly AB_TRUE="/usr/bin/true"
 readonly AB_UNITS="lilith-authority-dev.service lilith-authority-dev.socket"
+readonly AB_WITNESS_UNITS="lilith-recovery-witness.service lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket"
 readonly AB_UNIT_VERBS="start stop restart reload try-restart reload-or-restart enable disable reenable mask unmask edit revert"
 readonly AB_KEYGEN="/usr/local/sbin/lilith-authority-keygen-dev"
 readonly AB_OPT="/opt/lilith-authority-dev"
 readonly AB_CREDSTORE="/etc/credstore.encrypted"
 # Existing root-owned parents that govern creation of every ladder object.
-readonly AB_PARENTS="/opt /etc /etc/systemd/system /etc/tmpfiles.d /usr/local/sbin /var/lib/systemd /etc/needrestart/conf.d /usr/local/lib/lilith-dev-deploy"
+readonly AB_PARENTS="/opt /etc /etc/systemd/system /etc/tmpfiles.d /usr/local/sbin /var/lib /var/lib/systemd /etc/needrestart/conf.d /usr/local/lib/lilith-dev-deploy"
 # Existing root-owned files whose integrity the maturity rule and this proof rely on.
 readonly AB_ROOT_FILES="/etc/passwd /etc/group /usr/local/lib/lilith-dev-deploy/effective_sudo_proof.sh /etc/needrestart/conf.d/lilith-authority-sensitive.conf"
 readonly AB_FORBIDDEN_GROUPS="root sudo adm lxd docker wheel google-sudoers systemd-journal lilith lilith-authority-dev lilith-recovery-witness lilith-memory-broker lilith-memory-ipc"
@@ -71,16 +85,47 @@ L1c.1|/etc/tmpfiles.d/lilith-authority-dev.conf|regular file|644|
 L1c.3|/usr/local/sbin/lilith-authority-keygen-dev|regular file|755|
 "
 readonly AB_STEPS="PRE_L1A L1a L1b.1 L1b.2 L1c.1 L1c.3"
+# PR-1 ladder (B1b-3e PR-1S), valid only on top of L1c.3: step|path|kind|mode|extra denials.
+readonly AB_PR1_LADDER="
+P1A-5|/usr/local/sbin/lilith-authority-ledger-dev|regular file|755|
+P1A-5|/usr/local/sbin/lilith-authority-hold-dev|regular file|755|
+P1A-5|/usr/local/sbin/lilith-authority-verify-dev|regular file|755|
+P1A-5|/usr/local/sbin/lilith-authority-recovery-dev|regular file|755|
+P1A-5|/usr/local/sbin/lilith-recovery-witness-owner-dev|regular file|755|
+P1A-7|/etc/lilith-authority-custody|directory|700|-r -x
+P1A-8b|/etc/systemd/system/lilith-recovery-witness.service|regular file|644|
+P1A-8b|/etc/systemd/system/lilith-recovery-witness-owner.socket|regular file|644|
+P1A-8b|/etc/systemd/system/lilith-recovery-witness-signer.socket|regular file|644|
+P1A-8b|/etc/tmpfiles.d/lilith-recovery-witness.conf|regular file|644|
+P1A-9|/etc/lilith-authority-dev|directory|755|
+P1A-9|/etc/lilith-authority-dev/trust|directory|755|
+P1A-9|/etc/lilith-authority-dev/registry|directory|755|
+P1A-9|/etc/lilith-authority-dev/owner|directory|755|
+P1A-9|/etc/lilith-recovery-witness|directory|700|-r -x
+P1A-9|/var/lib/lilith-authority-custody|directory|700|-r -x
+"
+readonly AB_PR1_STEPS="PR1_ABSENT P1A-5 P1A-7 P1A-8a P1A-8b P1A-9"
+readonly AB_PR1_CLIS="/usr/local/sbin/lilith-authority-ledger-dev /usr/local/sbin/lilith-authority-hold-dev /usr/local/sbin/lilith-authority-verify-dev /usr/local/sbin/lilith-authority-recovery-dev /usr/local/sbin/lilith-recovery-witness-owner-dev"
+# Private leaves beneath a root-only directory the deployer can stat: parent|leaf.
+readonly AB_PR1_UNOBSERVABLE="
+/etc/lilith-authority-custody|/etc/lilith-authority-custody/prepared
+/etc/lilith-authority-custody|/etc/lilith-authority-custody/retired
+/etc/lilith-recovery-witness|/etc/lilith-recovery-witness/credentials/lilith-recovery-witness.witness.cred
+/var/lib/lilith-authority-custody|/var/lib/lilith-authority-custody/holds
+/var/lib/lilith-authority-dev|/var/lib/lilith-authority-dev/authority_ledger.db
+"
 # Generic host prerequisites: path|kind|mode|denials. Never maturity evidence.
 readonly AB_HOST_PREREQS="
 /var/lib/systemd/credential.secret|regular file|400|-r -w
 /etc/credstore.encrypted|directory|700|-r -w -x
 "
-# Later authority state (L3 onward). Denied whenever present; not ladder-required here.
-readonly AB_LATER="/etc/lilith-authority-dev /var/lib/lilith-authority-dev /run/lilith-authority-dev /run/credentials/lilith-authority-dev.service /var/lib/lilith-recovery-witness /run/lilith-recovery-witness"
+# Later authority state (PR-1B onward). Denied whenever present; not ladder-required here.
+# (`/etc/lilith-authority-dev` is a PR-1 ladder object since PR-1S.)
+readonly AB_LATER="/var/lib/lilith-authority-dev /run/lilith-authority-dev /run/credentials/lilith-authority-dev.service /var/lib/lilith-recovery-witness /run/lilith-recovery-witness /run/credentials/lilith-recovery-witness.service"
 
 AB_FAILED=0
 AB_MATURITY="PRE_L1A"
+AB_PR1_MATURITY="PR1_ABSENT"
 
 ab_say() { printf '%s\n' "$*"; }
 ab_fail() { ab_say "FAIL: $*"; AB_FAILED=1; }
@@ -114,6 +159,21 @@ ab_step_index() {
 ab_raise() {  # ab_raise <step>: maturity becomes the later of the two
   if [ "$(ab_step_index "$1")" -gt "$(ab_step_index "${AB_MATURITY}")" ]; then
     AB_MATURITY="$1"
+  fi
+}
+
+ab_pr1_index() {
+  local i=0 step
+  for step in ${AB_PR1_STEPS}; do
+    [ "${step}" = "$1" ] && { echo "${i}"; return 0; }
+    i=$((i + 1))
+  done
+  echo 99
+}
+
+ab_pr1_raise() {
+  if [ "$(ab_pr1_index "$1")" -gt "$(ab_pr1_index "${AB_PR1_MATURITY}")" ]; then
+    AB_PR1_MATURITY="$1"
   fi
 }
 
@@ -202,6 +262,12 @@ ab_check_sudo_as() {
   else
     ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u ${AB_SERVICE_USER} (proxy: ${AB_BROKER_USER})"
   fi
+  if ab_local_user "${AB_WITNESS_USER}"; then
+    ab_pr1_raise P1A-8a
+    ab_sudo_denied "-u ${AB_WITNESS_USER} ${AB_TRUE}" -u "${AB_WITNESS_USER}" "${AB_TRUE}"
+  else
+    ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u ${AB_WITNESS_USER} (proxy: ${AB_BROKER_USER})"
+  fi
 }
 
 ab_check_service_control() {
@@ -211,7 +277,7 @@ ab_check_service_control() {
     return
   fi
   ab_sudo_denied "${AB_SYSTEMCTL} daemon-reload" "${AB_SYSTEMCTL}" daemon-reload
-  for unit in ${AB_UNITS}; do
+  for unit in ${AB_UNITS} ${AB_WITNESS_UNITS}; do
     for verb in ${AB_UNIT_VERBS}; do
       ab_sudo_denied "${AB_SYSTEMCTL} ${verb} ${unit}" "${AB_SYSTEMCTL}" "${verb}" "${unit}"
     done
@@ -321,13 +387,61 @@ ab_check_host_prereqs() {  # ABSENT | PRESENT_SECURE | PRESENT_UNSAFE; never mat
   fi
 }
 
+ab_pr1_ladder_maturity() {
+  local step path kind mode denies
+  while IFS='|' read -r step path kind mode denies; do
+    [ -n "${step}" ] || continue
+    if [ -n "$(ab_stat "${path}")" ]; then
+      ab_pr1_raise "${step}"
+    fi
+  done <<< "${AB_PR1_LADDER}"
+}
+
+ab_check_pr1_ladder() {
+  local step path kind mode denies op max cli parent leaf
+  max="$(ab_pr1_index "${AB_PR1_MATURITY}")"
+  if [ "${max}" -gt 0 ] && [ "${AB_MATURITY}" != "L1c.3" ]; then
+    ab_fail "PR1_OBJECT_BEFORE_L1C3 pr1=${AB_PR1_MATURITY} maturity=${AB_MATURITY}"
+  fi
+  if [ "${max}" -ge "$(ab_pr1_index P1A-8b)" ] && ! ab_local_user "${AB_WITNESS_USER}"; then
+    ab_fail "LADDER_OBJECT_MISSING account ${AB_WITNESS_USER}"
+  fi
+  while IFS='|' read -r step path kind mode denies; do
+    [ -n "${step}" ] || continue
+    if [ "$(ab_pr1_index "${step}")" -gt "${max}" ]; then
+      ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: ${path} (${step})"
+      continue
+    fi
+    ab_expect_root_object "${path}" "${kind}" "${mode}" || continue
+    ab_deny -w "${path}"
+    for op in ${denies}; do
+      ab_deny "${op}" "${path}"
+    done
+  done <<< "${AB_PR1_LADDER}"
+  if [ "${max}" -ge "$(ab_pr1_index P1A-5)" ]; then
+    for cli in ${AB_PR1_CLIS}; do
+      ab_sudo_denied "${cli}" "${cli}"
+    done
+  else
+    ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: sudo PR-1 fixed CLIs (the effective-sudo proof still applies)"
+  fi
+  while IFS='|' read -r parent leaf; do
+    [ -n "${parent}" ] || continue
+    if [ -n "$(ab_stat "${parent}")" ]; then
+      ab_say "UNOBSERVABLE_BY_DESIGN: ${leaf} (beneath root-only ${parent}; checked only by root tooling)"
+    else
+      ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: ${leaf} (${parent} absent)"
+    fi
+  done <<< "${AB_PR1_UNOBSERVABLE}"
+}
+
 ab_check_later_state() {
   local path
   for path in ${AB_LATER}; do
     if [ -n "$(ab_stat "${path}")" ]; then
       ab_deny -w "${path}"
       case "${path}" in
-        /var/lib/*|/run/*) ab_deny -r "${path}" ;;
+        /var/lib/*|/run/*) ab_deny -r "${path}"; ab_deny -x "${path}" ;;
       esac
     else
       ab_say "DEFERRED_UNTIL_OBJECT_EXISTS: ${path} (later step)"
@@ -338,14 +452,18 @@ ab_check_later_state() {
 ab_main() {
   AB_FAILED=0
   AB_MATURITY="PRE_L1A"
+  AB_PR1_MATURITY="PR1_ABSENT"
   ab_check_identity
   ab_check_parents
   ab_check_sudo_as
   ab_check_service_control
   ab_ladder_maturity
   ab_check_ladder
+  ab_pr1_ladder_maturity
+  ab_check_pr1_ladder
   ab_check_host_prereqs
   ab_check_later_state
+  ab_say "PR1_AUTHORITY_BOUNDARY maturity=${AB_PR1_MATURITY}"
   if [ "${AB_FAILED}" -eq 0 ]; then
     ab_say "AUTHORITY_BOUNDARY_PROOF=PASS maturity=${AB_MATURITY}"
     return 0
