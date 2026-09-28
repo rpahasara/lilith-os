@@ -8,10 +8,16 @@ Status:
 - **B1b-3e LIVE REHEARSAL NOT AUTHORIZED**
 - **WHOLE-HOST ROLLBACK UNRESOLVED**
 - **REAL AUTHORITY ABSENT**
-- **NEW OWNER DECISIONS:** RR-33 … RR-40, all **PENDING_OWNER_DECISION** (§34)
+- **OWNER DECISIONS ACCEPTED:** RR-33 … RR-40 (§34), in the owner-decision
+  closure after `c908a95`. **No PENDING_OWNER_DECISION remains before PR-1S**
+- **NEXT SLICE: PR-1S** (source/test only), not PR-1A
 
 Base: protected main `954255665e23e0421017a1a0822c3fd6e00a506b` (includes the
-merged Source Prep B, `5f5a715` + `5e65c0c`).
+merged Source Prep B, `5f5a715` + `5e65c0c`). First draft `c908a95`; this
+revision is the owner-decision closure pass. Where the first draft's
+recommendation differs from the accepted decision (RR-34 path, RR-36 path,
+RR-38 package digest, RR-39 scope, the PR-2 position), the accepted decision
+is written in place.
 
 "PR-1" is the prerequisite of the
 [live-rehearsal gate](slice-15b2b-b1b3e-live-rehearsal-gate.md) §14: *B1b-3d
@@ -32,6 +38,7 @@ touched; no Stage III; no First Memory. Every live fact below comes from an
 accepted record, never from observation.
 
 ```text
+PR-1 acceptance               != positive evidence issuance acceptance
 source release prepared       != installed release
 installed release             != activation
 installation                  != authority
@@ -107,11 +114,11 @@ differ, this record says so (§2).
 
 | # | Conflict | Consequence for PR-1 |
 | --- | --- | --- |
-| PC-1 | B1b-3d §15 puts the K-WIT blob at `/etc/credstore.encrypted/lilith-recovery-witness.witness.cred`. Prep A (PF-10) and the successor keygen (PF-9) require the credstore to hold **exactly** the CURRENT K-ACT slot | a K-WIT blob there would make every readiness evaluation fail `UNEXPECTED_CREDENTIAL_BLOB` and block every successor keygen. **RR-36** |
+| PC-1 | B1b-3d §15 puts the K-WIT blob at `/etc/credstore.encrypted/lilith-recovery-witness.witness.cred`. Prep A (PF-10) and the successor keygen (PF-9) require the credstore to hold **exactly** the CURRENT K-ACT slot | a K-WIT blob there would make every readiness evaluation fail `UNEXPECTED_CREDENTIAL_BLOB` and block every successor keygen. **Resolved by RR-36 (OWNER-ACCEPTED):** K-WIT lives under `/etc/lilith-recovery-witness/credentials/`; the B1b-3d §15 credstore path is superseded (not edited) and must stay absent |
 | PC-2 | B1b-3d §10/§23 L3b bootstraps the witness at `ledgerSequence = 0` **before** the ledger (L3c). The accepted V2 genesis (RR-18, PF-11) needs `ledgerSequence ≥ 1`, which only a provisioned ledger provides | the V2 order is ledger first, then genesis (§14). The B1b-3d §23 L3b/L3c order is superseded for V2 (the design record is not edited) |
 | PC-3 | The installer ladder name `L2c` means "custody directories" (Source Prep B). B1b-3d §23 `L2c` means "K-WIT keygen" | two different mutations share a name. PR-1 phases use the `P1A-*` / `P1B-*` names below and call the installer stage by its name, `custody` |
-| PC-4 | B1b-3d §13 step 1 puts the ceremony hold at `/etc/lilith-authority-dev/hold`. Source Prep B makes the hold a store of records named `<sha256(ceremonyId)>.json` whose location PR-1 fixes | **RR-34** fixes the location; the single-file hold is superseded (not edited) |
-| PC-5 | The gate's PR-1 evidence is "the B1b-3d acceptance record". B1b-3d §22 acceptance includes positive signing (P2–P4, §22 item 3) and R1–R5 (L7). The gate's PR-1 text names only L3a–L4 and a `RESTORE_READY` signer | PR-1 scope must be fixed before PR-1S is written. **RR-39** |
+| PC-4 | B1b-3d §13 step 1 puts the ceremony hold at `/etc/lilith-authority-dev/hold`. Source Prep B makes the hold a store of records named `<sha256(ceremonyId)>.json` whose location PR-1 fixes | **Resolved by RR-34 (OWNER-ACCEPTED):** `/var/lib/lilith-authority-custody/holds/`; the single-file hold is superseded (not edited) |
+| PC-5 | The gate's PR-1 evidence is "the B1b-3d acceptance record". B1b-3d §22 acceptance includes positive signing (P2–P4, §22 item 3) and R1–R5 (L7). The gate's PR-1 text names only L3a–L4 and a `RESTORE_READY` signer | **Resolved by RR-39 (OWNER-ACCEPTED):** PR-1 does not wire or prove positive issuance. Its acceptance record names a narrower claim (§5.1) and never claims full legacy B1b-3d §22 acceptance |
 | PC-6 | B1b-3d §7 keys the DR-5 existence rule on an `INSTALLED` marker written at L4. The accepted deployer boundary derives maturity from root-owned ladder objects instead, and introduces no marker | PR-1 writes **no** `INSTALLED` marker. The ladder derivation is extended instead (§9). The broker verifier's `…/INSTALLED` entry stays `NOT_YET_PRESENT` |
 | PC-7 | The signer runs as `lilith-authority-dev` with `InaccessiblePaths=/etc/credstore.encrypted`. It therefore cannot observe the credential inventory (B6) that `FULL_READINESS` requires | `FULL_READINESS` can be reproduced only by a root observer, never by the signer about itself. The signer reports a partial self-view (§19, §33) |
 
@@ -165,7 +172,7 @@ or **UNKNOWN** columns is a live fact.
 | B-19 | `RecoveryWitnessV2` live | **KNOWN** absent; **EXPECTED** impossible today | no live writer or service source (PF-13, PF-14) |
 | B-20 | witness service / account `lilith-recovery-witness` | **KNOWN** absent | closure §6; L2 D-W deferred the account |
 | B-21 | K-WIT custody | **KNOWN** absent | closure §6: "K-WIT is absent" |
-| B-22 | live hold storage | **KNOWN** absent | its location is not yet decided (RR-34) |
+| B-22 | live hold storage | **KNOWN** absent | accepted location `/var/lib/lilith-authority-custody/holds/` (RR-34) |
 | B-23 | custody root, `prepared/`, `retired/` | **KNOWN** absent at closure; **EXPECTED** absent | the `custody` stage did not exist at closure and is source-only (Source Prep B §14) |
 | B-24 | owner off-host register / genesis pin | **KNOWN** absent | Source Prep A §7.1: no real off-host storage is built; no genesis exists to pin |
 | B-25 | snapshot inventory | **KNOWN** absent; snapshots **UNKNOWN** | PR-2 not performed. Whether any disk or machine-image snapshot of `lilith-dev-01` exists is unknown |
@@ -187,18 +194,66 @@ PR-1S  source/runtime wiring (no DEV contact)
 
 PR-2 and PR-3 interleave as §20 shows. The label "PR-1" is kept for the
 gate's single prerequisite row; its three parts are accepted separately.
-**RR-33** records this split and the single-upgrade rule (§6.1).
+**RR-33 (OWNER-ACCEPTED)** fixes this split and the single-upgrade rule
+(§6.1): PR-1S produces the **one** reviewed release PR-1A installs, holding
+all source/runtime machinery known to be required for the accepted PR-1
+baseline. PR-1S performs no live mutation; PR-1A installs inert machinery
+only; PR-1B establishes V2/bootstrap/readiness state only after its PR-2 and
+PR-3 dependencies are satisfied.
 
 | | PR-1S | PR-1A | PR-1B |
 | --- | --- | --- | --- |
-| may mutate | repository only | `/opt/lilith-authority-dev` release set and selector; installed unit/socket/tmpfiles files; `/usr/local/sbin/lilith-authority-*-dev`; `systemctl daemon-reload`; empty custody root and slots; the `lilith-recovery-witness` account; empty root-owned config skeleton directories | K-WIT blob; trust anchors; registry v1; the authority recovery ledger; the on-host pin copy; witness state dir + V2 genesis; hold store records; signer and witness runtime (started, never enabled) |
+| may mutate | repository only | `/opt/lilith-authority-dev` release set and selector; installed unit/socket/tmpfiles files; `/usr/local/sbin/lilith-authority-*-dev`; `systemctl daemon-reload`; empty custody root and slots; the `lilith-recovery-witness` account; empty root-owned skeleton directories (`/etc/lilith-authority-dev/{trust,registry}`, `/etc/lilith-recovery-witness/credentials/`, `/var/lib/lilith-authority-custody/holds/`) | K-WIT blob; trust anchors; registry v1; the authority recovery ledger; the on-host pin copy; witness state dir + V2 genesis; hold store records; signer and witness runtime (started, never enabled) |
 | must stay unchanged | every host | CURRENT blob bytes and identity; credstore listing; host key; signer account; K-ACT; units inactive and not enabled; activation; broker; Stage III; IAM/WIF/sudoers | CURRENT blob bytes and identity; host key; K-ACT; activation `GRANT_ABSENT`; broker; Stage III; IAM/WIF/sudoers; the routine deployer rule |
 | evidence | CI, tests, release manifest, reproducible build | pre/post installer `status` per stage; CURRENT preservation (§24); installed-release evidence (§23); DR-5 + broker preservation on a real routine deployment | per-phase POST (§27); the owner acceptance package (§19) |
 | blocks continuation | any §31 blocker open | any baseline mismatch (§7); any preservation diff | PR-2 or PR-3 missing where §20 requires them; any RR-7 class 1–4; any readiness reason other than the hold |
 | rollback boundary | revert | release rollback to a reviewed prior archive, before any authority PONR | per phase (§29); forward-only from V2 genesis commit |
 | authority state changes | no | **no** | **yes, and only by K-ROOT**: registry v1 becomes the genesis head through the witness. Nothing is granted by the host |
 | custody state changes | no | **no** (empty directories only) | yes: K-WIT created; hold store written |
-| owner acceptance | review + merge | PR-1A acceptance record (inert install; no custody claim) | the explicit INITIAL_CUSTODY release decision, then the PR-1 acceptance record |
+| owner acceptance | review + merge | PR-1A acceptance record (inert install; no custody claim) | the explicit INITIAL_CUSTODY release decision over the digest-bound package (RR-38), then the PR-1 acceptance record (§5.1) |
+
+### 5.1 The PR-1 claim (RR-39, OWNER-ACCEPTED)
+
+PR-1 scope is exactly:
+
+- B1b-3d L3a–L4-style live custody and bootstrap establishment, re-derived
+  for V2 (registry v1, anchors, K-WIT custody, authority recovery ledger, V2
+  genesis);
+- the accepted OS, routine-deployer, and broker denial proofs (B1b-3d §17
+  N1–N9, D1–D12, B1–B4, plus the custody, witness-credential, and hold-store
+  paths);
+- loaded-key / HEALTH fingerprint verification: the independently
+  reproduced custody/publication/blob binding (B1 = B3 = B2, with B5/B6)
+  plus the runtime-derived HEALTH fingerprint (B4). This is the current
+  accepted loaded-key evidence; RR-14a proof-of-possession stays deferred per
+  the B1b-3e design;
+- the V2 / INITIAL_CUSTODY hold / readiness bootstrap through
+  `FULL_READINESS`.
+
+PR-1 does **not** enable or prove positive OwnerEvidence issuance. Issuance
+stays unwired (`ISSUE_OWNER_EVIDENCE` is refused even at `FULL_READINESS`
+READY). No real OwnerEvidence signing is performed to satisfy the older
+B1b-3d §22 acceptance shape (P2–P4 and R1–R5, §22 items 3 and 13–16).
+
+The PR-1 acceptance record therefore names this narrower claim:
+
+```text
+B1b-3d L3a–L4 (V2) DEV_SYNTHETIC custody bootstrap ACCEPTED
+  issuance: UNWIRED; positive evidence issuance: NOT ACCEPTED, NOT PROVEN
+  legacy B1b-3d §22 "DEV_SYNTHETIC CUSTODY PROVEN": NOT CLAIMED
+```
+
+The gate's PR-1 row ("B1b-3d L3a–L4 designed for V2, implemented, live, and
+accepted … `RESTORE_READY` signer"; evidence "the B1b-3d acceptance record")
+is satisfied by that record, read with this narrower claim:
+`RESTORE_READY` means `FULL_READINESS` READY reproduced by the independent
+root verifier and the owner (RR-38), not issuance. No real authority gate is
+weakened: every readiness, binding, inventory, hold, and denial condition
+still applies; only the claim is narrower.
+
+```text
+PR-1 acceptance != positive evidence issuance acceptance
+```
 
 ## 6. Installed release upgrade
 
@@ -211,7 +266,7 @@ reader, C-4 wiring, or readiness (PF-1). Installing it alone would satisfy
 RR-25 only until PR-1S produces the release PR-1B needs, and then a **second**
 upgrade of the custody host would follow.
 
-**Recommendation (RR-33):** do not install the Source Prep B release on its
+**Accepted (RR-33):** do not install the Source Prep B release on its
 own. PR-1A installs exactly one release: the reviewed PR-1S release, which
 contains the Source Prep B changes plus the §31 runtime work. One upgrade,
 one release-set transition, one set of provenance evidence.
@@ -336,8 +391,9 @@ Why the custody root (and every other PR-1 path) must be added: the
 preservation transcript is the owner's record that each routine deployment
 left the broker unchanged **while** the authority paths existed. A path not
 in the list is silently absent from that record. Adding
-`/etc/lilith-authority-custody`, the K-WIT custody location (RR-36), the hold
-store (RR-34), `/etc/lilith-authority-dev/{trust,registry}`, and
+`/etc/lilith-authority-custody`, `/etc/lilith-recovery-witness/credentials/`
+(RR-36), `/var/lib/lilith-authority-custody/holds/` (RR-34),
+`/etc/lilith-authority-dev/{trust,registry}`, and
 `/var/lib/lilith-authority-dev/authority_ledger.db` makes the transcript
 complete. Because custody observations are outside the pinned
 `baselineCandidate` (PF-18), adding paths does **not** change the accepted
@@ -352,13 +408,17 @@ names. Required extension:
 
 - ladder objects for the custody root (`directory|700`, denials `-r -w -x`),
   the witness account (`sudo -u lilith-recovery-witness` denied), witness
-  units (every unit verb denied), new CLIs (`sudo -n -l` denied), and the
-  `/etc/lilith-authority-dev` skeleton (`-w` denied);
+  units (every unit verb denied), new CLIs (`sudo -n -l` denied), the
+  `/etc/lilith-authority-dev` skeleton (`-w` denied), and the two new
+  root-only roots `/etc/lilith-recovery-witness` and
+  `/var/lib/lilith-authority-custody` (`-r -w -x` denied on the first
+  root-only directory the deployer can stat; everything beneath it is
+  `UNOBSERVABLE_BY_DESIGN`, like the K-ACT blob);
 - the maturity rule unchanged in kind: derived only from root-owned objects
   the ceremony steps create; no marker (PC-6);
 - a decision on the transient upgrade names: the proof refuses
   `.<sha>.staging` in `releases/` (PF-17). That is fail-closed availability
-  loss for a routine deployment that runs mid-upgrade. **Recommendation:** keep
+  loss for a routine deployment that runs mid-upgrade. **Rule (SOURCE DETAIL):** keep
   the refusal, and require that no routine deployment runs between
   `upgrade-stage` and `upgrade-retire-old` (owner freeze on merges to `main`).
 
@@ -400,7 +460,23 @@ scan exactly as Prep A implements them; single instance and `flock`.
 
 Owner ops for V2: `BOOTSTRAP` (V2 genesis only, from `UNINITIALIZED`). The
 V2 head-advance and epoch-advance execution ops are needed by the B1b-3e
-rehearsal, not by PR-1B. **RR-37** decides whether PR-1S ships them.
+rehearsal, not by PR-1B. **RR-37 (OWNER-ACCEPTED, with inertness):** PR-1S
+ships them, TEST-proven, so the accepted host needs no further source-release
+upgrade merely to begin the B1b-3e rehearsal. `installed code != enabled
+mutation`:
+
+- PR-1 never executes a registry-head or RecoveryEpoch transition;
+- both ops stay fail closed at runtime: they require a K-ROOT-verified
+  `RegistryHeadAdvanceAuthorizationV1` / `EpochAdvanceAuthorizationV1` bound
+  to the current head, a registered retained copy (RR-20a), the owner pin, a
+  CONSISTENT chain, the governing hold of the matching ceremony kind, the
+  root owner socket, and `environment=dev`;
+- no transition authorization exists or is manufactured by installation;
+  PR-3's authorization register stays empty through PR-1;
+- PR-1 uses only `BOOTSTRAP` (V2 genesis), `READ_WITNESS`, and
+  `RECORD_LEDGER_ADVANCE`;
+- PR-1 evidence for the transition ops is the TEST proof and their presence
+  in the reviewed manifest. PR-1 does not invoke them live.
 
 ## 11. K-WIT custody
 
@@ -425,16 +501,38 @@ Fixed by accepted records (B1b-3d §4, §6, §9, §10, §17 B4):
 
 Not fixed by any accepted record, and conflicting with Prep A:
 
-- **the K-WIT blob location** (PC-1). **RR-36.** Recommendation: a separate
-  root-only witness custody directory outside `/etc/credstore.encrypted`
-  (for example `/etc/lilith-recovery-witness-custody/`, `root:root 0700`,
-  holding `lilith-recovery-witness.witness.cred` `root:root 0600`),
-  referenced only by the witness unit, in the signer unit's
-  `InaccessiblePaths`, on the same host key. This leaves the accepted
-  "credstore = exactly CURRENT" invariant untouched.
+- **the K-WIT blob location** (PC-1). **RR-36 (OWNER-ACCEPTED):** K-WIT
+  custody is separate from K-ACT custody. The blob **must not** be placed in
+  `/etc/credstore.encrypted`, which stays constrained to the single K-ACT
+  CURRENT blob. It lives in a dedicated root-only RecoveryWitness credential
+  source boundary, `/etc/lilith-recovery-witness/credentials/`:
+  - directory `root:root 0700` (its parent `/etc/lilith-recovery-witness`
+    root-owned; parent mode SOURCE DETAIL); no symlinks;
+  - exactly one expected blob, a `root:root 0600` regular file, encrypted
+    `--with-key=host` under the already-accepted runtime credential name
+    `recovery-witness-signing-key` for the already-accepted keyId. The
+    filename is SOURCE DETAIL (the B1b-3d §15 basename
+    `lilith-recovery-witness.witness.cred` is the natural choice); the
+    credential name gets no second meaning;
+  - referenced only by the witness unit's single
+    `LoadCredentialEncrypted=recovery-witness-signing-key:<that path>`; the
+    K-WIT service obtains plaintext only through that systemd credential;
+  - denied to the routine deployer, the broker, and the K-ACT signer (the
+    signer unit adds the directory to `InaccessiblePaths`; SOURCE CHANGE
+    REQUIRED);
+  - protected by the existing systemd host credential mechanism (T-2). The
+    whole-host snapshot limitation is unchanged: a disk snapshot holds both
+    the blob and `credential.secret`.
+
+  The Prep A "credstore = exactly CURRENT" invariant is untouched. The old
+  credstore K-WIT path stays a must-be-absent path in the installer and
+  broker observations.
 - **the keygen form** for K-WIT: a closed `witness` form writing only that
   location, refusing if it is non-empty, printing only its public
   publication. SOURCE CHANGE REQUIRED (S-6).
+
+K-WIT is distinct from K-ACT, K-ROOT, the B1c activation key, and the owner
+WebAuthn credential, and signs only `RecoveryWitnessV2`.
 
 Distinctness evidence (owner package §19): K-WIT public fingerprint ≠ K-ACT
 fingerprint; K-WIT keyId ∉ registry v1; K-WIT blob SHA-256 ≠ K-ACT blob
@@ -477,39 +575,54 @@ Preconditions before the genesis may be committed:
    names the K-WIT public key from its publication;
 7. the witness store is `UNINITIALIZED`: no chain, pointer, scratch, or
    retained authorization;
-8. the owner pin equals the candidate digest (RR-35, §13).
+8. the owner pin equals the candidate digest (RR-35 step 4, §13), and after
+   the commit the committed digest equals the pin (step 7).
 
 Durability (inherited, Prep A §8): create `chain/1.json` `O_EXCL`, fsync the
 file, fsync `chain/` (**commit point**), write and fsync the tmp pointer,
 rename to `witness.json`, fsync the state directory, then reply. An
 interrupted bootstrap before the commit point stays `UNINITIALIZED`.
 
-## 13. Owner genesis pin dependency
+## 13. Owner genesis pin dependency (RR-35, OWNER-ACCEPTED)
 
-**Ordering options.**
+**Accepted ordering: PIN-BEFORE-COMMIT.** After the exact initial ledger
+position, registry head, RecoveryEpoch, `policyVersion`, and every other
+deterministic genesis field are established (§12):
 
-| | A. commit, then pin | B. owner-derived candidate, pin, then commit |
-| --- | --- | --- |
-| sequence | K-WIT signs and commits genesis; owner copies the digest off-host | the owner computes the unsigned genesis offline from owner-held inputs (§12); the host tooling computes it read-only; both digests must be equal; the owner records the pin; `BOOTSTRAP` refuses unless the signed genesis digest equals the pin |
-| independence | the pin is copied from the host it is meant to anchor | the pin is derived independently of the host (PF-12: the digest excludes the signature) |
-| window | between commit and pin, witness recovery has no pin input: `RECOVERY_INPUT_INVALID`, fail closed | none: the pin exists before the genesis |
-| wrong genesis | a genesis over a stale or wrong registry could be pinned by mistake | refused before commit (digest mismatch) |
-| dependency | PR-3 register must exist before acceptance | PR-3 register must exist **before commit** |
+1. construct the exact unsigned `RecoveryWitnessV2` genesis candidate;
+2. compute its canonical genesis digest (`witness_v2_digest`, which excludes
+   the K-WIT signature, PF-12);
+3. the owner independently reproduces that digest off-host from owner-held
+   inputs and stores it as `OwnerGenesisPinV1` (PR-3);
+4. on-host verification proves the owner pin equals the candidate digest;
+5. K-WIT signs **that exact candidate** (the witness `BOOTSTRAP` refuses any
+   other unsigned body);
+6. the signed genesis is committed durably (§12 durability);
+7. the committed genesis digest is re-verified equal to the owner pin.
 
-**Recommendation: B (RR-35).** The ownership of each item:
+If the committed genesis differs from the pinned candidate: **STOP.** No
+second genesis is ever created silently (RR-40). The rejected alternative
+(commit, then pin) would copy the pin from the host it anchors and leave a
+window with no pin input.
+
+```text
+owner pin != K-WIT signature
+owner pin != K-ROOT authority
+owner pin != external monotonic current-head anchoring
+```
 
 | Item | Owner | PR |
 | --- | --- | --- |
-| candidate digest production, host side (read-only) | PR-1B tooling (S-7) | PR-1 |
-| candidate digest production, owner side (offline recomputation) | owner workstation tooling (S-11) | PR-1 source, PR-3 material |
-| off-host storage of the pin (`OwnerGenesisPinV1`) | the owner | **PR-3** |
+| candidate construction and digest, host side (read-only) | PR-1B tooling (S-7) | PR-1 |
+| digest reproduction, owner side (offline) | owner workstation tooling (S-11) | PR-1 source; PR-3 material |
+| off-host storage of the pin | the owner | **PR-3 foundation** (before commit) |
 | on-host copy of the pin (root-owned input for witness recovery and the verifier) | host root | PR-1B |
-| verification of the pin (`genesis_pin_reason`) | witness recovery; the independent verifier; the owner's off-host re-evaluation | PR-1 |
+| pin verification before signing (step 4) and after commit (step 7) | witness `BOOTSTRAP`; witness recovery; the root verifier; the owner's off-host reproduction | PR-1 |
 | release-eligibility input | the verified pin, checked equal to the owner's off-host record | PR-1 (check), PR-3 (reference value) |
 
 PR-1 never manufactures PR-3 evidence: the on-host copy counts only when its
 digest equals the owner's off-host record (Prep A §7.2 rule 4 applied to the
-pin). `owner pin != authority`.
+pin).
 
 ## 14. Authority ledger live gap
 
@@ -542,8 +655,8 @@ Design only:
 | operations callable | only the three ledger ops of the gate allowlist. `ISSUE`, `PREPARE`, `CONSUME`, `RESERVE`, `CONFIRM`, `ABANDON`, `REGISTRY_VIEW`, every signing request, admin, and unknown values are refused before any state is read |
 | normal signing impossible | the recovery handler module imports no minter (test-enforced, like today's "no authority-dev module imports the gate"). The minter is constructed only on the `FULL_READINESS` path, which is unwired in PR-1 if RR-39 is accepted |
 | compromised K-ACT loaded for C-4 | the C-4 ops are **ledger journal writes, not signatures**. P stays loaded only because systemd delivers it and the signer refuses to start without it (PF-3). The key object is never retained (PF-2), so no code path in the handler can reach private material |
-| operation context | the request carries only the operation name and, for `RECOVERY_ADVANCE_EPOCH`, the exact signed `EpochAdvanceAuthorizationV1` bytes. Everything else the signer reads **itself**, from fixed paths, never from the caller: the witness (chain from genesis, via `ReadOnlyPaths`), head registries, anchors, the on-host pin and register copies, the **complete** hold store, and its own ledger |
-| HELD verification | the governing hold is derived from the complete hold store with the same `governing_hold_reason` rule readiness uses, then passed to the gate. The caller never selects a hold. Closes PF-15 (single-record input) |
+| operation context | the request carries only the operation name and, for `RECOVERY_ADVANCE_EPOCH`, the exact signed `EpochAdvanceAuthorizationV1` bytes. Everything else, except the root-produced hold-store observation below, the signer reads **itself**, from fixed paths, never from the caller: the witness (chain from genesis, via `ReadOnlyPaths`), head registries, anchors, the on-host pin and register copies, and its own ledger |
+| HELD verification | the hold store is `root:root 0700` (RR-34), so the signer **cannot read it** and cannot observe its completeness, exactly as it cannot observe the credential inventory (PC-7). The root owner-socket request therefore carries the **complete** `HoldStoreObservationV1` produced by the fixed root hold observer (§17), with its listing digest. The handler accepts no single hold record; it re-judges the whole set with the same `parse_hold_store` / `governing_hold_reason` rules readiness uses and passes only the governing record to the gate. Completeness remains a root-observation property (story 4), produced by the store's owner, never by an arbitrary caller. Closes PF-15 (single-record input) |
 | expected epoch authorization | K-ROOT signature, `KEY_COMPROMISE`, bound to the current witness digest/version/epoch, unconsumed in the chain; and `ledger_observation` is **mandatory** in the runtime path (PF-15: optional in the pure API), so `ADOPTION_ALREADY_JOURNALLED` is always checked |
 | refusal of everything else | any gate result other than `RECOVERY_GATE_PERMITTED` returns only the closed reason; a permitted result performs exactly the named ledger op in one transaction, then `RECORD_LEDGER_ADVANCE` (B1b-3d §10 ordering). No other side effect |
 
@@ -552,37 +665,43 @@ C-4 (no compromise exists); acceptance is TEST evidence plus the live
 refusal of the three ops outside `KEY_COMPROMISE_RECOVERY` (they must return
 `HOLD_NOT_COMPROMISE_RECOVERY` under INITIAL_CUSTODY).
 
-## 16. Live hold-store location
+## 16. Live hold-store location (RR-34, OWNER-ACCEPTED)
 
-Who owns persistence of non-authority ceremony holds? **Host root** (gate §9:
-"ceremony hold — owner host root; may mutate host root; verify anyone"). The
-signer consumes holds; it must never own them. The writer is one fixed root
-CLI (S-11); the signer and the verifier are readers.
+**Accepted path:** `/var/lib/lilith-authority-custody/holds/`.
 
-| | A. `/var/lib/lilith-authority-dev/holds/` | B. `/etc/lilith-authority-custody/holds/` | C. `/etc/lilith-authority-dev/holds/` | D. `/var/lib/lilith-authority-ceremony/holds/` |
-| --- | --- | --- | --- | --- |
-| owner | inside the **signer's** `0700` state dir | inside the credential custody root | root-owned authority config tree | new root-owned state root |
-| signer can rewrite | **yes** (its `ReadWritePaths`) | no | no (`ProtectSystem=strict`, `ReadOnlyPaths`) | no (needs a new `ReadOnlyPaths`) |
-| signer can read (needed for its self-view) | yes | **no** (`InaccessiblePaths`) | yes (already `ReadOnlyPaths`) | after a unit change |
-| conflicts | makes the consumer the owner | breaks RR-26 "exactly `prepared`, `retired`"; mixes non-secret records with credential custody | mixes mutable ceremony state with public trust material; `/etc` for state is unconventional | new namespace in DR-5, broker list, unit |
-| deployer read | no | no | yes (world-readable, as the registry) | configurable |
-| existing coverage | — | — | unit `ReadOnlyPaths`, DR-5 later-state (`-w`), broker `CUSTODY_PATHS` already cover `/etc/lilith-authority-dev` | none |
-| B1b-3d precedent | — | — | §15 put the single `hold` file here | — |
+Holds are mutable, forward-only local readiness/custody state, not static
+configuration, so they live under `/var/lib`, not `/etc`. Persistence is
+owned by **host root through the fixed root ceremony tooling** (gate §9:
+"ceremony hold — owner host root; may mutate host root"). The authority
+signer is a consumer, never the owner. The hold store is not
+authority-bearing.
 
-**Recommendation: C** — `/etc/lilith-authority-dev/holds/`, `root:root 0755`,
-records `root:root 0644`, written only by the fixed root hold CLI. Holds are
-non-secret, non-authority records; write denial is the property that
-matters, and C reuses boundaries that are already proven. A is rejected
-outright (consumer as owner). **RR-34, PENDING_OWNER_DECISION**, because a
-world-readable hold store is a (small) confidentiality choice and D would
-change the unit and the proof surface.
+| Requirement | Rule |
+| --- | --- |
+| parent | `/var/lib/lilith-authority-custody`, root-owned, not a symlink, no other entries than `holds` (mode SOURCE DETAIL; `0700` keeps everything beneath unobservable by non-root) |
+| hold directory | `root:root 0700`, not a symlink, no subdirectories |
+| records | `root:root 0600` regular files named `<sha256(ceremonyId)>.json`, RFC 8785 bytes |
+| writer | the fixed root hold CLI only (S-11) |
+| signer | cannot read or rewrite (mode; plus `InaccessiblePaths` in the signer unit as defence in depth, SOURCE DETAIL). It consumes only the root-produced complete observation (§15) |
+| broker, routine deployer, `lilith` | denied (mode; proven non-vacuously on the first directory they can stat, §9) |
+| unexpected content | any unexpected entry, name, type, or symlink fails the whole store closed |
+| completeness | provable by the root observer (§17) |
+
+`/var/lib/lilith-authority-custody` (hold state) and `/etc/lilith-authority-custody`
+(credential custody slots, RR-26) are **different roots with similar names**.
+Tooling, proofs, and records always use the full path; neither is ever
+inferred from the other.
+
+The draft's alternatives (the signer state dir, the credential custody root,
+`/etc/lilith-authority-dev/holds/`, another state root) are closed by this
+decision.
 
 ## 17. Hold-store completeness proof
 
 | Property | Design |
 | --- | --- |
-| exact directory | the RR-34 path; opened `O_DIRECTORY\|O_NOFOLLOW`; every later operation through that descriptor (`openat`, `fstatat` with `AT_SYMLINK_NOFOLLOW`) |
-| ownership / mode | directory `root:root 0755`, not a symlink; every record `root:root 0644` regular file |
+| exact directory | `/var/lib/lilith-authority-custody/holds/`; opened `O_DIRECTORY\|O_NOFOLLOW`; every later operation through that descriptor (`openat`, `fstatat` with `AT_SYMLINK_NOFOLLOW`) |
+| ownership / mode | directory `root:root 0700`, not a symlink, inside a root-owned parent holding only `holds`; every record `root:root 0600` regular file |
 | no nested namespace | zero subdirectories; any non-regular entry fails the whole store closed |
 | no ignored filename classes | **every** directory entry is judged: no dot-file, backup, editor, or temp exemption. Only `^[0-9a-f]{64}\.json$` names are admitted; anything else is `HOLD_STORE_ENTRY_INVALID` |
 | deterministic naming | `sha256(ceremonyId).json`; the name is re-derived from the parsed record (`HOLD_STORE_NAME_MISMATCH`); duplicates fail (`HOLD_SET_CEREMONY_DUPLICATED`) |
@@ -590,7 +709,7 @@ change the unit and the proof surface.
 | atomic / read-consistent | the root writer and every observer take `flock` on the **directory descriptor** (no lock file inside the store, which would be an unexpected entry). The observer records the directory's `(st_ino, st_mtime_ns, st_ctime_ns)` before and after the listing and fails on any change. The writer publishes a record by tmp **outside** the store → fsync → `rename` into the store → fsync the store directory |
 | digest / listing evidence | `HoldStoreObservationV1` plus a listing digest: SHA-256 of the JCS list of `(name, sha256(bytes))`, sorted by name. Every eligibility and readiness result names that digest |
 | forward-only | the writer checks `hold_store_transition_reason(previous, proposed)` before every write: no record disappears, new ceremonies start `HELD`, `RELEASED` never returns to `HELD`. A forged or reverted record by host root is Level 3 (DR-3) |
-| observer | the root independent verifier (authoritative observation for eligibility and acceptance) and the signer (a read-only self-view) |
+| observer | the fixed root observer only (inside the root verifier and the root hold CLI). The signer never observes the store; it receives the complete root observation (§15) |
 
 ```text
 complete observation            != authority
@@ -620,19 +739,26 @@ missing -> INITIAL_CUSTODY / HELD -> HOLD_RELEASE_ELIGIBILITY -> explicit owner 
 - **No grandfathering.** The B1b-3d credential's existence never becomes a
   release. Missing, malformed, or unknown holds fail closed.
 - **HELD placement.** HELD is written after the genesis commit and its pin
-  verification, and **before** the signer's first start. Because the
-  ceremony ID is deterministic and a HELD record can never disappear or be
-  re-bound (Source Prep B §8), a HELD record bound to a genesis that must
-  later be abandoned would block any re-bootstrap with the same K-ACT.
-  **RR-40.**
+  re-verification (RR-35 step 7), and **before** the signer's first start.
+- **No re-bootstrap (RR-40, OWNER-ACCEPTED).** Once HELD is durably created:
+  it is never deleted or recreated; no other genesis is created; the
+  bootstrap ceremony is never silently reset; the deterministic initial
+  ceremony ID is never reused for different state. If eligibility fails on
+  a recoverable observation/readiness condition (unit mapping, inventory,
+  HEALTH, ledger view, a proof), the **same** HELD ceremony is re-evaluated
+  after the condition is corrected: that is retry, not re-bootstrap. If the
+  accepted genesis, the initial ceremony identity, or the HELD lineage itself
+  is wrong after HELD exists: **STOP**; a separate reviewed recovery design is
+  required. There is no automatic bootstrap reset.
 - **Eligibility** is a read-only evaluation by the root verifier in
   `HOLD_RELEASE_ELIGIBILITY` mode. It needs B4 (HEALTH), so the signer must
   be running (not enabled).
 - **RELEASED is never automatic.** It is written only by the fixed root hold
-  CLI, and only when the owner supplies the **eligibility readiness digest
-  they reviewed**. The CLI re-runs eligibility and refuses unless the
-  digest is identical. This binds the owner's decision to the exact state
-  reviewed. It is not authority.
+  CLI, and only when the owner supplies the **canonical acceptance-package
+  digest they approved** (RR-38, §19). The CLI re-runs the root verifier,
+  rebuilds the package, and refuses unless its digest is identical. This
+  binds the owner's decision to the exact state reviewed. It is not
+  authority.
 - **RELEASED** binds `OWNER_RELEASE_AFTER_ELIGIBILITY` and an
   `observedWitnessDigest` with the **genesis registry head** (the genesis
   itself, or a later ledger-only entry).
@@ -666,8 +792,8 @@ the PR that owns it. **Every item is required.**
 | E-14 | RecoveryEpoch E0 (counter, random, digest) | PR-1 |
 | E-15 | authority ledger: sequence, head, schema fingerprint; equal to the genesis binding | PR-1 |
 | E-16 | complete hold-store observation: listing digest; exactly one record, INITIAL_CUSTODY HELD bound to E-11 | PR-1 |
-| E-17 | `HOLD_RELEASE_ELIGIBILITY` = READY: every check PASS, with `CEREMONY_HOLD` passing as a bound INITIAL_CUSTODY HELD record; the readiness digest | PR-1 |
-| E-18 | the same result independently reproduced by the owner off-host from the exported evidence bundle (RR-38) | PR-1 tooling; PR-3 inputs |
+| E-17 | `HOLD_RELEASE_ELIGIBILITY` = READY by the on-host root verifier: every check PASS, with `CEREMONY_HOLD` passing as a bound INITIAL_CUSTODY HELD record; the readiness digest | PR-1 |
+| E-18 | the owner's off-host reproduction (RR-38 B) of the relevant digests, registry, genesis pin, identities, and package content, from off-host material; equal to E-17 | PR-1 tooling; PR-3 inputs |
 | E-19 | `ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT`; B1c helper, library, verifier, sudoers unchanged | PR-1 |
 | E-20 | snapshot inventory: accepted record; every K-ACT, K-WIT, and host-key artefact `SAFE_RETAINED_CIPHERTEXT` or bounded, documented `KNOWN_CUSTODY_DEBT`; named debts | **PR-2** |
 | E-21 | off-host register status: exists; holds the K-ROOT public fingerprint, registry v1 head, genesis pin, K-WIT fingerprint, release provenance, the (empty) authorization-ID list, and the (empty) burned-ordinal register | **PR-3** |
@@ -677,23 +803,62 @@ the PR that owns it. **Every item is required.**
 
 **PR-2 and PR-3 are both required before release** (E-20, E-21, E-12).
 
-## 20. PR-2 / PR-3 dependency order
+**Two reproductions (RR-38, OWNER-ACCEPTED).**
+
+- **A. On-host root verifier.** Produces the complete canonical evidence
+  package (E-1 … E-24 as structured data, RFC 8785) and the
+  `HOLD_RELEASE_ELIGIBILITY` result. The package has one canonical digest:
+  SHA-256 over its JCS bytes, domain-separated (exact separator SOURCE
+  DETAIL).
+- **B. Owner off-host verification.** The owner independently verifies and
+  reproduces, from off-host material (the register, the pin, the K-ACT
+  publication, registry v1 bytes, K-ROOT and K-WIT public keys, release
+  provenance), the digests, the registry, the genesis pin, the identities,
+  and the package content, and recomputes the package digest.
+- The owner may release INITIAL_CUSTODY only when the exact package digest
+  being approved equals the digest of a **current re-run** (§18). No
+  screenshot and no unstructured human comparison counts.
 
 ```text
-PR-1S (source) ─┐
-PR-2 (read-only inventory) ─┼─> PR-1A (inert install) ─> PR-3 foundation ─> PR-1B ... pin (PR-3) ... RELEASED
-                            │
-                   (PR-2 recommended before PR-1A; required before PR-1B)
+on-host PASS != owner acceptance
 ```
+
+## 20. PR-2 / PR-3 dependency order (OWNER-ACCEPTED)
+
+```text
+PR-1S
+ -> PR-1A inert install
+ -> PR-2 snapshot inventory
+ -> PR-3 foundation
+ -> authority-ledger bootstrap
+ -> exact V2 genesis candidate
+ -> owner candidate-digest pin
+ -> K-WIT signed genesis commit
+ -> INITIAL_CUSTODY / HELD
+ -> HOLD_RELEASE_ELIGIBILITY
+ -> PR-3 full acceptance / register material
+ -> explicit owner acceptance
+ -> RELEASED
+ -> FULL_READINESS
+```
+
+The steps this order implies but does not name are placed where their
+inputs require them (§28): K-ROOT generation, K-WIT keygen, registry v1
+signing, and the anchor and registry installs come after PR-2 and PR-3
+foundation and before the ledger bootstrap (the ledger's genesis op copies
+registry v1, PF-11); the witness start precedes the genesis commit; the
+signer's first start (for B4) follows HELD and precedes eligibility.
 
 | Question | Answer | Why |
 | --- | --- | --- |
-| must PR-2 precede **any** live install? | **no** (ALLOWED WITH EXPLICIT NONCLAIM). **Recommended** first | PR-1A creates no credential and makes no custody claim. PR-2 is read-only and cheap, and an exposure finding changes the PR-1B plan, not PR-1A |
-| must PR-2 precede PR-1B? | **yes**, before its first credential mutation (K-WIT keygen) and before registry v1 is signed | K-ACT is `NOT_IN_HEAD` today. If PR-2 finds it exposed, RR-7 says it "must never be published": registry v1 must not name it, and RR-20b requires fresh custody material. Creating K-WIT under a possibly exposed host key would waste and contaminate it |
+| may PR-2 follow PR-1A? | **yes, with an explicit nonclaim** (PR-1A makes no custody claim) | PR-1A creates no credential |
+| what must PR-2 precede? | **real K-WIT credential generation**, and the **initial authority registry publication/signing** for this bootstrap | K-ACT is `NOT_IN_HEAD` today. If PR-2 finds it exposed, RR-7 says it "must never be published", and RR-20b requires fresh custody material. A K-WIT created under a possibly exposed host key would be contaminated |
 | must PR-2 precede RELEASED? | **yes** (E-20) | the gate's entry rule applied to initial custody |
-| must PR-3 exist before V2 genesis creation? | **yes, the foundation** (register + pin storage) under RR-35 B | the pin is recorded before commit |
-| before genesis acceptance / release? | **yes, complete** (E-12, E-21) | |
-| before the first live K-ROOT authorization? | yes (gate §14). PR-1 issues **no** K-ROOT authorization: genesis consumes none |
+| what must PR-3 foundation precede? | the **V2 genesis commit** (the pin is stored before commit, RR-35) | |
+| what must PR-3 full material precede? | **INITIAL_CUSTODY RELEASED** (E-12, E-21) | |
+| the first live K-ROOT authorization? | PR-1 issues **none**: genesis consumes none (gate §14 is satisfied vacuously within PR-1) | |
+
+**PR-1B cannot complete until PR-2 and PR-3 are satisfied.**
 
 ## 21. Snapshot inventory interaction
 
@@ -711,8 +876,9 @@ to PR-1 continuation:
 | snapshot outside the accepted project/account | with both halves `EXPOSED_PRIVATE_MATERIAL`; ciphertext only `UNKNOWN_PROVENANCE` | proceed | **DO NOT PROCEED** |
 | the host itself was restored from a stale snapshot | before PR-1B: detectable only as a baseline mismatch (§7.2) → STOP. After V2 genesis: whole-host rollback, **not detected** | STOP on mismatch | nonclaim; STOP on any detected mismatch |
 
-PR-1A may proceed under bounded `KNOWN_CUSTODY_DEBT`, and even with PR-2
-incomplete, because it asserts nothing about custody. INITIAL_CUSTODY
+PR-1A precedes PR-2 in the accepted order and may proceed under bounded
+`KNOWN_CUSTODY_DEBT` or with PR-2 incomplete, with an explicit nonclaim,
+because it asserts nothing about custody. INITIAL_CUSTODY
 release may proceed only when every artefact is `SAFE_RETAINED_CIPHERTEXT`
 or bounded, documented `KNOWN_CUSTODY_DEBT`.
 
@@ -829,7 +995,7 @@ One logical transition per row. PRE always includes: the preservation set
 | M-A7 | root | custody root | installer `custody` stage | custody POST (§8) | `rmdir` the three (empty) | none | structure only | not empty; `st_dev` mismatch |
 | M-A8 | root | witness identity | create `lilith-recovery-witness` | account contract | `userdel` (nothing uses it) | none | none | name exists; uid/gid collision |
 | M-A9 | root + systemd | witness units | install witness unit/socket/tmpfiles, then `daemon-reload` (two stages) | loaded, inactive, never enabled | remove + reload | none | none | active |
-| M-A10 | root | config skeleton | create `/etc/lilith-authority-dev/{trust,registry,holds}` and the K-WIT custody dir (RR-36), all empty | owner/mode/emptiness | `rmdir` | none | structure only | not empty |
+| M-A10 | root | skeleton | create, all empty: `/etc/lilith-authority-dev/{trust,registry}`; `/etc/lilith-recovery-witness/credentials/` (RR-36); `/var/lib/lilith-authority-custody/holds/` (RR-34) | owner/mode/emptiness | `rmdir` | none | structure only | not empty |
 | — | routine CI | proof gate | none (a real routine deployment) | DR-5 PASS non-vacuous; broker preservation PASS | — | none | none | any FAIL |
 | M-B1 | owner, off-host | K-ROOT | generate K-ROOT on the workstation | public fingerprint in the register | discard (nothing uses it) | defines the future root | none on host | key material leaves the workstation |
 | M-B2 | root | K-WIT custody | keygen `witness` → K-WIT blob | publication; blob hash; scans clean; K-ACT unchanged | destroy the blob (before M-B4) | none | **custody created** | any private pattern; CURRENT changed |
@@ -837,15 +1003,15 @@ One logical transition per row. PRE always includes: the preservation set
 | M-B4 | root | trust anchors | install `registry-root.json`, `witness-anchor.json` | bytes equal owner copies | remove | none | none | anchor ≠ publication |
 | M-B5 | root | registry bytes | install registry v1 + `current` pointer | verifies on-host under the anchor | remove (nothing binds it yet) | none on host (story 4) | none | verification fails |
 | M-B6 | signer uid (via root) | ledger | provision `authority_ledger.db` at sequence 1 | sequence 1; head = owner value; fingerprint | remove (before M-B9 only) | none | none | head ≠ owner-computed |
-| M-B7 | owner + root | genesis candidate | none on host (read-only computation both sides) | host digest = owner digest | — | none | none | digests differ |
-| M-B8 | owner / root | pin | owner records the pin off-host (PR-3); root installs the on-host copy | copy digest = off-host | remove the copy (before M-B9) | none | none | mismatch |
+| M-B7 | owner + root | genesis candidate | none on host (read-only construction and digest, both sides) | host digest = owner digest | — | none | none | digests differ |
+| M-B8 | owner / root | pin | owner stores the pin off-host (PR-3 foundation); root installs the on-host copy | copy digest = off-host = candidate digest | remove the copy (before M-B9b) | none | none | mismatch |
 | M-B9a | systemd | witness start | start the witness socket/service (not enabled) | recovery `UNINITIALIZED`; nothing written but the state dir | stop; remove the empty state dir | none | none | any other classification |
-| M-B9b | witness | V2 genesis | `BOOTSTRAP` | chain `[1]`; pointer = head; `CONSISTENT`; digest = pin | **forward only** | lineage anchored | none | refusal (state unchanged) |
-| M-B10 | root | hold | write INITIAL_CUSTODY HELD | store = one HELD record bound to genesis | **forward only** (RR-40) | none | none | store not empty before |
+| M-B9b | witness | V2 genesis | `BOOTSTRAP` of the exact pinned candidate | chain `[1]`; pointer = head; `CONSISTENT`; committed digest re-verified = pin | **forward only** | lineage anchored | none | refusal (state unchanged); committed ≠ pin → STOP |
+| M-B10 | root | hold | write INITIAL_CUSTODY HELD | store = one HELD record bound to genesis | **forward only**; never deleted or recreated (RR-40) | none | none | store not empty before |
 | M-B11 | systemd | signer start | start the signer socket/service (not enabled) | HEALTH B4 = B3; `NOT_READY` with only the hold reason | stop | none | K-ACT loaded (first time) | B4 ≠ B3; any other reason |
-| M-B12 | root verifier | eligibility | none (read-only) + evidence bundle export | eligibility READY; digest | — | none | none | not READY |
-| M-B13 | owner | acceptance | the owner's explicit decision, recorded off-host | acceptance record digest | — | none | none | owner declines |
-| M-B14 | root | release | write INITIAL_CUSTODY RELEASED (with the reviewed digest) | RELEASED bound to the genesis head | **forward only** | none | none | digest mismatch |
+| M-B12 | root verifier | eligibility | none (read-only): canonical evidence package + its digest | eligibility READY; package digest | — (retry of the same HELD after a correction) | none | none | not READY |
+| M-B13 | owner | acceptance | off-host reproduction (RR-38 B), then the explicit decision naming the package digest, recorded off-host (PR-3 full material in place) | owner digest = package digest | — | none | none | any mismatch; owner declines |
+| M-B14 | root | release | write INITIAL_CUSTODY RELEASED (hold CLI with the approved package digest; re-run must match) | RELEASED bound to the genesis head | **forward only** | none | none | re-run digest ≠ approved digest |
 | M-B15 | root verifier | full readiness | none (read-only) | FULL_READINESS READY; E-19 activation dark | — | none | none | anything else |
 
 ## 28. Future phases
@@ -857,15 +1023,15 @@ No commands.
 | Phase | Gate | Rows |
 | --- | --- | --- |
 | **PR-1S** | source + tests + review + merge; reproducible build | §31 |
-| P1A-0 read-only preflight | PR-1S merged; PR-2 recommended done | reproduce §4 **UNKNOWN** rows; installer `status L2b.2 9ac7de2` PASS; accepted-baseline pins recorded; DR-5 + preservation PASS |
+| P1A-0 read-only preflight | PR-1S merged and its release reviewed | reproduce §4 **UNKNOWN** rows; installer `status L2b.2 9ac7de2` PASS; accepted-baseline pins recorded; DR-5 + preservation PASS |
 | P1A-1 … P1A-6 inert release upgrade | P1A-0 | M-A1 … M-A6 (with S-1/S-2-style owner-only staging and unstaging around M-A1) |
 | P1A-7 custody root | `status L2b.2 <NEW>` | M-A7 |
 | P1A-8 witness identity + units | P1A-7 | M-A8, M-A9 |
 | P1A-9 config skeleton | P1A-8 | M-A10 |
 | P1A-10 routine proof | a real routine deployment | DR-5 non-vacuous for every new path; broker preservation |
 | **PR-1A acceptance** | owner | inert install accepted; no custody claim |
-| PR-2 | read-only | accepted inventory record (required here at the latest) |
-| PR-3 foundation | owner | register + pin storage exist |
+| PR-2 | read-only | accepted inventory record (required before P1B-2 and P1B-3) |
+| PR-3 foundation | owner | register + pin storage exist (required before P1B-9) |
 | P1B-0 preflight | PR-1A, PR-2, PR-3 foundation | re-verify the PR-1A POST; RR-7 classes permit PR-1B |
 | P1B-1 K-ROOT (off-host) | P1B-0 | M-B1 |
 | P1B-2 K-WIT | P1B-1 | M-B2 |
@@ -879,10 +1045,11 @@ No commands.
 | P1B-10 INITIAL_CUSTODY HELD | P1B-9 | M-B10 |
 | P1B-11 signer start | P1B-10 | M-B11 |
 | P1B-12 eligibility | P1B-11 | M-B12; denial proofs N1–N9, D1–D12, B1–B4 as evidence |
-| P1B-13 owner acceptance | P1B-12 + E-1…E-24 | M-B13 |
+| PR-3 full material | owner | E-21 complete |
+| P1B-13 owner acceptance | P1B-12 + PR-3 full + E-1…E-24 | M-B13 |
 | P1B-14 RELEASED | P1B-13 | M-B14 |
 | P1B-15 FULL_READINESS | P1B-14 | M-B15; a routine deployment re-proves DR-5 and preservation |
-| **PR-1 acceptance record** | owner | "B1b-3d L3a–L4 (V2) accepted", scoped by RR-39 |
+| **PR-1 acceptance record** | owner | the §5.1 narrower claim; no positive-issuance claim (RR-39) |
 
 ## 29. Points of no return
 
@@ -895,7 +1062,7 @@ No commands.
 | authority-ledger initialization (M-B6) | no, until M-B9b | deterministic; re-provisioning gives the same head. After the genesis binds it: rollback-sensitive, forward-only |
 | V2 genesis commit (M-B9b) | **lineage PONR** | forward only; a second genesis is `GENESIS_MISMATCH` against the pin |
 | owner genesis pin (M-B8) | record PONR | never silently replaced; a new pin is an owner re-bootstrap decision |
-| INITIAL_CUSTODY HELD (M-B10) | **hold-store PONR** | the record can never disappear or re-bind (RR-40) |
+| INITIAL_CUSTODY HELD (M-B10) | **hold-store PONR** | never deleted, recreated, or re-bound; retry of the same ceremony only (RR-40) |
 | INITIAL_CUSTODY RELEASED (M-B14) | **readiness PONR** | never returns to HELD; later changes are new ceremonies |
 | FULL_READINESS | none | derived; a re-run, not a mutation |
 
@@ -909,9 +1076,10 @@ No commands.
 | F-4 | K-WIT created, witness service absent | none | no witness → signer `WITNESS_MISSING` | continue forward, or destroy the unused blob and record it burned | destroy only before M-B4 |
 | F-5 | ledger initialized, genesis absent | none | `WITNESS_MISSING` | continue to M-B7 | yes (remove DB before M-B9b) |
 | F-6 | genesis written, `chain/` fsync missing | witness recovery at start (Prep A §9): after a crash, `UNINITIALIZED` → the owner re-runs `BOOTSTRAP` (same candidate, same digest); without a crash, the visible head is made durable, then published | never serves an uncommitted genesis | re-run `BOOTSTRAP` if `UNINITIALIZED` | no rollback of a committed genesis |
-| F-7 | genesis committed, pin absent | none (RR-35 B makes this impossible; under A it is `RECOVERY_INPUT_INVALID`) | yes | record the pin | — |
+| F-7 | genesis committed, pin absent | none: impossible under RR-35 (the pin precedes signing). If ever observed, `RECOVERY_INPUT_INVALID` | yes | STOP | no |
+| F-7a | committed genesis digest ≠ pinned candidate | none | yes | **STOP**; no second genesis (RR-35, RR-40) | no |
 | F-8 | pin exists, HELD absent | none | `missing hold != released`: full readiness fails | write HELD | — |
-| F-9 | HELD exists, eligibility fails | none | NOT_READY with the reasons | diagnose; fix forward inputs (unit, inventory, ledger view). If the genesis itself is wrong: STOP (RR-40) | never delete HELD |
+| F-9 | HELD exists, eligibility fails | none | NOT_READY with the reasons | recoverable observation/readiness condition: correct it and re-evaluate the **same** HELD ceremony (retry). Genesis, initial ceremony identity, or HELD lineage wrong: **STOP**, separate reviewed recovery design (RR-40) | never delete or recreate HELD |
 | F-10 | eligibility passed, owner does not release | none | stays HELD: no issuance | the owner decides; nothing expires into a release | — |
 | F-11 | RELEASED written, full readiness fails | none | NOT_READY | diagnose. A later head change needs its own REGISTRY_MAINTENANCE cycle | RELEASED never returns to HELD |
 | F-12 | service restart after RELEASED | signer and witness re-verify at start | readiness recomputed from inputs; no state lost | none if READY | — |
@@ -922,7 +1090,9 @@ No commands.
 ## 31. Source blocker table
 
 Every item must be implemented, TEST-proven, reviewed, and merged before
-**any** live PR-1 mutation, unless its class says otherwise.
+**any** live PR-1 mutation, unless its class says otherwise. **The next
+engineering slice is PR-1S** (source/test only), which must close every
+SOURCE CHANGE REQUIRED row; not PR-1A.
 
 | # | Blocker | Classification | Notes |
 | --- | --- | --- | --- |
@@ -935,17 +1105,17 @@ Every item must be implemented, TEST-proven, reviewed, and merged before
 | S-7 | live durable witness store adapter (real filesystem, RR-9 order, `flock`, retention dir) + genesis candidate computation | **SOURCE CHANGE REQUIRED** | the TEST adapter shows the shape |
 | S-8 | witness unit, socket, tmpfiles assets | **SOURCE CHANGE REQUIRED** | `systemd-analyze verify` in CI |
 | S-9 | durable authority recovery ledger (SQLite, schema fingerprint, head function identical to the model) + provisioning CLI | **SOURCE CHANGE REQUIRED** | §14 |
-| S-10 | signer runtime: registry/anchor/pin/register readers, witness client, hold-store reader, readiness self-view, narrow C-4 wiring (governing hold from the complete store; mandatory ledger observation) | **SOURCE CHANGE REQUIRED** | §15; PF-15 |
-| S-11 | root tooling: hold writer (HELD / RELEASED with reviewed digest), independent verifier CLI with evidence-bundle export, owner-workstation K-ROOT generator, registry v1 builder/signer, genesis-candidate recomputation | **SOURCE CHANGE REQUIRED** | PF-14; RR-38 |
+| S-10 | signer runtime: registry/anchor/pin/register readers, witness client, readiness self-view, narrow C-4 wiring (complete root hold-store observation, never a single record; mandatory ledger observation); unit `InaccessiblePaths` for the K-WIT credential root and the hold root; issuance stays unwired | **SOURCE CHANGE REQUIRED** | §15; PF-15; RR-34/36/39 |
+| S-11 | root tooling: hold writer and complete hold-store observer (HELD / RELEASED with the approved package digest), independent verifier CLI producing the canonical evidence package and its digest, owner off-host reproduction tooling, owner-workstation K-ROOT generator, registry v1 builder/signer, genesis-candidate recomputation | **SOURCE CHANGE REQUIRED** | PF-14; RR-38 |
 | S-12 | installer `status` contracts for every P1A/P1B phase (active never-enabled units; new paths; ledger; witness state) | **SOURCE CHANGE REQUIRED** | FI-5, FI-9 |
 | S-13 | DR-5 proof extension | **SOURCE CHANGE REQUIRED** (control-only) | §9 |
 | S-14 | broker preservation `CUSTODY_PATHS` extension | **SOURCE CHANGE REQUIRED** (control-only; candidate hash unchanged) | §9 |
 | S-15 | root denial-proof tool (N1–N9, B1–B4, broker probes, mount-namespace probe of the signer) | **SOURCE CHANGE REQUIRED** (control-only) | §8, §19 |
-| S-16 | hold-store location | **LIVE CONFIG ONLY** after RR-34 (the path is a constant in S-10/S-11) | |
+| S-16 | hold-store location | decided (RR-34): a fixed constant in S-10/S-11; created empty by PR-1A | |
 | S-17 | snapshot inventory | **PR-2** | read-only |
 | S-18 | owner register, pin storage, burned-ordinal register | **PR-3** | Prep A §7.1 / Prep B §4 models exist |
-| S-19 | issuance (ISSUE path) wiring | **NOT NEEDED** for PR-1 if RR-39 is accepted | |
-| S-20 | V2 head-advance / epoch-advance witness execution ops | **NOT NEEDED** for PR-1B; required before the B1b-3e rehearsal (RR-37) | |
+| S-19 | issuance (ISSUE path) wiring | **NOT NEEDED** (RR-39: issuance stays unwired) | |
+| S-20 | V2 head-advance / epoch-advance witness execution ops | **SOURCE CHANGE REQUIRED** in PR-1S, TEST-proven, fail closed, never invoked in PR-1 (RR-37) | |
 | S-21 | needrestart coverage of the witness unit | **ALREADY IMPLEMENTED** (PF-19) | |
 
 ## 32. PR-1 is not one slice
@@ -976,7 +1146,7 @@ not identity (PF-7), and HEALTH is a self-claim about one instant. Each case:
 | release installed, CURRENT blob changed | `status` checks only type/owner/mode | §24 hash + identity pins (S-2) |
 | unit updated, old process still running | unit bytes match | `NeedDaemonReload=no`, `InvocationID`/start time after the reload, `/proc/<pid>/cwd` (§23) |
 | HEALTH good, wrong key loaded | HEALTH shows *a* fingerprint | B4 = B3 = B2 = B1 (binding), not HEALTH alone |
-| V2 genesis over a stale registry | genesis verifies | the owner-derived candidate digest (RR-35 B); register head entry |
+| V2 genesis over a stale registry | genesis verifies | the owner-reproduced candidate digest pinned before signing (RR-35); register head entry |
 | owner pins a digest from another genesis | a pin exists | pin = the owner's own offline recomputation, not a copy |
 | hold-store listing incomplete | the listed records parse | complete directory observation under `flock`; no ignored names (§17) |
 | RELEASED exists but a newer HELD exists | the RELEASED record is valid | the complete store: any HELD blocks `FULL_READINESS` (Source Prep B §21.2) |
@@ -986,51 +1156,71 @@ not identity (PF-7), and HEALTH is a self-claim about one instant. Each case:
 | snapshot holds blob + `credential.secret` | the live host is clean | PR-2 before PR-1B (§21) |
 | installer success mistaken for acceptance | every stage printed PASS | acceptance is a separate owner act over E-1 … E-24 (§19) |
 | the signer's own readiness mistaken for independent readiness | the signer reports READY-ish | the signer cannot observe the inventory (PC-7); only the root verifier and the owner's off-host re-evaluation count |
-| a C-4 handler given a caller-chosen hold | the gate accepts a single record (PF-15) | S-10 derives the governing hold from the complete store |
+| a C-4 handler given a caller-chosen hold | the gate accepts a single record (PF-15) | S-10 accepts only the complete root observation and re-judges the whole set |
+| an older owner approval reused for a changed state | the owner did approve *a* package | RELEASED requires the approved package digest to equal a current re-run (RR-38) |
 
-## 34. Owner decisions (RR-33+)
+## 34. Owner decisions (RR-33 … RR-40)
 
-All **PENDING_OWNER_DECISION**. Nothing below is decided by this record.
+All **OWNER-ACCEPTED** in this closure pass. **No PENDING_OWNER_DECISION
+remains before PR-1S.**
 
-| # | Question | Alternatives | Security consequence | Operational consequence | Recommendation |
-| --- | --- | --- | --- | --- | --- |
-| RR-33 | How is PR-1 decomposed, and which release does PR-1A install? | (a) PR-1S → PR-1A → PR-1B, installing only the PR-1S release; (b) install the Source Prep B release now, upgrade again after PR-1S; (c) one combined PR-1 ceremony | (a) one upgrade of the custody host; (b) two; (c) mixes reversible and forward-only steps | (a) PR-1A waits for PR-1S; (b) earlier but double work | **(a)** |
-| RR-34 | Where does the live hold store live? | A signer state dir; B custody root; C `/etc/lilith-authority-dev/holds/`; D new root state root | A lets the consumer rewrite holds; B breaks RR-26 and blinds the signer; C is world-readable, non-secret; D adds a namespace | C reuses the unit, DR-5, and broker coverage | **C**, owner host root, fixed root CLI writer |
-| RR-35 | Genesis pin order | A commit then pin; B owner-derived candidate, pin, then commit | B makes the pin independent of the host and refuses a wrong genesis before commit | B needs owner-side recomputation tooling and PR-3 before commit | **B** |
-| RR-36 | K-WIT blob location | (a) separate root-only witness custody dir; (b) credstore, with Prep A inventory and successor keygen widened to admit one K-WIT name | (a) keeps "credstore = exactly CURRENT"; (b) weakens an accepted fail-closed invariant | (a) one more directory in the proofs; (b) changes merged pure contracts | **(a)** |
-| RR-37 | Witness op set in PR-1S | minimal {READ_WITNESS, BOOTSTRAP, RECORD_LEDGER_ADVANCE}; or also V2 head/epoch execution | extra ops are inert without a K-ROOT authorization and a root peer | minimal needs a second custody-host upgrade before the rehearsal | **include them, TEST-proven, unused in PR-1** |
-| RR-38 | Where is eligibility independently reproduced for acceptance? | on-host root verifier only; or plus the owner's off-host re-evaluation of an exported bundle | off-host re-evaluation removes host root from the acceptance decision's trust path (not from execution) | needs a bundle format and owner tooling | **both** |
-| RR-39 | PR-1 scope versus B1b-3d §22 (PC-5) | (a) L3a–L4 + L5 denials, issuance unwired, L6–L8 later; (b) full B1b-3d §22 including P2–P4 signing and R1–R5 | (a) no issuance surface in PR-1; (b) wires issuance before B1b-3e has been rehearsed | (a) B1b-3d `DEV_SYNTHETIC CUSTODY PROVEN` stays unclaimed; the gate's PR-1 row is read as "L3a–L4 accepted" | **(a)**, with the gate's PR-1 evidence read as a B1b-3d L3a–L4 (V2) acceptance record |
-| RR-40 | Re-bootstrap after INITIAL_CUSTODY HELD | (a) forbid; a failed genesis after HELD is STOP plus a separate reviewed re-custody design; (b) an owner-authorized hold-store reset archiving the old store as evidence | (b) breaks "no record may disappear" | (a) makes HELD the last reversible-looking step; place it after every check that could force a re-bootstrap | **(a)** |
+| # | Question | Accepted outcome | Classification |
+| --- | --- | --- | --- |
+| RR-33 | How is PR-1 decomposed, and which release does PR-1A install? | PR-1S (source/runtime wiring) → PR-1A (inert live install) → PR-1B (V2 bootstrap / owner acceptance). PR-1S produces the **single** reviewed release PR-1A installs, holding all machinery known to be required for the accepted PR-1 baseline. The Source Prep B release is not installed on its own; no second authority-host upgrade (§5, §6.1) | **OWNER-ACCEPTED** |
+| RR-34 | Where does the live hold store live? | `/var/lib/lilith-authority-custody/holds/`: holds are mutable forward-only local state, not configuration. Root-owned parent; directory `root:root 0700`; records `root:root 0600`, `<sha256(ceremonyId)>.json`; no symlinks; no ignored classes; unexpected entries fail closed; completeness provable; fixed root tooling the only writer; signer a consumer that cannot rewrite; broker and deployer denied; never authority-bearing (§16, §17) | **OWNER-ACCEPTED (different path from the draft recommendation)** |
+| RR-35 | Genesis pin order | PIN-BEFORE-COMMIT: candidate → digest → owner off-host reproduction and pin → on-host pin = candidate → K-WIT signs that candidate → durable commit → committed digest re-verified = pin. Mismatch → STOP; no silent second genesis (§13) | **OWNER-ACCEPTED** |
+| RR-36 | K-WIT blob location | separate K-WIT custody under `/etc/lilith-recovery-witness/credentials/` (`root:root 0700`, one `root:root 0600` blob, no symlinks); never in `/etc/credstore.encrypted`; accepted credential name and keyId unchanged; deployer, broker, and K-ACT signer denied; plaintext only through the witness unit's systemd credential; host-key mechanism unchanged; filename SOURCE DETAIL (§11) | **OWNER-ACCEPTED** |
+| RR-37 | Witness op set in PR-1S | ship the TEST-proven V2 registry-head and RecoveryEpoch execution machinery, inert: never executed in PR-1, fail closed behind the authorization / witness / hold / environment gates; no authorization manufactured. PR-1 uses only bootstrap/genesis (plus read and ledger-advance). `installed code != enabled mutation` (§10) | **OWNER-ACCEPTED (with inertness requirement)** |
+| RR-38 | How is acceptance reproduced? | two reproductions: A on-host root verifier (canonical evidence package with a canonical digest + eligibility result); B the owner's off-host verification from off-host material. Release only when the approved package digest equals a current re-run. `on-host PASS != owner acceptance` (§19) | **OWNER-ACCEPTED** |
+| RR-39 | PR-1 scope versus B1b-3d §22 | L3a–L4-style custody/bootstrap + OS/deployer/broker denial proofs + loaded-key/HEALTH verification + V2/hold/readiness bootstrap. Issuance unwired; no positive OwnerEvidence signing; RR-14a stays deferred; no full legacy B1b-3d acceptance claimed; the acceptance record names the narrower claim. `PR-1 acceptance != positive evidence issuance acceptance` (§5.1) | **OWNER-ACCEPTED** |
+| RR-40 | Re-bootstrap after INITIAL_CUSTODY HELD | never delete/recreate HELD, never create another genesis, never silently reset, never reuse the initial ceremony ID for other state. Recoverable eligibility failures: retry the same HELD ceremony. Wrong genesis / ceremony identity / HELD lineage: STOP; separate reviewed recovery design (§18) | **OWNER-ACCEPTED** |
+
+The dependency order of §20 is also OWNER-ACCEPTED.
+
+**Derived consequence (not a new decision).** Under RR-34 the signer cannot
+read the `0700` hold store. Its C-4 handler therefore receives the complete
+root-produced hold-store observation instead of reading the store itself
+(§15). This follows from the accepted ownership (host root owns the holds;
+the signer consumes) and matches the existing treatment of the credential
+inventory (PC-7). It changes no authority, state owner, custody boundary, or
+failure semantics: C-4 is never exercised in PR-1, and `FULL_READINESS` is
+reproduced by the root verifier and the owner in any case.
 
 Source details that do not change authority, state owner, security
 boundary, or failure semantics (for PR-1S to fix and review): exact CLI
-names and argument forms; the ledger's physical SQL; the evidence-bundle
-schema; whether the witness package ships inside the authority-dev release
+names and argument forms; the ledger's physical SQL; the evidence-package
+schema and digest separator; the K-WIT blob filename; the modes of the
+`/etc/lilith-recovery-witness` and `/var/lib/lilith-authority-custody`
+parents; whether the witness package ships inside the authority-dev release
 tree (recommended: one reviewed release, two units, RR-25 unchanged) or its
 own tree; the listing-digest encoding.
 
 ## 35. Live entry matrix
 
-**Current verdict: DO NOT PROCEED with any PR-1 live phase.**
+**Current verdict: DO NOT PROCEED with any PR-1 live phase.** Live PR-1
+mutation is **NOT AUTHORIZED**. The next slice is PR-1S.
 
 | Condition | Verdict |
 | --- | --- |
 | any §31 SOURCE CHANGE REQUIRED item unresolved | **DO NOT PROCEED** |
-| RR-33 … RR-40 pending | **DO NOT PROCEED** |
-| PR-2 incomplete | PR-1A: **ALLOWED WITH EXPLICIT NONCLAIM** (no custody claim). PR-1B: **DO NOT PROCEED** |
-| PR-3 incomplete | PR-1A: PROCEED TO NEXT PR-1 PHASE (does not need it). PR-1B genesis and release: **DO NOT PROCEED** |
+| PR-1S not merged, or its release not reviewed | **DO NOT PROCEED** |
+| PR-2 incomplete | PR-1A: **ALLOWED WITH EXPLICIT NONCLAIM** (no custody claim). K-WIT generation, registry v1 signing, and everything after: **DO NOT PROCEED** |
+| PR-3 foundation absent | PR-1A and the ledger bootstrap: PROCEED TO NEXT PR-1 PHASE. Genesis commit: **DO NOT PROCEED** |
+| PR-3 full material absent | owner acceptance and RELEASED: **DO NOT PROCEED** |
 | new release not installed | PR-1A phases: PROCEED TO NEXT PR-1 PHASE (the upgrade is the phase). PR-1B: **DO NOT PROCEED** |
 | custody dirs absent | P1A-7 may create them; everything after: **DO NOT PROCEED** |
 | K-WIT absent | up to P1B-1: PROCEED TO NEXT PR-1 PHASE. Anchors and genesis: **DO NOT PROCEED** |
-| authority ledger absent | genesis: **DO NOT PROCEED** (PF-11) |
+| authority ledger absent | genesis candidate and commit: **DO NOT PROCEED** (PF-11) |
 | V2 genesis absent | HELD, signer start, eligibility: **DO NOT PROCEED** |
-| owner genesis pin absent | genesis commit (RR-35 B): **DO NOT PROCEED** |
+| owner genesis pin absent | K-WIT signing and genesis commit (RR-35): **DO NOT PROCEED** |
+| committed genesis ≠ pin | **DO NOT PROCEED**; STOP (RR-35, RR-40) |
 | HELD absent | signer start and eligibility: **DO NOT PROCEED** |
-| eligibility fails | owner acceptance and release: **DO NOT PROCEED** |
-| owner acceptance absent | RELEASED: **DO NOT PROCEED** |
+| eligibility fails | owner acceptance and release: **DO NOT PROCEED**; retry the same HELD after a recoverable correction (RR-40) |
+| owner acceptance absent, or its package digest ≠ current re-run | RELEASED: **DO NOT PROCEED** |
 | RELEASED absent | FULL_READINESS and PR-1 acceptance: **DO NOT PROCEED** |
 | FULL_READINESS fails | PR-1 acceptance: **DO NOT PROCEED** |
+| positive issuance unwired / unproven | **ALLOWED WITH EXPLICIT NONCLAIM** (required: RR-39) |
+| registry-head / epoch execution code installed | **ALLOWED WITH EXPLICIT NONCLAIM** (inert; never invoked in PR-1, RR-37) |
 | activation grant absent | **ALLOWED WITH EXPLICIT NONCLAIM** (required: PR-1 never creates one) |
 | whole-host rollback unresolved | **ALLOWED WITH EXPLICIT NONCLAIM** (`wholeHostRollbackProtected: false`) |
 | any preservation-set or §24 difference | **DO NOT PROCEED** |
@@ -1053,6 +1243,8 @@ This record does not claim, create, or authorize:
 - a whole-host rollback solution;
 - media zeroization or remanence elimination;
 - an activation grant;
+- positive OwnerEvidence issuance, or full legacy B1b-3d §22 acceptance;
+- any executed registry-head or RecoveryEpoch transition;
 - that installer success, service health, genesis creation, or eligibility
   equals authority acceptance;
 - that source tests passing authorizes any live phase;
