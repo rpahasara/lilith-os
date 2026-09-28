@@ -80,7 +80,28 @@ left untouched.
 The transcripts are in `…\lilith-b1b3e-pr1a-aee323e…\cleanup\` with
 `SHA256SUMS`.
 
-## 5. Result
+## 5. Routine deployments around the ceremony (observed from GitHub, read-only)
+
+The owner merged PR #94 (the M-A1…M-A6 evidence) as main `0621f26`. That
+lifted the freeze after M-A6 and before this cleanup.
+
+| Run | Candidate | Window (UTC) | DR-5 |
+| --- | --- | --- | --- |
+| `36432097677` | `d7f9f06` (final-gate record) | `13:55:26Z`–`14:01:01Z`, **before** M-A1 PRE (`14:09:40Z`) | `AUTHORITY_BOUNDARY_PROOF=PASS maturity=L1c.3`, `PR1_AUTHORITY_BOUNDARY maturity=PR1_ABSENT` |
+| `36443835331` | `0621f26` (merge of PR #94) | `15:28:26Z`–`15:34:05Z`, **after** M-A6 (`15:16:27Z`), before this cleanup | `SUDO_EFFECTIVE_PROOF=PASS`; `AUTHORITY_BOUNDARY_PROOF=PASS maturity=L1c.3`; **`PR1_AUTHORITY_BOUNDARY maturity=P1A-5`** |
+
+What the two runs show:
+
+- No routine deployment ran between `upgrade-stage` and
+  `upgrade-retire-old`, so the preflight §9 freeze held.
+- Run `36443835331` is the first DR-5 proof over the installed PR-1 CLIs,
+  and it returned exactly the expected ladder step. For example,
+  `DENIED: sudo /usr/local/sbin/lilith-recovery-witness-owner-dev` and
+  `DENIED: test -w` on it.
+- The cleanup PRE observer equalled the M-A6 POST observer. The routine
+  deployment therefore changed no authority state.
+
+## 6. Result
 
 ```text
 PR1A_TRANSPORT_CLEANUP_PASS
