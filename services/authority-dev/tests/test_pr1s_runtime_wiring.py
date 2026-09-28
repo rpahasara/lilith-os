@@ -8,6 +8,7 @@ TEST material in the TEST environment `test`. Nothing contacts DEV or PROD.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pr1s_fixtures as X
 from pr1s_fixtures import F, PB, J, PA, SC, WR, RC
@@ -433,6 +435,100 @@ class RecoveryWiringTests(unittest.TestCase):
 
 
 # ---------------------------------------------------- protocol / core / server ---
+
+class MarkingLagTests(unittest.TestCase):
+    """The one tolerated registry-view lag stays narrow (owner-accepted, pre-PR closure).
+
+    Accepted only for ADVANCE_EPOCH, only under a KEY_COMPROMISE_RECOVERY / HELD
+    hold, and only when the witness head's own transition is the in-epoch
+    COMPROMISE_MARKING of the hold's predecessor from exactly the ledger's
+    registry view. Never "a registry may be one version stale".
+    """
+
+    def setUp(self):
+        self.s = PB.PrepBScenario().mark()
+        self.kcr = PB.hold(kind=SC.KEY_COMPROMISE_RECOVERY, witness=self.s.digests["holdEngaged"])
+
+    def view(self, scenario=None):
+        scenario = scenario or self.s
+        return REC.SignerViewV1(scenario.context(), tuple(scenario.registries), scenario.observation())
+
+    def observation(self, scenario=None):
+        return W2.observe_authority_recovery_ledger((scenario or self.s).ledger)
+
+    def reason(self, *, observation=None, view=None, governing=None):
+        return REC.marking_lag_reason(observation=observation or self.observation(), view=view or self.view(),
+                                      governing=self.kcr if governing is None else governing, profile=PBF.PROFILE)
+
+    def test_the_accepted_marking_lag(self):
+        head = WR.classify_witness_store(observation=self.s.observation(), context=self.s.context()).head
+        observation = self.observation()
+        self.assertEqual(RC.authority_ledger_position_reason(observation, head), REC.MARKING_LAG)
+        self.assertEqual((observation.registry_view, head.registry_version), (1, 2))
+        self.assertIsNone(self.reason())
+
+    def test_a_lag_of_more_than_the_marking_is_refused(self):
+        stale = dataclasses.replace(self.observation(), registry_view=0)
+        self.assertEqual(self.reason(observation=stale), "LAG_NOT_EXACT_PREDECESSOR")
+        ahead = dataclasses.replace(self.observation(), registry_view=2)
+        self.assertEqual(self.reason(observation=ahead), "LAG_NOT_EXACT_PREDECESSOR")
+
+    def test_only_a_held_key_compromise_recovery_of_the_marked_predecessor(self):
+        cases = {
+            "rotation hold": (PB.hold(kind=SC.ROTATION, witness=self.s.digests["holdEngaged"]),
+                              "LAG_HOLD_NOT_COMPROMISE_RECOVERY"),
+            "released recovery hold": (PB.hold(kind=SC.KEY_COMPROMISE_RECOVERY, state=SC.RELEASED,
+                                               witness=self.s.head.digest), "LAG_HOLD_NOT_COMPROMISE_RECOVERY"),
+            "hold naming another predecessor": (PB.hold(kind=SC.KEY_COMPROMISE_RECOVERY, predecessor=PB.S2,
+                                                        witness=self.s.digests["holdEngaged"]),
+                                                "LAG_HOLD_NOT_COMPROMISE_RECOVERY"),
+        }
+        for label, (governing, reason) in cases.items():
+            with self.subTest(label=label):
+                self.assertEqual(self.reason(governing=governing), reason)
+
+    def test_an_ordinary_rotation_lag_is_not_the_marking(self):
+        rotated = PBF.rotated()
+        self.assertEqual(self.reason(observation=dataclasses.replace(self.observation(rotated), registry_view=1),
+                                     view=self.view(rotated)), "LAG_RECOVERY_NOT_MARKED")
+
+    def test_the_marking_must_mark_the_holds_current_predecessor(self):
+        real = SR.verify_history
+
+        def other_key(**kwargs):
+            history, reason, detail = real(**kwargs)
+            last = dataclasses.replace(history.steps[-1], marked_compromised=(PB.S2,))
+            return dataclasses.replace(history, steps=history.steps[:-1] + (last,)), reason, detail
+        with mock.patch.object(REC.SR, "verify_history", other_key):
+            self.assertEqual(self.reason(), "LAG_RECOVERY_NOT_MARKED")
+
+    def test_the_marking_must_be_the_head_transition(self):
+        real = SR.verify_history
+
+        def later_step(**kwargs):
+            history, reason, detail = real(**kwargs)
+            last = history.steps[-1]
+            extra = dataclasses.replace(last, witness_version=last.witness_version + 1, marked_compromised=(),
+                                        prior_current=None)
+            return dataclasses.replace(history, steps=history.steps + (extra,)), reason, detail
+        with mock.patch.object(REC.SR, "verify_history", later_step):
+            self.assertEqual(self.reason(), "LAG_MARKING_NOT_HEAD_TRANSITION")
+
+    def test_the_tolerance_is_confined_to_the_advance_epoch_branch(self):
+        source = (SERVICE / "lilith_authority_dev/recovery.py").read_text(encoding="utf-8")
+        branch = source[source.index("if operation == RECOVERY_ADVANCE_EPOCH:"):]
+        branch = branch[:branch.index("\n        else:")]
+        self.assertEqual(source.count("position == MARKING_LAG"), 1)
+        self.assertIn("position == MARKING_LAG", branch)
+        # No other signer, witness, or root-tooling module tolerates a stale registry view.
+        for tree in ("services/authority-dev/lilith_authority_dev", "services/authority-dev/lilith_authority_root",
+                     "services/authority-dev/lilith_authority_host", "services/recovery-witness/lilith_recovery_witness"):
+            for path in (ROOT / tree).rglob("*.py"):
+                if path.name != "recovery.py":
+                    self.assertNotIn("BROKER_REGISTRY_VIEW_STALE", path.read_text(encoding="utf-8"), path)
+                    self.assertNotIn("MARKING_LAG", path.read_text(encoding="utf-8"), path)
+        self.assertEqual(source.count("BROKER_REGISTRY_VIEW_STALE"), 1)
+
 
 class SignerSurfaceTests(unittest.TestCase):
     def test_protocol_recovery_payloads_are_closed(self):

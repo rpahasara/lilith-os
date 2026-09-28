@@ -15,8 +15,10 @@ def load_tests(loader: unittest.TestLoader, standard_tests: unittest.TestSuite, 
     if str(WITNESS_TESTS) not in sys.path:
         sys.path.insert(0, str(WITNESS_TESTS))
     import test_recovery_witness
+    import test_recovery_witness_units  # systemd-analyze verify of every shipped witness unit (CI)
 
     standard_tests.addTests(loader.loadTestsFromModule(test_recovery_witness))
+    standard_tests.addTests(loader.loadTestsFromModule(test_recovery_witness_units))
     return standard_tests
 
 

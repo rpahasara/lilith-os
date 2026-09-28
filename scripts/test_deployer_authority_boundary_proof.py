@@ -375,6 +375,11 @@ class ProofLogicTests(unittest.TestCase):
                        "lilith-recovery-witness.witness.cred",
                        "UNOBSERVABLE_BY_DESIGN: /var/lib/lilith-authority-custody/holds"):
             self.assertIn(needle, out)
+        # Every fixed PR-1 CLI (and the keygen) is a root-owned leaf the deployer can neither write nor sudo.
+        for cli in PR1_CLIS + ("/usr/local/sbin/lilith-authority-keygen-dev",):
+            self.assertIn(f"DENIED: test -w {cli}", out)
+        for cli in PR1_CLIS:
+            self.assertIn(f"DENIED: sudo {cli}", out)
         for step in PR1_ORDER:
             self.assertPass(host("L1c.3", credstore=True, host_key=True, pr1=step), "L1c.3", step)
         out = self.assertPass(host("L1c.3", credstore=True, host_key=True), "L1c.3")

@@ -97,7 +97,7 @@ No source in this slice conflicts with an accepted owner decision.
 | role | `lilith-authority-dev-synthetic-release-source-v2` |
 | status | `SOURCE_PREPARED_NOT_INSTALLED` |
 | runtime payload files | 53 (plus 6 `cli/` members) |
-| `runtimeDigests.authority` | `08d6a99c7eb02cb659253ad37137651706931f2e7bf160224288f80343dd5521` |
+| `runtimeDigests.authority` | `4b32f169fb5d83873d574845fb8a38bbae31a904be941fc2411b0d4202a9671b` |
 | `runtimeDigests.witness` | `5137ddb03c3c1b17fceb400cee70a5e0b057c02f1c9138722f1260db1564d3c3` |
 | `runtimeDigests.rootTooling` | `28e9d6cbdb0d2642074d10c4d8dc9e83c9c7b19f90c6676248b920cd6c47b903` |
 | `witnessManifestSha256` | `5137ddb03c3c1b17fceb400cee70a5e0b057c02f1c9138722f1260db1564d3c3` (12 witness files, role `lilith-recovery-witness-dev-synthetic-source-v1`) |
@@ -213,8 +213,9 @@ sockets, and a tmpfiles file for the runtime directory only
 The state directory is created once by the installer stage `witness-state`
 (P1B-9a) as `lilith-recovery-witness:lilith-authority-dev 2750`; the unit has
 no `StateDirectory=`. `systemd-analyze verify` (with `ExecStart` stubbed, as
-CI does for the signer) is clean for all five units locally; CI verifies only
-the authority-dev units (§22).
+CI does for the signer) is clean for all five units. CI verifies every shipped
+witness unit through `services/recovery-witness/tests/test_recovery_witness_units.py`
+(§22).
 
 ## 10. S-9 — durable authority recovery ledger
 
@@ -250,10 +251,19 @@ through `recovery.py`, which is the only signer module that imports
 3. open the ledger (a missing ledger is `AUTHORITY_STATE_MISSING`) and take a
    mandatory observation;
 4. `evaluate_recovery_gate`;
-5. `ADVANCE_EPOCH`: the ledger must equal the witness position (a
-   `BROKER_REGISTRY_VIEW_STALE` lag from the in-epoch compromise marking is
-   tolerated: the adoption itself moves the view to the target, as in the
-   Prep B model), then `epoch_adoption_op`; the witness binds the adoption by
+5. `ADVANCE_EPOCH`: the ledger must equal the witness position, then
+   `epoch_adoption_op`. One lag is tolerated (owner-accepted): the registry
+   view may trail the witness by exactly the in-epoch `COMPROMISE_MARKING`
+   step, because the adoption itself moves the view to the target (Prep B
+   model). `marking_lag_reason` re-derives this from the verified history and
+   refuses (`LEDGER_NOT_AT_WITNESS` with a `LAG_*` detail) unless the
+   governing hold is `KEY_COMPROMISE_RECOVERY` / HELD, the recovery is
+   `RECOVERY_MARKED`, the witness head's own transition is a same-epoch
+   `HEAD_ADVANCE` authorized `COMPROMISE_MARKING` that marks the hold's
+   predecessor (current before it) and names no current key, and that step
+   moved the registry from exactly the ledger's view to the next version.
+   `VOID_CHALLENGE` and `QUARANTINE_USE` never tolerate it; no other signer,
+   witness, or root-tooling module does either. The witness binds the adoption by
    its own later `EXECUTE_EPOCH_ADVANCE`, so no `RECORD_LEDGER_ADVANCE` is
    sent;
 6. `VOID_CHALLENGE` / `QUARANTINE_USE`: exact position, stale ids only
@@ -422,13 +432,13 @@ unchanged.
 
 | Suite | Result |
 | --- | --- |
-| `services/authority-dev/tests` (incl. the witness loader) | 214 OK |
+| `services/authority-dev/tests` (incl. the witness loader) | 226 OK |
 | `services/owner-memory-control/tests` | 489 OK |
-| `services/recovery-witness/tests` | 39 OK |
+| `services/recovery-witness/tests` | 44 OK |
 | DR-5, broker preservation, needrestart, classifier, PR-CI separation | 35 + 38 + 24 + 19 + 9 OK |
 
-New: `test_pr1s_runtime_wiring.py` (28), `test_pr1s_installer_upgrade.py`
-(14), `test_pr1s_root_tooling.py` (24), `test_recovery_witness.py` (39), and
+New: `test_pr1s_runtime_wiring.py` (35, incl. 7 marking-lag), `test_pr1s_installer_upgrade.py`
+(14), `test_pr1s_root_tooling.py` (24), `test_recovery_witness.py` (39), `test_recovery_witness_units.py` (5), and
 four DR-5 PR-1 ladder tests.
 
 ## 21. Remaining before any PR-1 live phase
@@ -442,9 +452,17 @@ four DR-5 PR-1 ladder tests.
 
 ## 22. Remaining SOURCE DETAIL
 
-- CI runs `systemd-analyze verify` for the authority-dev units only; the
-  witness units were verified locally. Adding them to CI is a workflow change
-  and is left for a later review.
+- CI coverage of the witness units closed without a workflow change: the
+  existing backend job's `unittest discover -s services/authority-dev/tests`
+  loads `test_recovery_witness_units.py`. It discovers every `*.service` /
+  `*.socket` in `services/recovery-witness/deploy/` (and requires that set to
+  equal the file set's shipped units), stubs only the pinned `ExecStart`, and
+  runs `systemd-analyze --man=no verify` on temporary copies. A unit passes
+  only on exit status 0 AND no diagnostic naming it, because `verify` exits 0
+  on unknown keys and unparseable values; malformed-unit cases prove each
+  failure mode is caught. Under `GITHUB_ACTIONS` a missing `systemd-analyze`
+  fails the test instead of skipping it. Nothing is installed, reloaded,
+  enabled, or started.
 - The witness suite runs in CI through
   `services/authority-dev/tests/test_recovery_witness_suite.py` (CI discovers
   only the authority-dev and owner-memory-control test directories).
