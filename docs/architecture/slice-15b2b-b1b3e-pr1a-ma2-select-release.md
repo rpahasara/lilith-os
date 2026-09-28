@@ -53,7 +53,9 @@ which is an atomic same-directory replace. Last, it fsyncs
 `/opt/lilith-authority-dev`.
 
 **Expected POST.** `SELECTED_NEW_RELEASE`: both releases present,
-`current -> releases/<NEW>`, units and CLIs still OLD, reloaded.
+`current -> releases/<NEW>`, units and CLIs still OLD, and the observed
+manager state `reloaded=true`. That is `LoadState=loaded` with
+`NeedDaemonReload=no`, read by `systemctl show`. It is not an action.
 
 This is the authorized meaning: only the release selector changes.
 
@@ -104,7 +106,7 @@ Nothing else changed. `.current.tmp` is absent afterwards, and
 
 | Check | Result |
 | --- | --- |
-| `upgrade-status` | `SELECTED_NEW_RELEASE`, `PASS`, `failures=[]`. `unitsOld=true`, `unitsNew=false`, `cliOld=true`, `cliNew=false`, `reloaded=true`, `idle=true` |
+| `upgrade-status` | `SELECTED_NEW_RELEASE`, `PASS`, `failures=[]`. `unitsOld=true`, `unitsNew=false`, `cliOld=true`, `cliNew=false`, `reloaded=true` (an observation of the existing manager state, not a reload; see the [M-A3 record](slice-15b2b-b1b3e-pr1a-ma3-install-units.md) §2), `idle=true` |
 | selector | `current -> releases/aee323e94412accbe321bc84eae78c5b8cf95afc` |
 | candidate | unchanged and still attested: manifest `1d578ca7…`, tree `675c9482…`, venv `530c1453…`, 0 mismatched or extra |
 | old release | `releases/9ac7de2…` present and intact: manifest `c9f2f76e…`, tree `ac62b1dd…`, venv `03bf7233…` |
