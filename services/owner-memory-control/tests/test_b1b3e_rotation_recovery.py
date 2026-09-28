@@ -1216,7 +1216,9 @@ class CompatibilityAndStructureTests(unittest.TestCase):
         self.assertTrue(runtime)
         for path in runtime:
             text = path.read_text(encoding="utf-8", errors="ignore")
-            for forbidden in ("rotation_contracts", "synthetic_witness_v2"):
+            # B1b-3e PR-1S (S-9/S-10) wires the pure contracts into the authority signer; the TEST writer never.
+            signer = "authority-dev" in path.parts
+            for forbidden in ("synthetic_witness_v2",) if signer else ("rotation_contracts", "synthetic_witness_v2"):
                 with self.subTest(path=path.name, forbidden=forbidden):
                     self.assertIsNone(re.search(rf"(?<![A-Za-z0-9_]){forbidden}(?![A-Za-z0-9_])", text))
 

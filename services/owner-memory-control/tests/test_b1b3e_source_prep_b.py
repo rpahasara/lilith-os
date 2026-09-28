@@ -799,8 +799,15 @@ class RecoveryGateTests(unittest.TestCase):
         self.assertEqual(result.reason, "ADOPTION_ALREADY_JOURNALLED")
 
     def test_gate_is_not_wired_into_any_signer(self):
-        for path in (ROOT / "services/authority-dev").rglob("*.py"):
-            self.assertNotIn("successor_readiness", path.read_text(encoding="utf-8"), path)
+        # B1b-3e PR-1S (S-10): the gate is wired into the signer ONLY through `recovery.py` (C-4 recovery ops);
+        # root tooling may evaluate readiness; nothing in core-api or the memory broker reaches it.
+        wired = sorted(path.name for path in (ROOT / "services/authority-dev/lilith_authority_dev").rglob("*.py")
+                       if "successor_readiness" in path.read_text(encoding="utf-8"))
+        self.assertEqual(wired, ["recovery.py"])
+        for tree in ("services/core-api", "services/memory-broker"):
+            for path in (ROOT / tree).rglob("*.py"):
+                if ".venv" not in path.parts:
+                    self.assertNotIn("successor_readiness", path.read_text(encoding="utf-8", errors="ignore"), path)
         credential = (ROOT / "services/authority-dev/lilith_authority_dev/server.py").read_text(encoding="utf-8")
         self.assertIn("CREDENTIAL_ABSENT", credential)  # no credential-less signer mode
 

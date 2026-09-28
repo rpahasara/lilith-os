@@ -525,8 +525,10 @@ class PinnedConstantDriftTests(unittest.TestCase):
 
     def test_custody_paths_are_named_in_b1b3d_design(self) -> None:
         design = (ROOT / "docs/architecture/slice-15b2b-b1b3d-dev-synthetic-custody-design.md").read_text(encoding="utf-8")
+        # B1b-3e PR-1S adds the PR-1 paths; each is named in its runtime-wiring record instead.
+        pr1 = (ROOT / "docs/architecture/slice-15b2b-b1b3e-pr1s-runtime-wiring.md").read_text(encoding="utf-8")
         for path in gate.CUSTODY_PATHS:
-            self.assertIn(Path(path).name, design, path)
+            self.assertTrue(Path(path).name in design or path in pr1, path)
 
 
 if __name__ == "__main__":

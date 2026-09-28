@@ -10,6 +10,13 @@ The only signing-related operation, `ISSUE_OWNER_EVIDENCE`, carries the
 B1b-3b `OwnerEvidenceRequestV1` shape: a challenge reference plus the owner's
 assertion and public credential over a frozen action. Every signed value is
 derived by the signer, never taken from the request.
+
+B1b-3e PR-1S adds exactly three recovery operations (preflight §15), each a
+ledger journal write gated by the pure C-4 recovery gate, never a signature:
+`RECOVERY_ADVANCE_EPOCH` (the exact K-ROOT epoch-advance authorization plus
+the complete root hold-store snapshot), `RECOVERY_VOID_CHALLENGE` and
+`RECOVERY_QUARANTINE_USE` (the snapshot only). Frames are at most 64 KiB so
+one complete snapshot fits.
 """
 
 from __future__ import annotations
@@ -25,14 +32,21 @@ from lilith_memory.owner_proof import OwnerAssertionV1, OwnerCredentialV1, Owner
 
 PROTOCOL = "LILITH_AUTHORITY_DEV"
 VERSION = 1
-MAX_FRAME_BYTES = 16 * 1024
+MAX_FRAME_BYTES = 64 * 1024
 HEALTH = "HEALTH"
 ISSUE_OWNER_EVIDENCE = "ISSUE_OWNER_EVIDENCE"
-OPERATIONS = frozenset({HEALTH, ISSUE_OWNER_EVIDENCE})
+RECOVERY_ADVANCE_EPOCH = "RECOVERY_ADVANCE_EPOCH"
+RECOVERY_VOID_CHALLENGE = "RECOVERY_VOID_CHALLENGE"
+RECOVERY_QUARANTINE_USE = "RECOVERY_QUARANTINE_USE"
+RECOVERY_OPERATIONS = frozenset({RECOVERY_ADVANCE_EPOCH, RECOVERY_VOID_CHALLENGE, RECOVERY_QUARANTINE_USE})
+OPERATIONS = frozenset({HEALTH, ISSUE_OWNER_EVIDENCE}) | RECOVERY_OPERATIONS
 _ENVELOPE = frozenset({"protocol", "schemaVersion", "operation", "payload"})
 _PAYLOAD_FIELDS = {
     HEALTH: frozenset(),
     ISSUE_OWNER_EVIDENCE: frozenset({"challengeId", "action", "assertion", "ownerCredential"}),
+    RECOVERY_ADVANCE_EPOCH: frozenset({"epochAuthorization", "holdStore"}),
+    RECOVERY_VOID_CHALLENGE: frozenset({"holdStore"}),
+    RECOVERY_QUARANTINE_USE: frozenset({"holdStore"}),
 }
 _ACTION_FIELDS = frozenset({
     "schemaVersion", "actorRefId", "operation", "memoryClass", "subjectNamespace", "subjectKey",
@@ -111,6 +125,11 @@ def parse_frame(frame: bytes) -> AuthorityMessageV1:
         raise ProtocolError("INVALID_PAYLOAD_FIELDS")
     if operation == ISSUE_OWNER_EVIDENCE:
         parse_issue_request(payload)
+    elif operation in RECOVERY_OPERATIONS:
+        if not isinstance(payload["holdStore"], dict):
+            raise ProtocolError("INVALID_HOLD_STORE")
+        if operation == RECOVERY_ADVANCE_EPOCH and not isinstance(payload["epochAuthorization"], dict):
+            raise ProtocolError("INVALID_EPOCH_AUTHORIZATION")
     return AuthorityMessageV1(operation, payload)
 
 

@@ -1,0 +1,41 @@
+[Unit]
+Description=LILITH DEV_SYNTHETIC RecoveryWitnessV2 service (DEV only)
+Requires=lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket
+After=lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lilith-recovery-witness
+Group=lilith-recovery-witness
+Sockets=lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket
+WorkingDirectory=/opt/lilith-authority-dev/current
+Environment=LILITH_ENV=dev
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+ExecStart=/opt/lilith-authority-dev/current/venv/bin/python -B -m lilith_recovery_witness.server
+LoadCredentialEncrypted=recovery-witness-signing-key:/etc/lilith-recovery-witness/credentials/lilith-recovery-witness.witness.cred
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/opt/lilith-authority-dev /etc/lilith-authority-dev
+ReadWritePaths=/var/lib/lilith-recovery-witness
+InaccessiblePaths=/etc/lilith-recovery-witness /etc/credstore.encrypted /etc/lilith-authority-custody /var/lib/lilith-authority-custody -/var/lib/lilith-authority-dev /etc/lilith-memory-broker /var/lib/lilith-memory-broker /etc/lilith-os-dev
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=15s
+TimeoutStopSec=10s

@@ -42,6 +42,8 @@ RELEASE_ROOT = "/opt/lilith-authority-dev"
 CONFIG_DIR = "/etc/lilith-authority-dev"
 RUNTIME_DIR = "/run/lilith-authority-dev"
 STATE_DIR = "/var/lib/lilith-authority-dev"
+# B1b-3e PR-1S (preflight §14): the signer-owned authority recovery ledger.
+LEDGER_PATH = STATE_DIR + "/authority_ledger.db"
 OWNER_SOCKET_PATH = RUNTIME_DIR + "/owner.sock"
 CREDENTIAL_NAME = "owner-actor-signing-key"
 CREDENTIAL_SOURCE = "/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred"

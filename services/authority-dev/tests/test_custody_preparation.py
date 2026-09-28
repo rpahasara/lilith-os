@@ -90,7 +90,8 @@ class FakeHost:
                       "lilith-memory-relay": pw(pw_uid=997, pw_gid=986, pw_dir="/nonexistent", pw_shell=I.NOLOGIN)}
         self.groups: dict[str, types.SimpleNamespace] = {}
         self.units = {u: {"LoadState": "not-found", "ActiveState": "inactive", "UnitFileState": "",
-                          "NeedDaemonReload": "no"} for u in ("lilith-authority-dev.service", "lilith-authority-dev.socket")}
+                          "NeedDaemonReload": "no"} for u in I.AUTHORITY_UNITS + I.WITNESS_UNITS}
+        self._next_id = 990
         for d in ("opt", "etc/systemd/system", "etc/tmpfiles.d", "etc/needrestart/conf.d", "usr/local/sbin", "usr/bin",
                   "var/lib/systemd", "proc"):
             (self.root / d).mkdir(parents=True, exist_ok=True)
@@ -110,14 +111,15 @@ class FakeHost:
         out = ""
         if name == "useradd":
             user = argv[-1]
-            self.users[user] = types.SimpleNamespace(pw_uid=990, pw_gid=980, pw_dir=I.NO_HOME, pw_shell=I.NOLOGIN)
-            self.groups[user] = types.SimpleNamespace(gr_gid=980, gr_mem=[])
+            uid, self._next_id = self._next_id, self._next_id - 1  # distinct system ids per account
+            self.users[user] = types.SimpleNamespace(pw_uid=uid, pw_gid=uid - 10, pw_dir=I.NO_HOME, pw_shell=I.NOLOGIN)
+            self.groups[user] = types.SimpleNamespace(gr_gid=uid - 10, gr_mem=[])
             with open(self.root / "etc/shadow", "a", encoding="utf-8") as shadow:
                 shadow.write(f"{user}:!:1::::::\n")
         elif name == "systemctl" and argv[1] == "show":
             out = "\n".join(f"{k}={v}" for k, v in self.units[argv[-1]].items())
         elif name == "sudo":
-            out = f"User {I.SERVICE_USER} is not allowed to run sudo on {I.DEV_HOSTNAME}.\n"
+            out = f"User {argv[-1]} is not allowed to run sudo on {I.DEV_HOSTNAME}.\n"
         elif name == "python3" and argv[1:3] == ["-m", "venv"]:
             venv = Path(argv[3])
             (venv / "bin").mkdir(parents=True)
@@ -136,8 +138,10 @@ class FakeHost:
         return G.Host(self.root, owner_uid=os.getuid() if POSIX else 0, owner_gid=os.getgid() if POSIX else 0)
 
     def daemon_reload(self) -> None:
-        for state in self.units.values():
-            state.update(LoadState="loaded", UnitFileState="static", NeedDaemonReload="no")
+        # Like systemd: only a unit whose file exists is loaded by a reload.
+        for unit, state in self.units.items():
+            if (self.root / I.UNIT_DIR.lstrip("/") / unit).is_file():
+                state.update(LoadState="loaded", UnitFileState="static", NeedDaemonReload="no")
 
     def systemd_creds_setup(self) -> None:
         key = self.root / "var/lib/systemd/credential.secret"
@@ -193,9 +197,8 @@ class KeygenContractTests(unittest.TestCase):
 
     def test_only_actor_invocation_is_accepted(self):
         G.parse_argv(["actor"])
-        with self.assertRaises(G.Refused) as caught:
-            G.parse_argv(["witness"])
-        self.assertEqual(caught.exception.reason, "WITNESS_NOT_IN_SCOPE")
+        # B1b-3e PR-1S (S-6): `witness` is the closed K-WIT form (test_pr1s_root_tooling).
+        self.assertEqual(G.parse_argv(["witness"]), G.Form(G.WITNESS))
         for argv in ([], ["ACTOR"], ["actor", "actor"], ["privacy"], ["PRIVACY"], ["actor", "--domain", "PRIVACY"],
                      ["actor", "--algorithm", "ecdsa"], ["actor", "--prod"], ["actor", "--environment", "prod"],
                      ["export"], ["actor", "--output", "/tmp/key.pem"], ["actor", "--seed", "00"],
@@ -231,7 +234,7 @@ class KeygenContractTests(unittest.TestCase):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 self.assertEqual(G.main(["actor", "--prod"], host=host.keygen_host()), G.EXIT_REFUSED)
-                self.assertEqual(G.main(["witness"], host=host.keygen_host()), G.EXIT_REFUSED)
+                self.assertEqual(G.main(["witness", "--force"], host=host.keygen_host()), G.EXIT_REFUSED)
             self.assertIn("REFUSED USAGE_ONLY_ACTOR", err.getvalue())
             self.assertFalse((host.root / "etc/credstore.encrypted").exists())
 

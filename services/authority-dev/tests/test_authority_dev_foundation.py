@@ -211,7 +211,10 @@ class ReadinessTests(unittest.TestCase):
 
     def test_core_holds_no_key_or_minter(self):
         core = CORE.DevAuthoritySignerCoreV1(PRESENT)
-        self.assertEqual(set(vars(core)), {"_credential"})
+        # PR-1S: two optional collaborators (the C-4 handler and the self-view), neither a key or a minter.
+        self.assertEqual(set(vars(core)), {"_credential", "_recovery", "_self_view"})
+        self.assertIsNone(core._recovery)
+        self.assertIsNone(core._self_view)
         source = (SERVICE / "lilith_authority_dev/core.py").read_text(encoding="utf-8")
         server = (SERVICE / "lilith_authority_dev/server.py").read_text(encoding="utf-8")
         for text in (source, server):
@@ -229,7 +232,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, code)
 
     def test_only_health_and_structured_issue_exist(self):
-        self.assertEqual(W.OPERATIONS, frozenset({"HEALTH", "ISSUE_OWNER_EVIDENCE"}))
+        # B1b-3e PR-1S adds exactly the three C-4 recovery operations (ledger journal writes, never signatures).
+        self.assertEqual(W.OPERATIONS, frozenset({"HEALTH", "ISSUE_OWNER_EVIDENCE", "RECOVERY_ADVANCE_EPOCH",
+                                                  "RECOVERY_VOID_CHALLENGE", "RECOVERY_QUARANTINE_USE"}))
         for operation in ("SIGN", "SIGN_BYTES", "SIGN_MESSAGE", "SIGN_DIGEST", "SIGN_PRIVACY", "RAW",
                           "EXPORT_KEY", "GET_KEY", "PREPARE", "CONSUME", "ADVANCE_EPOCH", "RECONCILE_DECISION"):
             self.assertRefused(frame(envelope(operation, {})), "UNSUPPORTED_OPERATION")
@@ -577,7 +582,8 @@ class UnitMaterialTests(unittest.TestCase):
             if name != "profile.py":
                 self.assertNotIn("/etc/credstore", text, name)
             self.assertNotRegex(text, r'environ(\.get\(|\[)"LILITH_(?!ENV")', name)
-            self.assertNotIn("sqlite", text, name)
+            if name != "ledger.py":  # PR-1S: only the durable authority recovery ledger uses SQLite
+                self.assertNotIn("sqlite", text, name)
         self.assertNotIn("load_der_private_key",
                          "".join((SERVICE / "lilith_authority_dev" / n).read_text(encoding="utf-8")
                                  for n in RFS.RUNTIME_MODULES if n != "credential.py"))
@@ -603,12 +609,12 @@ class PackagingTests(unittest.TestCase):
                 self.assertNotIn(SA.b64(seed).encode(), data)
                 self.assertNotIn(seed.hex().encode(), data)
         manifest = RFS.runtime_manifest(ROOT)
-        self.assertEqual(manifest["status"], "SOURCE_FOUNDATION_NOT_INSTALLED")
+        self.assertEqual(manifest["status"], "SOURCE_PREPARED_NOT_INSTALLED")
 
     def test_extra_file_and_forbidden_markers_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for relative in set(RFS.SOURCE_FILES) | set(RFS.SHARED_HASHES):
+            for relative in RFS.input_files():
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((ROOT / relative).read_bytes())

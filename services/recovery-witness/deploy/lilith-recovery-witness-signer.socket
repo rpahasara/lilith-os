@@ -1,0 +1,20 @@
+[Unit]
+Description=LILITH DEV_SYNTHETIC recovery witness signer socket (DEV only, authority signer peer only)
+Requires=systemd-tmpfiles-setup.service
+After=systemd-tmpfiles-setup.service
+AssertPathIsDirectory=/run/lilith-recovery-witness
+
+[Socket]
+ListenStream=/run/lilith-recovery-witness/signer.sock
+Accept=no
+Service=lilith-recovery-witness.service
+FileDescriptorName=signer
+SocketUser=lilith-recovery-witness
+SocketGroup=lilith-authority-dev
+SocketMode=0660
+DirectoryMode=0710
+FlushPending=yes
+RemoveOnStop=yes
+Backlog=16
+TriggerLimitIntervalSec=60
+TriggerLimitBurst=3
