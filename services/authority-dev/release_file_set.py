@@ -51,11 +51,14 @@ DEPLOY_ASSETS = frozenset({
 })
 TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_preparation.py",
                         "test_successor_custody.py", "test_pr1s_runtime_wiring.py", "test_pr1s_installer_upgrade.py",
-                        "test_pr1s_root_tooling.py", "test_recovery_witness_suite.py", "pr1s_fixtures.py"})
+                        "test_pr1s_root_tooling.py", "test_recovery_witness_suite.py", "pr1s_fixtures.py",
+                        "test_pr1a_build_attestation.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
-                            "build_authority_dev_release.py", "lilith_authority_owner_dev.py"})
+                            "build_authority_dev_release.py", "lilith_authority_owner_dev.py",
+                            # B1b-3e PR-1A build gate: owner-workstation attestation and the fixed host observer.
+                            "attest_authority_dev_build.py", "observe_authority_dev_host.py"})
 # The fixed root CLI wrappers (release members `cli/<name>`).
 CLI_FILES = frozenset({"lilith-authority-ledger-dev", "lilith-authority-hold-dev", "lilith-authority-verify-dev",
                        "lilith-authority-recovery-dev", "lilith-recovery-witness-owner-dev"})
