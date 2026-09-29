@@ -14,6 +14,7 @@ import unittest
 import synthetic_authority as SA  # noqa: F401  (sets sys.path)
 import synthetic_b1b3e as F
 import test_b1b3e_pr3_p32_owner_freshness_tool as P32
+from lilith_owner_memory import owner_acceptance as OA
 from lilith_owner_memory import owner_freshness as OF
 from lilith_owner_memory import owner_freshness_tool as T
 from lilith_owner_memory import pr1b_sequencing as S
@@ -23,6 +24,7 @@ RECORD = ROOT / "docs/architecture/slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequenci
 
 EMPTY = OF.OwnerRegisterResultV1(OF.REGISTER_NOT_VERIFIED, "OWNER_REGISTER_EMPTY")
 CURRENT = OF.FreshnessResultV1(OF.AUTHENTIC, OF.CURRENT)
+COMPLETE = OA.AcceptanceResultV1(OA.ACCEPTANCE_COMPLETE, evidenced_record_version=1)
 ALL_PRECONDITIONS = {name: True for name in S.PRECONDITIONS}
 
 
@@ -34,6 +36,8 @@ def evidence(step: S.StepV1, **extra):
         value["ownerRegister"] = EMPTY
     if step.gate == S.REQUIRED_CURRENT or step.action == "APPEND_RECORD_1_REPLICA_B":
         value["freshness"] = CURRENT
+    if step.action in S.ACCEPTANCE_REQUIRED:
+        value["acceptance"] = COMPLETE
     value.update(extra)
     return value
 
@@ -214,6 +218,7 @@ class CrashAndFirstMemoryTests(unittest.TestCase):
         self.assertTrue(all(state in S.STATES for state, _, _ in S.CRASH_MATRIX.values()))
         by_prefix = {key.split(" ")[0]: cls for key, (_, cls, _) in S.CRASH_MATRIX.items()}
         expected = {"C-3": S.MANUAL_RECOVERY_REQUIRED, "C-4": S.KNOWN_CUSTODY_DEBT, "C-5": S.RECOVERABLE_INCOMPLETE,
+                    "C-16a": S.RECOVERABLE_INCOMPLETE, "C-16b": S.SAFE_RETRY,
                     "C-11": S.SAFE_RETRY, "C-12": S.REBOOTSTRAP_FORBIDDEN, "C-13": S.RECOVERABLE_INCOMPLETE,
                     "C-14": S.RECOVERABLE_INCOMPLETE, "C-15": S.MANUAL_RECOVERY_REQUIRED, "C-16": S.SAFE_RETRY,
                     "C-17": S.RECOVERABLE_INCOMPLETE, "C-18": S.SAFE_RETRY, "C-19": S.MANUAL_RECOVERY_REQUIRED}
@@ -276,7 +281,7 @@ class SyntheticEndToEndTests(unittest.TestCase):
         self.assertTrue(current.current)
         self.assertTrue(s.advance("APPEND_RECORD_1_REPLICA_B", evidence(S.BY_ACTION["APPEND_RECORD_1_REPLICA_B"],
                                                                         freshness=current)).advanced)
-        for step in S.STEPS[[x.action for x in S.STEPS].index("WRITE_HELD"):]:
+        for step in S.STEPS[[x.action for x in S.STEPS].index("APPEND_ENVELOPE_1_COPY_A"):]:
             self.assertTrue(s.advance(step.action, evidence(step, freshness=freshness())).advanced, step.action)
         self.assertEqual(s.state, "FULL_READINESS")
 

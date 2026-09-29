@@ -155,7 +155,12 @@ STEPS: tuple[StepV1, ...] = (
            ("sameCandidateAndDigest", "appendReplicationReplicasIdentical", "compareReplicasVerified"),
            PONR_OWNER_RECORD,
            "completes the same record-1 ceremony. Its result must classify AUTHENTIC + CURRENT"),
-    StepV1("WRITE_HELD", "OWNER_FRESHNESS_CURRENT", "INITIAL_CUSTODY_HELD", "M-B10", REQUIRED_CURRENT,
+    StepV1("APPEND_ENVELOPE_1_COPY_A", "OWNER_FRESHNESS_CURRENT", "OWNER_ACCEPTANCE_EVIDENCE_PARTIAL", "P3-6",
+           REQUIRED_CURRENT, ("reviewPackageReproduced", "ownerConfirmedEnvelopeDigest",
+                              "envelopeReplicationPeerPending"), PONR_OWNER_RECORD),
+    StepV1("APPEND_ENVELOPE_1_COPY_B", "OWNER_ACCEPTANCE_EVIDENCE_PARTIAL", "OWNER_ACCEPTANCE_EVIDENCED", "P3-6",
+           REQUIRED_CURRENT, ("sameEnvelopeAndDigest", "envelopeReplicationCopiesIdentical"), PONR_OWNER_RECORD),
+    StepV1("WRITE_HELD", "OWNER_ACCEPTANCE_EVIDENCED", "INITIAL_CUSTODY_HELD", "M-B10", REQUIRED_CURRENT,
            ("holdStoreEmptyBefore", "heldBoundToGenesisDigest"), PONR_HOLD),
     StepV1("START_SIGNER", "INITIAL_CUSTODY_HELD", "SIGNER_STARTED", "M-B11", REQUIRED_CURRENT,
            ("healthB4EqualsB3", "notReadyOnlyHoldReason", "signerNotEnabled")),
@@ -177,6 +182,12 @@ TERMINAL_HALT = "BOOTSTRAP_HALTED_MANUAL_RECOVERY"
 
 # During the one-replica record-1 window, the only permitted action is completing it.
 PARTIAL_STATE = "OWNER_RECORD_PARTIAL"
+
+# P3-6: steps that require CURRENT freshness AND complete owner-acceptance
+# evidence (`owner_acceptance.AcceptanceResultV1`). The envelope is created
+# after CURRENT, so CURRENT never depends on it: there is no cycle.
+_ACTIONS = [step.action for step in STEPS]
+ACCEPTANCE_REQUIRED = frozenset(_ACTIONS[_ACTIONS.index("APPEND_ENVELOPE_1_COPY_B"):])
 
 ADVANCED = "ADVANCED"
 REFUSED = "REFUSED"
@@ -239,6 +250,12 @@ class BootstrapSequencerV1:
             state = owner_register_state(evidence.get("ownerRegister"))
             if state != KNOWN_EMPTY:
                 return "OWNER_REGISTER_NOT_KNOWN_EMPTY", state
+        if step.action in ACCEPTANCE_REQUIRED:
+            from . import owner_acceptance as OA
+            acceptance = evidence.get("acceptance")
+            if not isinstance(acceptance, OA.AcceptanceResultV1) or not acceptance.complete:
+                return "OWNER_ACCEPTANCE_NOT_COMPLETE", (acceptance.state if isinstance(acceptance, OA.AcceptanceResultV1)
+                                                         else "MISSING")
         if step.gate == REQUIRED_CURRENT or step.action == "APPEND_RECORD_1_REPLICA_B":
             freshness = evidence.get("freshness")
             if not isinstance(freshness, OF.FreshnessResultV1) or not freshness.current:
@@ -311,8 +328,14 @@ CRASH_MATRIX: dict[str, tuple[str, str, str]] = {
     "C-15 append interrupted (pending file left)": (
         "OWNER_RECORD_PARTIAL", MANUAL_RECOVERY_REQUIRED,
         "REPLICA_PENDING_WRITE; owner inspects; never auto-deleted"),
-    "C-16 record 1 CURRENT / HELD not written": ("OWNER_FRESHNESS_CURRENT", SAFE_RETRY,
-                                                "write HELD (hold store still empty)"),
+    "C-16 record 1 CURRENT / envelope absent": (
+        "OWNER_FRESHNESS_CURRENT", SAFE_RETRY,
+        "freshness CURRENT, acceptance NOT_PRESENT: re-build the package, propose, confirm, append the envelope"),
+    "C-16a envelope on copy A only": (
+        "OWNER_ACCEPTANCE_EVIDENCE_PARTIAL", RECOVERABLE_INCOMPLETE,
+        "ACCEPTANCE_PARTIAL: append the same envelope to copy B; HELD blocked until COMPLETE"),
+    "C-16b envelope COMPLETE / HELD not written": ("OWNER_ACCEPTANCE_EVIDENCED", SAFE_RETRY,
+                                                  "write HELD (hold store still empty)"),
     "C-17 HELD / owner package incomplete": (
         "INITIAL_CUSTODY_HELD", RECOVERABLE_INCOMPLETE,
         "correct the condition and re-evaluate the SAME HELD ceremony; never delete or recreate HELD"),

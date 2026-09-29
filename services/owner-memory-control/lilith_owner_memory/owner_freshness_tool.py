@@ -41,11 +41,12 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from lilith_memory.owner_proof import OwnerProofError
 
 from . import authority_contracts as A
+from . import owner_acceptance as OA
 from . import owner_freshness as OF
 from . import recovery_contracts as R
 from . import rotation_contracts as RC
@@ -457,6 +458,9 @@ def append(target_path, peer_path, candidate_path, trust, chain_path, pin_path, 
        byte-identical record. Therefore only `AHEAD_UNACCEPTED` can be
        accepted, and only `AHEAD_UNACCEPTED` or `CONFLICTING` can be rejected.
     """
+    block = OA.real_acceptance_block(authority_profile)
+    if block is not None:                               # P3-6: no real acceptance while P3-3 is incomplete
+        raise _refuse("REAL_ACCEPTANCE_DISABLED", block)
     record, digest = load_candidate(candidate_path)
     if not isinstance(confirm_digest, str) or not confirm_digest:
         raise _refuse("OWNER_CONFIRMATION_REQUIRED")
@@ -686,6 +690,289 @@ def init_real_replica(path: Any, *, replica_id: str, environment: str, authority
             "recordsMode": oct(stat.S_IMODE(os.stat(path / RECORDS).st_mode)), "device": info.st_dev}
 
 
+# -------------------------------------------- P3-6 acceptance-evidence store ---
+#
+# A sibling owner-custody structure, one per replica. It is never inside the
+# strict replica root, which admits only REPLICA.json and records/:
+#
+#   <acceptance store>/
+#     ACCEPTANCE.json                          manifest: custodyCopyId = the paired replica's replicaId
+#     envelopes/NNNNNN-<envelopeDigest>.json   JCS {"envelope": ..., "package": ...}, create-only
+#
+# Freshness records and acceptance evidence stay distinct but cross-bound:
+# envelope N binds record N's digest, and the store binds its paired replica ID.
+
+ACCEPTANCE_STORE_TYPE = "LILITH_OWNER_ACCEPTANCE_STORE"
+ACCEPTANCE_STORE_FIELDS = frozenset({"storeType", "schemaVersion", "custodyCopyId", "environment",
+                                     "authorityProfile"})
+ACCEPTANCE_MANIFEST = "ACCEPTANCE.json"
+ENVELOPES = "envelopes"
+ENVELOPE_NAME = RECORD_NAME
+ENVELOPE_CANDIDATE_TYPE = "LILITH_OWNER_ACCEPTANCE_ENVELOPE_CANDIDATE"
+ENVELOPE_CANDIDATE_FIELDS = frozenset({"candidateType", "schemaVersion", "accepted", "envelopeDigest", "envelope",
+                                       "package"})
+
+
+@dataclass(frozen=True)
+class AcceptanceStoreV1:
+    path: Path
+    custody_copy_id: str
+    environment: str
+    authority_profile: str
+    bundles: tuple[dict[str, Any], ...]
+
+    @property
+    def digests(self) -> tuple[str, ...]:
+        return tuple(OA.envelope_digest(b["envelope"]) for b in self.bundles)
+
+
+def init_acceptance_store(path: Any, *, custody_copy_id: str, environment: str,
+                          authority_profile: str) -> dict[str, Any]:
+    path = Path(path)
+    if not (isinstance(custody_copy_id, str) and REPLICA_ID.fullmatch(custody_copy_id)):
+        raise _refuse("REPLICA_ID_INVALID")
+    if OF.PROFILE_ENVIRONMENTS.get(authority_profile) != environment:
+        raise _refuse("PROFILE_MISMATCH")
+    if _inside_replica(Path(os.path.abspath(path))):
+        raise _refuse("ACCEPTANCE_STORE_INSIDE_REPLICA")
+    if os.path.lexists(path):
+        raise _refuse("ACCEPTANCE_STORE_PATH_EXISTS")
+    os.mkdir(path, 0o700)
+    _write_new_file(path / ACCEPTANCE_MANIFEST, OF.record_bytes(
+        {"storeType": ACCEPTANCE_STORE_TYPE, "schemaVersion": 1, "custodyCopyId": custody_copy_id,
+         "environment": environment, "authorityProfile": authority_profile}))
+    os.mkdir(path / ENVELOPES, 0o700)
+    return {"status": "ACCEPTANCE_STORE_INITIALIZED", "custodyCopyId": custody_copy_id,
+            "directoryFsync": [_fsync_directory(path / ENVELOPES), _fsync_directory(path)][-1]}
+
+
+def load_acceptance_store(path: Any) -> AcceptanceStoreV1:
+    """Strict read, like `load_replica`: exact entries, canonical names and
+    bytes, contiguous versions, and no repair."""
+    path = Path(path)
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError as exc:
+        raise _refuse("ACCEPTANCE_STORE_MISSING") from exc
+    if not stat.S_ISDIR(info.st_mode):
+        raise _refuse("ACCEPTANCE_STORE_NOT_A_DIRECTORY")
+    entries = set(os.listdir(path))
+    if entries != {ACCEPTANCE_MANIFEST, ENVELOPES}:
+        raise _refuse("ACCEPTANCE_STORE_UNEXPECTED_ENTRY", ",".join(sorted(entries ^ {ACCEPTANCE_MANIFEST, ENVELOPES})))
+    manifest = _canonical_json(_read_regular(path / ACCEPTANCE_MANIFEST, "ACCEPTANCE_MANIFEST_INVALID"),
+                               "ACCEPTANCE_MANIFEST_INVALID")
+    if set(manifest) != ACCEPTANCE_STORE_FIELDS or manifest["storeType"] != ACCEPTANCE_STORE_TYPE \
+            or type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1 \
+            or not (isinstance(manifest["custodyCopyId"], str) and REPLICA_ID.fullmatch(manifest["custodyCopyId"])) \
+            or OF.PROFILE_ENVIRONMENTS.get(manifest["authorityProfile"]) != manifest["environment"]:
+        raise _refuse("ACCEPTANCE_MANIFEST_INVALID")
+    directory = path / ENVELOPES
+    if os.path.islink(directory) or not directory.is_dir():
+        raise _refuse("ACCEPTANCE_STORE_UNEXPECTED_ENTRY", ENVELOPES)
+    by_version: dict[int, tuple[str, str]] = {}
+    for name in sorted(os.listdir(directory)):
+        if name.startswith(PENDING_PREFIX):
+            raise _refuse("ACCEPTANCE_PENDING_WRITE", name)
+        match = ENVELOPE_NAME.fullmatch(name)
+        if match is None:
+            raise _refuse("ACCEPTANCE_STORE_UNEXPECTED_ENTRY", name)
+        version = int(match.group(1))
+        if version in by_version:
+            raise _refuse("ENVELOPE_VERSION_DUPLICATED", str(version))
+        by_version[version] = (name, match.group(2))
+    if sorted(by_version) != list(range(1, len(by_version) + 1)):
+        raise _refuse("ENVELOPE_VERSION_GAP", ",".join(str(v) for v in sorted(by_version)))
+    bundles = []
+    for version in sorted(by_version):
+        name, digest = by_version[version]
+        bundle = _canonical_json(_read_regular(directory / name, "ENVELOPE_MALFORMED"), "ENVELOPE_MALFORMED")
+        try:
+            if set(bundle) != OA.BUNDLE_FIELDS:
+                raise ContractViolation("INVALID_BUNDLE")
+            parsed = OA.OwnerFreshnessAcceptanceEnvelopeV1.from_dict(bundle["envelope"])
+        except (OwnerProofError, TypeError) as exc:
+            raise _refuse("ENVELOPE_MALFORMED", name) from exc
+        if parsed.digest != digest or parsed.freshness_record_version != version:
+            raise _refuse("ENVELOPE_NAME_MISMATCH", name)
+        if (parsed.environment, parsed.authority_profile) != (manifest["environment"], manifest["authorityProfile"]):
+            raise _refuse("ENVELOPE_PROFILE_MISMATCH", name)
+        bundles.append(bundle)
+    return AcceptanceStoreV1(path, manifest["custodyCopyId"], manifest["environment"], manifest["authorityProfile"],
+                             tuple(bundles))
+
+
+def classify_acceptance_state(replica_paths: Sequence[Any], store_paths: Sequence[Any],
+                              pin_path: Any) -> dict[str, Any]:
+    """Acceptance-evidence state for the latest freshness record. Reported
+    beside freshness, never merged into it."""
+    register, replicas = load_register(replica_paths)
+    try:
+        stores = [load_acceptance_store(p) for p in store_paths]
+        pin = _input_json(Path(pin_path), "GENESIS_PIN_INVALID")
+    except ToolRefusal as refusal:
+        return {"state": OA.ACCEPTANCE_UNKNOWN, "reason": refusal.reason, "detail": refusal.detail}
+    if len(stores) != 2 or {s.custody_copy_id for s in stores} != {r.replica_id for r in replicas} \
+            or len({s.custody_copy_id for s in stores}) != 2:
+        return {"state": OA.ACCEPTANCE_UNKNOWN, "reason": "ACCEPTANCE_STORES_NOT_PAIRED_WITH_REPLICAS", "detail": None}
+    result = OA.classify_acceptance(register=register, copies=[list(s.bundles) for s in stores],
+                                    replica_ids=[r.replica_id for r in replicas], pin=pin)
+    return {"state": result.state, "reason": result.reason, "detail": result.detail,
+            "evidencedRecordVersion": result.evidenced_record_version}
+
+
+def build_package(replica_paths: Sequence[Any], trust_path: Any, chain_path: Any, pin_path: Any,
+                  candidate_path: Any, out: Any, *, environment: str, authority_profile: str,
+                  evidence: Mapping[str, str]) -> dict[str, Any]:
+    """Ceremony step 1: build the review package BEFORE the append, from the
+    replicas as they are now (the prior register)."""
+    register, replicas = load_register(replica_paths)
+    if not register.verified and register.reason != "OWNER_REGISTER_EMPTY":
+        raise _refuse("OWNER_REGISTER_NOT_VERIFIED", register.reason)
+    prior = [] if not register.verified else [r.to_dict() for r in register.facts.records]
+    record, _ = load_candidate(candidate_path)
+    trust = load_trust(trust_path)
+    try:
+        package = OA.build_review_package(
+            prior_records=prior, chain=verify_chain(trust, chain_path, environment), candidate_record=record,
+            trust_document=_input_json(Path(trust_path), "TRUST_INPUTS_INVALID"),
+            pin=_input_json(Path(pin_path), "GENESIS_PIN_INVALID"), replica_ids=[r.replica_id for r in replicas],
+            environment=environment, authority_profile=authority_profile, attached_evidence=evidence)
+    except (OwnerProofError, TypeError, KeyError) as exc:
+        raise _refuse("PACKAGE_NOT_BUILDABLE", str(exc)) from exc
+    try:
+        _write_new_file(Path(out), OF.record_bytes(package))
+    except FileExistsError as exc:
+        raise _refuse("PACKAGE_FILE_EXISTS") from exc
+    return {"status": "PACKAGE_WRITTEN", "packageDigest": OA.review_package_digest(package),
+            "packageKind": package["packageKind"], "note": "a review package is not an acceptance"}
+
+
+def _expected_envelope(stores: Sequence[AcceptanceStoreV1], register: OF.OwnerRegisterResultV1,
+                       package: Mapping[str, Any]) -> dict[str, Any]:
+    records = register.facts.records
+    target = stores[0]
+    if len(target.bundles) != len(records) - 1:
+        raise _refuse("ENVELOPE_NOT_NEXT", f"{len(target.bundles)}/{len(records)}")
+    previous = target.bundles[-1]["envelope"] if target.bundles else None
+    try:
+        return OA.build_envelope(record=records[-1].to_dict(), package=package, previous_envelope=previous)
+    except (OwnerProofError, TypeError, KeyError) as exc:
+        raise _refuse("ENVELOPE_NOT_BUILDABLE", str(exc)) from exc
+
+
+def propose_envelope(replica_paths, store_paths, package_path, out) -> dict[str, Any]:
+    """Ceremony step 11: construct the envelope for the latest record, after
+    both replicas hold it. A candidate, never an acceptance."""
+    register, _ = load_register(replica_paths)
+    if not register.verified:
+        raise _refuse("OWNER_REGISTER_NOT_VERIFIED", register.reason)
+    stores = [load_acceptance_store(p) for p in store_paths]
+    package = _canonical_json(_read_regular(Path(package_path), "PACKAGE_INVALID"), "PACKAGE_INVALID")
+    envelope = _expected_envelope(stores, register, package)
+    digest = OA.envelope_digest(envelope)
+    document = {"candidateType": ENVELOPE_CANDIDATE_TYPE, "schemaVersion": 1, "accepted": False,
+                "envelopeDigest": digest, "envelope": envelope, "package": package}
+    try:
+        _write_new_file(Path(out), json.dumps(document, indent=1, sort_keys=True).encode("utf-8") + b"\n")
+    except FileExistsError as exc:
+        raise _refuse("CANDIDATE_FILE_EXISTS") from exc
+    return {"status": "ENVELOPE_CANDIDATE_WRITTEN", "accepted": False, "envelopeDigest": digest,
+            "freshnessRecordVersion": envelope["freshnessRecordVersion"],
+            "note": "envelope candidate != acceptance evidence"}
+
+
+def append_envelope(target_path, peer_path, replica_paths, candidate_path, trust_path, chain_path, pin_path, *,
+                    environment: str, authority_profile: str, confirm_digest: Any) -> dict[str, Any]:
+    """Ceremony steps 12–13: the owner confirms the envelope digest, then it is
+    written to ONE acceptance store. Everything is re-derived first:
+
+    - both replicas are identical and hold the bound record as their head;
+    - the package is rebuilt from the prior register, the authentic chain,
+      the trust inputs, the pin, and the record, and must be identical;
+    - for ACCEPT_CURRENT, the chain classifies AUTHENTIC + CURRENT now;
+    - the envelope is rebuilt and must be identical.
+
+    Real-profile writes are blocked while P3-3 is incomplete.
+    """
+    block = OA.real_acceptance_block(authority_profile)
+    if block is not None:
+        raise _refuse("REAL_ACCEPTANCE_DISABLED", block)
+    value = _input_json(Path(candidate_path), "ENVELOPE_CANDIDATE_MALFORMED")
+    if not isinstance(value, dict) or set(value) != ENVELOPE_CANDIDATE_FIELDS \
+            or value["candidateType"] != ENVELOPE_CANDIDATE_TYPE or value["accepted"] is not False \
+            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+        raise _refuse("ENVELOPE_CANDIDATE_MALFORMED")
+    try:
+        digest = OA.envelope_digest(value["envelope"])
+    except (OwnerProofError, TypeError) as exc:
+        raise _refuse("ENVELOPE_CANDIDATE_MALFORMED", "ENVELOPE") from exc
+    if digest != value["envelopeDigest"]:
+        raise _refuse("ENVELOPE_CANDIDATE_MALFORMED", "DIGEST")
+    if not isinstance(confirm_digest, str) or not confirm_digest:
+        raise _refuse("OWNER_CONFIRMATION_REQUIRED")
+    if confirm_digest != digest:
+        raise _refuse("OWNER_CONFIRMATION_MISMATCH")
+    register, replicas = load_register(replica_paths)
+    if not register.verified:
+        raise _refuse("OWNER_REGISTER_NOT_VERIFIED", register.reason)
+    if (register.facts.environment, register.facts.authority_profile) != (environment, authority_profile):
+        raise _refuse("PROFILE_MISMATCH")
+    target, peer = load_acceptance_store(target_path), load_acceptance_store(peer_path)
+    if {target.custody_copy_id, peer.custody_copy_id} != {r.replica_id for r in replicas} \
+            or target.custody_copy_id == peer.custody_copy_id:
+        raise _refuse("ACCEPTANCE_STORES_NOT_PAIRED_WITH_REPLICAS")
+    if os.path.samefile(target.path, peer.path):
+        raise _refuse("ACCEPTANCE_STORE_SAME_LOCATION")
+    if peer.digests == target.digests:
+        replication = "PEER_PENDING"
+    elif peer.digests == target.digests + (digest,):
+        replication = "COPIES_IDENTICAL"
+    else:
+        raise _refuse("ACCEPTANCE_STORES_NOT_APPENDABLE")
+    records = register.facts.records
+    trust = load_trust(trust_path)
+    chain = verify_chain(trust, chain_path, environment)
+    try:
+        package = OA.build_review_package(
+            prior_records=[r.to_dict() for r in records[:-1]], chain=chain, candidate_record=records[-1].to_dict(),
+            trust_document=_input_json(Path(trust_path), "TRUST_INPUTS_INVALID"),
+            pin=_input_json(Path(pin_path), "GENESIS_PIN_INVALID"), replica_ids=[r.replica_id for r in replicas],
+            environment=environment, authority_profile=authority_profile,
+            attached_evidence=value["package"].get("attachedEvidence", {}) if isinstance(value["package"], dict)
+            else {})
+    except (OwnerProofError, TypeError, KeyError) as exc:
+        raise _refuse("PACKAGE_NOT_REPRODUCIBLE", str(exc)) from exc
+    if package != value["package"]:
+        raise _refuse("PACKAGE_NOT_REPRODUCIBLE", "PACKAGE_DIFFERS")
+    if records[-1].decision == OF.ACCEPT_CURRENT:
+        now = OF.classify_presented_world(register=register, chain=chain, environment=environment,
+                                          authority_profile=authority_profile)
+        if not now.current:
+            raise _refuse("FRESHNESS_NOT_CURRENT", f"{now.freshness}:{now.reason}")
+    if _expected_envelope([target], register, package) != value["envelope"]:
+        raise _refuse("ENVELOPE_NOT_DERIVABLE")
+    bundle = {"envelope": value["envelope"], "package": package}
+    version = value["envelope"]["freshnessRecordVersion"]
+    directory = target.path / ENVELOPES
+    final = directory / f"{version:06d}-{digest}.json"
+    pending = directory / f"{PENDING_PREFIX}{version:06d}-{digest}.tmp"
+    _write_new_file(pending, OF.record_bytes(bundle))
+    try:
+        os.link(pending, final)
+    except FileExistsError as exc:
+        os.unlink(pending)
+        raise _refuse("ENVELOPE_EXISTS", final.name) from exc
+    except OSError:
+        os.unlink(pending)
+        raise
+    os.unlink(pending)
+    fsync = _fsync_directory(directory)
+    if load_acceptance_store(target.path).digests != target.digests + (digest,):
+        raise _refuse("POST_WRITE_VERIFICATION_FAILED")
+    return {"status": "ENVELOPE_APPENDED", "custodyCopyId": target.custody_copy_id, "freshnessRecordVersion": version,
+            "envelopeDigest": digest, "replication": replication, "directoryFsync": fsync}
+
+
 # ---------------------------------------------------------------------- CLI ---
 
 EXIT_OK, EXIT_USAGE, EXIT_REFUSED = 0, 2, 3
@@ -725,6 +1012,32 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--path", required=True)
     p = sub.add_parser("check-independence")
     p.add_argument("--replica", action="append", required=True)
+    p = sub.add_parser("init-acceptance-store", help="P3-6 sibling acceptance-evidence store (empty)")
+    p.add_argument("--store", required=True)
+    p.add_argument("--custody-copy-id", required=True, help="the paired replica's replicaId")
+    p.add_argument("--environment", required=True)
+    p.add_argument("--profile", required=True, choices=sorted(OF.PROFILE_ENVIRONMENTS))
+    p = sub.add_parser("verify-acceptance-store")
+    p.add_argument("--store", required=True)
+    p = sub.add_parser("build-review-package", help="P3-6 ceremony step 1 (before the append)")
+    world(p, pin=True, out=True)
+    p.add_argument("--candidate", required=True, help="the freshness record candidate")
+    p.add_argument("--evidence", action="append", default=[], help="NAME=SHA256 of owner-held evidence")
+    p = sub.add_parser("propose-envelope", help="P3-6 ceremony step 11 (after both replicas hold the record)")
+    p.add_argument("--replica", action="append", required=True)
+    p.add_argument("--store", action="append", required=True)
+    p.add_argument("--package", required=True)
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("append-envelope", help="P3-6 ceremony steps 12-13, into ONE store")
+    world(p, replicas=True, pin=True)
+    p.add_argument("--store", required=True, help="the ONE acceptance store to write")
+    p.add_argument("--peer-store", required=True)
+    p.add_argument("--candidate", required=True)
+    p.add_argument("--confirm-digest", required=True, help="the envelopeDigest, repeated by the owner")
+    p = sub.add_parser("classify-acceptance")
+    p.add_argument("--replica", action="append", required=True)
+    p.add_argument("--store", action="append", required=True)
+    p.add_argument("--pin", required=True)
     p = sub.add_parser("inspect-chain")
     world(p, replicas=False)
     p = sub.add_parser("verify-replica")
@@ -754,6 +1067,31 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
         if command == "init-replica":
             return EXIT_OK, init_replica(args.replica, replica_id=args.replica_id, environment=args.environment,
                                          authority_profile=args.profile)
+        if command == "init-acceptance-store":
+            return EXIT_OK, init_acceptance_store(args.store, custody_copy_id=args.custody_copy_id,
+                                                  environment=args.environment, authority_profile=args.profile)
+        if command == "verify-acceptance-store":
+            store = load_acceptance_store(args.store)
+            return EXIT_OK, {"status": "ACCEPTANCE_STORE_VERIFIED", "custodyCopyId": store.custody_copy_id,
+                             "envelopes": len(store.bundles)}
+        if command == "classify-acceptance":
+            return EXIT_OK, classify_acceptance_state(args.replica, args.store, args.pin)
+        if command == "propose-envelope":
+            return EXIT_OK, propose_envelope(args.replica, args.store, args.package, args.out)
+        if command == "build-review-package":
+            evidence = {}
+            for item in args.evidence:
+                name, sep, value = item.partition("=")
+                if not sep or name in evidence:
+                    return EXIT_USAGE, {"status": "USAGE"}
+                evidence[name] = value
+            return EXIT_OK, build_package(args.replica, args.trust, args.chain, args.pin, args.candidate, args.out,
+                                          environment=args.environment, authority_profile=args.profile,
+                                          evidence=evidence)
+        if command == "append-envelope":
+            return EXIT_OK, append_envelope(args.store, args.peer_store, args.replica, args.candidate, args.trust,
+                                            args.chain, args.pin, environment=args.environment,
+                                            authority_profile=args.profile, confirm_digest=args.confirm_digest)
         if command == "init-real-replica":
             return EXIT_OK, init_real_replica(args.replica, replica_id=args.replica_id,
                                               environment=args.environment, authority_profile=args.profile,

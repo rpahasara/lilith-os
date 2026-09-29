@@ -100,6 +100,12 @@ owner authorization ┘         │
                               ▼
             ◆ APPEND_RECORD_1_REPLICA_B ── AUTHENTIC + CURRENT
                               │
+                              ▼   (P3-6: after CURRENT, never before)
+            ◆ APPEND_ENVELOPE_1_COPY_A ── ACCEPTANCE_PARTIAL
+                              │
+                              ▼
+            ◆ APPEND_ENVELOPE_1_COPY_B ── ACCEPTANCE_COMPLETE
+                              │
                               ▼
             ▲ WRITE_HELD (M-B10) ─► ▲ START_SIGNER (M-B11) ─► EVALUATE_ELIGIBILITY (M-B12)
                                                                   │
@@ -146,6 +152,8 @@ table's gate column is §10. For crash semantics, see §9.
 | 9 | `COMMIT_WITNESS_GENESIS` | → WITNESS_GENESIS_COMMITTED | M-B9b | pin = candidate; committed = pin; chain = genesis only; recovery CONSISTENT | `chain/1.json`, pointer | lineage anchored (not accepted) | **LINEAGE** |
 | 10 | `APPEND_RECORD_1_REPLICA_A` | → OWNER_RECORD_PARTIAL | P3 | chain authentic, genesis only; record 1 binds pin; record 1 witness = committed genesis; owner reviewed; owner confirmed digest; `PEER_PENDING` | record 1 in Replica A | none yet: FRESHNESS_UNKNOWN | **OWNER_RECORD** |
 | 11 | `APPEND_RECORD_1_REPLICA_B` | → OWNER_FRESHNESS_CURRENT | P3 | same candidate and digest; `REPLICAS_IDENTICAL`; replicas verified; **classify = AUTHENTIC + CURRENT** | record 1 in Replica B | owner-accepted latest world = genesis | **OWNER_RECORD** |
+| 11a | `APPEND_ENVELOPE_1_COPY_A` | → OWNER_ACCEPTANCE_EVIDENCE_PARTIAL | P3-6 | review package reproduced; owner confirmed the envelope digest; `PEER_PENDING`; **CURRENT** | envelope 1 in acceptance store A | owner-acceptance evidence (partial); authorizes nothing | **OWNER_RECORD** |
+| 11b | `APPEND_ENVELOPE_1_COPY_B` | → OWNER_ACCEPTANCE_EVIDENCED | P3-6 | same envelope and digest; `COPIES_IDENTICAL`; **CURRENT + ACCEPTANCE_COMPLETE** | envelope 1 in acceptance store B | owner-acceptance evidence complete ([P3-6](slice-15b2b-b1b3e-pr3-owner-acceptance-envelope.md)) | **OWNER_RECORD** |
 | 12 | `WRITE_HELD` | → INITIAL_CUSTODY_HELD | M-B10 | hold store empty before; HELD bound to genesis digest | one HELD record | restricts: no issuance | **HOLD** |
 | 13 | `START_SIGNER` | → SIGNER_STARTED | M-B11 | HEALTH B4 = B3; NOT_READY with only the hold reason; not enabled | K-ACT loaded (first time) | none | — |
 | 14 | `EVALUATE_ELIGIBILITY` | → ELIGIBILITY_READY | M-B12 | eligibility READY; package digest; denial proofs | none | none | — |
@@ -383,7 +391,9 @@ These are the rows of `pr1b_sequencing.CRASH_MATRIX`, classified as
 | C-13 witness genesis committed / record 1 absent | RECOVERABLE_INCOMPLETE | propose record 1 against the same genesis; nothing is effective |
 | C-14 record 1 in Replica A / Replica B absent | RECOVERABLE_INCOMPLETE | append the same candidate to B; FRESHNESS_UNKNOWN until then |
 | C-15 append interrupted (pending file left) | MANUAL_RECOVERY_REQUIRED | `REPLICA_PENDING_WRITE`; the owner inspects; never auto-deleted |
-| C-16 record 1 CURRENT / HELD not written | SAFE_RETRY | write HELD (the store is still empty) |
+| C-16 record 1 CURRENT / envelope absent | SAFE_RETRY | acceptance `NOT_PRESENT`; build or reuse the package, propose, confirm, and append the envelope (P3-6) |
+| C-16a envelope on copy A only | RECOVERABLE_INCOMPLETE | `ACCEPTANCE_PARTIAL`; append the same envelope to copy B; HELD is blocked until COMPLETE |
+| C-16b envelope COMPLETE / HELD not written | SAFE_RETRY | write HELD (the store is still empty) |
 | C-17 HELD / owner package incomplete | RECOVERABLE_INCOMPLETE | correct the condition; re-evaluate the SAME HELD |
 | C-18 owner acceptance complete / RELEASED absent | SAFE_RETRY | re-run the package; the digest must match, else the owner reviews again |
 | C-19 RELEASED write interrupted | MANUAL_RECOVERY_REQUIRED | the root observer decides HELD vs RELEASED; never re-create; ambiguous = STOP |
@@ -401,7 +411,8 @@ owner copy is newer (P3-4 joint-rollback limitation).
 | 2 `GENERATE_K_WIT`, 4 `INSTALL_TRUST_AND_REGISTRY`, 5 `PROVISION_LEDGER`, 7 `PIN_GENESIS`, 8 `START_WITNESS` | `REQUIRED_UNKNOWN_BLOCK` | pre-genesis host writes. The register must be KNOWN_EMPTY; any unknown state (missing, divergent, non-empty) blocks |
 | 9 `COMMIT_WITNESS_GENESIS` | `BOOTSTRAP_SPECIAL_CASE` | creates the lineage that freshness later accepts, so no record can precede it. Compensating controls: the owner's pre-commit pin, a KNOWN_EMPTY register, committed = pin |
 | 10 `APPEND_RECORD_1_REPLICA_A`, 11 `APPEND_RECORD_1_REPLICA_B` | `BOOTSTRAP_SPECIAL_CASE` | the act that creates owner freshness cannot require CURRENT. Compensating controls: P3-2 re-derivation, pin binding, owner digest confirmation, a KNOWN_EMPTY register before A, and step 11 must itself classify CURRENT |
-| 12–17 (HELD … FULL_READINESS) | `REQUIRED_CURRENT` | every post-record step, re-classified per step |
+| 11a–11b (acceptance envelope, P3-6) | `REQUIRED_CURRENT` | created after CURRENT; 11b also requires its own `ACCEPTANCE_COMPLETE` |
+| 12–17 (HELD … FULL_READINESS) | `REQUIRED_CURRENT` + `ACCEPTANCE_COMPLETE` | every post-record step, re-classified per step (P3-6 §10) |
 
 There is **no blanket bootstrap bypass**. There are exactly three special
 cases, each tested and each justified, and all of them sit in the
@@ -436,8 +447,9 @@ and adds:
 | E-25 | owner freshness classification at package time: `AUTHENTIC` + `CURRENT`, with the register head digest and latest accepted record version |
 | E-26 | record 1 bytes and digest; `compare-replicas` = verified; the R1 package digest |
 | E-27 | P3-3 storage and independence evidence (public-safe class plus a private evidence digest) |
+| E-28 | the record-1 acceptance envelope digest and `ACCEPTANCE_COMPLETE` state (P3-6) |
 
-The canonical package digest covers E-25…E-27. Step 16 re-runs the whole
+The canonical package digest covers E-25…E-28. Step 16 re-runs the whole
 package and refuses unless the digest is identical.
 
 ## 12. Reboot interaction (not authorized)
