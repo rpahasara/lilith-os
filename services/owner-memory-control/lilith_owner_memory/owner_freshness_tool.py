@@ -9,7 +9,9 @@ nothing.
 
     python -m lilith_owner_memory.owner_freshness_tool <command> ...
 
-Read-only: `inspect-chain`, `verify-replica`, `compare-replicas`, `classify`.
+Read-only: `inspect-chain`, `verify-replica`, `compare-replicas`, `classify`, `location-check`,
+`check-independence`. Storage setup (P3-3): `probe-storage` (temporary probe files only),
+`init-real-replica` (gated; creates an EMPTY replica).
 Candidate producers (write only a new candidate file, never a record):
 `propose-genesis`, `propose-accept`, `propose-reject`.
 The one record writer: `append` (owner ceremony; §24 of the record).
@@ -514,6 +516,169 @@ def _write_record(replica: ReplicaV1, record: dict[str, Any], digest: str) -> st
     return _fsync_directory(records_dir)
 
 
+# ------------------------------------------- P3-3 real-replica storage gate ---
+#
+# Generic inspection keeps the P3-2 behaviour (directory fsync reported, not
+# required). Admission of a REAL owner replica is stricter (P3-3 decisions):
+# directory fsync and hard links are REQUIRED, with no rename-only fallback,
+# and the location must pass the policy checks below.
+
+P3_STORAGE_CAPABLE = "P3_STORAGE_CAPABLE"
+P3_STORAGE_INCAPABLE = "P3_STORAGE_INCAPABLE"
+PROBE_PREFIX = ".lilith-p3-probe-"
+PROBE_CHECKS = ("exclusiveCreate", "fileFsync", "hardLink", "hardLinkNoReplace", "directoryFsync",
+                "renameWithinDirectory", "symlinkDetection", "canonicalReread", "cleanup")
+# Path components of known automatically synchronized roots (case-insensitive).
+AUTO_SYNC_COMPONENTS = re.compile(r"(onedrive.*|dropbox.*|google ?drive|my ?drive|icloud.*|box|box sync|nextcloud|"
+                                  r"owncloud|pcloud.*|mega|megasync|sync|syncthing|resilio sync)\Z", re.IGNORECASE)
+
+
+def _directory_fsync_strict(path: Path) -> None:
+    """Directory fsync or an exception. No platform exemption."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _inside_replica(path: Path) -> bool:
+    for ancestor in (path, *path.parents):
+        if os.path.lexists(ancestor / MANIFEST) and os.path.isdir(ancestor / RECORDS):
+            return True
+    return False
+
+
+def probe_storage(probe_parent: Any) -> dict[str, Any]:
+    """Capability probe on the filesystem of `probe_parent` (an existing
+    directory the owner selected). It creates and removes only a fresh
+    `.lilith-p3-probe-<random>` directory and the files inside it, and it
+    refuses to run inside, or above nothing but, an initialized replica."""
+    parent = Path(probe_parent)
+    if not parent.is_dir() or os.path.islink(parent):
+        raise _refuse("PROBE_PARENT_INVALID")
+    if _inside_replica(parent.resolve()):
+        raise _refuse("PROBE_INSIDE_REPLICA")
+    root = parent / f"{PROBE_PREFIX}{os.urandom(8).hex()}"
+    checks: dict[str, Any] = dict.fromkeys(PROBE_CHECKS, False)
+    failure = None
+    os.mkdir(root, 0o700)
+    try:
+        a, b, c, d, s = (root / n for n in ("a.json", "b.json", "c.json", "d.json", "s.json"))
+        payload = OF.record_bytes({"probe": "LILITH_P3_STORAGE_PROBE", "n": 1})
+        _write_new_file(a, payload)                                        # O_EXCL + file fsync
+        try:
+            _write_new_file(a, payload)
+            raise _refuse("PROBE_EXCLUSIVE_CREATE_REPLACED")
+        except FileExistsError:
+            checks["exclusiveCreate"] = True
+        checks["fileFsync"] = True
+        os.link(a, b)
+        checks["hardLink"] = os.path.samefile(a, b)
+        _write_new_file(c, payload + b" ")
+        try:
+            os.link(c, b)
+            raise _refuse("PROBE_LINK_REPLACED_EXISTING")
+        except FileExistsError:
+            checks["hardLinkNoReplace"] = _read_regular(b, "PROBE") == payload
+        _directory_fsync_strict(root)
+        checks["directoryFsync"] = True
+        os.rename(c, d)
+        checks["renameWithinDirectory"] = not os.path.lexists(c) and os.path.lexists(d)
+        os.symlink(a, s)
+        try:
+            _read_regular(s, "PROBE_SYMLINK")
+        except ToolRefusal:
+            checks["symlinkDetection"] = stat.S_ISLNK(os.lstat(s).st_mode)
+        checks["canonicalReread"] = _canonical_json(_read_regular(a, "PROBE"), "PROBE") == \
+            {"probe": "LILITH_P3_STORAGE_PROBE", "n": 1}
+    except ToolRefusal as refusal:
+        failure = refusal.reason
+    except OSError as exc:
+        failure = f"{type(exc).__name__}:{getattr(exc, 'errno', None)}"
+    finally:
+        for name in os.listdir(root):
+            os.unlink(root / name)
+        os.rmdir(root)
+        try:
+            _directory_fsync_strict(parent)
+        except OSError:
+            pass
+        checks["cleanup"] = not os.path.lexists(root)
+    info = os.stat(parent)
+    capable = failure is None and all(checks[name] is True for name in PROBE_CHECKS)
+    return {"result": P3_STORAGE_CAPABLE if capable else P3_STORAGE_INCAPABLE, "failure": failure,
+            "checks": checks, "device": info.st_dev, "platform": os.name}
+
+
+def location_policy(path: Any) -> dict[str, Any]:
+    """Refuse locations that cannot be an independent owner replica: inside a
+    Git working tree (any ancestor holds `.git`), or under a known
+    automatically synchronized root. Unknown sync or backup mechanisms cannot
+    be excluded by code; that remains owner evidence."""
+    target = Path(os.path.abspath(path))
+    for ancestor in (target, *target.parents):
+        if os.path.lexists(ancestor / ".git"):
+            raise _refuse("LOCATION_IN_GIT_WORKTREE", str(ancestor))
+    for part in target.parts:
+        if AUTO_SYNC_COMPONENTS.fullmatch(part.strip("/\\")):
+            raise _refuse("LOCATION_AUTO_SYNC_ROOT", part)
+    for name, value in os.environ.items():
+        if name.upper().startswith(("ONEDRIVE", "DROPBOX")) and value:
+            root = os.path.abspath(value)
+            if os.path.commonpath([root, str(target)]) == root:
+                raise _refuse("LOCATION_AUTO_SYNC_ROOT", name)
+    return {"path": str(target), "gitWorkTree": False, "knownAutoSyncRoot": False}
+
+
+def check_independence(first: Any, second: Any) -> dict[str, Any]:
+    """Refuse two replicas that are observably one location or one device.
+    Distinct devices are necessary evidence, not sufficient: two partitions of
+    one disk, or two directories inside one virtual disk, still roll back together."""
+    left, right = load_replica(first), load_replica(second)
+    _distinct((left, right))
+    dev_left, dev_right = os.stat(left.path).st_dev, os.stat(right.path).st_dev
+    if dev_left == dev_right:
+        raise _refuse("REPLICA_SAME_DEVICE", str(dev_left))
+    return {"status": "DISTINCT_DEVICES_OBSERVED", "devices": [dev_left, dev_right],
+            "note": "distinct st_dev != independent rollback domain; owner evidence required"}
+
+
+def init_real_replica(path: Any, *, replica_id: str, environment: str, authority_profile: str,
+                      other_replica: Any = None) -> dict[str, Any]:
+    """P3-3 admission + initialization of one REAL owner replica. Every gate
+    must pass before anything is created; nothing is appended."""
+    path = Path(os.path.abspath(path))
+    if OF.PROFILE_ENVIRONMENTS.get(authority_profile) != environment:
+        raise _refuse("PROFILE_MISMATCH")
+    if not (isinstance(replica_id, str) and REPLICA_ID.fullmatch(replica_id)):
+        raise _refuse("REPLICA_ID_INVALID")
+    policy = location_policy(path)
+    if os.path.lexists(path):
+        raise _refuse("REPLICA_PATH_EXISTS")
+    if other_replica is not None:
+        other = load_replica(other_replica)
+        if other.replica_id == replica_id:
+            raise _refuse("REPLICA_ID_DUPLICATED")
+        if os.stat(path.parent).st_dev == os.stat(other.path).st_dev:
+            raise _refuse("REPLICA_SAME_DEVICE")
+    probe = probe_storage(path.parent)
+    if probe["result"] != P3_STORAGE_CAPABLE:
+        raise _refuse(P3_STORAGE_INCAPABLE, probe["failure"] or ",".join(k for k, v in probe["checks"].items()
+                                                                           if v is not True))
+    created = init_replica(path, replica_id=replica_id, environment=environment, authority_profile=authority_profile)
+    if created["directoryFsync"] != "PERFORMED":
+        raise _refuse("DIRECTORY_FSYNC_NOT_PERFORMED")
+    replica = load_replica(path)
+    if replica.records or sorted(os.listdir(path / RECORDS)):
+        raise _refuse("REPLICA_NOT_EMPTY")
+    info = os.stat(path)
+    return {"status": "REAL_REPLICA_INITIALIZED_EMPTY", "replicaId": replica_id, "environment": environment,
+            "authorityProfile": authority_profile, "records": 0, "location": policy, "probe": probe,
+            "mode": oct(stat.S_IMODE(info.st_mode)),
+            "recordsMode": oct(stat.S_IMODE(os.stat(path / RECORDS).st_mode)), "device": info.st_dev}
+
+
 # ---------------------------------------------------------------------- CLI ---
 
 EXIT_OK, EXIT_USAGE, EXIT_REFUSED = 0, 2, 3
@@ -541,6 +706,18 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--replica-id", required=True)
     p.add_argument("--environment", required=True)
     p.add_argument("--profile", required=True, choices=sorted(OF.PROFILE_ENVIRONMENTS))
+    p = sub.add_parser("init-real-replica", help="P3-3 gated initialization of a REAL owner replica")
+    p.add_argument("--replica", required=True)
+    p.add_argument("--replica-id", required=True)
+    p.add_argument("--environment", required=True)
+    p.add_argument("--profile", required=True, choices=sorted(OF.PROFILE_ENVIRONMENTS))
+    p.add_argument("--other-replica", help="the already-initialized other real replica, if any")
+    p = sub.add_parser("probe-storage", help="P3-3 filesystem capability probe (temporary files only)")
+    p.add_argument("--probe-parent", required=True)
+    p = sub.add_parser("location-check")
+    p.add_argument("--path", required=True)
+    p = sub.add_parser("check-independence")
+    p.add_argument("--replica", action="append", required=True)
     p = sub.add_parser("inspect-chain")
     world(p, replicas=False)
     p = sub.add_parser("verify-replica")
@@ -570,6 +747,19 @@ def run(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
         if command == "init-replica":
             return EXIT_OK, init_replica(args.replica, replica_id=args.replica_id, environment=args.environment,
                                          authority_profile=args.profile)
+        if command == "init-real-replica":
+            return EXIT_OK, init_real_replica(args.replica, replica_id=args.replica_id,
+                                              environment=args.environment, authority_profile=args.profile,
+                                              other_replica=args.other_replica)
+        if command == "probe-storage":
+            result = probe_storage(args.probe_parent)
+            return (EXIT_OK if result["result"] == P3_STORAGE_CAPABLE else EXIT_REFUSED), result
+        if command == "location-check":
+            return EXIT_OK, location_policy(args.path)
+        if command == "check-independence":
+            if len(args.replica) != 2:
+                return EXIT_USAGE, {"status": "USAGE"}
+            return EXIT_OK, check_independence(*args.replica)
         if command == "verify-replica":
             replica = load_replica(args.replica)
             return EXIT_OK, {"status": "REPLICA_VERIFIED", "replicaId": replica.replica_id,
