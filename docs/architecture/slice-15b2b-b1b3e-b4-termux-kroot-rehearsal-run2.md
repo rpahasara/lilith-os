@@ -156,6 +156,33 @@ rehearsal**, not with accepted limitations.
 >
 > Also, the rehearsal gate program's own exit status was never checked.
 
+> **Final hardening (2026-09-29, before any owner execution).** Script
+> `193da67a…b4b0` (commit `3b0d530`) is superseded. Its authority and
+> control gates are unchanged here. Only evidence I/O was hardened, so that
+> an evidence write or read failure can never end `RUN_EXIT=0`.
+>
+> **Confirmed on `193da67a` by fault injection (§7):**
+>
+> - a failed g0 environment probe ended **`RUN_EXIT=0`** with an
+>   incomplete `g0.txt`;
+> - a `rehearsal.exit` write failure ran on through the gate and verify
+>   steps, and stopped only at the seal;
+> - baseline and post-run snapshot write failures stopped only indirectly,
+>   with the misleading "not the accepted empty replica" and "Replica B
+>   changed".
+>
+> **Eight `|| stop` additions**, listed in the diff below:
+>
+> - `cd "$HOME"`;
+> - the `g0.txt` group (its redirection and the probe);
+> - `snap > replica-b-before.txt`, and its `cat`;
+> - `echo "exit=$rc" | tee rehearsal.exit` (the content is still
+>   exactly `exit=N`);
+> - `tail -1 rehearsal.json`;
+> - `cat gate.txt`, before its exact success check;
+> - `snap > replica-b-after.txt`;
+> - `cat evidence.sha256`.
+
 **Why run 2 cannot be the reviewed block unmodified.**
 
 - Its G0 requires `~/lilith-b4-rehearsal` to be absent.
@@ -196,8 +223,11 @@ diff is exactly this.
      same five PASS lines in the same order.
      - `STDERR_EMPTY` also requires `rehearsal.stderr` to exist.
      - `REPLICA_B_UNCHANGED` is `cmp … || stop`.
-   - **Seal:** `evidence.sha256` is written `|| stop`, then verified with
-     `sha256sum -c`, which also stops on failure.
+   - **Seal:** `evidence.sha256` is written `|| stop`, shown `|| stop`, then
+     verified with `sha256sum -c`, which also stops on failure.
+   - **Evidence I/O:** `cd "$HOME"`, the `g0.txt` group, both Replica B
+     snapshots and the baseline's `cat`, the `rehearsal.exit` write, and
+     the `rehearsal.json` and `gate.txt` displays each end in `|| stop`.
    - **Cleanup** runs only after every gate and the seal. It requires, each
      with a stop on failure:
      1. the Download tar exists;
@@ -242,9 +272,11 @@ which a test pins.
 @@ -8 +15 @@
 -W="$HOME/lilith-b4-rehearsal"
 +W="$HOME/lilith-b4-rehearsal-2"
-@@ -20,2 +27,2 @@
+@@ -19,3 +26,3 @@
+-cd "$HOME"
 -priv "$HOME" && echo HOME_TERMUX_PRIVATE || echo "STOP: HOME is not Termux private storage"
 -priv "$TMP" && echo TMP_TERMUX_PRIVATE || echo "STOP: TMPDIR is not Termux private storage"
++cd "$HOME" || stop "cannot enter HOME"
 +priv "$HOME" && echo HOME_TERMUX_PRIVATE || stop "HOME is not Termux private storage"
 +priv "$TMP" && echo TMP_TERMUX_PRIVATE || stop "TMPDIR is not Termux private storage"
 @@ -23,6 +30,6 @@
@@ -263,8 +295,12 @@ which a test pins.
 @@ -31 +38 @@
 -mkdir -m 700 "$W" "$E"
 +mkdir -m 700 "$W" "$E" || stop "cannot create $W"
-@@ -35 +42 @@
+@@ -33,3 +40,3 @@
+-  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$E/g0.txt"
+-snap > "$E/replica-b-before.txt"; cat "$E/replica-b-before.txt"
 -grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$E/replica-b-before.txt" && grep -qx "records 0" "$E/replica-b-before.txt" && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$E/replica-b-before.txt" && echo REPLICA_B_BASELINE_OK || echo "STOP: Replica B is not the accepted empty replica"
++  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$E/g0.txt" || stop "cannot write g0.txt"
++snap > "$E/replica-b-before.txt" || stop "cannot write Replica B baseline"; cat "$E/replica-b-before.txt" || stop "cannot read Replica B baseline"
 +grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$E/replica-b-before.txt" && grep -qx "records 0" "$E/replica-b-before.txt" && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$E/replica-b-before.txt" && echo REPLICA_B_BASELINE_OK || stop "Replica B is not the accepted empty replica"
 @@ -38,10 +45,10 @@
 -cp "$HOME/storage/downloads/$TAR" "$W/"
@@ -287,30 +323,34 @@ which a test pins.
 +test "$(cat SOURCE_COMMIT)" = "$SRC" && echo SOURCE_COMMIT_OK || stop "source commit differs"
 +test "$(find "$B" -type f | wc -l)" = 75 && echo FILE_COUNT_OK || stop "unexpected file count"
 +priv "$B" && echo BUNDLE_IN_TERMUX_PRIVATE || stop "bundle is not in Termux private storage"
-@@ -55 +62,3 @@
+@@ -55,3 +62,5 @@
 -echo "exit=$?" | tee "$E/rehearsal.exit"                                                     # exit=0
-+rc=$?
-+echo "exit=$rc" | tee "$E/rehearsal.exit"                                                     # exit=0
-+test "$rc" -eq 0 || stop "rehearsal exited non-zero ($rc)"
-@@ -57 +66 @@
+-tail -1 "$E/rehearsal.json"                                                                   # B4_KROOT_REHEARSAL=PASS
 -python - "$E/rehearsal.json" > "$E/gate.txt" <<'PYEOF'
++rc=$?
++echo "exit=$rc" | tee "$E/rehearsal.exit" || stop "cannot write rehearsal.exit"                                                     # exit=0
++test "$rc" -eq 0 || stop "rehearsal exited non-zero ($rc)"
++tail -1 "$E/rehearsal.json" || stop "cannot read rehearsal.json"                                                                   # B4_KROOT_REHEARSAL=PASS
 +python - "$E/rehearsal.json" > "$E/gate.txt" <<'PYEOF' || stop "rehearsal gate program failed"
-@@ -77,0 +87 @@
+@@ -77 +86,2 @@
+-cat "$E/gate.txt"                                                                             # REHEARSAL_GATE_PASS + 6 BURNED lines
++cat "$E/gate.txt" || stop "cannot read gate.txt"                                                                             # REHEARSAL_GATE_PASS + 6 BURNED lines
 +test "$(head -1 "$E/gate.txt")" = REHEARSAL_GATE_PASS && test "$(grep -c '^BURNED ' "$E/gate.txt")" = 6 && ! grep -q '^STOP' "$E/gate.txt" || stop "rehearsal gate failed"
-@@ -80,4 +90,4 @@
+@@ -80,7 +90,8 @@
 -{ ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && echo "STOP: rehearsal directory left in TMPDIR" || echo TMP_CLEAN
 -  find "$HOME" \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' \) 2>/dev/null | grep -q . && echo "STOP: a TEST key file remains" || echo NO_KEY_FILE_ANYWHERE
 -  test "$(find "$B" -type f | wc -l)" = 75 && (cd "$B" && sha256sum -c --quiet SHA256SUMS) && echo BUNDLE_UNCHANGED || echo "STOP: unexpected file in bundle"
 -  test -s "$E/rehearsal.stderr" && echo "STOP: rehearsal wrote to stderr" || echo STDERR_EMPTY; } | tee "$E/verify.txt"
+-snap > "$E/replica-b-after.txt"
+-cmp "$E/replica-b-before.txt" "$E/replica-b-after.txt" && echo REPLICA_B_UNCHANGED | tee -a "$E/verify.txt" || echo "STOP: Replica B changed"
+-sha256sum "$E"/* > "$W/evidence.sha256"; cat "$W/evidence.sha256"
 +ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && stop "rehearsal directory left in TMPDIR"; vpass TMP_CLEAN
 +find "$HOME" \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' \) 2>/dev/null | grep -q . && stop "a TEST key file remains"; vpass NO_KEY_FILE_ANYWHERE
 +test "$(find "$B" -type f | wc -l)" = 75 && (cd "$B" && sha256sum -c --quiet SHA256SUMS) || stop "unexpected file in bundle"; vpass BUNDLE_UNCHANGED
 +test -f "$E/rehearsal.stderr" && ! test -s "$E/rehearsal.stderr" || stop "rehearsal wrote to stderr"; vpass STDERR_EMPTY
-@@ -85,2 +95,3 @@
--cmp "$E/replica-b-before.txt" "$E/replica-b-after.txt" && echo REPLICA_B_UNCHANGED | tee -a "$E/verify.txt" || echo "STOP: Replica B changed"
--sha256sum "$E"/* > "$W/evidence.sha256"; cat "$W/evidence.sha256"
++snap > "$E/replica-b-after.txt" || stop "cannot write Replica B post-run snapshot"
 +cmp "$E/replica-b-before.txt" "$E/replica-b-after.txt" || stop "Replica B changed"; vpass REPLICA_B_UNCHANGED
-+sha256sum "$E"/* > "$W/evidence.sha256" || stop "cannot write evidence.sha256"; cat "$W/evidence.sha256"
++sha256sum "$E"/* > "$W/evidence.sha256" || stop "cannot write evidence.sha256"; cat "$W/evidence.sha256" || stop "cannot read evidence.sha256"
 +sha256sum -c --quiet "$W/evidence.sha256" || stop "evidence.sha256 does not verify"
 @@ -89 +100,6 @@
 -cmp "$HOME/storage/downloads/$TAR" "$W/$TAR" && rm "$HOME/storage/downloads/$TAR" && echo TRANSPORT_COPY_REMOVED
@@ -328,7 +368,7 @@ block needs a network or the laptop: the bundle is copied from Download
 locally.
 
 **Script.** `b4_phone_commands.run2.sh` (SHA-256
-`193da67ac61989d55c901a8dd24fcc0ba55f8a143dfd6410129ad58c68f1b4b0`) is exactly the block below. The laptop copy is at
+`f0768b6e2b1faa120d1136c467cccfa99b2f2fa83f59ad719ddabc2b4d1b1fe9`) is exactly the block below. The laptop copy is at
 `%USERPROFILE%\lilith-b4-evidence\b4_phone_commands.run2.sh`.
 
 ```bash
@@ -357,7 +397,7 @@ snap() { echo "sha $(sha256sum "$R/REPLICA.json" | cut -d' ' -f1)"; echo "record
          stat -c '%n %i %a %s %Y' "$R" "$R/REPLICA.json" "$R/records" | sed "s#$HOME#~#"; }
 
 # ---- G0 environment (read-only) ----
-cd "$HOME"
+cd "$HOME" || stop "cannot enter HOME"
 priv "$HOME" && echo HOME_TERMUX_PRIVATE || stop "HOME is not Termux private storage"
 priv "$TMP" && echo TMP_TERMUX_PRIVATE || stop "TMPDIR is not Termux private storage"
 python -c 'import sys; print("PYTHON", sys.version.split()[0])'
@@ -371,8 +411,8 @@ test ! -e "$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01" && echo 
 # ---- G1 Replica B baseline (read-only) ----
 mkdir -m 700 "$W" "$E" || stop "cannot create $W"
 { echo "HOME_PRIVATE $(priv "$HOME" && echo yes || echo no)"; echo "TMP_PRIVATE $(priv "$TMP" && echo yes || echo no)"
-  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$E/g0.txt"
-snap > "$E/replica-b-before.txt"; cat "$E/replica-b-before.txt"
+  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$E/g0.txt" || stop "cannot write g0.txt"
+snap > "$E/replica-b-before.txt" || stop "cannot write Replica B baseline"; cat "$E/replica-b-before.txt" || stop "cannot read Replica B baseline"
 grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$E/replica-b-before.txt" && grep -qx "records 0" "$E/replica-b-before.txt" && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$E/replica-b-before.txt" && echo REPLICA_B_BASELINE_OK || stop "Replica B is not the accepted empty replica"
 
 # ---- T1 transport copy -> private staging, then verify ----
@@ -394,9 +434,9 @@ export PYTHONPATH="$B/vendor"
 export PYTHONDONTWRITEBYTECODE=1
 python -B "$B/services/owner-memory-control/tools/termux_kroot_rehearsal.py" rehearse > "$E/rehearsal.json" 2> "$E/rehearsal.stderr"
 rc=$?
-echo "exit=$rc" | tee "$E/rehearsal.exit"                                                     # exit=0
+echo "exit=$rc" | tee "$E/rehearsal.exit" || stop "cannot write rehearsal.exit"                                                     # exit=0
 test "$rc" -eq 0 || stop "rehearsal exited non-zero ($rc)"
-tail -1 "$E/rehearsal.json"                                                                   # B4_KROOT_REHEARSAL=PASS
+tail -1 "$E/rehearsal.json" || stop "cannot read rehearsal.json"                                                                   # B4_KROOT_REHEARSAL=PASS
 python - "$E/rehearsal.json" > "$E/gate.txt" <<'PYEOF' || stop "rehearsal gate program failed"
 import json, sys
 head, last = open(sys.argv[1]).read().rstrip().rsplit("\n", 1)
@@ -417,7 +457,7 @@ for k, v in sorted(d["burnedTestIdentities"].items()):
     print("BURNED", k, v)
 print("ENV", json.dumps(d["environment"], sort_keys=True))
 PYEOF
-cat "$E/gate.txt"                                                                             # REHEARSAL_GATE_PASS + 6 BURNED lines
+cat "$E/gate.txt" || stop "cannot read gate.txt"                                                                             # REHEARSAL_GATE_PASS + 6 BURNED lines
 test "$(head -1 "$E/gate.txt")" = REHEARSAL_GATE_PASS && test "$(grep -c '^BURNED ' "$E/gate.txt")" = 6 && ! grep -q '^STOP' "$E/gate.txt" || stop "rehearsal gate failed"
 
 # ---- V verification (read-only) ----
@@ -425,9 +465,9 @@ ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && stop "rehearsal directory le
 find "$HOME" \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' \) 2>/dev/null | grep -q . && stop "a TEST key file remains"; vpass NO_KEY_FILE_ANYWHERE
 test "$(find "$B" -type f | wc -l)" = 75 && (cd "$B" && sha256sum -c --quiet SHA256SUMS) || stop "unexpected file in bundle"; vpass BUNDLE_UNCHANGED
 test -f "$E/rehearsal.stderr" && ! test -s "$E/rehearsal.stderr" || stop "rehearsal wrote to stderr"; vpass STDERR_EMPTY
-snap > "$E/replica-b-after.txt"
+snap > "$E/replica-b-after.txt" || stop "cannot write Replica B post-run snapshot"
 cmp "$E/replica-b-before.txt" "$E/replica-b-after.txt" || stop "Replica B changed"; vpass REPLICA_B_UNCHANGED
-sha256sum "$E"/* > "$W/evidence.sha256" || stop "cannot write evidence.sha256"; cat "$W/evidence.sha256"
+sha256sum "$E"/* > "$W/evidence.sha256" || stop "cannot write evidence.sha256"; cat "$W/evidence.sha256" || stop "cannot read evidence.sha256"
 sha256sum -c --quiet "$W/evidence.sha256" || stop "evidence.sha256 does not verify"
 
 # ---- Cleanup of the transport copy only (after every line above passed) ----
@@ -454,13 +494,13 @@ echo TRANSPORT_COPY_REMOVED
 
 **Steps.**
 
-1. **Laptop:** verify `b4_phone_commands.run2.sh` is `193da67ac61989d55c901a8dd24fcc0ba55f8a143dfd6410129ad58c68f1b4b0`, then
+1. **Laptop:** verify `b4_phone_commands.run2.sh` is `f0768b6e2b1faa120d1136c467cccfa99b2f2fa83f59ad719ddabc2b4d1b1fe9`, then
    copy it by MTP into Download. Also copy the bundle tar if it is absent.
 2. **Phone:** unplug USB, turn airplane mode **ON**, and open Termux.
 3. **Phone, read-only pre-checks:**
 
    ```bash
-   sha256sum "$HOME/storage/downloads/b4_phone_commands.run2.sh"                 # 193da67ac61989d55c901a8dd24fcc0ba55f8a143dfd6410129ad58c68f1b4b0
+   sha256sum "$HOME/storage/downloads/b4_phone_commands.run2.sh"                 # f0768b6e2b1faa120d1136c467cccfa99b2f2fa83f59ad719ddabc2b4d1b1fe9
    sha256sum "$HOME/storage/downloads/lilith-b4-kroot-rehearsal-ff13bc6.tar"     # 659c50a476c85ff9ed005af97bc70a48989a87890ec53b23f940d97901bee0b3
    test ! -e "$HOME/lilith-b4-rehearsal-2" && test ! -e "$HOME/lilith-b4-rehearsal-2.transcript.txt" && test ! -e "$HOME/lilith-b4-rehearsal-2-evidence.tar" && echo RUN2_TARGETS_ABSENT
    ```
@@ -600,6 +640,23 @@ not touched. Run 2 does not reference them.
 | F | stderr non-empty | `RUN_EXIT=0`, sealed, cleaned | **`1`**, `STOP: rehearsal wrote to stderr`; no seal |
 | G | `REPLICA.json` mtime changed | `RUN_EXIT=1` | **`1`**, `STOP: Replica B changed`; no seal |
 | H | Download tar altered before cleanup | `RUN_EXIT=1`, **no STOP line** | **`1`**, `STOP: transport copy differs from the staged tar`; seal present (it precedes cleanup); the Download tar preserved |
+
+**Evidence-I/O faults (final hardening).** Same full-fidelity setup. The
+shim fails the g0 probe, or puts a directory where the next evidence file
+must be written.
+
+| Fault | superseded `193da67a` | **final (this script)** |
+| --- | --- | --- |
+| g0 environment probe fails | **`RUN_EXIT=0`**, sealed, cleaned; `g0.txt` incomplete | **`1`**, `STOP: cannot write g0.txt`; before any baseline or transport |
+| `replica-b-before.txt` unwritable | `1`, only via "not the accepted empty replica" | **`1`**, `STOP: cannot write Replica B baseline`; before transport |
+| `rehearsal.exit` unwritable | `1`, only at the seal; gate and verify had run | **`1`**, `STOP: cannot write rehearsal.exit`; no gate, verify, or seal |
+| `replica-b-after.txt` unwritable | `1`, only via "Replica B changed" | **`1`**, `STOP: cannot write Replica B post-run snapshot`; no seal |
+| `evidence.sha256` unwritable | `1` | **`1`**, `STOP: cannot write evidence.sha256` |
+| clean | `0` | **`0`**: 0 STOP lines, 6 `BURNED`, 8 evidence files, `exit=0`, the seal verifies, before = after |
+
+In every case, the Download bundle is preserved and `TRANSPORT_COPY_REMOVED`
+never appears. `RunTwoHardStopTests` covers the same five faults on the
+pinned text (`test_io_*`).
 
 The pre-run STOPs (G0, G1, T1) remain as in the earlier check. The bad
 transport tar, an existing run-2 directory, a nested replica, a leftover

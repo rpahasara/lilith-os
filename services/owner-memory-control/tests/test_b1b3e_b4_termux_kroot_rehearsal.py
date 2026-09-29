@@ -427,7 +427,21 @@ if f == "replica":
     os.utime(os.path.join(home, "lilith-owner-offline-dev-synthetic-01", "REPLICA.json"), (1, 1))
 if f == "cleanup":
     open(os.path.join(home, "storage/downloads/lilith-b4-kroot-rehearsal-ff13bc6.tar"), "ab").write(b"x")
+w = os.path.join(home, "lilith-b4-rehearsal-2")
+target = {{"exitdir": "evidence/rehearsal.exit", "afterdir": "evidence/replica-b-after.txt", "sealdir": "evidence.sha256"}}.get(f)
+if target:
+    os.mkdir(os.path.join(w, target))
 sys.exit(3 if f == "exit" else 0)
+"""
+# `python` for the run: the g0 environment probe can fail (g0probe) or find its baseline path blocked (beforedir).
+_PYTHON_SHIM = """#!/bin/bash
+if [ "${1-}" = -c ] && [[ "${2-}" == *platform.machine* ]]; then
+  case "${FAULT-}" in
+    g0probe) exit 1;;
+    beforedir) mkdir "$HOME/lilith-b4-rehearsal-2/evidence/replica-b-before.txt";;
+  esac
+fi
+exec "@PY@" "$@"
 """
 _CLEAN_TOKENS = ["HOME_TERMUX_PRIVATE", "TMP_TERMUX_PRIVATE", "CRYPTOGRAPHY_OK", "STAGING_ABSENT", "TMP_NO_STALE",
                  "NO_KROOT_FILES_BEFORE", "REPLICA_B_PRESENT", "NESTED_REPLICA_ABSENT", "REPLICA_B_BASELINE_OK",
@@ -450,7 +464,8 @@ class RunTwoHardStopTests(unittest.TestCase):
         downloads = home / "storage/downloads"
         for d in (downloads, tmp, bindir):
             d.mkdir(parents=True)
-        (bindir / "python").symlink_to(sys.executable)
+        (bindir / "python").write_text(_PYTHON_SHIM.replace("@PY@", sys.executable), encoding="utf-8")
+        (bindir / "python").chmod(0o755)
         replica = home / "lilith-owner-offline-dev-synthetic-01"
         (replica / "records").mkdir(parents=True)
         (replica / "REPLICA.json").write_bytes(REPLICA_B_MANIFEST)
@@ -539,6 +554,25 @@ class RunTwoHardStopTests(unittest.TestCase):
     def test_G_replica_changed(self):
         _, w, _ = self.assertStopped("replica", "Replica B changed")
         self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_io_g0_write_failure(self):
+        _, w, _ = self.assertStopped("g0probe", "cannot write g0.txt")
+        self.assertFalse((w / "evidence/replica-b-before.txt").exists())
+
+    def test_io_replica_b_before_write_failure(self):
+        _, w, _ = self.assertStopped("beforedir", "cannot write Replica B baseline")
+        self.assertFalse((w / "lilith-b4-kroot-rehearsal-ff13bc6.tar").exists())      # stopped before transport
+
+    def test_io_rehearsal_exit_write_failure(self):
+        _, w, _ = self.assertStopped("exitdir", "cannot write rehearsal.exit")
+        self.assertFalse((w / "evidence/gate.txt").exists())
+
+    def test_io_replica_b_after_write_failure(self):
+        _, w, _ = self.assertStopped("afterdir", "cannot write Replica B post-run snapshot")
+        self.assertFalse((w / "evidence.sha256").is_file())
+
+    def test_io_evidence_sha256_write_failure(self):
+        self.assertStopped("sealdir", "cannot write evidence.sha256")
 
     def test_H_cleanup_cmp_failure(self):
         _, w, download = self.assertStopped("cleanup", "transport copy differs from the staged tar")
