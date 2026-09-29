@@ -25,8 +25,10 @@ Three fixed operations exist (N-45 PRESERVATION_VERIFIER_PHASE_MISMATCH):
   path exists. Its old evidence keeps its old meaning.
 - ``preservation``: phase-aware broker continuity for use once legitimate
   B1b-3d custody exists (from L1b.1). It runs the same broker checks, and it
-  additionally pins the owner-accepted incarnation and baselineCandidate
-  SHA-256. It does not assess authority custody: exact authority state is
+  additionally pins the owner-accepted incarnation, process identity, and
+  baselineCandidate SHA-256, and the accepted boot's Stage III controller
+  state. Since the pre-PR-1B reboot the accepted baseline is the post-reboot
+  one (docs/architecture/slice-15b2b-b1b3e-broker-preservation-repin.md). It does not assess authority custody: exact authority state is
   owned by ``install_authority_dev.py status --expect <stage> <RELEASE_SHA>``,
   and routine-deployer denial by the DR-5 proof. Custody paths are only
   reported, with their raw metadata. There is no ignore, allow, or bypass
@@ -92,15 +94,32 @@ ACCEPTED_BROKER_PID = 96650
 ACCEPTED_BROKER_START_TICKS = 91036598
 ACCEPTED_BROKER_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
 
-# Owner-accepted B1b-3d current-runtime baseline
-# (docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md). Required
-# only by `preservation`; `baseline` keeps reporting it as a new candidate.
-ACCEPTED_CURRENT_INCARNATION = "42af2691b8d24ee5a92a286197c5444c"
-ACCEPTED_CURRENT_BASELINE_SHA256 = "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5"
+# Owner-accepted broker continuity baseline, accepted 2026-09-29 after the
+# pre-PR-1B reboot (docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline-acceptance.md
+# §5; pinned by docs/architecture/slice-15b2b-b1b3e-broker-preservation-repin.md).
+# Required by `preservation`; the supersession reference of `rebaseline`;
+# `baseline` keeps reporting its own new candidate.
+ACCEPTED_CURRENT_INCARNATION = "84798e5b74494e1ea362ce90f1cf04ad"
+ACCEPTED_CURRENT_BASELINE_SHA256 = "5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2"
 PRESERVATION_SCHEMA = "BrokerDevPreservationV1"
 # The boot on which the accepted incarnation was observed; `rebaseline`
 # requires a different one.
-ACCEPTED_CURRENT_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
+ACCEPTED_CURRENT_BOOT_ID = "eea461c3-60f0-4b10-8ee9-556dcef19711"
+# The accepted process identity, pinned explicitly as well as through the
+# candidate digest so a mismatch names the field.
+ACCEPTED_CURRENT_IDENTITY = {
+    "bootId": ACCEPTED_CURRENT_BOOT_ID, "pid": 2586, "startTicks": 69918, "nRestarts": "0",
+    "releaseSha": "817a83e44cec8965479fd97fc30b7a0b3ae49ab2",
+    "manifestSha256": "7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614",
+    "sharedLibrariesSha256": "40e68a1c27328c27b811da19bb17a1262cbacff18dcd7ab397e06bebb17a87bd",
+}
+# Retired for broker continuity only: ended by the M-R1 reboot on 2026-09-29.
+# Reference only; never accepted by any operation.
+RETIRED_BROKER_BASELINES = (
+    {"runtimeIncarnation": "42af2691b8d24ee5a92a286197c5444c", "bootId": "24d1771d-e1b5-4e5f-816d-da08ad8b367a",
+     "baselineCandidateSha256": "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5",
+     "record": "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md"},
+)
 REBASELINE_SCHEMA = "BrokerDevPostRebootRebaselineCandidateV1"
 AUTHORITY_CUSTODY_OWNERS = {
     "exactAuthorityState": "install_authority_dev.py status --expect <stage> <RELEASE_SHA>",
@@ -161,11 +180,15 @@ CONTROLLER_EXPECTED = {
 }
 # After a reboot systemd no longer holds the failed result. The controller
 # must still be loaded (its unit file exists) and must not have run in the
-# new boot: no InvocationID. Used by `rebaseline` only.
+# new boot: no InvocationID. Used by `rebaseline`, and by `preservation`
+# for the accepted post-reboot baseline.
 CONTROLLER_POST_REBOOT_EXPECTED = {
     "LoadState": "loaded", "ActiveState": "inactive", "SubState": "dead", "Result": "success",
     "ExecMainStatus": "0", "Restart": "no", "NRestarts": "0", "InvocationID": "",
 }
+# The accepted baseline's boot is a post-reboot boot, so `preservation` pins
+# that controller state: never started in the accepted boot.
+ACCEPTED_CURRENT_CONTROLLER_EXPECTED = CONTROLLER_POST_REBOOT_EXPECTED
 
 # Stage III artifacts as observed read-only by the DR-1 forensics on
 # 2026-09-26 (no earlier record pinned their hashes).
@@ -532,19 +555,26 @@ def evaluate(obs: dict) -> dict:
 
 
 def evaluate_preservation(obs: dict, *, accepted_incarnation: str = ACCEPTED_CURRENT_INCARNATION,
-                          accepted_candidate_sha256: str = ACCEPTED_CURRENT_BASELINE_SHA256) -> dict:
+                          accepted_candidate_sha256: str = ACCEPTED_CURRENT_BASELINE_SHA256,
+                          accepted_identity: dict | None = None,
+                          controller_expected: dict = ACCEPTED_CURRENT_CONTROLLER_EXPECTED) -> dict:
     """`preservation`: broker continuity independent of the authority-custody
-    lifecycle. Every broker check of `baseline` applies unchanged; in place of
-    the pre-custody absence rule, the owner-accepted incarnation and the
+    lifecycle. Every broker check of `baseline` applies, with the Stage III
+    controller state of the accepted boot; in place of the pre-custody
+    absence rule, the owner-accepted incarnation, process identity, and the
     canonical baselineCandidate SHA-256 must match exactly. The candidate is
     always produced and hashed. Authority custody is reported, never judged,
     and never yields a maturity."""
-    checked = _broker_checks(obs)
+    identity = ACCEPTED_CURRENT_IDENTITY if accepted_identity is None else accepted_identity
+    checked = _broker_checks(obs, controller_expected=controller_expected)
     failures = list(checked["failures"])
     candidate = checked["candidate"]
     candidate_sha256 = canonical_sha256(candidate)
     if checked["invocation"] != accepted_incarnation:
         failures.append("RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE")
+    identity_mismatch = sorted(key for key in identity if candidate.get(key) != identity[key])
+    for key in identity_mismatch:
+        failures.append("ACCEPTED_IDENTITY_CHANGED:" + key)
     if candidate_sha256 != accepted_candidate_sha256:
         failures.append("BASELINE_CANDIDATE_CHANGED")
     return {
@@ -558,6 +588,8 @@ def evaluate_preservation(obs: dict, *, accepted_incarnation: str = ACCEPTED_CUR
         **checked["facts"],
         "runtimeIncarnation": checked["invocation"],
         "acceptedRuntimeIncarnation": accepted_incarnation,
+        "acceptedIdentity": identity,
+        "acceptedIdentityMatches": not identity_mismatch,
         "baselineCandidate": candidate,
         "baselineCandidateSha256": candidate_sha256,
         "acceptedBaselineCandidateSha256": accepted_candidate_sha256,
