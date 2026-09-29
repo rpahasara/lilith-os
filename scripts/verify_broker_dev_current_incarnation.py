@@ -18,7 +18,7 @@ The output is a *candidate* for separate owner acceptance. It never claims
 Stage II acceptance for this incarnation, and it never reports a missing path
 as a denial.
 
-Two fixed operations exist (N-45 PRESERVATION_VERIFIER_PHASE_MISMATCH):
+Three fixed operations exist (N-45 PRESERVATION_VERIFIER_PHASE_MISMATCH):
 
 - ``baseline``: the historical pre-custody observation. Unchanged: it still
   FAILs with ``CUSTODY_PATH_PRESENT_BEFORE_B1B3D`` once any B1b-3d custody
@@ -31,6 +31,15 @@ Two fixed operations exist (N-45 PRESERVATION_VERIFIER_PHASE_MISMATCH):
   and routine-deployer denial by the DR-5 proof. Custody paths are only
   reported, with their raw metadata. There is no ignore, allow, or bypass
   option.
+- ``rebaseline``: the fresh post-reboot broker candidate
+  (docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline.md). A
+  reboot ends the accepted incarnation, so ``preservation`` must fail after
+  it. ``rebaseline`` runs the same broker checks, with one reviewed reboot
+  effect: the Stage III controller's pre-reboot ``failed/exit-code`` result is
+  cleared, so it must be loaded and never started in the new boot. It requires
+  a different boot and a replaced incarnation, and it reports custody paths
+  like ``preservation`` without judging them. A PASS is a candidate for a
+  separate owner acceptance. It never re-pins this file's accepted constants.
 """
 
 from __future__ import annotations
@@ -89,6 +98,10 @@ ACCEPTED_BROKER_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
 ACCEPTED_CURRENT_INCARNATION = "42af2691b8d24ee5a92a286197c5444c"
 ACCEPTED_CURRENT_BASELINE_SHA256 = "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5"
 PRESERVATION_SCHEMA = "BrokerDevPreservationV1"
+# The boot on which the accepted incarnation was observed; `rebaseline`
+# requires a different one.
+ACCEPTED_CURRENT_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
+REBASELINE_SCHEMA = "BrokerDevPostRebootRebaselineCandidateV1"
 AUTHORITY_CUSTODY_OWNERS = {
     "exactAuthorityState": "install_authority_dev.py status --expect <stage> <RELEASE_SHA>",
     "routineDeployerDenial": "scripts/deployer_authority_boundary_proof.sh (DR-5)",
@@ -145,6 +158,13 @@ SOCKET_EXPECTED = {
 CONTROLLER_EXPECTED = {
     "ActiveState": "failed", "SubState": "failed", "Result": "exit-code",
     "ExecMainStatus": "1", "Restart": "no", "NRestarts": "0",
+}
+# After a reboot systemd no longer holds the failed result. The controller
+# must still be loaded (its unit file exists) and must not have run in the
+# new boot: no InvocationID. Used by `rebaseline` only.
+CONTROLLER_POST_REBOOT_EXPECTED = {
+    "LoadState": "loaded", "ActiveState": "inactive", "SubState": "dead", "Result": "success",
+    "ExecMainStatus": "0", "Restart": "no", "NRestarts": "0", "InvocationID": "",
 }
 
 # Stage III artifacts as observed read-only by the DR-1 forensics on
@@ -329,8 +349,8 @@ def _subset(observed: dict, expected: dict) -> bool:
     return all(observed.get(key) == value for key, value in expected.items())
 
 
-def _broker_checks(obs: dict) -> dict:
-    """Pure broker-continuity checks shared by both operations. Missing keys
+def _broker_checks(obs: dict, *, controller_expected: dict = CONTROLLER_EXPECTED) -> dict:
+    """Pure broker-continuity checks shared by every operation. Missing keys
     fail closed. Custody paths are observed here but judged by the caller."""
     failures: list[str] = []
 
@@ -403,7 +423,7 @@ def _broker_checks(obs: dict) -> dict:
         check(stage3.get("present") == STAGE3_PRESENT, "STAGE3_ARTIFACT_CHANGED"),
         check(stage3.get("absent") == {path: True for path in STAGE3_ABSENT},
               "STAGE3_ARM_GUARD_OR_CONSUMPTION_PRESENT"),
-        check(_subset(units.get(CONTROLLER, {}), CONTROLLER_EXPECTED), "STAGE3_CONTROLLER_CHANGED"),
+        check(_subset(units.get(CONTROLLER, {}), controller_expected), "STAGE3_CONTROLLER_CHANGED"),
     ))
 
     deployer = obs.get("deployer", {})
@@ -542,6 +562,54 @@ def evaluate_preservation(obs: dict, *, accepted_incarnation: str = ACCEPTED_CUR
         "baselineCandidateSha256": candidate_sha256,
         "acceptedBaselineCandidateSha256": accepted_candidate_sha256,
         "baselineCandidateMatchesAccepted": candidate_sha256 == accepted_candidate_sha256,
+        "runtimeBehavioralEquivalence": "NOT_PROVEN_BY_OBSERVATION",
+        "stageIIAcceptance": "HISTORICAL_RECORD_UNCHANGED_NOT_EXTENDED_TO_THIS_INCARNATION",
+        "authorityCustody": {**AUTHORITY_CUSTODY_OWNERS, "observedPaths": checked["custodyObserved"]},
+        "informational": {
+            "deployerBoundary": "POLICY_TEXT_ONLY_NOT_A_DENIAL_PROOF",
+            "dr3Ubuntu": obs.get("ubuntu"),
+            "needrestart": obs.get("needrestart"),
+        },
+    }
+
+
+def evaluate_rebaseline(obs: dict, *, superseded_incarnation: str = ACCEPTED_CURRENT_INCARNATION,
+                        superseded_boot_id: str = ACCEPTED_CURRENT_BOOT_ID,
+                        superseded_candidate_sha256: str = ACCEPTED_CURRENT_BASELINE_SHA256) -> dict:
+    """`rebaseline`: a fresh post-reboot candidate. Every broker check of
+    `baseline` applies, except that the Stage III controller must show the
+    post-reboot state instead of the pre-reboot failed result. The boot and
+    the incarnation must both differ from the accepted baseline. Custody is
+    reported, never judged. A PASS is not an acceptance."""
+    checked = _broker_checks(obs, controller_expected=CONTROLLER_POST_REBOOT_EXPECTED)
+    failures = list(checked["failures"])
+    candidate = checked["candidate"]
+    candidate_sha256 = canonical_sha256(candidate)
+    if checked["host"].get("bootId") == superseded_boot_id:
+        failures.append("REBOOT_NOT_OBSERVED")
+    if checked["invocation"] == superseded_incarnation:
+        failures.append("RUNTIME_INCARNATION_NOT_REPLACED")
+    if candidate_sha256 == superseded_candidate_sha256:
+        failures.append("BASELINE_CANDIDATE_NOT_REPLACED")
+    passed = not failures
+    return {
+        "schema": REBASELINE_SCHEMA,
+        "operation": "READ_ONLY_POST_REBOOT_REBASELINE",
+        "BROKER_REBASELINE": "PASS" if passed else "FAIL",
+        "authorityCustodyJudgment": "NOT_PERFORMED",
+        "authorityMaturity": "NOT_ESTABLISHED_BY_REBASELINE",
+        "failures": failures,
+        **checked["facts"],
+        "runtimeIncarnation": checked["invocation"],
+        "bootId": checked["host"].get("bootId"),
+        "startTime": checked["process"].get("startTime"),
+        "baselineCandidate": candidate,
+        # Only a passing candidate gets a digest the owner could accept.
+        "baselineCandidateSha256": candidate_sha256 if passed else None,
+        "supersedes": {"runtimeIncarnation": superseded_incarnation, "bootId": superseded_boot_id,
+                       "baselineCandidateSha256": superseded_candidate_sha256},
+        "continuityWithAcceptedBaseline": False,
+        "ownerAcceptance": "PENDING_SEPARATE_EXPLICIT_OWNER_DECISION",
         "runtimeBehavioralEquivalence": "NOT_PROVEN_BY_OBSERVATION",
         "stageIIAcceptance": "HISTORICAL_RECORD_UNCHANGED_NOT_EXTENDED_TO_THIS_INCARNATION",
         "authorityCustody": {**AUTHORITY_CUSTODY_OWNERS, "observedPaths": checked["custodyObserved"]},
@@ -750,7 +818,7 @@ def _deployer() -> dict:
 SERVICE_PROPERTIES = tuple(SERVICE_EXPECTED) + tuple(SANDBOX_EXPECTED) + (
     "MainPID", "InvocationID", "ExecMainStartTimestamp")
 SOCKET_PROPERTIES = tuple(SOCKET_EXPECTED) + ("InvocationID",)
-CONTROLLER_PROPERTIES = tuple(CONTROLLER_EXPECTED)
+CONTROLLER_PROPERTIES = tuple(dict.fromkeys((*CONTROLLER_EXPECTED, *CONTROLLER_POST_REBOOT_EXPECTED)))
 
 
 def collect() -> dict:
@@ -782,6 +850,7 @@ def collect() -> dict:
 OPERATIONS = {
     "baseline": (evaluate, "CURRENT_RUNTIME_BASELINE"),
     "preservation": (evaluate_preservation, "BROKER_PRESERVATION"),
+    "rebaseline": (evaluate_rebaseline, "BROKER_REBASELINE"),
 }
 
 

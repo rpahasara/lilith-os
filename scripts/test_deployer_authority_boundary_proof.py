@@ -386,6 +386,21 @@ class ProofLogicTests(unittest.TestCase):
         self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: /etc/lilith-authority-custody (P1A-7)", out)
         self.assertIn(f"DEFERRED_UNTIL_OBJECT_EXISTS: sudo -u {WITNESS_USER} (proxy: lilith-memory-broker)", out)
 
+    # Pre-PR-1B reboot ceremony, OR-6: boot creates the tmpfiles runtime directories.
+    # They are real, non-vacuous denials and never raise either maturity line.
+    def test_tmpfiles_runtime_directories_after_reboot_are_denied_not_matured(self):
+        spec = host("L1c.3", credstore=True, host_key=True, pr1="P1A-9")
+        spec["stat"]["/run/lilith-authority-dev"] = "directory|0|0|700"
+        spec["stat"]["/run/lilith-recovery-witness"] = "directory|0|985|710"
+        out = self.assertPass(spec, "L1c.3", "P1A-9")
+        for path in ("/run/lilith-authority-dev", "/run/lilith-recovery-witness"):
+            for flag in ("-w", "-r", "-x"):
+                self.assertIn(f"DENIED: test {flag} {path}", out)
+            self.assertNotIn(f"DEFERRED_UNTIL_OBJECT_EXISTS: {path}", out)
+        self.assertIn("DEFERRED_UNTIL_OBJECT_EXISTS: /run/credentials/lilith-authority-dev.service", out)
+        spec["can"].add("-x /run/lilith-recovery-witness")
+        self.assertFails(spec, "ALLOWED(unexpected) test -x /run/lilith-recovery-witness")
+
     def test_pr1_objects_before_l1c3_or_out_of_order_fail(self):
         self.assertFails(host("L1c.1", pr1="P1A-5"), "PR1_OBJECT_BEFORE_L1C3 pr1=P1A-5 maturity=L1c.1")
         spec = host("L1c.3", pr1="P1A-9")
