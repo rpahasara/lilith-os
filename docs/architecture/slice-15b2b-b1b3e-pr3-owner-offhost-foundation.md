@@ -1,19 +1,22 @@
 # Slice 15B2b-B1b-3e PR-3: Owner / Off-Host Freshness Foundation
 
-**Status: PR-3 DESIGN + SOURCE FOUNDATION.**
-- The pure, offline contract is implemented and test proven.
-- No live owner register exists. No owner key has been generated.
+**Status: PR-3 DESIGN + SOURCE FOUNDATION + P3-2 OFFLINE TOOLING.**
+- The pure, offline contract and the offline owner-workstation tooling are
+  implemented and test proven.
+- Owner decisions PR3-D1..PR3-D12 are **ACCEPTED** (§19).
+- No live owner register or real owner storage exists. No owner key has
+  been generated.
 - No DEV or cloud contact was made.
-- Owner decisions PR3-D1..PR3-D12 are **PENDING**.
-- PR-1B is not authorized. First Memory is not authorized.
+- P3-3 is not authorized. PR-1B is not authorized. First Memory is not
+  authorized.
 
 | Field | Value |
 | --- | --- |
 | Gate | live-rehearsal gate §14 row PR-3; PR-1 preflight §20 (PR-3 foundation precedes the V2 genesis commit; PR-3 full material precedes `INITIAL_CUSTODY` `RELEASED`) |
 | Accepted pre-state | PR-1A ACCEPTED (`P1A-9`, AUTHORITY_BOUNDARY PASS `L1c.3`); PR-2 ACCEPTED ([record](slice-15b2b-b1b3e-pr2-acceptance.md)) |
 | Starting main | `f3a8add08d1aa114615fc5397ba3c919e35931bf` |
-| Source | `services/owner-memory-control/lilith_owner_memory/owner_freshness.py` (pure, offline) |
-| Tests | `services/owner-memory-control/tests/test_b1b3e_pr3_owner_freshness.py`: 27 tests over real K-WIT-signed TEST chains |
+| Source | `services/owner-memory-control/lilith_owner_memory/owner_freshness.py` (pure, offline); `…/owner_freshness_tool.py` (P3-2 offline workstation tooling, §24) |
+| Tests | `…/tests/test_b1b3e_pr3_owner_freshness.py` (27) and `…/tests/test_b1b3e_pr3_p32_owner_freshness_tool.py` (19), over real K-WIT-signed TEST chains |
 
 PR-2 found that DEV holds every authority and custody object in one
 rollback domain:
@@ -235,7 +238,7 @@ Git history / remote storage != owner acceptance authority
 | Risk of becoming root authority | none: it signs nothing | **real**: a key that "accepts worlds" drifts toward K-ROOT | **real**: a memory approval could be replayed as authority acceptance | limited, if the scope is fixed to freshness records |
 | Exists off-host | yes | only if the owner holds it offline or in hardware | yes | yes |
 
-**Recommendation (not a decision).**
+**Recommendation (accepted for DEV_SYNTHETIC as PR3-D2, §19).**
 
 - **V1 / DEV_SYNTHETIC:** option **A**. The record digest is
   envelope-independent, so a later B or C′ envelope needs no contract
@@ -469,11 +472,11 @@ before any gated step.
 | `INITIAL_CUSTODY_RELEASE` | blocked |
 | `FIRST_MEMORY` | blocked |
 
-DEV itself changes nothing; the gate is an owner-side precondition. Open
-sub-question **PR3-D11**: whether routine issuance after First Memory,
-which advances the ledger and therefore the witness, may proceed under
-`AHEAD_LEDGER_ONLY` within a bounded window. V1 says no. It is deferred to
-the First Memory design.
+DEV itself changes nothing; the gate is an owner-side precondition.
+**PR3-D11 (ACCEPTED):** `AHEAD_UNACCEPTED` blocks authority-changing
+issuance. Any bounded window for routine, non-authority-changing issuance
+after First Memory would be a new decision in the First Memory design; V1
+grants none.
 
 ## 17. Compromise matrix
 
@@ -518,22 +521,22 @@ the First Memory design.
 6. **"A signed owner record is fresh."** Signature validity is not
    freshness; an old signed record replays.
 
-## 19. Decisions (all PENDING owner decision)
+## 19. Decisions (OWNER-ACCEPTED, 2026-09-29)
 
-| ID | Question | Recommendation | Status |
+| ID | Question | Accepted decision | Status |
 | --- | --- | --- | --- |
-| PR3-D1 | owner register authority mechanism | acceptance = owner ceremony review of a tool-produced candidate against an authentic chain, then owner append to owner-only copies; storage and Git never confer it | PENDING |
-| PR3-D2 | owner signing method | A (unsigned, envelope-ready) for DEV_SYNTHETIC; C′ or hardware-held B before any non-synthetic authority; reject C | PENDING |
-| PR3-D3 | canonical fields | §4.2, with §4.3 excluded | PENDING |
-| PR3-D4 | monotonic fields | §9 | PENDING |
-| PR3-D5 | register sequence semantics | `recordVersion` counts every decision, contiguous from 1; freshness moves on accept only | PENDING |
-| PR3-D6 | storage model | ≥ 2 identical owner-only copies outside DEV, no shared sync or backup path; GitHub mirror only; `minimum_replicas = 2` | PENDING |
-| PR3-D7 | conflict resolution | first accepted lineage wins; reject is terminal; divergent copies are never auto-resolved | PENDING |
-| PR3-D8 | unavailable-register behavior | `FRESHNESS_UNKNOWN` blocks the five gated operations; no fallback | PENDING |
-| PR3-D9 | WebAuthn relationship | keep memory WebAuthn separate; any authority use is a separate credential and domain (C′) | PENDING |
-| PR3-D10 | recovery relationship | detect only; R-1 (new custody, genesis, and register lineage) for a stale restore; R-2 deferred | PENDING |
-| PR3-D11 | ledger-only-ahead window for routine issuance | none in V1; decide in the First Memory design | PENDING (deferred) |
-| PR3-D12 | relation to `OwnerGenesisPinV1` (SW-8) and `OwnerAuthorizationRegisterV1` (SW-7) | keep three contracts; record 1 must equal the genesis pin (`genesis_pin_consistent`); consolidation deferred | PENDING |
+| PR3-D1 | owner register authority mechanism | **explicit owner ceremony.** The owner reviews a tool-derived candidate against an authentic chain, then appends it to the owner-only replicas by an explicit digest confirmation. Storage, Git, DEV, models, and the witness never confer authority | **ACCEPTED** |
+| PR3-D2 | owner signing method | **unsigned ceremony (option A) for DEV_SYNTHETIC.** The record digest stays envelope-independent. Any signed or C′ envelope is a later, separate decision, taken before non-synthetic authority | **ACCEPTED** |
+| PR3-D3 | canonical fields | the §4.2 `OwnerFreshnessRecordV1` fields, with the §4.3 exclusions | **ACCEPTED** |
+| PR3-D4 | monotonic fields | the §9 rules | **ACCEPTED** |
+| PR3-D5 | register sequence semantics | `recordVersion` is mandatory and strictly +1 per decision (accept or reject), contiguous from 1. Freshness moves on accept only | **ACCEPTED** |
+| PR3-D6 | storage model | **two independent owner-controlled replicas** outside the DEV rollback domain, sharing no sync or backup path; `minimum_replicas = 2`. A GitHub mirror is non-authoritative | **ACCEPTED** |
+| PR3-D7 | conflict resolution | conflicts fail closed. There is no automatic resolution by length, newest file, or last write. Rejection is terminal | **ACCEPTED** |
+| PR3-D8 | unavailable-register behavior | `FRESHNESS_UNKNOWN`: fail closed, with every gated operation blocked | **ACCEPTED** |
+| PR3-D9 | WebAuthn relationship | memory WebAuthn remains separate from authority-bootstrap acceptance | **ACCEPTED** |
+| PR3-D10 | recovery relationship | a stale DEV is recovered only through fresh custody material, a new V2 genesis, and a **new owner register lineage** (R-1). It is never repaired or rebased | **ACCEPTED** |
+| PR3-D11 | issuance while DEV is ahead of the owner | `AHEAD_UNACCEPTED` blocks authority-changing issuance. Every gated operation requires `CURRENT` | **ACCEPTED** |
+| PR3-D12 | relation to `OwnerGenesisPinV1` and `OwnerAuthorizationRegisterV1` | three distinct contracts. Neither the pin nor the authorization register substitutes for the freshness register. Record 1 must bind the accepted genesis pin, and every P3-2 proposal and append re-checks the pin | **ACCEPTED** |
 
 ## 20. Nonclaims
 
@@ -550,47 +553,40 @@ PR-3 does **not** establish:
 - whole-host rollback prevention: **WHOLE-HOST ROLLBACK RESISTANCE = NOT
   ESTABLISHED** on DEV;
 - First Memory readiness;
-- a live owner register;
-- an owner key;
-- owner acceptance of any PR3-D decision.
+- a live owner register, or real owner storage (P3-3 is not authorized);
+- an owner key.
 
 It establishes only **owner-controlled freshness observation and
-acceptance semantics**, as pure source and tests.
+acceptance semantics**, plus offline tooling to apply them.
 
 ## 21. Acceptance criteria for PR-3 foundation
 
-1. The owner accepts, amends, or rejects PR3-D1..PR3-D12.
-2. The contract and the classification are reviewed. The 15 required
-   synthetic cases pass, mapped as follows:
-   - 1 → `test_01`; 2 → `test_02`; 3 → `test_03`; 4 → `test_04`;
-     5 → `test_05`; 6 → `test_06`; 7 → `test_07`;
-   - 8 → `test_08`; 9 → `test_09`; 10 → `test_10`; 11 → `test_11`;
-     12 → `test_12`; 13 → `test_13`; 14 → `test_14`; 15 → `test_15`.
-
-   Supporting tests cover determinism, monotonicity, the genesis pin,
-   replica divergence and joint rollback, non-authentic chains, genesis
-   mismatch, the gate, proposal refusals, rejection terminality,
-   candidate ≠ acceptance, and source purity.
-3. The owner has prepared the PR3-D6 storage locations. This is owner work,
-   not repository work.
-4. There is no live effect. PR-3 foundation creates no register content:
-   record 1 can exist only after the V2 genesis commit.
+1. PR3-D1..PR3-D12 are decided (§19). **Done.**
+2. The contract and the classification have been reviewed, and the 15
+   required synthetic cases pass. Each case N maps to `test_NN`
+   (1 → `test_01` through 15 → `test_15`). Supporting tests cover:
+   - determinism and monotonicity;
+   - the genesis pin;
+   - replica divergence and joint rollback;
+   - non-authentic chains and genesis mismatch;
+   - the gate and proposal refusals;
+   - rejection terminality and candidate ≠ acceptance;
+   - source purity.
+3. The P3-2 tooling tests pass (§24).
+4. The owner has prepared the PR3-D6 storage locations. This is P3-3: owner
+   work, not authorized.
+5. There is no live effect. PR-3 creates no register content; record 1 can
+   exist only after the V2 genesis commit.
 
 ## 22. Implementation plan
 
 | Step | Content | Status |
 | --- | --- | --- |
-| P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done (this record)** |
-| P3-2 | owner-workstation offline CLI: read owner copies and a presented chain export, print the classification and candidate. The witness anchor and registry root come from pinned inputs | not started; not authorized |
-| P3-3 | owner storage preparation per PR3-D6 | owner action; not authorized |
-| P3-4 | PR-1B sequencing, as follows | not authorized |
-| P3-5 | acceptance envelope per PR3-D2 (B or C′), if chosen | not started |
-
-P3-4 sequences PR-1B so that:
-- the genesis pin is stored before the V2 genesis commit (RR-35, unchanged);
-- owner record 1 (`propose_genesis_record`) is appended after the commit;
-- `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` =
-  `FRESHNESS_PRECONDITION_MET`.
+| P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done** (`368b36c`) |
+| P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
+| P3-3 | real owner storage preparation per PR3-D6, including review of the §24.4 write items | owner action; **not authorized** |
+| P3-4 | PR-1B sequencing: the genesis pin is stored before the V2 genesis commit (RR-35, unchanged); owner record 1 is appended to both replicas after the commit; `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` = `FRESHNESS_PRECONDITION_MET` | not authorized |
+| P3-5 | an acceptance envelope, if a later decision replaces D2 for non-synthetic authority | not started |
 
 ## 23. Validation
 
@@ -598,13 +594,179 @@ P3-4 sequences PR-1B so that:
 - `python scripts/validate_repository.py`: pass.
 - Offline unit tests, run in WSL with the pinned wheels:
   - `test_b1b3e_pr3_owner_freshness.py`: 27 tests, OK;
-  - the full suites: `services/owner-memory-control` (516), `services/authority-dev` (240), and `services/recovery-witness` (44), all OK.
+  - `test_b1b3e_pr3_p32_owner_freshness_tool.py`: 19 tests, OK;
+  - full suites, all OK: `services/owner-memory-control` (535),
+    `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 
+## 24. P3-2: offline owner workstation tooling
+
+Source: `services/owner-memory-control/lilith_owner_memory/owner_freshness_tool.py`.
+
+This is a filesystem and CLI layer over the pure contract. It uses only the
+standard library (`argparse`, `json`, `os`, `re`, `stat`, `sys`, `pathlib`,
+`dataclasses`, `typing`) and the repository contracts. It has:
+
+- no network, process, Git, cloud, DEV, or cryptography-library dependency;
+- no key, and no signing;
+- no use of file mtimes or ctimes.
+
+### 24.1 Commands
+
 ```text
-PR-3 DESIGN / FOUNDATION ONLY    NO DEV CONTACT       NO CLOUD MUTATION
-NO OWNER KEY GENERATED           NO K-WIT             NO REGISTRY
-NO LEDGER                        NO WITNESS STATE     NO HOLD
-NO RECOVERY EPOCH                NO INITIAL_CUSTODY
-PR-1B NOT AUTHORIZED             FIRST MEMORY NOT AUTHORIZED
+python -m lilith_owner_memory.owner_freshness_tool <command> [options]
+```
+
+| Command | Effect | Writes |
+| --- | --- | --- |
+| `init-replica --replica DIR --replica-id ID --environment E --profile P` | creates an empty replica in a directory that must **not** exist | the new directory only |
+| `inspect-chain --trust T --chain C --environment E --profile P` | K-WIT-verifies an exported chain and prints authenticity and head facts, **never** freshness | nothing |
+| `verify-replica --replica DIR` | strictly reads one replica | nothing |
+| `compare-replicas --replica A --replica B` | reports identical, `REPLICAS_DIVERGENT` (`PREFIX` / `FORK`), or a load refusal | nothing |
+| `classify --replica A --replica B --trust T --chain C --environment E --profile P` | reports authenticity, freshness, and the gate status of every gated operation | nothing |
+| `propose-genesis --trust T --chain C --pin PIN --out F …` | produces a record-1 candidate. The chain must be the genesis only, and the pin must bind it | a **new** candidate file (O_EXCL) |
+| `propose-accept` / `propose-reject --replica A --replica B --trust T --chain C --pin PIN --out F …` | produces an `ACCEPT_CURRENT` candidate (only from `AHEAD_UNACCEPTED`) or a `REJECT_CANDIDATE` candidate (only from `AHEAD_UNACCEPTED` or `CONFLICTING`) | a **new** candidate file |
+| `append --replica TARGET --peer OTHER --candidate F --trust T --chain C --pin PIN --confirm-digest D …` | performs the owner ceremony write, into ONE replica | one record file in TARGET |
+
+**Inputs.**
+
+- **Trust inputs** (`LILITH_OWNER_FRESHNESS_TRUST_INPUTS`): the pinned K-WIT
+  anchor, the registry root, and the registries whose keys must never sign a
+  witness. Their environments must agree.
+- **Chain export:** a JSON array of V2 witness documents, genesis first.
+- **Pin:** an `OwnerGenesisPinV1`.
+
+**Exit codes:** `0` OK, `2` usage, `3` refused. `classify` exits 0 and
+reports the state.
+
+### 24.2 Replica layout (explicit identity, canonical names)
+
+```text
+<replica>/
+  REPLICA.json                      {"replicaType":"LILITH_OWNER_FRESHNESS_REPLICA","schemaVersion":1,
+                                     "replicaId":"<id>","environment":"<env>","authorityProfile":"<profile>"}  (JCS)
+  records/
+    000001-<recordDigest>.json      exact JCS record bytes
+    000002-<recordDigest>.json
+```
+
+**Replica identity.**
+
+- Each replica has a `replicaId` matching `[a-z0-9][a-z0-9._-]{0,63}`.
+- Two replicas must have distinct IDs, be distinct locations (`samefile`),
+  and share the environment and profile.
+- A copied directory is refused as `REPLICA_ID_DUPLICATED`. A replica
+  compared with itself is refused as `REPLICA_SAME_LOCATION`.
+
+**Strict read (`load_replica`).** Each of the following refuses the replica:
+
+- the root holds anything other than exactly `REPLICA.json` and `records/`,
+  including `.git` (`REPLICA_UNEXPECTED_ENTRY`);
+- a file that is a symlink or not a regular file;
+- a record name that does not match `NNNNNN-<64 hex>.json`;
+- a gap in the versions, which must run contiguously from 1
+  (`RECORD_VERSION_GAP`);
+- a duplicated version (`RECORD_VERSION_DUPLICATED`);
+- content that is not canonical or does not parse as a record;
+- a name that disagrees with the content's version or digest
+  (`RECORD_NAME_MISMATCH`);
+- records that do not match the manifest profile, or a chain that does not
+  verify.
+
+Order comes from content only. File order, mtimes, Git history, and commit
+times are never read. **Git metadata and timestamps have zero freshness
+authority.**
+
+**Candidate file** (`LILITH_OWNER_FRESHNESS_CANDIDATE`). It carries
+`"accepted": false`, the decision, the record digest, and the record. A
+candidate is not a record:
+
+- dropped into `records/`, it is an unexpected entry;
+- a candidate claiming `accepted: true` is malformed.
+
+### 24.3 `append`: the only record writer
+
+1. **Owner confirmation.** `--confirm-digest` must exactly equal the
+   candidate's record digest, or the write refuses with
+   `OWNER_CONFIRMATION_REQUIRED` / `OWNER_CONFIRMATION_MISMATCH`. This guards
+   against mistakes. It is not a defense against a hostile process running
+   as the owner; D6 custody is.
+2. **Replica state.** Target and peer both load cleanly and are distinct.
+   One of two states must hold:
+   - they are identical: the first half of the ceremony (`PEER_PENDING`);
+   - the peer equals the target plus exactly this record: the second half
+     (`REPLICAS_IDENTICAL`).
+
+   Anything else is `REPLICAS_NOT_APPENDABLE`. **The tool never copies
+   between replicas;** each replica is written by its own owner invocation.
+3. **Re-derivation.** The candidate is re-derived from the target
+   replica's register, the K-WIT-verified chain, and the genesis pin (D12).
+   It must be byte-identical, or the write refuses with
+   `CANDIDATE_NOT_ACCEPTABLE`. Consequences:
+   - a STALE, CONFLICTING, NOT_AUTHENTIC, rejected-lineage, malformed,
+     version-skipping, or hand-edited candidate can never be written;
+   - `AHEAD_UNACCEPTED` is accepted only through this explicit owner step.
+4. **Atomic, create-only write.**
+   - `records/.pending-NNNNNN-<digest>.tmp` is opened with
+     `O_CREAT | O_EXCL` (plus `O_NOFOLLOW` where available), fully written,
+     and **fsynced**.
+   - It is hard-linked to `NNNNNN-<digest>.json`. The link fails if the
+     name exists, so there is **no overwrite**. Any existing file with the
+     same version refuses first (`RECORD_EXISTS`).
+   - The pending name is unlinked, and the `records/` directory is fsynced.
+5. **Post-write check.** The target is reloaded and must equal the prior
+   state plus exactly this record.
+
+**Degraded states.**
+
+- Between the two halves of a ceremony the replicas differ, so `classify`
+  reports `FRESHNESS_UNKNOWN`. This is intended, and it ends when the owner
+  appends the same candidate to the peer.
+- A missing, empty, or single replica is also `FRESHNESS_UNKNOWN`, with
+  every gated operation blocked.
+
+### 24.4 Items for P3-3 review (not decided here)
+
+| Item | Current behavior | To review at P3-3 |
+| --- | --- | --- |
+| directory fsync | `PERFORMED` on POSIX. On Windows it is reported as `UNSUPPORTED_PLATFORM`, because NTFS offers no directory fsync through Python | whether owner replicas live on a POSIX filesystem, or a Windows-specific flush (`FlushFileBuffers` on a directory handle) is required |
+| hard-link no-overwrite | needs a filesystem with hard links (ext4, NTFS, APFS). FAT/exFAT removable media refuse with `IO_ERROR` | choose a removable-media filesystem that supports links, or specify an `O_EXCL`-only publication |
+| crash residue | a leftover `.pending-*` makes every read refuse (`REPLICA_PENDING_WRITE`). It is never auto-deleted | the owner's manual inspection procedure |
+| password-manager / vault replica | not a filesystem, so the tool cannot write it | an export/import procedure that keeps the exact record bytes and names |
+| replica placement | code enforces only identity and location checks | physical independence: no shared sync or backup path (D6) |
+| GitHub mirror | never read or written by the tool | whether to keep a mirror at all, as a one-way export |
+
+### 24.5 Tests
+
+`test_b1b3e_pr3_p32_owner_freshness_tool.py` has 19 tests. They cover:
+
+- the full two-replica genesis ceremony and its layout;
+- explicit owner confirmation;
+- candidate ≠ acceptance, including a dropped-in candidate, a forged
+  candidate, and no overwriting of a candidate file;
+- record 1 binding the genesis pin, at both propose and append;
+- an accepted record that cannot be overwritten;
+- a skipped `recordVersion`;
+- a duplicate version with a different digest;
+- divergent replicas (`PREFIX` and `FORK`);
+- a missing or single replica → `FRESHNESS_UNKNOWN`;
+- stale DEV never accepted as current;
+- ahead DEV never accepted automatically (the D11 gate);
+- rejected lineage, including descendants, staying rejected;
+- Git metadata and timestamps having zero freshness authority;
+- refusal of a hand-edited candidate;
+- the authorization register and the pin never substituting for the
+  freshness register;
+- replica identity and layout rules;
+- a pending write that refuses without repair;
+- `inspect-chain` reporting authenticity only;
+- no network, process, or key dependency.
+
+```text
+PR-3 DESIGN / FOUNDATION + P3-2 OFFLINE TOOLING ONLY
+NO DEV CONTACT          NO CLOUD CONTACT        NO REAL OWNER REGISTER CREATED
+NO OWNER KEY GENERATED  NO K-WIT                NO REGISTRY
+NO LEDGER               NO WITNESS STATE        NO HOLD
+NO RECOVERY EPOCH       NO INITIAL_CUSTODY
+P3-3 NOT AUTHORIZED     PR-1B NOT AUTHORIZED    FIRST MEMORY NOT AUTHORIZED
 ```
