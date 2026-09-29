@@ -382,7 +382,8 @@ class GateAndProposalTests(unittest.TestCase):
         self.assertEqual(OF.freshness_gate(current, "ISSUE_EVIDENCE").reason, "UNKNOWN_OPERATION")
         self.assertEqual(OF.freshness_gate(None, OF.FIRST_MEMORY).reason, "MALFORMED_INPUT")
         self.assertEqual(OF.GATED_OPERATIONS, {"REGISTRY_HEAD_ADVANCE", "RECOVERY_EPOCH_ADVANCE",
-                                               "SUCCESSOR_READINESS", "INITIAL_CUSTODY_RELEASE", "FIRST_MEMORY"})
+                                               "SUCCESSOR_READINESS", "INITIAL_CUSTODY_RELEASE",
+                                               "AUTHORITY_CHANGING_ISSUANCE", "FIRST_MEMORY"})
 
     def test_owner_cannot_be_led_to_accept_a_stale_or_conflicting_world(self):
         s = F.Scenario()

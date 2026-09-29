@@ -487,8 +487,9 @@ RECOVERY_EPOCH_ADVANCE = "RECOVERY_EPOCH_ADVANCE"
 SUCCESSOR_READINESS = "SUCCESSOR_READINESS"
 INITIAL_CUSTODY_RELEASE = "INITIAL_CUSTODY_RELEASE"
 FIRST_MEMORY = "FIRST_MEMORY"
+AUTHORITY_CHANGING_ISSUANCE = "AUTHORITY_CHANGING_ISSUANCE"   # PR3-D11
 GATED_OPERATIONS = frozenset({REGISTRY_HEAD_ADVANCE, RECOVERY_EPOCH_ADVANCE, SUCCESSOR_READINESS,
-                              INITIAL_CUSTODY_RELEASE, FIRST_MEMORY})
+                              INITIAL_CUSTODY_RELEASE, AUTHORITY_CHANGING_ISSUANCE, FIRST_MEMORY})
 
 FRESHNESS_PRECONDITION_MET = "FRESHNESS_PRECONDITION_MET"
 FRESHNESS_BLOCKED = "FRESHNESS_BLOCKED"
@@ -509,7 +510,7 @@ def freshness_gate(result: Any, operation: Any) -> FreshnessGateResultV1:
     """Owner-side precondition only: the presented world must be AUTHENTIC and
     exactly CURRENT. Meeting it authorizes nothing (K-ROOT, the witness, the
     hold store, and owner acceptance still decide). Every other state,
-    including `AHEAD_LEDGER_ONLY`, blocks every gated operation."""
+    including `AHEAD_LEDGER_ONLY`, blocks every gated operation (PR3-D11)."""
     if operation not in GATED_OPERATIONS:
         return FreshnessGateResultV1(FRESHNESS_BLOCKED, None, "UNKNOWN_OPERATION")
     if not isinstance(result, FreshnessResultV1):

@@ -1,6 +1,6 @@
 # Slice 15B2b-B1b-3e PR-3: Owner / Off-Host Freshness Foundation
 
-**Status: PR-3 DESIGN + SOURCE FOUNDATION + P3-2 OFFLINE TOOLING + P3-3 STORAGE (`P3_3_STORAGE_INCOMPLETE`).**
+**Status: PR-3 DESIGN + SOURCE FOUNDATION + P3-2 OFFLINE TOOLING + P3-3 STORAGE (`P3_3_STORAGE_INCOMPLETE`) + P3-4 SYNTHETIC REHEARSAL (PASSED; does not close P3-3).**
 - The pure, offline contract and the offline owner-workstation tooling are
   implemented and test proven.
 - Owner decisions PR3-D1..PR3-D12 are **ACCEPTED** (§19).
@@ -17,7 +17,7 @@
 | Accepted pre-state | PR-1A ACCEPTED (`P1A-9`, AUTHORITY_BOUNDARY PASS `L1c.3`); PR-2 ACCEPTED ([record](slice-15b2b-b1b3e-pr2-acceptance.md)) |
 | Starting main | `f3a8add08d1aa114615fc5397ba3c919e35931bf` |
 | Source | `services/owner-memory-control/lilith_owner_memory/owner_freshness.py` (pure, offline); `…/owner_freshness_tool.py` (P3-2 offline workstation tooling, §24) |
-| Tests | `…/tests/test_b1b3e_pr3_owner_freshness.py` (27) and `…/tests/test_b1b3e_pr3_p32_owner_freshness_tool.py` (19), over real K-WIT-signed TEST chains |
+| Tests | `…/tests/test_b1b3e_pr3_owner_freshness.py` (27), `…_p32_owner_freshness_tool.py` (19), `…_p33_storage_gate.py` (16), and `…_p34_ceremony_rehearsal.py` (10), over real K-WIT-signed TEST chains |
 
 PR-2 found that DEV holds every authority and custody object in one
 rollback domain:
@@ -461,7 +461,7 @@ result is `FRESHNESS_UNKNOWN`. There is **no fallback** to "DEV is
 internally consistent, therefore current".
 
 `freshness_gate(result, operation)` meets its precondition **only** for
-`AUTHENTIC` + `CURRENT`. Every other state blocks all five gated
+`AUTHENTIC` + `CURRENT`. Every other state blocks all six gated
 operations. That includes `AHEAD_LEDGER_ONLY`, so the owner must checkpoint
 before any gated step.
 
@@ -471,6 +471,7 @@ before any gated step.
 | `RECOVERY_EPOCH_ADVANCE` | blocked |
 | `SUCCESSOR_READINESS` | blocked |
 | `INITIAL_CUSTODY_RELEASE` | blocked |
+| `AUTHORITY_CHANGING_ISSUANCE` (PR3-D11; added in P3-4) | blocked |
 | `FIRST_MEMORY` | blocked |
 
 DEV itself changes nothing; the gate is an owner-side precondition.
@@ -587,8 +588,9 @@ acceptance semantics**, plus offline tooling to apply them.
 | P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done** (`368b36c`) |
 | P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
 | P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_STORAGE_INCOMPLETE`**: Replica A empty; Replica B is waiting for an independent medium (§25) |
-| P3-4 | PR-1B sequencing: the genesis pin is stored before the V2 genesis commit (RR-35, unchanged); owner record 1 is appended to both replicas after the commit; `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` = `FRESHNESS_PRECONDITION_MET` | not authorized |
-| P3-5 | an acceptance envelope, if a later decision replaces D2 for non-synthetic authority | not started |
+| P3-4 | synthetic owner freshness ceremony rehearsal (§26) and runbook template | **PASSED**; does not close P3-3 |
+| P3-5 | PR-1B sequencing: the genesis pin is stored before the V2 genesis commit (RR-35, unchanged); owner record 1 is appended to both replicas after the commit; `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` = `FRESHNESS_PRECONDITION_MET` | not authorized |
+| P3-6 | an acceptance envelope, if a later decision replaces D2 for non-synthetic authority | not started |
 
 ## 23. Validation
 
@@ -598,7 +600,8 @@ acceptance semantics**, plus offline tooling to apply them.
   - `test_b1b3e_pr3_owner_freshness.py`: 27 tests, OK;
   - `test_b1b3e_pr3_p32_owner_freshness_tool.py`: 19 tests, OK;
   - `test_b1b3e_pr3_p33_storage_gate.py`: 16 tests, OK;
-  - full suites, all OK: `services/owner-memory-control` (551),
+  - `test_b1b3e_pr3_p34_ceremony_rehearsal.py`: 10 tests, OK;
+  - full suites, all OK: `services/owner-memory-control` (561),
     `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 
@@ -967,12 +970,90 @@ on GitHub.
 - Replica A's `records/` is empty.
 - The accepted record count is **0**, and there is no record 1.
 
+## 26. P3-4: synthetic owner freshness ceremony rehearsal
+
+**Result: P3-4 PASSED.** This result does NOT close P3-3. **P3-3 remains
+`P3_3_STORAGE_INCOMPLETE`** and is blocked on independent storage. Real
+Replica A remains empty and non-authoritative, and every real
+classification remains `FRESHNESS_UNKNOWN`.
+
 ```text
-P3-3 OWNER STORAGE FOUNDATION ONLY — P3_3_STORAGE_INCOMPLETE
-TWO INDEPENDENT OWNER REPLICA PATHS REQUIRED (ONE EXISTS)
-NO REAL FRESHNESS RECORD    NO RECORD 1       NO OWNER KEY
-NO DEV CONTACT              NO CLOUD CONTACT  NO K-WIT
-NO REGISTRY                 NO LEDGER         NO WITNESS STATE
-NO HOLD                     NO RECOVERY EPOCH NO INITIAL_CUSTODY
-PR-1B NOT AUTHORIZED        FIRST MEMORY NOT AUTHORIZED
+synthetic ceremony success != real owner freshness established
+```
+
+### 26.1 How it was run
+
+The tests are in `test_b1b3e_pr3_p34_ceremony_rehearsal.py` (10 tests).
+They drive the P3-2 CLI (`T.run`) through the runbook's ten steps, over two
+**temporary** replica directories created per test with distinct IDs.
+
+The authority worlds are real K-WIT-signed TEST chains from the B1b-3e
+synthetic scenario, under the `TEST_ONLY` profile. The synthetic witness
+writer admits only `test`; a `DEV_SYNTHETIC` rehearsal would need
+DEV-environment chains, which exist nowhere.
+
+The real Replica A is never read or written. The runbook is at
+[slice-15b2b-b1b3e-pr3-owner-ceremony-runbook.md](slice-15b2b-b1b3e-pr3-owner-ceremony-runbook.md).
+
+### 26.2 Rehearsal results
+
+| Case | Result |
+| --- | --- |
+| Genesis | Before any record: `FRESHNESS_UNKNOWN`. A proposal leaves both replicas empty (proposal ≠ acceptance). Record 1 equals the synthetic pin. After the first `--confirm-digest` append: `FRESHNESS_UNKNOWN` (`REPLICAS_DIVERGENT … PREFIX`), with every gate blocked. After the second: the replicas are byte-identical and `compare-replicas` returns `OWNER_REGISTER_VERIFIED`. The matching world is `AUTHENTIC` + `CURRENT`, with every gate met |
+| Successor acceptance | Before: `AHEAD_UNACCEPTED` / `AHEAD_AUTHORITY_CHANGING`, every gate `BLOCKED`. After replica A only: `FRESHNESS_UNKNOWN`. After replica B: `CURRENT`. `recordVersion` runs 1 → 2; `previousRecordDigest` is null for record 1 and record 1's digest for record 2 |
+| Stale DEV | The older world, presented after the newer acceptance: `AUTHENTIC` + `STALE` / `EARLIER_ACCEPTED_STATE` (`DEV_STATE_STALE`). All gates are blocked. The replicas are unchanged, and there is no repair |
+| Conflict | Competing successors from one accepted head. Branch B is longer and later-stamped; both are `AHEAD_UNACCEPTED` until the owner decides, so there is no automatic witness preference. After the owner accepts A, B is `CONFLICTING` / `FORKED_FROM_ACCEPTED_HISTORY`: no longest-chain rule. Proposing B is refused: no last-write-wins. Injected owner-copy divergence gives `REPLICAS_DIVERGENT … FORK` → `FRESHNESS_UNKNOWN`, even when mtimes favor the diverging copy: no timestamp rule. A `.git` entry in a replica gives `REPLICA_UNEXPECTED_ENTRY`: no Git rule |
+| Rejection | The chained record 2 is `REJECT_CANDIDATE`, with `previousRecordDigest` = record 1. The chain export is byte-unchanged (DEV not mutated). The rejected head and a later descendant are `CONFLICTING` / `OWNER_REJECTED_LINEAGE`, and the descendant can never be proposed for acceptance. Every gate stays blocked, the previously accepted world stays `CURRENT`, and the rejection record is not an authorization-register input (rejection ≠ recovery authorization) |
+| Register loss | Replica A missing: `FRESHNESS_UNKNOWN` (`REPLICA_MISSING`). Replica B missing: the same. One copy behind: `FRESHNESS_UNKNOWN` (`REPLICAS_DIVERGENT:replica1:PREFIX`). Both missing: `FRESHNESS_UNKNOWN`. Every gate is blocked in all four cases |
+| Joint rollback (**limitation**) | With both copies restored to the same old history, the register verifies and the **old world classifies falsely `CURRENT`**, while the true latest world classifies `AHEAD_UNACCEPTED`. Only an independently newer copy, or the owner's own memory, reveals this. This is preserved as an explicit limitation (§17, runbook) |
+| Recovery detection | The owner accepts world N−1 and then N; DEV presents N−1. The result is `AUTHENTIC` + `STALE` (`DEV_STATE_STALE`), with every gate blocked. The tool has no recover, repair, or rollback command, and detection writes nothing |
+
+```text
+detect != authorize recovery;  authorize != execute;  execute != accept recovered state
+```
+
+### 26.3 Gate matrix
+
+`freshness_gate` over the six gated operations. `AUTHORITY_CHANGING_ISSUANCE`
+was added in P3-4, which makes D11 explicit.
+
+| Presented state | Registry-head advance | RecoveryEpoch advance | Successor-key readiness | INITIAL_CUSTODY release | Authority-changing issuance | First Memory |
+| --- | --- | --- | --- | --- | --- | --- |
+| `AUTHENTIC` + `CURRENT` | MET | MET | MET | MET | MET | MET |
+| `STALE` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+| `AHEAD_UNACCEPTED` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+| `CONFLICTING` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+| `FRESHNESS_UNKNOWN` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+| `NOT_AUTHENTIC` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+| `REFUSED` | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED | BLOCKED |
+
+Only `AUTHENTIC` + `CURRENT` meets the freshness precondition, and meeting
+it authorizes nothing. A hand-built `NOT_AUTHENTIC` + `CURRENT` result is
+also blocked.
+
+### 26.4 Real-state guard
+
+`RealStateGuard` models the real P3-3 state in temporary directories: one
+empty Replica A, and no Replica B. It asserts that this state yields
+`FRESHNESS_UNKNOWN`, with every gate blocked, whether one or two `--replica`
+paths are given. It further asserts:
+
+- that holds even after a synthetic record 1 exists in the single replica;
+- `append` refuses a replica as its own peer;
+- `MINIMUM_REPLICAS` = 2.
+
+It also asserts that this record keeps `P3_3_STORAGE_INCOMPLETE` and
+`FRESHNESS_UNKNOWN`, and that the runbook contains no private path or
+device identifiers.
+
+**This guard must stay until real P3-3 completion.** A read-only
+`verify-replica` of the real Replica A, taken after P3-4, reports 0
+records.
+
+```text
+P3-4 SYNTHETIC REHEARSAL ONLY — P3-4 PASSED; P3-3 REMAINS P3_3_STORAGE_INCOMPLETE
+REAL REPLICA A REMAINS EMPTY      NO REAL RECORD 1      FRESHNESS_UNKNOWN REMAINS REQUIRED
+NO OWNER KEY    NO DEV CONTACT    NO CLOUD CONTACT      NO K-WIT     NO REGISTRY
+NO LEDGER       NO WITNESS STATE  NO HOLD               NO RECOVERY EPOCH
+NO INITIAL_CUSTODY                PR-1B NOT AUTHORIZED  FIRST MEMORY NOT AUTHORIZED
 ```
