@@ -331,6 +331,47 @@ class Pr1aContinuationTests(unittest.TestCase):
             for unit in I.WITNESS_UNITS:
                 self.assertIn(unit, report["observed"])
 
+    def test_p1a9_status_after_boot_creates_the_tmpfiles_runtime_directories(self):
+        """Pre-PR-1B reboot ceremony, OR-6: the installed tmpfiles files create
+        /run/lilith-authority-dev and /run/lilith-recovery-witness at boot. That
+        keeps `status --expect P1A-9` passing only at their exact tmpfiles spec.
+        runtime directory existence != witness state != authority readiness."""
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as out, fake_wheels() as wheels, \
+                accepted_current():
+            host, system = old_host(directory)
+            archive, attestation, _ = build_archive(Path(out), wheels)
+            full_upgrade(host, system, I.parse_baseline(baseline_file(out, system), OLD), archive, attestation)
+            I.stage_custody(system, NEW)
+            I.stage_witness_account(system, NEW)
+            I.stage_witness_units(system, NEW)
+            host.daemon_reload()
+            self.assertEqual(I.stage_skeleton(system, NEW)["result"], "PASS")
+            self.assertEqual(I.status(system, "P1A-9", NEW)["result"], "PASS")  # PRE-reboot shape: both absent
+            run = host.root / "run"
+            authority = run / I.AUTHORITY_RUNTIME.rsplit("/", 1)[1]
+            authority.mkdir(parents=True)
+            os.chmod(authority, 0o700)  # d /run/lilith-authority-dev 0700 root root -
+            report = I.status(system, "P1A-9", NEW)
+            self.assertEqual(report["result"], "PASS", report["failures"])
+            os.chmod(authority, 0o755)
+            self.assertIn("CONTRACT:" + I.AUTHORITY_RUNTIME, I.status(system, "P1A-9", NEW)["failures"])
+            os.chmod(authority, 0o700)
+            witness = run / I.WITNESS_RUNTIME.rsplit("/", 1)[1]
+            witness.mkdir()
+            os.chmod(witness, 0o710)
+            signer_gid = host.users[I.SERVICE_USER].pw_gid
+            # d /run/lilith-recovery-witness 0710 root lilith-authority-dev -: the group is the signer's.
+            self.assertIn("CONTRACT:" + I.WITNESS_RUNTIME, I.status(system, "P1A-9", NEW)["failures"])
+            if os.geteuid() == 0:
+                os.chown(witness, -1, signer_gid)
+                report = I.status(system, "P1A-9", NEW)
+                self.assertEqual(report["result"], "PASS", report["failures"])
+            # A runtime *credential* directory is authority runtime state, never a boot effect at P1A-9.
+            credentials = run / "credentials" / I.AUTHORITY_CREDENTIALS_RUNTIME.rsplit("/", 1)[1]
+            credentials.mkdir(parents=True)
+            self.assertIn("UNEXPECTED_PRESENT:" + I.AUTHORITY_CREDENTIALS_RUNTIME,
+                          I.status(system, "P1A-9", NEW)["failures"])
+
     def test_witness_account_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             host = FakeHost(directory)

@@ -271,10 +271,11 @@ class LegacyBaselineUnchangedTests(unittest.TestCase):
     def test_baseline_failure_order_is_unchanged(self) -> None:
         self.assertEqual(gate.evaluate({})["failures"], LEGACY_EMPTY_FAILURE_ORDER)
 
-    def test_only_two_fixed_operations_and_no_bypass(self) -> None:
-        self.assertEqual(set(gate.OPERATIONS), {"baseline", "preservation"})
+    def test_only_three_fixed_operations_and_no_bypass(self) -> None:
+        self.assertEqual(set(gate.OPERATIONS), {"baseline", "preservation", "rebaseline"})
         for argv in ([], ["baseline", "--ignore-failure"], ["preservation", "--allow-path", "/opt"],
-                     ["preservation", "--force"], ["--ignore-failure"], ["bypass"], ["PRESERVATION"]):
+                     ["preservation", "--force"], ["--ignore-failure"], ["bypass"], ["PRESERVATION"],
+                     ["rebaseline", "--boot-id", BOOT_ID], ["rebaseline", "--accept"], ["REBASELINE"]):
             with self.assertRaises(gate.BaselineError):
                 gate.main(argv)
         tree = ast.parse(SOURCE)
@@ -401,6 +402,141 @@ class PreservationTests(unittest.TestCase):
         # The fixture is not the live host, so the real pin rejects it: no silent acceptance.
         self.assertIn("BASELINE_CANDIDATE_CHANGED",
                       gate.evaluate_preservation(with_l1b1_custody(observation()))["failures"])
+
+
+NEW_BOOT_ID = "5b0e7c1a-9d2f-4e61-8a3b-0c4d5e6f7a8b"
+NEW_INVOCATION = "0123456789abcdef0123456789abcdef"
+
+
+def rebooted(obs: dict) -> dict:
+    """The same healthy broker after one reboot and the owner's separate start:
+    new boot, process, invocation, and freshly mapped libraries; the Stage III
+    controller no longer holds its failed result."""
+    obs["host"]["bootId"] = NEW_BOOT_ID
+    obs["units"][gate.SERVICE].update(InvocationID=NEW_INVOCATION, MainPID="1234",
+                                      ExecMainStartTimestamp="Wed 2026-09-30 01:02:03 UTC")
+    obs["units"][gate.CONTROLLER] = dict(gate.CONTROLLER_POST_REBOOT_EXPECTED)
+    obs["process"].update(pid=1234, startTicks=4321, startTime="2026-09-30T01:02:03Z")
+    obs["brokerProcesses"] = [1234]
+    obs["libraries"][EXPAT].update(inode=3003, diskInode=3003, sha256="d" * 64)
+    return obs
+
+
+def rebase(obs: dict) -> dict:
+    """Evaluate `rebaseline` against the fixture's own accepted pins."""
+    accepted = gate.evaluate(observation())["baselineCandidateSha256"]
+    return gate.evaluate_rebaseline(obs, superseded_incarnation=CURRENT_INVOCATION, superseded_boot_id=BOOT_ID,
+                                    superseded_candidate_sha256=accepted)
+
+
+class RebaselineTests(unittest.TestCase):
+    """Pre-PR-1B reboot ceremony: a fresh candidate after one reboot."""
+
+    def test_post_reboot_broker_with_p1a9_custody_passes_as_a_new_candidate(self) -> None:
+        result = rebase(rebooted(with_l1b1_custody(observation())))
+        self.assertEqual(result["BROKER_REBASELINE"], "PASS", result["failures"])
+        self.assertEqual(result["operation"], "READ_ONLY_POST_REBOOT_REBASELINE")
+        self.assertEqual((result["runtimeIncarnation"], result["bootId"]), (NEW_INVOCATION, NEW_BOOT_ID))
+        self.assertEqual(result["baselineCandidateSha256"], gate.canonical_sha256(result["baselineCandidate"]))
+        self.assertEqual(result["baselineCandidate"]["pid"], 1234)
+        self.assertEqual(result["baselineCandidate"]["startTicks"], 4321)
+        self.assertIs(result["continuityWithAcceptedBaseline"], False)
+        self.assertEqual(result["ownerAcceptance"], "PENDING_SEPARATE_EXPLICIT_OWNER_DECISION")
+        self.assertEqual(result["authorityCustodyJudgment"], "NOT_PERFORMED")
+        self.assertEqual(result["authorityMaturity"], "NOT_ESTABLISHED_BY_REBASELINE")
+        self.assertNotIn("STAGE_II_ACCEPTED", json.dumps(result))
+        for key in ("releaseEquivalent", "configEquivalent", "stateEquivalent", "identityBoundaryEquivalent",
+                    "socketBoundaryEquivalent", "stageIIIUntouched", "deployerPolicyTextEquivalent",
+                    "incarnationHealthy"):
+            self.assertIs(result[key], True, key)
+
+    def test_the_same_post_reboot_host_fails_the_other_two_operations(self) -> None:
+        obs = rebooted(with_l1b1_custody(observation()))
+        self.assertIn("RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE", preserve(obs)["failures"])
+        self.assertIn("STAGE3_CONTROLLER_CHANGED", preserve(obs)["failures"])
+        self.assertIn("CUSTODY_PATH_PRESENT_BEFORE_B1B3D", gate.evaluate(obs)["failures"])
+
+    def test_pre_reboot_host_is_not_a_rebaseline(self) -> None:
+        result = rebase(with_l1b1_custody(observation()))
+        self.assertEqual(result["BROKER_REBASELINE"], "FAIL")
+        for code in ("REBOOT_NOT_OBSERVED", "RUNTIME_INCARNATION_NOT_REPLACED", "BASELINE_CANDIDATE_NOT_REPLACED",
+                     "STAGE3_CONTROLLER_CHANGED"):
+            self.assertIn(code, result["failures"])
+        self.assertIsNone(result["baselineCandidateSha256"])  # no digest to accept from a failing run
+
+    def test_a_restart_without_a_reboot_is_not_a_rebaseline(self) -> None:
+        obs = rebooted(with_l1b1_custody(observation()))
+        obs["host"]["bootId"] = BOOT_ID
+        self.assertEqual(rebase(obs)["failures"], ["REBOOT_NOT_OBSERVED"])
+
+    def test_controller_must_be_loaded_and_never_started_in_the_new_boot(self) -> None:
+        cases = {
+            "still failed": dict(gate.CONTROLLER_EXPECTED, LoadState="loaded", InvocationID=""),
+            "ran this boot": dict(gate.CONTROLLER_POST_REBOOT_EXPECTED, InvocationID="e" * 32),
+            "active": dict(gate.CONTROLLER_POST_REBOOT_EXPECTED, ActiveState="active", SubState="running"),
+            "unit file gone": dict(gate.CONTROLLER_POST_REBOOT_EXPECTED, LoadState="not-found"),
+            "restarting": dict(gate.CONTROLLER_POST_REBOOT_EXPECTED, Restart="on-failure"),
+            "unobserved": {},
+        }
+        for name, state in cases.items():
+            with self.subTest(name):
+                obs = rebooted(with_l1b1_custody(observation()))
+                obs["units"][gate.CONTROLLER] = state
+                result = rebase(obs)
+                self.assertEqual(result["failures"], ["STAGE3_CONTROLLER_CHANGED"])
+                self.assertIsNone(result["baselineCandidateSha256"])
+
+    def test_every_broker_drift_class_still_fails_after_reboot(self) -> None:
+        cases = {
+            "RELEASE_MANIFEST_CHANGED": lambda o: o["release"].update(manifestSha256="0" * 64),
+            "UNIT_FILE_CHANGED": lambda o: o["files"][next(iter(gate.UNIT_FILES))].update(sha256="0" * 64),
+            "BROKER_STATE_CHANGED": lambda o: o["files"][next(iter(gate.STATE_FILES))].update(sha256="0" * 64),
+            "BROKER_SANDBOX_CHANGED": lambda o: o["units"][gate.SERVICE].update(ProtectSystem="no"),
+            "SOCKET_UNIT_CHANGED": lambda o: o["units"][gate.SOCKET].update(UnitFileState="enabled"),
+            "RUNTIME_DIRECTORY_CHANGED": lambda o: o["runtimeDirectory"].update(mode=0o755),
+            "OWNER_SOCKET_CHANGED": lambda o: o["ownerSocket"].update(listening=False),
+            "STAGE3_ARM_GUARD_OR_CONSUMPTION_PRESENT": lambda o: o["stage3"]["absent"].update(
+                {gate.STAGE3_ABSENT[1]: False}),
+            "DEPLOYER_POLICY_CHANGED": lambda o: o["deployer"]["sudoers"].update(exactText=False),
+            "RUNTIME_SUBSTRATE_STALE_OR_UNREADABLE": lambda o: o["libraries"][EXPAT].update(deleted=True),
+            "BROKER_SERVICE_STATE_UNEXPECTED": lambda o: o["units"][gate.SERVICE].update(ActiveState="inactive"),
+            "BROKER_PROCESS_AMBIGUOUS": lambda o: o.update(brokerProcesses=[1234, 1235]),
+            "HOST_MISMATCH": lambda o: o["host"].update(machineId="0" * 32),
+        }
+        for code, mutate in cases.items():
+            with self.subTest(code=code):
+                obs = rebooted(with_l1b1_custody(observation()))
+                mutate(obs)
+                result = rebase(obs)
+                self.assertEqual(result["BROKER_REBASELINE"], "FAIL")
+                self.assertIn(code, result["failures"])
+
+    def test_broker_left_down_after_reboot_fails_closed(self) -> None:
+        obs = rebooted(with_l1b1_custody(observation()))
+        obs["units"][gate.SERVICE].update(ActiveState="inactive", SubState="dead", MainPID="0", InvocationID="")
+        obs["units"][gate.SOCKET].update(ActiveState="inactive")
+        obs.update(process={}, libraries={}, brokerProcesses=[], ownerSocket={"present": False})
+        result = rebase(obs)
+        self.assertEqual(result["BROKER_REBASELINE"], "FAIL")
+        for code in ("SOCKET_UNIT_CHANGED", "OWNER_SOCKET_CHANGED", "BROKER_SERVICE_STATE_UNEXPECTED",
+                     "INVOCATION_ID_INVALID", "BROKER_PROCESS_AMBIGUOUS", "RUNTIME_SUBSTRATE_STALE_OR_UNREADABLE"):
+            self.assertIn(code, result["failures"])
+
+    def test_real_supersession_pins_are_the_accepted_baseline(self) -> None:
+        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, BOOT_ID)
+        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, gate.ACCEPTED_BROKER_BOOT_ID)
+        result = gate.evaluate_rebaseline(rebooted(with_l1b1_custody(observation())))
+        self.assertEqual(result["supersedes"], {"runtimeIncarnation": gate.ACCEPTED_CURRENT_INCARNATION,
+                                                "bootId": gate.ACCEPTED_CURRENT_BOOT_ID,
+                                                "baselineCandidateSha256": gate.ACCEPTED_CURRENT_BASELINE_SHA256})
+        self.assertEqual(result["BROKER_REBASELINE"], "PASS", result["failures"])
+        # `rebaseline` never re-pins: preservation still names the old accepted incarnation.
+        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, CURRENT_INVOCATION)
+
+    def test_controller_collection_reads_both_contracts(self) -> None:
+        for key in (*gate.CONTROLLER_EXPECTED, *gate.CONTROLLER_POST_REBOOT_EXPECTED):
+            self.assertIn(key, gate.CONTROLLER_PROPERTIES)
+        self.assertEqual(len(gate.CONTROLLER_PROPERTIES), len(set(gate.CONTROLLER_PROPERTIES)))
 
 
 class ParserTests(unittest.TestCase):

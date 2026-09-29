@@ -98,6 +98,9 @@ jobs:
       - name: Validate read-only DR-1 current-incarnation baseline contract
         run: python -m unittest scripts/test_verify_broker_dev_current_incarnation.py
 
+      - name: Validate offline pre-PR-1B reboot observation comparison
+        run: python -m unittest scripts/test_compare_reboot_host_observations.py
+
       - name: Validate needrestart authority-sensitive restart exclusion artifact
         run: python -m unittest scripts/test_needrestart_lilith_override.py
 
