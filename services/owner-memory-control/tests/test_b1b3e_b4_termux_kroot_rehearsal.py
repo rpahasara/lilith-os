@@ -8,11 +8,13 @@ the Termux gate bypassed only through the pure `rehearse(base)` function.
 from __future__ import annotations
 
 import ast
+import difflib
 import hashlib
 import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -325,6 +327,257 @@ class OperatorBlockTests(unittest.TestCase):
         out = run(nested + unrelated)                                      # the old nested layout alone stops
         self.assertIn("STOP: Replica B missing", out)
         self.assertTrue(out.endswith("PARENT_NOT_OK\n"), out)
+
+
+RUN2_DOC = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-run2.md"
+REVIEWED_OPERATOR_SHA256 = "353c988f67cd855372c7037f0b55d8655af63d52bb4ac26a44f1d43a7c98d6a7"
+REPLICA_B_MANIFEST = (b'{"authorityProfile":"DEV_SYNTHETIC","environment":"dev","replicaId":"owner-offline-dev-synthetic-01",'
+                      b'"replicaType":"LILITH_OWNER_FRESHNESS_REPLICA","schemaVersion":1}')
+
+
+def _doc_block(doc: Path, fence: str, first: str) -> str:
+    blocks = [part.split("\n```", 1)[0] + "\n" for part in doc.read_text(encoding="utf-8").split(f"```{fence}\n")[1:]]
+    found = [block for block in blocks if block.startswith(first)]
+    assert len(found) == 1, (doc, fence, first)
+    return found[0]
+
+
+def _run2_block() -> str:
+    return _doc_block(RUN2_DOC, "bash", "# ===== B-4 FRESH")
+
+
+class RunTwoTests(unittest.TestCase):
+    """Pins run 2 to the reviewed 353c988f block: every difference is the recorded diff, and nothing else."""
+
+    def test_reviewed_block_is_unchanged(self):
+        self.assertEqual(hashlib.sha256(_bash_block(STAGING_DOC).encode()).hexdigest(), REVIEWED_OPERATOR_SHA256)
+        self.assertEqual(hashlib.sha256(REPLICA_B_MANIFEST).hexdigest(),
+                         "c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4")
+
+    def test_every_difference_from_the_reviewed_block_is_the_recorded_diff(self):
+        reviewed, run2 = _bash_block(STAGING_DOC), _run2_block()
+        diff = "".join(difflib.unified_diff(reviewed.splitlines(keepends=True), run2.splitlines(keepends=True),
+                                            fromfile="353c988f", tofile="run2", n=0))
+        self.assertEqual(diff, _doc_block(RUN2_DOC, "diff", "--- 353c988f"))
+
+    def test_recorded_run2_digest_matches_the_block(self):
+        text = RUN2_DOC.read_text(encoding="utf-8")
+        start = text.index("`b4_phone_commands.run2.sh` (SHA-256")
+        recorded = text[start:start + 200].split("`")[3]
+        self.assertEqual(recorded, hashlib.sha256(_run2_block().encode()).hexdigest())
+
+    def test_run2_structure(self):
+        run2 = _run2_block()
+        code = [line for line in run2.splitlines() if not line.lstrip().startswith("#")]
+        self.assertFalse([line for line in code if re.search(r'(?<!builtin )echo "STOP', line)])  # every STOP is stop()
+        self.assertNotIn('} | tee "$E/verify.txt"', run2)                           # no gate inside a pipeline group
+        self.assertNotIn("echo()", run2)                                           # no echo redefinition
+        self.assertIn('stop() { builtin echo "STOP: $*" >&2; exit 1; }', run2)
+        for fixed in (f'R="{CANONICAL_REPLICA_B}"', 'W="$HOME/lilith-b4-rehearsal-2"',
+                      "TAR_SHA=659c50a476c85ff9ed005af97bc70a48989a87890ec53b23f940d97901bee0b3",
+                      "SUMS_SHA=dbb9dfbeaeefb59e47cb2ae64aaa651bbe9b89daa443e0912787c10d0b0e2288",
+                      "SRC=ff13bc6f72156c332b29ad1605d24410c2abf232",
+                      'grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4"'):
+            self.assertIn(fixed, run2)
+        snap_of = lambda block: block.split("\nsnap() ", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(snap_of(run2), snap_of(_bash_block(STAGING_DOC)))          # the reviewed snap() format
+
+    @unittest.skipUnless(os.name == "posix", "runs bash")
+    def test_documented_invocation_preserves_the_script_exit(self):
+        text = RUN2_DOC.read_text(encoding="utf-8")
+        line = next(l.strip() for l in text.splitlines()
+                    if l.strip().startswith('bash "$HOME/storage/downloads/b4_phone_commands.run2.sh" 2>&1 | tee'))
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, "storage/downloads"))
+            Path(home, "storage/downloads/b4_phone_commands.run2.sh").write_text('echo A\necho "STOP: x" >&2\nexit 1\n',
+                                                                                encoding="utf-8")
+            subprocess.run(["bash", "-c", line], env=dict(os.environ, HOME=home), capture_output=True, check=False)
+            self.assertEqual(Path(home, "lilith-b4-rehearsal-2.transcript.txt").read_text(encoding="utf-8"),
+                             "A\nSTOP: x\nRUN_EXIT=1\n")
+
+
+_GATE_CHECKS = ["rootKeygen", "keyFileRegular0600", "keyFileOnlyEntry", "keyNotLoadableWithoutPassphrase",
+                "keyNotLoadableWithWrongPassphrase", "anchorMatchesKeyAndFingerprint", "existingKeyNeverOverwritten",
+                "shortPassphraseRefused", "rootKeygenCli", "syntheticInputs", "registryV1", "registryV1CliEqualsFunction",
+                "registryV1WrongPassphraseRefused", "witnessAnchor", "reproduceDeterministicAndVerified",
+                "allFilesInsideWorkdir", "cleanup"]
+_REMOVED = ["k-root.REHEARSAL-TEST.der", "k-root-cli.REHEARSAL-TEST.der", "kact.json", "kwit.json",
+            "root-anchor.json", "registry.json", "witness-anchor.json"]
+# A stub of the rehearsal program: it emits a gate-passing transcript and injects exactly one FAULT.
+_STUB_REHEARSAL = f"""import json, os, sys
+f = os.environ.get("FAULT", "")
+checks = {{k: "PASS" for k in {_GATE_CHECKS!r}}}
+if f == "gate":
+    checks["cleanup"] = "FAIL"
+burned = {{f"id{{i}}": f"{{i:064x}}" for i in range(6)}}
+print(json.dumps({{"REHEARSAL": "PASS", "checks": checks, "testOnly": True, "realAuthorityMaterial": "NONE",
+                  "removedEntries": {_REMOVED!r}, "burnedTestIdentities": burned,
+                  "environment": {{"python": "stub"}}}}, indent=1))
+print("B4_KROOT_REHEARSAL=PASS")
+home, tmp = os.environ["HOME"], os.environ["TMPDIR"]
+if f == "stderr":
+    print("warning", file=sys.stderr)
+if f == "tmpleft":
+    os.mkdir(os.path.join(tmp, ".lilith-b4-kroot-rehearsal-TEST-left"))
+if f == "keyleft":
+    open(os.path.join(home, "k-root.REHEARSAL-TEST.der"), "w").close()
+if f == "bundle":
+    open(__file__, "a").write("#\\n")
+if f == "replica":
+    os.utime(os.path.join(home, "lilith-owner-offline-dev-synthetic-01", "REPLICA.json"), (1, 1))
+if f == "cleanup":
+    open(os.path.join(home, "storage/downloads/lilith-b4-kroot-rehearsal-ff13bc6.tar"), "ab").write(b"x")
+w = os.path.join(home, "lilith-b4-rehearsal-2")
+target = {{"exitdir": "evidence/rehearsal.exit", "afterdir": "evidence/replica-b-after.txt", "sealdir": "evidence.sha256"}}.get(f)
+if target:
+    os.mkdir(os.path.join(w, target))
+sys.exit(3 if f == "exit" else 0)
+"""
+# `python` for the run: the g0 environment probe can fail (g0probe) or find its baseline path blocked (beforedir).
+_PYTHON_SHIM = """#!/bin/bash
+if [ "${1-}" = -c ] && [[ "${2-}" == *platform.machine* ]]; then
+  case "${FAULT-}" in
+    g0probe) exit 1;;
+    beforedir) mkdir "$HOME/lilith-b4-rehearsal-2/evidence/replica-b-before.txt";;
+  esac
+fi
+exec "@PY@" "$@"
+"""
+_CLEAN_TOKENS = ["HOME_TERMUX_PRIVATE", "TMP_TERMUX_PRIVATE", "CRYPTOGRAPHY_OK", "STAGING_ABSENT", "TMP_NO_STALE",
+                 "NO_KROOT_FILES_BEFORE", "REPLICA_B_PRESENT", "NESTED_REPLICA_ABSENT", "REPLICA_B_BASELINE_OK",
+                 "lilith-b4-kroot-rehearsal-ff13bc6.tar: OK", "SHA256SUMS: OK", "BUNDLE_VERIFIED", "SOURCE_COMMIT_OK",
+                 "FILE_COUNT_OK", "BUNDLE_IN_TERMUX_PRIVATE", "exit=0", "B4_KROOT_REHEARSAL=PASS", "REHEARSAL_GATE_PASS",
+                 "TMP_CLEAN", "NO_KEY_FILE_ANYWHERE", "BUNDLE_UNCHANGED", "STDERR_EMPTY", "REPLICA_B_UNCHANGED",
+                 "TRANSPORT_COPY_REMOVED"]
+
+
+@unittest.skipUnless(os.name == "posix" and importlib.util.find_spec("cryptography"),
+                     "runs run 2 under bash (G0 imports cryptography)")
+class RunTwoHardStopTests(unittest.TestCase):
+    """Runs the pinned run-2 text against a stub bundle. Only the bundle pins (TAR_SHA, SUMS_SHA, SRC), the
+    75-file count, and the Termux path prefix in priv() are substituted; the control flow is the pinned text."""
+
+    def run2(self, fault: str = ""):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(root)])
+        home, tmp, bindir = root / "home", root / "tmp", root / "bin"
+        downloads = home / "storage/downloads"
+        for d in (downloads, tmp, bindir):
+            d.mkdir(parents=True)
+        (bindir / "python").write_text(_PYTHON_SHIM.replace("@PY@", sys.executable), encoding="utf-8")
+        (bindir / "python").chmod(0o755)
+        replica = home / "lilith-owner-offline-dev-synthetic-01"
+        (replica / "records").mkdir(parents=True)
+        (replica / "REPLICA.json").write_bytes(REPLICA_B_MANIFEST)
+        top = "lilith-b4-kroot-rehearsal-ff13bc6"
+        files = {"services/owner-memory-control/tools/termux_kroot_rehearsal.py": _STUB_REHEARSAL.encode(),
+                 "SOURCE_COMMIT": b"stub0commit\n"}
+        files["SHA256SUMS"] = "".join(f"{hashlib.sha256(v).hexdigest()}  {k}\n" for k, v in sorted(files.items())).encode()
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for name, data in files.items():
+                info = tarfile.TarInfo(f"{top}/{name}")
+                info.size, info.mode = len(data), 0o644
+                tar.addfile(info, io.BytesIO(data))
+        (downloads / f"{top}.tar").write_bytes(buf.getvalue())
+        script = (_run2_block()
+                  .replace("TAR_SHA=659c50a476c85ff9ed005af97bc70a48989a87890ec53b23f940d97901bee0b3",
+                           f"TAR_SHA={hashlib.sha256(buf.getvalue()).hexdigest()}")
+                  .replace("SUMS_SHA=dbb9dfbeaeefb59e47cb2ae64aaa651bbe9b89daa443e0912787c10d0b0e2288",
+                           f"SUMS_SHA={hashlib.sha256(files['SHA256SUMS']).hexdigest()}")
+                  .replace("SRC=ff13bc6f72156c332b29ad1605d24410c2abf232", "SRC=stub0commit")
+                  .replace('wc -l)" = 75', f'wc -l)" = {len(files)}')
+                  .replace("/data/data/com.termux/*|/data/user/0/com.termux/*", f"{root}/*"))
+        (root / "run2.sh").write_text(script, encoding="utf-8")
+        env = {"HOME": str(home), "TMPDIR": str(tmp), "PREFIX": str(root), "PATH": f"{bindir}:/usr/bin:/bin", "FAULT": fault}
+        result = subprocess.run(["bash", str(root / "run2.sh")], cwd=home, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+        return result.returncode, result.stdout, home / "lilith-b4-rehearsal-2", downloads / f"{top}.tar"
+
+    def assertStopped(self, fault: str, message: str):
+        rc, out, w, download = self.run2(fault)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(out.endswith(f"STOP: {message}\n"), out)                 # the STOP is the last thing that ran
+        self.assertNotIn("TRANSPORT_COPY_REMOVED", out)
+        self.assertTrue(download.exists())                                          # the transport copy is preserved
+        return out, w, download
+
+    def test_I_clean_run(self):
+        rc, out, w, download = self.run2()
+        self.assertEqual(rc, 0, out)
+        self.assertFalse([line for line in out.splitlines() if line.startswith("STOP")], out)
+        variable = ("PYTHON ", "CRYPTOGRAPHY ", "~/", "BURNED ", "ENV ", "sha ", "records ", "entries ", "parent ")
+        tokens = [line for line in out.splitlines()
+                  if not line.startswith(variable) and not re.fullmatch(r"[0-9a-f]{64}  .*", line)]
+        self.assertEqual(tokens, _CLEAN_TOKENS)
+        self.assertEqual(len([line for line in out.splitlines() if line.startswith("BURNED ")]), 6)
+        e = w / "evidence"
+        self.assertEqual(sorted(os.listdir(e)), ["g0.txt", "gate.txt", "rehearsal.exit", "rehearsal.json",
+                                                 "rehearsal.stderr", "replica-b-after.txt", "replica-b-before.txt",
+                                                 "verify.txt"])
+        self.assertEqual((e / "verify.txt").read_text(),
+                         "TMP_CLEAN\nNO_KEY_FILE_ANYWHERE\nBUNDLE_UNCHANGED\nSTDERR_EMPTY\nREPLICA_B_UNCHANGED\n")
+        self.assertEqual((e / "rehearsal.exit").read_text(), "exit=0\n")
+        self.assertEqual((e / "replica-b-before.txt").read_bytes(), (e / "replica-b-after.txt").read_bytes())
+        self.assertIn("parent lilith-owner-offline-dev-synthetic-01 \n", (e / "replica-b-before.txt").read_text())
+        subprocess.run(["sha256sum", "-c", "--quiet", str(w / "evidence.sha256")], check=True)
+        self.assertFalse(download.exists())
+
+    def test_A_rehearsal_exit_nonzero(self):
+        _, w, _ = self.assertStopped("exit", "rehearsal exited non-zero (3)")
+        self.assertEqual((w / "evidence/rehearsal.exit").read_text(), "exit=3\n")
+        for later in ("evidence/gate.txt", "evidence/verify.txt", "evidence/replica-b-after.txt", "evidence.sha256"):
+            self.assertFalse((w / later).exists(), later)
+
+    def test_B_gate_stop(self):
+        _, w, _ = self.assertStopped("gate", "rehearsal gate failed")
+        self.assertTrue((w / "evidence/gate.txt").read_text().startswith("STOP: rehearsal gate failed cleanup"))
+        self.assertFalse((w / "evidence/verify.txt").exists())
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_C_tmp_leftover(self):
+        _, w, _ = self.assertStopped("tmpleft", "rehearsal directory left in TMPDIR")
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_D_test_key_leftover(self):
+        _, w, _ = self.assertStopped("keyleft", "a TEST key file remains")
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_E_bundle_changed(self):
+        _, w, _ = self.assertStopped("bundle", "unexpected file in bundle")
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_F_stderr_nonempty(self):
+        _, w, _ = self.assertStopped("stderr", "rehearsal wrote to stderr")
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_G_replica_changed(self):
+        _, w, _ = self.assertStopped("replica", "Replica B changed")
+        self.assertFalse((w / "evidence.sha256").exists())
+
+    def test_io_g0_write_failure(self):
+        _, w, _ = self.assertStopped("g0probe", "cannot write g0.txt")
+        self.assertFalse((w / "evidence/replica-b-before.txt").exists())
+
+    def test_io_replica_b_before_write_failure(self):
+        _, w, _ = self.assertStopped("beforedir", "cannot write Replica B baseline")
+        self.assertFalse((w / "lilith-b4-kroot-rehearsal-ff13bc6.tar").exists())      # stopped before transport
+
+    def test_io_rehearsal_exit_write_failure(self):
+        _, w, _ = self.assertStopped("exitdir", "cannot write rehearsal.exit")
+        self.assertFalse((w / "evidence/gate.txt").exists())
+
+    def test_io_replica_b_after_write_failure(self):
+        _, w, _ = self.assertStopped("afterdir", "cannot write Replica B post-run snapshot")
+        self.assertFalse((w / "evidence.sha256").is_file())
+
+    def test_io_evidence_sha256_write_failure(self):
+        self.assertStopped("sealdir", "cannot write evidence.sha256")
+
+    def test_H_cleanup_cmp_failure(self):
+        _, w, download = self.assertStopped("cleanup", "transport copy differs from the staged tar")
+        self.assertTrue((w / "evidence.sha256").exists())                           # sealing precedes cleanup
+        self.assertNotEqual(download.read_bytes(), (w / "lilith-b4-kroot-rehearsal-ff13bc6.tar").read_bytes())
 
 
 if __name__ == "__main__":
