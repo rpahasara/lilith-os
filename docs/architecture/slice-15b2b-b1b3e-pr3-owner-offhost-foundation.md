@@ -587,7 +587,7 @@ acceptance semantics**, plus offline tooling to apply them.
 | --- | --- | --- |
 | P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done** (`368b36c`) |
 | P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
-| P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_STORAGE_INCOMPLETE`**: Replica A empty; Replica B is waiting for an independent medium (§25) |
+| P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_COMPLETE`** ([storage acceptance](slice-15b2b-b1b3e-pr3-p33-storage-acceptance.md)): Replica A on the laptop (WSL ext4) and Replica B on the S25 (Termux private storage, `RENAME_NOREPLACE_V1`), both empty; two independent storage domains. It was `P3_3_STORAGE_INCOMPLETE` until P3-3B (§25 is kept as the historical state) |
 | P3-3A | Android-safe create-only publication: backend abstraction (`RENAME_NOREPLACE_V1` preferred, `HARDLINK_PUBLISH_V1`; `DIRECT_O_EXCL_V1` not admitted), per-backend probe, strict-read refinements, Termux probe ([record](slice-15b2b-b1b3e-pr3-android-replica-publication.md)) | **done (compatibility only)**; S25 not admitted; P3-3 still incomplete |
 | P3-4 | synthetic owner freshness ceremony rehearsal (§26) and runbook template | **PASSED**; does not close P3-3 |
 | P3-5 | PR-1B bootstrap sequencing design: dependency DAG, state machine (`pr1b_sequencing.py`), freshness-gate placement, PONRs, crash matrix, owner packages ([sequencing record](slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequencing.md)) | **done (design only)**; PR-1B eligibility FALSE while P3-3 is incomplete |
@@ -774,6 +774,8 @@ candidate is not a record:
 - no network, process, or key dependency.
 
 ## 25. P3-3: owner off-host storage foundation
+
+> **Superseded status (2026-09-29).** P3-3 is now **`P3_3_COMPLETE`**. Replica B was initialized on the S25 Ultra (P3-3B) and accepted in the [P3-3 storage acceptance](slice-15b2b-b1b3e-pr3-p33-storage-acceptance.md). This section records the earlier `P3_3_STORAGE_INCOMPLETE` state. Both replicas remain empty, real freshness remains `FRESHNESS_UNKNOWN`, and the real-profile acceptance block stays in source until a separately reviewed change.
 
 **Result: `P3_3_STORAGE_INCOMPLETE`.** Replica A exists and is empty. There
 is no suitable second medium, so Replica B was not created. The two-copy
