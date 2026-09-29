@@ -156,39 +156,136 @@ time):**
 
 ## 6. Read-only collection commands (phone, owner-executed)
 
+> **Revision v2 (2026-09-29, before any owner execution).** The first
+> version (`99e4d95d…38a5`) is **withdrawn and must not be run**. The review
+> found three defects:
+>
+> 1. Its `cond && echo PASS || echo "STOP: …"` gates printed STOP and
+>    **kept going**.
+> 2. Several gates sat inside `{ …; } | tee`. There, even an `exit` leaves
+>    only the pipeline subshell, so the script still continued.
+> 3. Its seal `sha256sum -- $(ls) > SHA256SUMS` hashed the partly written
+>    `SHA256SUMS` itself on any rerun. It also word-split file names and
+>    never verified the seal.
+>
+> v2 below corrects all three.
+
 **Boundaries:**
 
 - It generates no key. It does not run the rehearsal, `root-keygen`,
   `registry-v1`, `witness-anchor`, or any LILITH tool.
-- It reads Replica B, `~/lilith-b4-rehearsal/`, and TMPDIR, and changes
-  nothing in them. It deletes nothing: a leftover file is reported, not
-  removed.
-- **The only writes** are a new directory `~/lilith-b4-readonly-check/`
-  with new text files, and its tar `~/lilith-b4-readonly-check.tar`. Neither
-  name matches `lilith-owner*`, so neither affects the `parent` line.
+- It reads Replica B, `~/lilith-b4-rehearsal/`, and TMPDIR, and writes or
+  deletes nothing in them. A leftover file is reported, never removed.
+- **The only writes:**
+  - a new directory `~/lilith-b4-readonly-check/` of new text files,
+    including `gates.txt` and, on a STOP, `STOP.txt`;
+  - its tar `~/lilith-b4-readonly-check.tar`.
+
+  The script refuses to start if either already exists. Neither name
+  matches `lilith-owner*`, so neither affects the `parent` line.
 - It changes no authority state.
 
-**Airplane mode:** keep it ON and USB unplugged until C8 has printed its
-last hash. Write that hash down on the phone screen **before** the MTP copy.
-It is the phone-side pre-transfer hash that the first archive lacked.
+**Hard stops.** Every safety failure calls `stop`. That prints
+`STOP: …` on stderr, appends it to `STOP.txt` once the check directory
+exists, and **exits 1 at once**. No gate runs inside a pipeline or a
+subshell whose exit could be swallowed. On a STOP, nothing later runs: no
+further gate, no seal, no tar. The hard-stop gates are:
 
-**Offline check (laptop / WSL; no phone).** Under a simulated Termux layout
-that mirrors the received evidence, the block below printed every PASS
-token and no STOP. Nothing outside the new directory changed except
-`$HOME`'s own mtime. Seeded faults each produced the intended STOP:
+- the preconditions: `HOME` and `TMPDIR` in Termux private storage; the
+  evidence directory and Replica B present; the check directory and tar
+  absent;
+- the six received evidence files unchanged (hashes of §1);
+- the bundle tar hash, the `SHA256SUMS` digest, the source commit, the
+  75-file count, and `sha256sum -c --strict`;
+- TMPDIR holding no rehearsal workdir;
+- the leftover TEST key or output search;
+- `rehearsal.stderr` empty;
+- Replica B equal to the baseline and to the after-snapshot;
+- the reviewed `REPLICA_B_BASELINE_OK` gate;
+- the nested Replica B absent;
+- the seal.
 
-- a leftover `k-root*` file in TMPDIR;
-- a touched `REPLICA.json`;
-- a nested replica.
+**Informational only (prefixed `INFO`, deliberately non-fatal):**
 
-Block SHA-256:
-`99e4d95d999e4b3130d5bfff5f0fb1bdccd58ce074a535ca98287da668d838a5`.
+- `ORIGINAL_PRESENT` or `ORIGINAL_ABSENT` for `g0.txt`, `verify.txt`, and
+  `evidence.sha256`;
+- the transport tar still in Download;
+- no earlier archive on the phone;
+- whether history was collected.
+
+**Leftover search scope.**
+
+- The rehearsal writes only inside
+  `$TMPDIR/.lilith-b4-kroot-rehearsal-TEST-*`. The search also covers all
+  of `$HOME`, as the reviewed gate did.
+- It matches `k-root*`, `*REHEARSAL-TEST*`, and the rehearsal's output
+  names (`kact.json`, `kwit.json`, `root-anchor.json`,
+  `witness-anchor.json`, `registry.json`).
+- It **cannot falsely match the bundle**: none of its 75 names match (checked
+  against the tar listing, and pinned by C3). The P3-3B bundle has no match
+  either.
+- The check directory is pruned. Its fixed names never match anyway.
+- Any match elsewhere in `$HOME` is a hard STOP. That fails safe.
+
+**Seal (C8).**
+
+- `SHA256SUMS` covers every regular file in the check directory **except
+  itself**. It is written as `SHA256SUMS.partial` from a NUL-separated,
+  `LC_ALL=C`-sorted `find`, which excludes both names, then renamed.
+- The seal is verified before the tar with `sha256sum -c --strict`, plus
+  two checks: the file count equals the line count, and there is no
+  self-entry.
+- A subdirectory in the check directory fails the seal.
+- Nothing is written into the check directory after the seal.
+
+**How to run.**
+
+1. Copy `b4_readonly_collect.sh` by MTP into Download. The laptop copy is at
+   `%USERPROFILE%\lilith-b4-evidence\`.
+2. Check its hash in Termux:
+   `sha256sum "$HOME/storage/downloads/b4_readonly_collect.sh"`. It must be
+   the SHA-256 below.
+3. Unplug, and turn airplane mode ON.
+4. Run `bash "$HOME/storage/downloads/b4_readonly_collect.sh"`.
+
+**Do not paste it** into an interactive shell: `exit 1` would close the
+Termux session. `INCLUDE_HISTORY=1 bash …` also collects matching
+`~/.bash_history` lines. That is off by default; review them on the phone
+before export.
+
+**The phone-side pre-transfer hash.** The last line is
+`PHONE_SIDE_PRE_TRANSFER_SHA256 <hash>`. Write it down **before** the MTP
+copy.
+
+**Offline check (laptop / WSL; no phone).** Simulated Termux layout that
+mirrors the received evidence. For the simulation only, the two expected
+Replica B evidence hashes are replaced by the simulated files' hashes;
+nothing else differs.
+
+| Case | Exit | Result |
+| --- | --- | --- |
+| clean | **0** | every PASS token, `ALL_GATES_PASS`, `SEAL_VERIFIED`. The seal re-verifies (8 files, 8 lines, no self-entry). The printed tar hash equals the actual one. Nothing outside the check directory and tar changed (apart from `$HOME`'s own mtime) |
+| leftover `k-root.REHEARSAL-TEST.der` in TMPDIR | **1** | `STOP: a TEST key or rehearsal output file remains`; no seal, no tar |
+| modified `REPLICA.json` (mtime) | **1** | `STOP: Replica B differs from the pre-rehearsal baseline`; no seal, no tar |
+| nested Replica B | **1** | `STOP: a second Replica B exists at the old nested path`; no seal, no tar |
+| existing check directory | **1** | `STOP: … already exists`; the existing content is untouched |
+| existing check tar | **1** | `STOP: … already exists`; the existing tar is untouched |
+| bad bundle hash | **1** | `STOP: bundle tar hash differs or tar missing`; no seal, no tar |
+| stale TMPDIR rehearsal workdir | **1** | `STOP: rehearsal directory present in TMPDIR` |
+| unpatched script vs. the simulated evidence | **1** | `STOP: evidence/replica-b-before.txt differs from the received archive` |
+
+Script SHA-256 (v2):
+`05ff0e3916373ea7f47cd08a07cdf01a4271b1f2612c794b6e112735b5003920`.
 
 ```bash
-# ===== B-4 post-hoc READ-ONLY evidence collection (Termux, S25) =====
+# ===== B-4 post-hoc READ-ONLY evidence collection (Termux, S25) — v2 =====
+# Run ONLY as a file:  bash "$HOME/storage/downloads/b4_readonly_collect.sh"   (never paste it line by line)
 # Generates NO key. Does NOT run the rehearsal, root-keygen, registry-v1, witness-anchor, or any LILITH tool.
-# Reads Replica B, the rehearsal staging directory, and TMPDIR only. Deletes nothing and changes nothing there.
-# The ONLY write is the new directory $X, holding new text files. Every "STOP" is a hard stop.
+# Reads Replica B, the rehearsal staging directory, and TMPDIR only; writes and deletes nothing there.
+# The ONLY writes: the new directory $X (new text files) and the new tar $XT.
+# Every STOP is a hard stop: it prints "STOP: ..." on stderr and exits 1 at once; nothing after it runs.
+# Optional: INCLUDE_HISTORY=1 bash <file> also copies matching ~/.bash_history lines (review before export).
+set -u
 W="$HOME/lilith-b4-rehearsal"
 E="$W/evidence"
 B="$W/lilith-b4-kroot-rehearsal-ff13bc6"
@@ -196,7 +293,13 @@ TAR=lilith-b4-kroot-rehearsal-ff13bc6.tar
 R="$HOME/lilith-owner-offline-dev-synthetic-01"
 TMP="${TMPDIR:-$PREFIX/tmp}"
 X="$HOME/lilith-b4-readonly-check"
+XT="$HOME/lilith-b4-readonly-check.tar"
+XMADE=0
+stop() { echo "STOP: $*" >&2; [ "$XMADE" = 1 ] && echo "STOP: $*" >> "$X/STOP.txt"; exit 1; }
+pass() { echo "$1"; [ "$XMADE" = 1 ] && echo "$1" >> "$X/gates.txt"; return 0; }
+info() { echo "INFO $1"; [ "$XMADE" = 1 ] && echo "INFO $1" >> "$X/gates.txt"; return 0; }
 priv() { case "$(realpath "$1")/" in /data/data/com.termux/*|/data/user/0/com.termux/*) return 0;; *) return 1;; esac; }
+sha_of() { test -f "$1" || return 1; sha256sum "$1" | cut -d' ' -f1; }
 # snap: byte-for-byte the reviewed snapshot of operator script 353c988f
 snap() { echo "sha $(sha256sum "$R/REPLICA.json" | cut -d' ' -f1)"; echo "records $(ls -A "$R/records" | wc -l)"
          echo "entries $(ls -A "$R" | LC_ALL=C sort | tr '\n' ' ')"; echo "parent $(ls -A "$HOME" | grep '^lilith-owner' | LC_ALL=C sort | tr '\n' ' ')"
@@ -206,88 +309,143 @@ snap_raw() { echo "sha $(sha256sum "$R/REPLICA.json" | cut -d' ' -f1)"; echo "re
              echo "entries $(ls -A "$R" | LC_ALL=C sort | tr '\n' ' ')"
              stat -c '%n %i %a %s %Y' "$R" "$R/REPLICA.json" "$R/records"; }
 
-# ---- C0 preconditions and the one new directory ----
-cd "$HOME"
-test -d "$E" && echo EVIDENCE_DIR_PRESENT || echo "STOP: $E missing"
-test ! -e "$X" && mkdir -m 700 "$X" && echo CHECK_DIR_CREATED || echo "STOP: $X already exists"
+# ---- C0 preconditions (read-only), then the one new directory ----
+cd "$HOME" || stop "cannot cd to HOME"
+priv "$HOME" || stop "HOME is not Termux private storage"
+test -d "$TMP" && priv "$TMP" || stop "TMPDIR missing or not Termux private storage"
+test -d "$E" || stop "$E missing"
+test -f "$R/REPLICA.json" && test -d "$R/records" || stop "Replica B missing at $R"
+test ! -e "$X" || stop "$X already exists"
+test ! -e "$XT" || stop "$XT already exists"
+mkdir -m 700 "$X" || stop "cannot create $X"
+XMADE=1
+pass CHECK_DIR_CREATED
 
-# ---- C1 inventory: which original evidence files exist on the phone (read-only; copies go to $X only) ----
-{ date -u +%Y-%m-%dT%H:%M:%SZ; ls -la "$W" "$E"; } > "$X/inventory.txt"; cat "$X/inventory.txt"
-sha256sum "$E"/* > "$X/evidence-now.sha256"; cat "$X/evidence-now.sha256"
-for f in g0.txt verify.txt; do test -f "$E/$f" && cp "$E/$f" "$X/original-$f" && echo "ORIGINAL_PRESENT $f" || echo "ORIGINAL_ABSENT $f"; done
-test -f "$W/evidence.sha256" && cp "$W/evidence.sha256" "$X/original-evidence.sha256" && echo "ORIGINAL_PRESENT evidence.sha256" || echo "ORIGINAL_ABSENT evidence.sha256"
+# ---- C1 received evidence unchanged; inventory; originals copied into $X if present ----
+while read -r want name; do
+  test "$(sha_of "$E/$name")" = "$want" || stop "evidence/$name differs from the received archive"
+done <<'SUMS'
+425377f848fb959aa6ad81eabceddaf7d6ae6184bee16b643d41732674ce64a7 gate.txt
+19eaf43821a7660ec323a87c8457bf74823beb296c39f5e01aa8a683aa50f061 rehearsal.exit
+557176d7b6fe9e05e1adcde86a8fff2a7cca775d3a8ab3b2e77ee9a39cc0a0e8 rehearsal.json
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 rehearsal.stderr
+e4587f324a6ec346aa8fa295a9d46a4204d453f1ea3bff8ae1f1f7007a136a61 replica-b-before.txt
+e4587f324a6ec346aa8fa295a9d46a4204d453f1ea3bff8ae1f1f7007a136a61 replica-b-after.txt
+SUMS
+pass EVIDENCE_UNCHANGED_NOW
+{ date -u +%Y-%m-%dT%H:%M:%SZ; ls -la "$W" "$E"; } > "$X/inventory.txt" || stop "inventory failed"
+sha256sum "$E"/* > "$X/evidence-now.sha256" || stop "evidence hashing failed"
+for f in g0.txt verify.txt; do
+  if test -f "$E/$f"; then cp "$E/$f" "$X/original-$f" || stop "copy of $f failed"; info "ORIGINAL_PRESENT $f"; else info "ORIGINAL_ABSENT $f"; fi
+done
+if test -f "$W/evidence.sha256"; then cp "$W/evidence.sha256" "$X/original-evidence.sha256" || stop "copy of evidence.sha256 failed"; info "ORIGINAL_PRESENT evidence.sha256"
+else info "ORIGINAL_ABSENT evidence.sha256"; fi
 
 # ---- C2 environment now (post-hoc equivalent of g0.txt) ----
-{ echo "HOME_PRIVATE $(priv "$HOME" && echo yes || echo no)"; echo "TMP_PRIVATE $(priv "$TMP" && echo yes || echo no)"
-  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$X/g0-now.txt"; cat "$X/g0-now.txt"
+{ echo "HOME_PRIVATE yes"; echo "TMP_PRIVATE yes"
+  python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$X/g0-now.txt" || stop "environment probe failed"
+cat "$X/g0-now.txt"
 
 # ---- C3 bundle integrity now ----
-{ echo "$(sha256sum "$W/$TAR" | cut -d' ' -f1)" | grep -qx 659c50a476c85ff9ed005af97bc70a48989a87890ec53b23f940d97901bee0b3 && echo BUNDLE_TAR_OK_NOW || echo "STOP: bundle tar hash differs or tar missing"
-  echo "$(sha256sum "$B/SHA256SUMS" | cut -d' ' -f1)" | grep -qx dbb9dfbeaeefb59e47cb2ae64aaa651bbe9b89daa443e0912787c10d0b0e2288 && echo SHA256SUMS_DIGEST_OK_NOW || echo "STOP: SHA256SUMS digest differs"
-  test "$(cat "$B/SOURCE_COMMIT")" = ff13bc6f72156c332b29ad1605d24410c2abf232 && echo SOURCE_COMMIT_OK_NOW || echo "STOP: source commit differs"
-  test "$(find "$B" -type f | wc -l)" = 75 && (cd "$B" && sha256sum -c --quiet SHA256SUMS) && echo BUNDLE_UNCHANGED_NOW || echo "STOP: bundle files differ"; } | tee "$X/bundle-now.txt"
+test "$(sha_of "$W/$TAR")" = 659c50a476c85ff9ed005af97bc70a48989a87890ec53b23f940d97901bee0b3 || stop "bundle tar hash differs or tar missing"
+pass BUNDLE_TAR_OK_NOW
+test "$(sha_of "$B/SHA256SUMS")" = dbb9dfbeaeefb59e47cb2ae64aaa651bbe9b89daa443e0912787c10d0b0e2288 || stop "SHA256SUMS digest differs"
+pass SHA256SUMS_DIGEST_OK_NOW
+test "$(cat "$B/SOURCE_COMMIT" 2>/dev/null)" = ff13bc6f72156c332b29ad1605d24410c2abf232 || stop "source commit differs"
+pass SOURCE_COMMIT_OK_NOW
+test "$(find "$B" -type f | wc -l)" = 75 || stop "bundle file count is not 75"
+(cd "$B" && sha256sum -c --quiet --strict SHA256SUMS) || stop "bundle files fail sha256sum -c"
+pass BUNDLE_UNCHANGED_NOW
 
-# ---- C4 no TEST key left, TMPDIR clean, stderr empty (read-only; any match is reported, NOT deleted) ----
-{ ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && echo "STOP: rehearsal directory present in TMPDIR" || echo TMP_CLEAN_NOW
-  find "$HOME" "$TMP" \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' -o -name 'kact.json' -o -name 'kwit.json' -o -name 'root-anchor.json' -o -name 'witness-anchor.json' \) 2>/dev/null > "$X/key-file-matches.txt"
-  test -s "$X/key-file-matches.txt" && echo "STOP: a TEST key or rehearsal output file remains (see key-file-matches.txt)" || echo NO_KEY_FILE_ANYWHERE_NOW
-  test -s "$E/rehearsal.stderr" && echo "STOP: rehearsal.stderr is not empty" || echo STDERR_EMPTY_NOW
-  test ! -e "$HOME/storage/downloads/$TAR" && echo TRANSPORT_COPY_ABSENT_NOW || echo "NOTE: transport tar still in Download (not removed here)"; } | tee "$X/verify-now.txt"
+# ---- C4 no TEST key or rehearsal output left; TMPDIR clean; stderr empty (matches are reported, NOT deleted) ----
+# The rehearsal writes only inside "$TMP"/.lilith-b4-kroot-rehearsal-TEST-*; $HOME is searched too, as in the reviewed gate.
+# $X is pruned (its fixed names never match); the bundle is not pruned (none of its 75 names match, and C3 pins it).
+ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && stop "rehearsal directory present in TMPDIR"
+pass TMP_CLEAN_NOW
+find "$HOME" "$TMP" -path "$X" -prune -o \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' -o -name 'kact.json' -o -name 'kwit.json' \
+     -o -name 'root-anchor.json' -o -name 'witness-anchor.json' -o -name 'registry.json' \) -print 2>/dev/null > "$X/key-file-matches.txt"
+test -s "$X/key-file-matches.txt" && stop "a TEST key or rehearsal output file remains (see $X/key-file-matches.txt)"
+pass NO_KEY_FILE_ANYWHERE_NOW
+test -f "$E/rehearsal.stderr" && ! test -s "$E/rehearsal.stderr" || stop "rehearsal.stderr missing or not empty"
+pass STDERR_EMPTY_NOW
+if test -e "$HOME/storage/downloads/$TAR"; then info "TRANSPORT_COPY_STILL_IN_DOWNLOAD (not removed here)"; else info TRANSPORT_COPY_ABSENT_NOW; fi
 
 # ---- C5 Replica B now (read-only) ----
-snap_raw > "$X/replica-b-now.raw.txt"; cat "$X/replica-b-now.raw.txt"
-snap > "$X/replica-b-now.reviewed.txt"; cat "$X/replica-b-now.reviewed.txt"
-{ cmp "$E/replica-b-before.txt" "$X/replica-b-now.raw.txt" && echo REPLICA_B_UNCHANGED_SINCE_BASELINE || echo "STOP: Replica B differs from the pre-rehearsal baseline"
-  cmp "$E/replica-b-after.txt" "$X/replica-b-now.raw.txt" && echo REPLICA_B_UNCHANGED_SINCE_AFTER || echo "STOP: Replica B differs from the post-rehearsal snapshot"
-  grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$X/replica-b-now.reviewed.txt" && grep -qx "records 0" "$X/replica-b-now.reviewed.txt" && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$X/replica-b-now.reviewed.txt" && echo REPLICA_B_BASELINE_OK_NOW || echo "STOP: reviewed baseline gate fails now"
-  test ! -e "$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01" && echo NESTED_REPLICA_ABSENT_NOW || echo "STOP: a second Replica B exists at the old nested path"; } | tee "$X/replica-b-now-gates.txt"
+snap_raw > "$X/replica-b-now.raw.txt" || stop "raw Replica B snapshot failed"
+snap > "$X/replica-b-now.reviewed.txt" || stop "reviewed Replica B snapshot failed"
+cat "$X/replica-b-now.raw.txt" "$X/replica-b-now.reviewed.txt"
+cmp -s "$E/replica-b-before.txt" "$X/replica-b-now.raw.txt" || stop "Replica B differs from the pre-rehearsal baseline"
+pass REPLICA_B_UNCHANGED_SINCE_BASELINE
+cmp -s "$E/replica-b-after.txt" "$X/replica-b-now.raw.txt" || stop "Replica B differs from the post-rehearsal snapshot"
+pass REPLICA_B_UNCHANGED_SINCE_AFTER
+grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$X/replica-b-now.reviewed.txt" \
+  && grep -qx "records 0" "$X/replica-b-now.reviewed.txt" \
+  && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$X/replica-b-now.reviewed.txt" || stop "reviewed baseline gate fails now"
+pass REPLICA_B_BASELINE_OK_NOW
+test ! -e "$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01" || stop "a second Replica B exists at the old nested path"
+pass NESTED_REPLICA_ABSENT_NOW
 
-# ---- C6 phone-side hash of the earlier evidence archive, if a copy is still on the phone ----
+# ---- C6 phone-side hash of the earlier evidence archive, if a copy is still on the phone (informational) ----
 for t in "$HOME/lilith-b4-rehearsal-evidence.tar" "$W/lilith-b4-rehearsal-evidence.tar" "$HOME/storage/downloads/lilith-b4-rehearsal-evidence.tar"; do
-  test -f "$t" && sha256sum "$t" | sed "s#$HOME#~#"; done > "$X/earlier-archive-phone-side.sha256"; cat "$X/earlier-archive-phone-side.sha256"
+  test -f "$t" && sha256sum "$t" | sed "s#$HOME#~#"; done > "$X/earlier-archive-phone-side.sha256"
+if test -s "$X/earlier-archive-phone-side.sha256"; then cat "$X/earlier-archive-phone-side.sha256"; else info NO_EARLIER_ARCHIVE_ON_PHONE; fi
 
-# ---- C7 optional, PRIVATE: what was actually typed (review before exporting; it may hold unrelated commands) ----
-test -f "$HOME/.bash_history" && grep -n -E 'lilith|snap|REPLICA|rehears|replica-b|g0\.txt|verify\.txt|evidence' "$HOME/.bash_history" > "$X/history-excerpt.txt"; wc -l < "$X/history-excerpt.txt" 2>/dev/null || echo "NO_HISTORY_FILE"
+# ---- C7 optional, PRIVATE (INCLUDE_HISTORY=1 only): typed commands, not their output ----
+if [ "${INCLUDE_HISTORY:-0}" = 1 ] && test -f "$HOME/.bash_history"; then
+  grep -n -E 'lilith|snap|REPLICA|rehears|replica-b|g0\.txt|verify\.txt|evidence' "$HOME/.bash_history" > "$X/history-excerpt.txt"
+  info "HISTORY_EXCERPT_LINES $(wc -l < "$X/history-excerpt.txt")"
+else info HISTORY_NOT_COLLECTED; fi
 
-# ---- C8 seal the check directory and hash the export BEFORE any transfer ----
-(cd "$X" && sha256sum -- $(ls | LC_ALL=C sort) > SHA256SUMS && cat SHA256SUMS)
-tar -cf "$HOME/lilith-b4-readonly-check.tar" -C "$HOME" lilith-b4-readonly-check && sha256sum "$HOME/lilith-b4-readonly-check.tar" | sed "s#$HOME#~#"
+# ---- C8 seal: hash every file in $X except SHA256SUMS itself, verify the seal, then tar ----
+pass ALL_GATES_PASS
+( cd "$X" || exit 1
+  find . -maxdepth 1 -type d ! -name . | grep -q . && exit 1
+  find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name SHA256SUMS.partial -print0 | LC_ALL=C sort -z | xargs -0 sha256sum -- > SHA256SUMS.partial || exit 1
+  mv SHA256SUMS.partial SHA256SUMS || exit 1
+  sha256sum -c --quiet --strict SHA256SUMS || exit 1
+  test "$(find . -maxdepth 1 -type f ! -name SHA256SUMS | wc -l)" = "$(wc -l < SHA256SUMS)" || exit 1
+  ! grep -q ' \./SHA256SUMS$' SHA256SUMS ) || stop "seal failed"
+XMADE=2                                            # sealed: nothing more is written into $X
+echo SEAL_VERIFIED
+cat "$X/SHA256SUMS"
+tar -cf "$XT" -C "$HOME" lilith-b4-readonly-check || stop "tar failed"
+echo "PHONE_SIDE_PRE_TRANSFER_SHA256 $(sha256sum "$XT" | cut -d' ' -f1)"
 # Write down this last hash on the phone screen BEFORE the MTP copy; it is the phone-side pre-transfer hash.
-# Transfer (owner choice): cp "$HOME/lilith-b4-readonly-check.tar" "$HOME/storage/downloads/" then MTP to the laptop.
+# Transfer (owner choice): cp "$XT" "$HOME/storage/downloads/" then MTP to the laptop.
 # ============================== end of read-only collection ==============================
 ```
 
 **Expected PASS output, in order:**
 
-- `EVIDENCE_DIR_PRESENT`, `CHECK_DIR_CREATED`;
-- the inventory and `evidence-now.sha256`. The six hashes must equal §1;
-- one `ORIGINAL_PRESENT` or `ORIGINAL_ABSENT` line each for `g0.txt`,
-  `verify.txt`, and `evidence.sha256`. Either answer is reportable;
+- `CHECK_DIR_CREATED`, `EVIDENCE_UNCHANGED_NOW`;
+- three `INFO ORIGINAL_PRESENT|ORIGINAL_ABSENT …` lines;
 - the `g0-now.txt` lines;
 - `BUNDLE_TAR_OK_NOW`, `SHA256SUMS_DIGEST_OK_NOW`, `SOURCE_COMMIT_OK_NOW`,
   `BUNDLE_UNCHANGED_NOW`;
-- `TMP_CLEAN_NOW`, `NO_KEY_FILE_ANYWHERE_NOW`, `STDERR_EMPTY_NOW`,
-  `TRANSPORT_COPY_ABSENT_NOW`;
+- `TMP_CLEAN_NOW`, `NO_KEY_FILE_ANYWHERE_NOW`, `STDERR_EMPTY_NOW`;
+- `INFO TRANSPORT_COPY_…`;
+- the raw and reviewed Replica B snapshots. The reviewed one includes
+  `parent lilith-owner-offline-dev-synthetic-01`;
 - `REPLICA_B_UNCHANGED_SINCE_BASELINE`, `REPLICA_B_UNCHANGED_SINCE_AFTER`,
-  `REPLICA_B_BASELINE_OK_NOW`, `NESTED_REPLICA_ABSENT_NOW`, with
-  `parent lilith-owner-offline-dev-synthetic-01` in the reviewed snapshot;
-- the earlier-archive hash lines (possibly none), the history line count
-  (or `NO_HISTORY_FILE`), `SHA256SUMS`, and the check-archive hash.
+  `REPLICA_B_BASELINE_OK_NOW`, `NESTED_REPLICA_ABSENT_NOW`;
+- the earlier-archive hash lines or `INFO NO_EARLIER_ARCHIVE_ON_PHONE`;
+- `INFO HISTORY_…`;
+- `ALL_GATES_PASS`, `SEAL_VERIFIED`, the `SHA256SUMS` listing;
+- `PHONE_SIDE_PRE_TRANSFER_SHA256 <hash>`.
 
-**On any STOP:**
+Exit status `0`.
 
-- Do not retry, delete, move, or edit anything.
-- Keep both directories and report the output.
+**On any STOP (exit 1):**
+
+- Do not retry, delete, move, or edit anything. That includes the partial
+  check directory: it is evidence of where the run stopped.
+- Report the STOP line.
 
 **For the review, the owner reports:**
 
 - `lilith-b4-readonly-check.tar`;
-- its phone-side hash, written down before transfer;
+- the `PHONE_SIDE_PRE_TRANSFER_SHA256` written down before transfer;
 - the laptop-side hash after transfer.
-
-C7 is optional. To keep shell history private, skip that one line: C8 then
-seals the directory without it. If C7 runs, review `history-excerpt.txt`
-on the phone before the transfer.
 
 ## 7. Is a fresh TEST rehearsal required?
 
