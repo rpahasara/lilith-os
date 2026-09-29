@@ -11,6 +11,9 @@ Status:
   the reviewed operator block and complete run-time evidence. It is
   prepared here and **not started**
 - **Classification: `B4_POSTHOC_EVIDENCE_ACCEPTED_FRESH_REHEARSAL_REQUIRED`**
+- **Update (2026-09-29):** run 2 was executed with `f0768b6e…1fe9` and is
+  **accepted** (`B4_TERMUX_KROOT_REHEARSAL=ACCEPTED`; see the
+  [acceptance](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md)). The "not started" wording below is historical
 - Documentation plus a derived operator script. No ceremony logic, gate,
   owner tooling, or acceptance flag changes. No phone contact was made to
   prepare it
