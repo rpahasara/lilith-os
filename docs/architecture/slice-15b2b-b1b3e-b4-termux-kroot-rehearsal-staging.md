@@ -2,7 +2,10 @@
 
 Status:
 
-- **`TERMUX_KROOT_REHEARSAL_READY_FOR_OWNER_EXECUTION`**
+- **`TERMUX_KROOT_REHEARSAL_READY_FOR_OWNER_EXECUTION`**, after the
+  **Replica B path correction** (§0,
+  `TERMUX_KROOT_REHEARSAL_PATH_CORRECTION_READY`). Use only the corrected
+  operator script `353c988f…d6a7`
 - **TEST ONLY. NOT EXECUTED ON THE PHONE.** No phone or DEV contact was
   made to prepare it
 - Built from merged `main` per the
@@ -12,6 +15,53 @@ Status:
 ```text
 rehearsal key != K-ROOT;  rehearsal PASS != M-B1 authorization
 ```
+
+## 0. Replica B path correction (before any execution)
+
+The first version of this record pointed the operator block at
+`$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01` and listed
+`$HOME/lilith-owner-freshness` as its parent. It was stopped before the
+phone ran it.
+
+**Owner read-only phone evidence** (the phone was not contacted by this
+correction):
+
+```text
+REAL_REPLICA_B_DIRECT=FOUND
+NESTED_PATH=ABSENT
+```
+
+**Canonical real Replica B:** `$HOME/lilith-owner-offline-dev-synthetic-01`,
+directly under the Termux `$HOME`. Its parent is `$HOME` itself.
+
+**Root cause.** The rehearsal copied the path from the P3-3B ceremony
+design ([P3-3B](slice-15b2b-b1b3e-pr3-p33b-replica-b-ceremony.md) §1 and its
+`p33b_phone_commands.sh`, `d7b2f7a3…160a`), which planned the nested
+`~/lilith-owner-freshness/` parent. The replica that was actually created
+and accepted is not nested. The [P3-3 acceptance](slice-15b2b-b1b3e-pr3-p33-storage-acceptance.md)
+§2 records its identity (ID, `REPLICA.json` `c068e533…07c4`, 0 records) but
+never restated its path, so the difference was not caught. Those two
+records are left unchanged by this correction.
+
+**Correction (operator block only; the bundle is unchanged):**
+
+- `R="$HOME/lilith-owner-offline-dev-synthetic-01"`;
+- the snapshot `parent` line lists the `lilith-owner*` entries of `$HOME`,
+  the real parent. `$HOME` also holds unrelated entries (`storage`,
+  `lilith-p3-3b`, this staging directory), so the full listing is not an
+  invariant;
+- a new G0 gate, `NESTED_REPLICA_ABSENT`, stops if a replica also exists at
+  the old nested path;
+- `REPLICA_B_BASELINE_OK` now also requires the canonical name in that
+  `parent` line.
+
+No file in the bundle names a replica path (all 75 files checked), so the
+bundle was **not rebuilt**. Its tar, `SHA256SUMS`, and source commit
+`ff13bc6` stand. Only the operator script changes (§2):
+`23f49b50…e227` (withdrawn) → `353c988f…d6a7`.
+
+The canonical path is pinned by
+`tests/test_b1b3e_b4_termux_kroot_rehearsal.py` (`OperatorBlockTests`).
 
 ## 1. Control source
 
@@ -78,6 +128,13 @@ rehearsal key != K-ROOT;  rehearsal PASS != M-B1 authorization
    the accepted expected manifest `c068e533…07c4`, and the bundle in a fake
    `storage/downloads`. **Every gate printed its PASS token, and no STOP
    line appeared.**
+3. After the §0 path correction, the corrected §3 block
+   (`353c988f…d6a7`) was run the same way, with the stub Replica B at
+   `~/lilith-owner-offline-dev-synthetic-01` and unrelated `~/storage` and
+   `~/lilith-p3-3b` entries beside it. Every gate, including the new
+   `NESTED_REPLICA_ABSENT`, printed its PASS token; the baseline read
+   `parent lilith-owner-offline-dev-synthetic-01`; stderr was empty; no
+   STOP line appeared. The simulated layout was then deleted.
 
 The TEST identities of both offline runs are throwaway too, and are burned
 like the phone's.
@@ -87,7 +144,9 @@ tree and OneDrive. It holds:
 
 - the tar;
 - `b4_phone_commands.sh` (SHA-256
-  `23f49b50e4ea1f4717ccd33f01648b445a4a94309a3fa77a23f2273ee578e227`);
+  `353c988f67cd855372c7037f0b55d8655af63d52bb4ac26a44f1d43a7c98d6a7`,
+  exactly the §3 block; it replaces the withdrawn path-wrong
+  `23f49b50…e227`, which must not be run);
 - `SHA256SUMS.inside-bundle`;
 - `BUILD.txt`;
 - `STAGING.sha256`.
@@ -115,11 +174,11 @@ SRC=ff13bc6f72156c332b29ad1605d24410c2abf232
 W="$HOME/lilith-b4-rehearsal"
 E="$W/evidence"
 B="$W/lilith-b4-kroot-rehearsal-ff13bc6"
-R="$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01"
+R="$HOME/lilith-owner-offline-dev-synthetic-01"                   # the real Replica B, directly under $HOME
 TMP="${TMPDIR:-$PREFIX/tmp}"
 priv() { case "$(realpath "$1")/" in /data/data/com.termux/*|/data/user/0/com.termux/*) return 0;; *) return 1;; esac; }
 snap() { echo "sha $(sha256sum "$R/REPLICA.json" | cut -d' ' -f1)"; echo "records $(ls -A "$R/records" | wc -l)"
-         echo "entries $(ls -A "$R" | LC_ALL=C sort | tr '\n' ' ')"; echo "parent $(ls -A "$HOME/lilith-owner-freshness" | LC_ALL=C sort | tr '\n' ' ')"
+         echo "entries $(ls -A "$R" | LC_ALL=C sort | tr '\n' ' ')"; echo "parent $(ls -A "$HOME" | grep '^lilith-owner' | LC_ALL=C sort | tr '\n' ' ')"
          stat -c '%n %i %a %s %Y' "$R" "$R/REPLICA.json" "$R/records" | sed "s#$HOME#~#"; }
 
 # ---- G0 environment (read-only) ----
@@ -132,13 +191,14 @@ test ! -e "$W" && echo STAGING_ABSENT || echo "STOP: $W already exists"
 ls -A "$TMP" | grep -q lilith-b4-kroot-rehearsal && echo "STOP: stale rehearsal directory in TMPDIR" || echo TMP_NO_STALE
 find "$HOME" -name 'k-root*' 2>/dev/null | grep -q . && echo "STOP: a k-root file already exists" || echo NO_KROOT_FILES_BEFORE
 test -f "$R/REPLICA.json" && echo REPLICA_B_PRESENT || echo "STOP: Replica B missing"
+test ! -e "$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01" && echo NESTED_REPLICA_ABSENT || echo "STOP: a second Replica B exists at the old nested path"
 
 # ---- G1 Replica B baseline (read-only) ----
 mkdir -m 700 "$W" "$E"
 { echo "HOME_PRIVATE $(priv "$HOME" && echo yes || echo no)"; echo "TMP_PRIVATE $(priv "$TMP" && echo yes || echo no)"
   python -c 'import sys, platform, cryptography as c; print("PYTHON", sys.version.split()[0], "CRYPTOGRAPHY", c.__version__, "MACHINE", platform.machine())'; } > "$E/g0.txt"
 snap > "$E/replica-b-before.txt"; cat "$E/replica-b-before.txt"
-grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$E/replica-b-before.txt" && grep -qx "records 0" "$E/replica-b-before.txt" && echo REPLICA_B_BASELINE_OK || echo "STOP: Replica B is not the accepted empty replica"
+grep -qx "sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4" "$E/replica-b-before.txt" && grep -qx "records 0" "$E/replica-b-before.txt" && grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 " "$E/replica-b-before.txt" && echo REPLICA_B_BASELINE_OK || echo "STOP: Replica B is not the accepted empty replica"
 
 # ---- T1 transport copy -> private staging, then verify ----
 cp "$HOME/storage/downloads/$TAR" "$W/"
@@ -208,12 +268,16 @@ In order:
 - `TMP_NO_STALE`
 - `NO_KROOT_FILES_BEFORE`
 - `REPLICA_B_PRESENT`
+- `NESTED_REPLICA_ABSENT`
 - the Replica B baseline:
   - `sha c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4`
   - `records 0`
   - `entries REPLICA.json records`
-  - `parent owner-offline-dev-synthetic-01`
-  - three stat lines
+  - `parent lilith-owner-offline-dev-synthetic-01` (the `lilith-owner*`
+    entries of `$HOME`; an empty leftover `lilith-owner-freshness` may also
+    appear and is not a STOP, since `NESTED_REPLICA_ABSENT` already passed)
+  - three stat lines, for `~/lilith-owner-offline-dev-synthetic-01`, its
+    `REPLICA.json`, and its `records`
 - `REPLICA_B_BASELINE_OK`
 - `lilith-b4-kroot-rehearsal-ff13bc6.tar: OK`
 - `SHA256SUMS: OK`
@@ -247,7 +311,10 @@ explicitly:
 - a stale rehearsal directory or an existing `k-root*` file is present
   before the run;
 - `cryptography` is missing or unsupported;
-- Replica B is missing or not the accepted empty replica;
+- Replica B is missing at `~/lilith-owner-offline-dev-synthetic-01`, is not
+  the accepted empty replica, or is not listed under `$HOME`;
+- a second Replica B exists at the old nested
+  `~/lilith-owner-freshness/owner-offline-dev-synthetic-01`;
 - the rehearsal exits non-zero, its final line is not
   `B4_KROOT_REHEARSAL=PASS`, or `REHEARSAL_GATE_PASS` is not printed. This
   covers key mode ≠ `0600`, a second file, encryption at rest, overwrite
@@ -256,8 +323,8 @@ explicitly:
   failure;
 - anything is left in TMPDIR, any `k-root*` or `*REHEARSAL-TEST*` file
   remains, the bundle changed, or the rehearsal wrote to stderr;
-- **Replica B changed**: hash, record count, entries, parent listing, or
-  inode, mode, size, or mtime;
+- **Replica B changed**: hash, record count, entries, the `lilith-owner*`
+  listing of `$HOME`, or inode, mode, size, or mtime;
 - any network or DEV / cloud attempt. The source has no network import
   (test-enforced), and airplane mode during R1 makes any attempt fail
   visibly.

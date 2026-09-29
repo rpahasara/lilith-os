@@ -234,5 +234,98 @@ class BundleTests(unittest.TestCase):
                                              "--out", str(d / "exists.tar")]), 2)
 
 
+DOCS = ROOT / "docs/architecture"
+STAGING_DOC = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-staging.md"
+PREP_DOC = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal.md"
+# The accepted real Replica B (P3-3B), confirmed on the phone read-only: directly under the
+# Termux $HOME, NOT under the nested ~/lilith-owner-freshness/ the P3-3B design had planned.
+CANONICAL_REPLICA_B = "$HOME/lilith-owner-offline-dev-synthetic-01"
+OLD_NESTED_REPLICA_B = "$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01"
+
+
+def _bash_block(doc: Path) -> str:
+    """The one ```bash block that is the B-4 operator block (exactly as staged as b4_phone_commands.sh)."""
+    blocks = [part.split("\n```", 1)[0] + "\n" for part in doc.read_text(encoding="utf-8").split("```bash\n")[1:]]
+    operator = [block for block in blocks if block.startswith("# ===") and "B-4 Termux K-ROOT capability rehearsal" in block]
+    assert len(operator) == 1, doc
+    return operator[0]
+
+
+class OperatorBlockTests(unittest.TestCase):
+    """Pins the B-4 operator block to the canonical real Replica B path."""
+
+    def setUp(self):
+        self.block = _bash_block(STAGING_DOC)
+
+    def test_replica_path_is_the_canonical_replica_b(self):
+        assignments = [line for line in self.block.splitlines() if line.startswith("R=")]
+        self.assertEqual(len(assignments), 1, assignments)
+        self.assertEqual(assignments[0].split("#")[0].strip(), f'R="{CANONICAL_REPLICA_B}"')
+        prep = [line for line in _bash_block(PREP_DOC).splitlines() if line.startswith("R=")]
+        self.assertEqual([line.split("#")[0].strip() for line in prep], [f'R="{CANONICAL_REPLICA_B}"'])
+
+    def test_old_nested_path_is_only_the_absence_gate(self):
+        uses = [line for line in self.block.splitlines() if "lilith-owner-freshness" in line]
+        self.assertEqual(len(uses), 1, uses)
+        self.assertTrue(uses[0].startswith(f'test ! -e "{OLD_NESTED_REPLICA_B}" && echo NESTED_REPLICA_ABSENT'))
+        self.assertNotIn("lilith-owner-freshness", _bash_block(PREP_DOC))
+
+    def test_parent_listing_is_home(self):
+        self.assertIn("""echo "parent $(ls -A "$HOME" | grep '^lilith-owner' | LC_ALL=C sort | tr '\\n' ' ')\"""",
+                      self.block)
+        self.assertIn('grep -qE "^parent (.* )?lilith-owner-offline-dev-synthetic-01 "', self.block)
+
+    def test_recorded_operator_script_digest_matches_the_block(self):
+        text = STAGING_DOC.read_text(encoding="utf-8")
+        start = text.index("`b4_phone_commands.sh` (SHA-256")
+        recorded = text[start:start + 200].split("`")[3]
+        self.assertEqual(recorded, hashlib.sha256(self.block.encode()).hexdigest())
+
+    @unittest.skipUnless(os.name == "posix", "runs the operator block's replica gates under bash")
+    def test_replica_gates_under_bash(self):
+        lines = self.block.splitlines()
+        prelude = "\n".join(lines[:next(i for i, line in enumerate(lines) if line.startswith("# ---- G0"))])
+        gates = "\n".join(line for line in lines if line.startswith(("test -f \"$R/REPLICA.json\"",
+                                                                    f'test ! -e "{OLD_NESTED_REPLICA_B}"')))
+        regex = next(line for line in lines if "REPLICA_B_BASELINE_OK" in line).split('grep -qE "')[1].split('"')[0]
+        script = f'{prelude}\n{gates}\nsnap\nsnap | grep -qE "{regex}" && echo PARENT_OK || echo PARENT_NOT_OK\n'
+
+        def run(layout):
+            with tempfile.TemporaryDirectory() as home:
+                for relative in layout:
+                    path = Path(home, relative)
+                    if relative.endswith("REPLICA.json"):
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("{}", encoding="utf-8")
+                    else:
+                        path.mkdir(parents=True, exist_ok=True)
+                env = dict(os.environ, HOME=home, TMPDIR=home, PREFIX=home)
+                return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env).stdout
+
+        direct = ["lilith-owner-offline-dev-synthetic-01/REPLICA.json", "lilith-owner-offline-dev-synthetic-01/records"]
+        unrelated = ["storage/downloads", "lilith-p3-3b/evidence", "lilith-b4-rehearsal/evidence"]
+        nested = ["lilith-owner-freshness/owner-offline-dev-synthetic-01/REPLICA.json",
+                  "lilith-owner-freshness/owner-offline-dev-synthetic-01/records"]
+
+        out = run(direct + unrelated)
+        self.assertIn("REPLICA_B_PRESENT\nNESTED_REPLICA_ABSENT\n", out)
+        self.assertIn("entries REPLICA.json records \nparent lilith-owner-offline-dev-synthetic-01 \n", out)
+        self.assertIn("~/lilith-owner-offline-dev-synthetic-01 ", out)
+        self.assertTrue(out.endswith("PARENT_OK\n"), out)
+        self.assertNotIn("STOP", out)
+
+        out = run(direct + unrelated + ["lilith-owner-freshness"])        # an empty leftover parent is tolerated
+        self.assertIn("parent lilith-owner-freshness lilith-owner-offline-dev-synthetic-01 \n", out)
+        self.assertTrue(out.endswith("PARENT_OK\n"), out)
+        self.assertNotIn("STOP", out)
+
+        out = run(direct + nested)                                         # a second, nested replica stops
+        self.assertIn("STOP: a second Replica B exists at the old nested path", out)
+
+        out = run(nested + unrelated)                                      # the old nested layout alone stops
+        self.assertIn("STOP: Replica B missing", out)
+        self.assertTrue(out.endswith("PARENT_NOT_OK\n"), out)
+
+
 if __name__ == "__main__":
     unittest.main()

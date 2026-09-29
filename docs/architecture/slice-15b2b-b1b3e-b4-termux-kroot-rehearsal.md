@@ -136,7 +136,7 @@ cd "$HOME"
 python -c 'import sys; print("PYTHON", sys.version.split()[0])'
 python -c 'import sys, cryptography as c; v = c.__version__; m = int(v.split(".")[0]); print("CRYPTOGRAPHY", v); sys.exit(0 if 2 <= m < 52 and m != 35 else 1)' || echo "STOP: cryptography missing or unsupported"
 test ! -e "$HOME/lilith-b4-rehearsal" && echo STAGING_ABSENT                                     # STOP if not printed
-R="$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01"
+R="$HOME/lilith-owner-offline-dev-synthetic-01"                                                  # the real Replica B (staging record §0)
 sha256sum "$R/REPLICA.json"; ls -A "$R/records" | wc -l                                        # c068e533…07c4 / 0 (record before)
 
 # ---- T1 transport + bundle verification ----
