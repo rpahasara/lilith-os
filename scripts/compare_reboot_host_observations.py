@@ -29,6 +29,19 @@ A reboot legitimately changes only these observed facts:
 Every other observed fact must be byte-identical. Anything else is
 UNEXPECTED, and the ceremony stops (§11).
 
+A second, stricter mode, `routine-deploy`, compares the post-M-R2 observation
+with the one taken after the §10 routine DEV deployment. No reboot and no
+broker restart may happen in between, so every section must be identical,
+broker lifetime included. There is exactly one reviewed exception: the pinned
+deploy helper (`scripts/dev_deployer/lilith-dev-deploy`, the
+`DEPLOY_HELPER_SHA` the broker verifier checks) runs `umask 077; exec
+9>/run/lilith-dev-deploy.lock` as root and never removes the file. The first
+deployment after a boot therefore adds that one `/run` name. The observer
+records names only, so the addition is accepted only together with a fixed
+read-only `stat` line for that exact path, proving a regular empty file,
+`0:0`, mode `600`, one link. Any other `/run` addition or removal, and any
+other difference, is UNEXPECTED.
+
     runtime directory existence != witness state != authority readiness
 """
 
@@ -63,6 +76,15 @@ RUN_RECREATED_REQUIRED = frozenset({"lilith-memory"})
 BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 FINAL_LINE = re.compile(r"PR1A_HOST_OBSERVATION=COMPLETE stableSha256=([0-9a-f]{64})\Z")
+ROUTINE_SCHEMA = "LILITH_AUTHORITY_DEV_ROUTINE_DEPLOY_OBSERVATION_COMPARISON"
+# The one reviewed routine-deploy /run effect (see the module docstring).
+DEPLOY_LOCK = "/run/lilith-dev-deploy.lock"
+DEPLOY_LOCK_NAME = "lilith-dev-deploy.lock"
+# Operator command: sudo -n stat -c '%n|%F|%u|%g|%a|%s|%h' /run/lilith-dev-deploy.lock
+LOCK_STAT_FORMAT = "%n|%F|%u|%g|%a|%s|%h"
+DEPLOY_LOCK_SPEC = {"path": DEPLOY_LOCK, "type": "regular empty file", "uid": "0", "gid": "0", "mode": "600",
+                    "size": "0", "links": "1"}
+LOCK_STAT_LINE = re.compile(r"([^|\n]+)\|([a-z ]+)\|([0-9]+)\|([0-9]+)\|([0-7]{1,4})\|([0-9]+)\|([0-9]+)\Z")
 
 
 class CompareError(RuntimeError):
@@ -243,7 +265,96 @@ def compare(pre: dict, post: dict, *, expected_kernel: str, accepted_pre_stable:
     }
 
 
+def parse_lock_stat(text: str) -> dict:
+    """Exactly one `stat -c LOCK_STAT_FORMAT` line; anything else is refused."""
+    lines = text.splitlines()
+    match = LOCK_STAT_LINE.fullmatch(lines[0]) if len(lines) == 1 else None
+    if match is None:
+        raise CompareError("LOCK_STAT_MALFORMED")
+    return dict(zip(("path", "type", "uid", "gid", "mode", "size", "links"), match.groups()))
+
+
+def compare_routine_deploy(before: dict, after: dict, *, lock_stat: dict | None = None) -> dict:
+    """Pure: post-M-R2 and post-routine-deploy observations -> classification.
+    Everything must be identical except the reviewed deploy-lock creation."""
+    expected: list[str] = []
+    unexpected: list[str] = []
+    a, b = before["facts"], after["facts"]
+    for key in sorted(set(a["host"]) | set(b["host"])):
+        if key not in ("utcNow", "uptimeSeconds") and a["host"].get(key) != b["host"].get(key):
+            unexpected.append("HOST_CHANGED:" + key)  # bootId, kernel, rebootRequired included
+    if not str(a["host"].get("utcNow", "")) < str(b["host"].get("utcNow", "")):
+        unexpected.append("AFTER_NOT_LATER")
+    for section in IDENTICAL_SECTIONS:
+        if a[section] != b[section]:
+            unexpected.append("SECTION_CHANGED:" + section)
+    shows_a, shows_b = a["units"].get("show", {}), b["units"].get("show", {})
+    if set(shows_a) != set(shows_b):
+        unexpected.append("UNIT_SET_CHANGED")
+    for unit in sorted(set(shows_a) & set(shows_b)):
+        for key in _diff_keys(shows_a[unit], shows_b[unit]):  # broker lifetime is NOT exempt here
+            unexpected.append(f"UNIT_PROPERTY_CHANGED:{unit}:{key}")
+    if a["units"].get("enablementOrDropInEntries") != b["units"].get("enablementOrDropInEntries"):
+        unexpected.append("ENABLEMENT_OR_DROPIN_CHANGED")
+    if set(a["pr1Objects"]) != set(b["pr1Objects"]):
+        unexpected.append("PR1_OBJECT_SET_CHANGED")
+    for path in sorted(set(a["pr1Objects"]) & set(b["pr1Objects"])):
+        if a["pr1Objects"][path] != b["pr1Objects"][path]:  # OR-6 dirs included: same tmpfs inode
+            unexpected.append("PR1_OBJECT_CHANGED:" + path)
+    inv_a, inv_b = a["namespaceInventory"], b["namespaceInventory"]
+    if set(inv_a) != set(inv_b):
+        unexpected.append("NAMESPACE_ROOTS_CHANGED")
+    lock_after = DEPLOY_LOCK_NAME in inv_b.get(RUN_ROOT, [])
+    for root in sorted(set(inv_a) & set(inv_b)):
+        added, removed = set(inv_b[root]) - set(inv_a[root]), set(inv_a[root]) - set(inv_b[root])
+        for name in sorted(removed):
+            unexpected.append(f"NAMESPACE_ENTRY_REMOVED:{root}:{name}")
+        for name in sorted(added):
+            if root == RUN_ROOT and name == DEPLOY_LOCK_NAME:
+                if lock_stat is None:
+                    unexpected.append("DEPLOY_LOCK_FACTS_MISSING")
+                else:
+                    expected.append("DEPLOY_LOCK_CREATED")
+            else:
+                unexpected.append(f"NAMESPACE_ENTRY_ADDED:{root}:{name}")
+    if lock_stat is not None:
+        if not lock_after:
+            unexpected.append("DEPLOY_LOCK_FACTS_WITHOUT_ENTRY")
+        for field in sorted(key for key in DEPLOY_LOCK_SPEC if lock_stat.get(key) != DEPLOY_LOCK_SPEC[key]):
+            unexpected.append("DEPLOY_LOCK_WRONG_SPEC:" + field)
+    return {
+        "schema": ROUTINE_SCHEMA, "schemaVersion": 1, "operation": "OFFLINE_COMPARISON",
+        "judgment": "OBSERVATION_DELTA_ONLY",
+        "ROUTINE_DEPLOY_OBSERVATION_COMPARISON": "PASS" if not unexpected else "FAIL",
+        "unexpected": unexpected, "expected": expected,
+        "bootId": b["host"].get("bootId"), "deployLock": lock_stat, "deployLockSpec": DEPLOY_LOCK_SPEC,
+        "beforeStableSha256": before["stableSha256"], "afterStableSha256": after["stableSha256"],
+        "rawDigestEqual": before["stableSha256"] == after["stableSha256"],
+        "nonclaims": ["NOT_AUTHORITY_STATE", "NOT_P1A9_STATUS", "NOT_BROKER_BASELINE", "NOT_DR5",
+                      "DEPLOY_LOCK_IS_NOT_AUTHORITY"],
+    }
+
+
+def main_routine_deploy(argv: list[str]) -> int:
+    try:
+        if len(argv) not in (2, 3):
+            raise CompareError("USAGE: compare_reboot_host_observations.py routine-deploy BEFORE AFTER [LOCK_STAT]")
+        before = parse_transcript(Path(argv[0]).read_text(encoding="utf-8"))
+        after = parse_transcript(Path(argv[1]).read_text(encoding="utf-8"))
+        lock = parse_lock_stat(Path(argv[2]).read_text(encoding="utf-8")) if len(argv) == 3 else None
+        result = compare_routine_deploy(before, after, lock_stat=lock)
+    except (CompareError, OSError) as exc:
+        print(f"compare_reboot_host_observations: REFUSED {getattr(exc, 'reason', exc)}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True, indent=1))
+    print(f"ROUTINE_DEPLOY_OBSERVATION_COMPARISON={result['ROUTINE_DEPLOY_OBSERVATION_COMPARISON']} "
+          f"unexpected={len(result['unexpected'])}")
+    return 0 if result["ROUTINE_DEPLOY_OBSERVATION_COMPARISON"] == "PASS" else 2
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["routine-deploy"]:
+        return main_routine_deploy(argv[1:])
     try:
         if len(argv) not in (3, 4) or (len(argv) == 4 and not SHA256.fullmatch(argv[3])) \
                 or not re.fullmatch(r"[0-9A-Za-z._+-]{1,64}", argv[2]):
