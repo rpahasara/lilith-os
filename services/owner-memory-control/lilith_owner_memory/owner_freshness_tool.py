@@ -46,6 +46,7 @@ from typing import Any, Mapping, Sequence
 from lilith_memory.owner_proof import OwnerProofError
 
 from . import authority_contracts as A
+from . import create_only_publish as COP
 from . import owner_acceptance as OA
 from . import owner_freshness as OF
 from . import recovery_contracts as R
@@ -155,15 +156,7 @@ def _fsync_directory(path: Path) -> str:
 
 def _write_new_file(path: Path, data: bytes) -> None:
     """Create-only write with a file fsync. Never replaces anything."""
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o600)
-    try:
-        view = memoryview(data)
-        while view:
-            view = view[os.write(fd, view):]
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    COP.write_new_file(path, data)
 
 
 def init_replica(path: Any, *, replica_id: str, environment: str, authority_profile: str) -> dict[str, Any]:
@@ -230,7 +223,10 @@ def load_replica(path: Any) -> ReplicaV1:
     records = []
     for version in sorted(by_version):
         name, digest = by_version[version]
-        record = _canonical_json(_read_regular(records_dir / name, "RECORD_MALFORMED"), "RECORD_MALFORMED")
+        raw = _read_regular(records_dir / name, "RECORD_MALFORMED")
+        if not raw:                      # interrupted create (DIRECT_O_EXCL crash): never accepted, never removed
+            raise _refuse("RECORD_ZERO_BYTES", name)
+        record = _canonical_json(raw, "RECORD_MALFORMED")
         try:
             parsed = OF.OwnerFreshnessRecordV1.from_dict(record)
         except (OwnerProofError, TypeError) as exc:
@@ -493,52 +489,65 @@ def append(target_path, peer_path, candidate_path, trust, chain_path, pin_path, 
         raise _refuse("POST_WRITE_VERIFICATION_FAILED")
     return {"status": "RECORD_APPENDED", "replicaId": target.replica_id, "recordVersion": record["recordVersion"],
             "decision": record["decision"], "recordDigest": digest, "replication": replication,
-            "directoryFsync": written}
+            "directoryFsync": written["directoryFsync"], "publicationBackend": written["backend"]}
 
 
-def _write_record(replica: ReplicaV1, record: dict[str, Any], digest: str) -> str:
-    """Atomic, create-only publication of one record file.
+def admitted_backend(directory: Path) -> str:
+    """The create-only backend for this filesystem, from a fresh probe of the
+    directory's parent (P3-3A). Refuses when no reviewed backend is admitted."""
+    probe = probe_storage(Path(directory).parent)
+    if probe["result"] != P3_STORAGE_CAPABLE:
+        raise _refuse(P3_STORAGE_INCAPABLE, probe["failure"] or probe["admittedBackend"])
+    return probe["admittedBackend"]
 
-    pending (O_EXCL, fsync) -> link to the canonical name (fails if it exists:
-    no overwrite) -> unlink pending -> fsync the records directory. A crash
-    can leave the pending file behind; the next read then refuses with
-    REPLICA_PENDING_WRITE, and the owner resolves it by hand (no silent repair).
+
+def _publish(directory: Path, final_name: str, data: bytes, *, exists_reason: str, owner: Path) -> dict[str, str]:
+    backend = admitted_backend(owner)
+    try:
+        fsync = COP.publish(directory, final_name, data, backend=backend)
+    except COP.PublishRefused as refused:
+        raise _refuse(exists_reason if refused.reason == "FINAL_EXISTS" else refused.reason, final_name) from refused
+    return {"directoryFsync": fsync, "backend": backend}
+
+
+def _write_record(replica: ReplicaV1, record: dict[str, Any], digest: str) -> dict[str, str]:
+    """Create-only publication of one record file through the admitted
+    backend (P3-3A). The final name is never replaced: any existing file of
+    the same version refuses first, and the primitive refuses a racing one.
+    A crash can leave a `.pending-*` file behind; the next read then refuses
+    with REPLICA_PENDING_WRITE, and the owner resolves it by hand (no silent
+    repair).
     """
     version = record["recordVersion"]
     if version > MAX_RECORD_VERSION:
         raise _refuse("RECORD_VERSION_OUT_OF_RANGE")
     records_dir = replica.path / RECORDS
-    final = records_dir / f"{version:06d}-{digest}.json"
-    pending = records_dir / f"{PENDING_PREFIX}{version:06d}-{digest}.tmp"
     for existing in os.listdir(records_dir):
         match = RECORD_NAME.fullmatch(existing)
         if match and int(match.group(1)) == version:
             raise _refuse("RECORD_EXISTS", existing)
-    _write_new_file(pending, OF.record_bytes(record))
-    try:
-        os.link(pending, final)
-    except FileExistsError as exc:
-        os.unlink(pending)
-        raise _refuse("RECORD_EXISTS", final.name) from exc
-    except OSError:
-        os.unlink(pending)
-        raise
-    os.unlink(pending)
-    return _fsync_directory(records_dir)
+    return _publish(records_dir, f"{version:06d}-{digest}.json", OF.record_bytes(record),
+                    exists_reason="RECORD_EXISTS", owner=replica.path)
 
 
 # ------------------------------------------- P3-3 real-replica storage gate ---
 #
 # Generic inspection keeps the P3-2 behaviour (directory fsync reported, not
-# required). Admission of a REAL owner replica is stricter (P3-3 decisions):
-# directory fsync and hard links are REQUIRED, with no rename-only fallback,
-# and the location must pass the policy checks below.
+# required). Admission of a REAL owner replica is stricter:
+# - directory fsync is REQUIRED (P3-3);
+# - at least one reviewed create-only backend must pass (P3-3A, which
+#   replaces the P3-3 "hard links required" rule). There is never a
+#   fallback to an overwriting rename;
+# - the location must pass the policy checks below.
 
 P3_STORAGE_CAPABLE = "P3_STORAGE_CAPABLE"
 P3_STORAGE_INCAPABLE = "P3_STORAGE_INCAPABLE"
 PROBE_PREFIX = ".lilith-p3-probe-"
-PROBE_CHECKS = ("exclusiveCreate", "fileFsync", "hardLink", "hardLinkNoReplace", "directoryFsync",
-                "renameWithinDirectory", "symlinkDetection", "canonicalReread", "cleanup")
+# Required on every admitted filesystem, whatever the backend.
+PROBE_CHECKS = ("exclusiveCreate", "fileFsync", "directoryFsync", "symlinkDetection", "canonicalReread", "cleanup")
+BACKEND_CHECK_NAMES = {COP.HARDLINK_PUBLISH_V1: "hardlinkPublish", COP.RENAME_NOREPLACE_V1: "renameNoReplace",
+                       COP.DIRECT_O_EXCL_V1: "directExclusiveFinal"}
+PASS, FAIL, UNAVAILABLE = "PASS", "FAIL", "UNAVAILABLE"
 # Path components of known automatically synchronized roots (case-insensitive).
 AUTO_SYNC_COMPONENTS = re.compile(r"(onedrive.*|dropbox.*|google ?drive|my ?drive|icloud.*|box|box sync|nextcloud|"
                                   r"owncloud|pcloud.*|mega|megasync|sync|syncthing|resilio sync)\Z", re.IGNORECASE)
@@ -560,11 +569,57 @@ def _inside_replica(path: Path) -> bool:
     return False
 
 
+def _probe_backend(root: Path, backend: str, payload: bytes) -> str:
+    """The abstract create-only contract, for one backend: publish once, the
+    re-read equals the bytes, a second publish at the same final name is
+    refused, a racing primitive call is refused by the primitive itself, and
+    the existing final stays untouched."""
+    directory = root / f"backend-{BACKEND_CHECK_NAMES[backend]}"
+    os.mkdir(directory, 0o700)
+    final = directory / "000001-probe.json"
+    try:
+        COP.publish(directory, final.name, payload, backend=backend)
+    except COP.RenameNoReplaceUnavailable:
+        return UNAVAILABLE
+    except (OSError, COP.PublishRefused):
+        return FAIL
+    try:
+        if _read_regular(final, "PROBE") != payload:
+            return FAIL
+        try:
+            COP.publish(directory, final.name, payload + b" ", backend=backend)
+            return FAIL                                   # replaced or duplicated: contract broken
+        except COP.PublishRefused as refused:
+            if refused.reason != "FINAL_EXISTS":
+                return FAIL
+        racing = directory / f"{COP.PENDING_PREFIX}race.tmp"
+        COP.write_new_file(racing, payload + b"  ")
+        try:
+            if backend == COP.RENAME_NOREPLACE_V1:
+                COP.rename_noreplace(racing, final)
+            elif backend == COP.HARDLINK_PUBLISH_V1:
+                os.link(racing, final)
+            else:
+                COP.write_new_file(final, payload + b"  ")
+            return FAIL
+        except FileExistsError:
+            pass
+        if _read_regular(final, "PROBE") != payload:
+            return FAIL
+        return PASS if set(os.listdir(directory)) == {final.name, racing.name} else FAIL
+    except (OSError, ToolRefusal):
+        return FAIL
+
+
 def probe_storage(probe_parent: Any) -> dict[str, Any]:
-    """Capability probe on the filesystem of `probe_parent` (an existing
-    directory the owner selected). It creates and removes only a fresh
+    """Capability probe on the filesystem of `probe_parent`, an existing
+    directory the owner selected. It creates and removes only a fresh
     `.lilith-p3-probe-<random>` directory and the files inside it, and it
-    refuses to run inside, or above nothing but, an initialized replica."""
+    refuses to run inside an initialized replica.
+
+    `P3_STORAGE_CAPABLE` requires every common check and at least one
+    ADMITTED create-only backend. Each backend is reported separately; the
+    admitted one is chosen deterministically (`COP.ADMITTED_PREFERENCE`)."""
     parent = Path(probe_parent)
     if not parent.is_dir() or os.path.islink(parent):
         raise _refuse("PROBE_PARENT_INVALID")
@@ -572,10 +627,11 @@ def probe_storage(probe_parent: Any) -> dict[str, Any]:
         raise _refuse("PROBE_INSIDE_REPLICA")
     root = parent / f"{PROBE_PREFIX}{os.urandom(8).hex()}"
     checks: dict[str, Any] = dict.fromkeys(PROBE_CHECKS, False)
+    backends = dict.fromkeys(COP.BACKENDS, UNAVAILABLE)
     failure = None
     os.mkdir(root, 0o700)
     try:
-        a, b, c, d, s = (root / n for n in ("a.json", "b.json", "c.json", "d.json", "s.json"))
+        a, s = root / "a.json", root / "s.json"
         payload = OF.record_bytes({"probe": "LILITH_P3_STORAGE_PROBE", "n": 1})
         _write_new_file(a, payload)                                        # O_EXCL + file fsync
         try:
@@ -584,18 +640,8 @@ def probe_storage(probe_parent: Any) -> dict[str, Any]:
         except FileExistsError:
             checks["exclusiveCreate"] = True
         checks["fileFsync"] = True
-        os.link(a, b)
-        checks["hardLink"] = os.path.samefile(a, b)
-        _write_new_file(c, payload + b" ")
-        try:
-            os.link(c, b)
-            raise _refuse("PROBE_LINK_REPLACED_EXISTING")
-        except FileExistsError:
-            checks["hardLinkNoReplace"] = _read_regular(b, "PROBE") == payload
         _directory_fsync_strict(root)
         checks["directoryFsync"] = True
-        os.rename(c, d)
-        checks["renameWithinDirectory"] = not os.path.lexists(c) and os.path.lexists(d)
         os.symlink(a, s)
         try:
             _read_regular(s, "PROBE_SYMLINK")
@@ -603,23 +649,35 @@ def probe_storage(probe_parent: Any) -> dict[str, Any]:
             checks["symlinkDetection"] = stat.S_ISLNK(os.lstat(s).st_mode)
         checks["canonicalReread"] = _canonical_json(_read_regular(a, "PROBE"), "PROBE") == \
             {"probe": "LILITH_P3_STORAGE_PROBE", "n": 1}
+        for backend in COP.BACKENDS:
+            backends[backend] = _probe_backend(root, backend, payload)
     except ToolRefusal as refusal:
         failure = refusal.reason
     except OSError as exc:
         failure = f"{type(exc).__name__}:{getattr(exc, 'errno', None)}"
     finally:
-        for name in os.listdir(root):
-            os.unlink(root / name)
+        for current, directories, files in os.walk(root, topdown=False):
+            for name in files:
+                os.unlink(Path(current) / name)
+            for name in directories:
+                path = Path(current) / name
+                if os.path.islink(path):
+                    os.unlink(path)
+                else:
+                    os.rmdir(path)
         os.rmdir(root)
         try:
             _directory_fsync_strict(parent)
         except OSError:
             pass
         checks["cleanup"] = not os.path.lexists(root)
+    admitted = COP.select_backend({b: backends[b] == PASS for b in COP.BACKENDS})
     info = os.stat(parent)
-    capable = failure is None and all(checks[name] is True for name in PROBE_CHECKS)
+    capable = failure is None and all(checks[name] is True for name in PROBE_CHECKS) and admitted != COP.NONE
     return {"result": P3_STORAGE_CAPABLE if capable else P3_STORAGE_INCAPABLE, "failure": failure,
-            "checks": checks, "device": info.st_dev, "platform": os.name}
+            "checks": checks, "backends": {BACKEND_CHECK_NAMES[b]: backends[b] for b in COP.BACKENDS},
+            "admittedBackend": admitted, "evaluatedNotAdmitted": [COP.DIRECT_O_EXCL_V1],
+            "device": info.st_dev, "platform": os.name}
 
 
 def location_policy(path: Any) -> dict[str, Any]:
@@ -785,7 +843,10 @@ def load_acceptance_store(path: Any) -> AcceptanceStoreV1:
     bundles = []
     for version in sorted(by_version):
         name, digest = by_version[version]
-        bundle = _canonical_json(_read_regular(directory / name, "ENVELOPE_MALFORMED"), "ENVELOPE_MALFORMED")
+        raw = _read_regular(directory / name, "ENVELOPE_MALFORMED")
+        if not raw:
+            raise _refuse("ENVELOPE_ZERO_BYTES", name)
+        bundle = _canonical_json(raw, "ENVELOPE_MALFORMED")
         try:
             if set(bundle) != OA.BUNDLE_FIELDS:
                 raise ContractViolation("INVALID_BUNDLE")
@@ -954,23 +1015,14 @@ def append_envelope(target_path, peer_path, replica_paths, candidate_path, trust
     bundle = {"envelope": value["envelope"], "package": package}
     version = value["envelope"]["freshnessRecordVersion"]
     directory = target.path / ENVELOPES
-    final = directory / f"{version:06d}-{digest}.json"
-    pending = directory / f"{PENDING_PREFIX}{version:06d}-{digest}.tmp"
-    _write_new_file(pending, OF.record_bytes(bundle))
-    try:
-        os.link(pending, final)
-    except FileExistsError as exc:
-        os.unlink(pending)
-        raise _refuse("ENVELOPE_EXISTS", final.name) from exc
-    except OSError:
-        os.unlink(pending)
-        raise
-    os.unlink(pending)
-    fsync = _fsync_directory(directory)
+    published = _publish(directory, f"{version:06d}-{digest}.json", OF.record_bytes(bundle),
+                         exists_reason="ENVELOPE_EXISTS", owner=target.path)
+    fsync = published["directoryFsync"]
     if load_acceptance_store(target.path).digests != target.digests + (digest,):
         raise _refuse("POST_WRITE_VERIFICATION_FAILED")
     return {"status": "ENVELOPE_APPENDED", "custodyCopyId": target.custody_copy_id, "freshnessRecordVersion": version,
-            "envelopeDigest": digest, "replication": replication, "directoryFsync": fsync}
+            "envelopeDigest": digest, "replication": replication, "directoryFsync": fsync,
+            "publicationBackend": published["backend"]}
 
 
 # ---------------------------------------------------------------------- CLI ---

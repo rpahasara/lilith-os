@@ -48,17 +48,33 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result["result"], T.P3_STORAGE_CAPABLE, result)
         self.assertEqual(set(result["checks"]), set(T.PROBE_CHECKS))
         self.assertTrue(all(value is True for value in result["checks"].values()))
+        self.assertEqual(set(result["backends"].values()), {T.PASS})
+        self.assertEqual(result["admittedBackend"], "RENAME_NOREPLACE_V1")
         self.assertEqual(os.listdir(parent), [])
 
-    def test_hard_link_unsupported_is_incapable(self):
+    def test_hard_link_unsupported_falls_to_rename_noreplace_not_to_overwrite(self):
+        # P3-3A: hard links are no longer required when another reviewed create-only backend passes.
         parent = self.t.sub("probe")
         with mock.patch.object(T.os, "link", side_effect=OSError(errno.EPERM, "no hard links")):
             result = T.probe_storage(parent)
-        self.assertEqual((result["result"], result["checks"]["hardLink"]), (T.P3_STORAGE_INCAPABLE, False))
+        self.assertEqual(result["backends"]["hardlinkPublish"], T.FAIL)
+        self.assertEqual(result["admittedBackend"], "RENAME_NOREPLACE_V1")
+        self.assertEqual(result["result"], T.P3_STORAGE_CAPABLE)
         self.assertTrue(result["checks"]["cleanup"])
         self.assert_clean(parent)
 
-    def test_link_that_replaces_an_existing_path_is_incapable(self):
+    def test_no_admitted_backend_is_incapable(self):
+        parent = self.t.sub("probe")
+        from lilith_owner_memory import create_only_publish as COP
+        with mock.patch.object(T.os, "link", side_effect=OSError(errno.EPERM, "no hard links")), \
+                mock.patch.object(COP, "rename_noreplace", side_effect=COP.RenameNoReplaceUnavailable(errno.ENOSYS, "x")):
+            result = T.probe_storage(parent)
+        self.assertEqual((result["result"], result["admittedBackend"]), (T.P3_STORAGE_INCAPABLE, "NONE"))
+        self.assertEqual(result["backends"]["renameNoReplace"], T.UNAVAILABLE)
+        self.assertEqual(result["backends"]["directExclusiveFinal"], T.PASS)       # evaluated, never admitted
+        self.assert_clean(parent)
+
+    def test_link_that_replaces_an_existing_path_fails_the_backend(self):
         parent = self.t.sub("probe")
         real_link = os.link
 
@@ -69,7 +85,8 @@ class ProbeTests(unittest.TestCase):
 
         with mock.patch.object(T.os, "link", side_effect=replacing_link):
             result = T.probe_storage(parent)
-        self.assertEqual((result["result"], result["failure"]), (T.P3_STORAGE_INCAPABLE, "PROBE_LINK_REPLACED_EXISTING"))
+        self.assertEqual(result["backends"]["hardlinkPublish"], T.FAIL)
+        self.assertNotEqual(result["admittedBackend"], "HARDLINK_PUBLISH_V1")
         self.assert_clean(parent)
 
     def test_directory_fsync_unsupported_is_incapable(self):

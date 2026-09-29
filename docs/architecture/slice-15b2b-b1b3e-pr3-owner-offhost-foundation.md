@@ -588,6 +588,7 @@ acceptance semantics**, plus offline tooling to apply them.
 | P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done** (`368b36c`) |
 | P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
 | P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_STORAGE_INCOMPLETE`**: Replica A empty; Replica B is waiting for an independent medium (§25) |
+| P3-3A | Android-safe create-only publication: backend abstraction (`RENAME_NOREPLACE_V1` preferred, `HARDLINK_PUBLISH_V1`; `DIRECT_O_EXCL_V1` not admitted), per-backend probe, strict-read refinements, Termux probe ([record](slice-15b2b-b1b3e-pr3-android-replica-publication.md)) | **done (compatibility only)**; S25 not admitted; P3-3 still incomplete |
 | P3-4 | synthetic owner freshness ceremony rehearsal (§26) and runbook template | **PASSED**; does not close P3-3 |
 | P3-5 | PR-1B bootstrap sequencing design: dependency DAG, state machine (`pr1b_sequencing.py`), freshness-gate placement, PONRs, crash matrix, owner packages ([sequencing record](slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequencing.md)) | **done (design only)**; PR-1B eligibility FALSE while P3-3 is incomplete |
 | P3-6 | owner acceptance envelope foundation: unsigned `OwnerFreshnessAcceptanceEnvelopeV1` binding the record digest, the review package, the pin, and the custody set, in sibling acceptance stores ([envelope record](slice-15b2b-b1b3e-pr3-owner-acceptance-envelope.md)); a real-profile hard block while P3-3 is incomplete | **done (foundation only)**; a future hardware owner-presence proof stays a separate, later decision |
@@ -603,7 +604,8 @@ acceptance semantics**, plus offline tooling to apply them.
   - `test_b1b3e_pr3_p34_ceremony_rehearsal.py`: 10 tests, OK;
   - `test_b1b3e_pr3_p35_pr1b_sequencing.py`: 19 tests, OK (P3-5);
   - `test_b1b3e_pr3_p36_acceptance_envelope.py`: 23 tests, OK (P3-6);
-  - full suites, all OK: `services/owner-memory-control` (603),
+  - `test_b1b3e_pr3_p33a_create_only_publication.py`: 22 tests, OK (P3-3A);
+  - full suites, all OK: `services/owner-memory-control` (626),
     `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 
@@ -718,6 +720,7 @@ candidate is not a record:
    - `records/.pending-NNNNNN-<digest>.tmp` is opened with
      `O_CREAT | O_EXCL` (plus `O_NOFOLLOW` where available), fully written,
      and **fsynced**.
+   - (P3-3A: published through the admitted create-only backend. With `RENAME_NOREPLACE_V1` the pending file is renamed without replacement, so exactly one name exists after a crash. The hard-link description below is `HARDLINK_PUBLISH_V1`.)
    - It is hard-linked to `NNNNNN-<digest>.json`. The link fails if the
      name exists, so there is **no overwrite**. Any existing file with the
      same version refuses first (`RECORD_EXISTS`).
@@ -738,7 +741,7 @@ candidate is not a record:
 | Item | Current behavior | To review at P3-3 |
 | --- | --- | --- |
 | directory fsync | `PERFORMED` on POSIX. On Windows it is reported as `UNSUPPORTED_PLATFORM`, because NTFS offers no directory fsync through Python | whether owner replicas live on a POSIX filesystem, or a Windows-specific flush (`FlushFileBuffers` on a directory handle) is required |
-| hard-link no-overwrite | needs a filesystem with hard links (ext4, NTFS, APFS). FAT/exFAT removable media refuse with `IO_ERROR` | choose a removable-media filesystem that supports links, or specify an `O_EXCL`-only publication |
+| create-only publication | P3-3A: `RENAME_NOREPLACE_V1` or `HARDLINK_PUBLISH_V1`, whichever the probe admits. FAT/exFAT supports neither hard links nor necessarily `renameat2`, so it is expected to be `NONE` | resolved by [P3-3A](slice-15b2b-b1b3e-pr3-android-replica-publication.md); still needs a probe of each real medium |
 | crash residue | a leftover `.pending-*` makes every read refuse (`REPLICA_PENDING_WRITE`). It is never auto-deleted | the owner's manual inspection procedure |
 | password-manager / vault replica | not a filesystem, so the tool cannot write it | an export/import procedure that keeps the exact record bytes and names |
 | replica placement | code enforces only identity and location checks | physical independence: no shared sync or backup path (D6) |
@@ -788,7 +791,7 @@ The rest of this section records:
 | Decision | Rule | Enforced by |
 | --- | --- | --- |
 | directory fsync REQUIRED | a real replica needs a strict directory fsync; there is no warning-only mode | `probe_storage` (`_directory_fsync_strict`), and `init_real_replica` requires `directoryFsync = PERFORMED` |
-| hard links REQUIRED | no rename-only fallback in V1; any alternate atomic write needs a separate design review | `probe_storage` (`hardLink`, `hardLinkNoReplace`) |
+| ~~hard links REQUIRED~~ → **a reviewed create-only backend REQUIRED** (amended by [P3-3A](slice-15b2b-b1b3e-pr3-android-replica-publication.md)) | at least one admitted backend (`RENAME_NOREPLACE_V1` preferred, `HARDLINK_PUBLISH_V1`) must pass the create-only contract. There is never a fallback to an overwriting rename, and `DIRECT_O_EXCL_V1` is not admitted | `probe_storage` (`backends`, `admittedBackend`) |
 | location policy | no Git working tree; no automatically synchronized root; not on DEV; not in the same tree as the other replica | `location_policy`, `init_real_replica --other-replica` |
 | independence | two directories are not two rollback domains; same device refused | `check_independence`; owner evidence (§25.4) |
 | no record creation | P3-3 never proposes or appends | no P3-3 command writes a record |
