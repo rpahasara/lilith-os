@@ -9,6 +9,8 @@ Status:
   rehearsal (throwaway TEST key) is authorized for **preparation and review
   only**; see the [rehearsal preparation](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal.md)
 - `LIVE_MUTATION = NONE`; no DEV, phone, or replica contact
+- **Update (2026-09-29):** the Termux rehearsal is accepted (run 2,
+  [acceptance](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md)), so **B-4 is CLOSED**. B-3 and B-5 remain open
 - **PR-1B remains `PR1B_NOT_ELIGIBLE`**: B-3 and B-5 are open, and the
   rehearsal must be reviewed before the real M-B1
 
@@ -137,7 +139,7 @@ genesis-pin storage != freshness replica storage
 | B-1 | PR-3 tooling not accepted | **CLOSED** |
 | B-2 | open risks not acknowledged | **CLOSED** |
 | B-3 | source-level real-acceptance block (plus the guard and runbook text) | open |
-| B-4 | K-ROOT custody and pin-copy topology | **topology CLOSED** (§1). The Termux rehearsal is prepared, not reviewed; its review is a precondition of the real M-B1 |
+| B-4 | K-ROOT custody and pin-copy topology | **CLOSED** (updated 2026-09-29). Topology closed here (§1); the mandatory Termux rehearsal was accepted (run 2, [acceptance](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md)). Originally: the rehearsal was prepared, not reviewed |
 | B-5 | PR-1B not authorized | open |
 
 **`PR1B_NOT_ELIGIBLE`.**
