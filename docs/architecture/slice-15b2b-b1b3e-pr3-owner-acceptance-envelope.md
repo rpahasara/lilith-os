@@ -5,7 +5,7 @@
 - No real owner acceptance and no real acceptance envelope exist. There is
   no real record 1.
 - Real-profile acceptance is **hard-blocked** in source while P3-3 is
-  `P3_3_STORAGE_INCOMPLETE`.
+  `P3_3_STORAGE_INCOMPLETE` (superseded: lifted by [B-3](slice-15b2b-b1b3e-b3-real-acceptance.md)).
 - Real freshness remains `FRESHNESS_UNKNOWN`.
 - There was no DEV contact, no cloud contact, and no owner key.
 - PR-1B, A1–A7, and First Memory are not authorized.
@@ -249,6 +249,11 @@ The sequencer accepts only a real `AcceptanceResultV1`. `PARTIAL`,
 (tested).
 
 ## 11. P3-3 hard block
+
+> **Superseded ([B-3](slice-15b2b-b1b3e-b3-real-acceptance.md)).** `REAL_ACCEPTANCE_ENABLED` is now `True`. The
+> reversible disable reason is `REAL_ACCEPTANCE_DISABLED_IN_SOURCE`, and
+> `P3_3_STORAGE_INCOMPLETE` is no longer used. The text below records the
+> P3-6 state. A synthetic envelope still never satisfies the real gate.
 
 - `owner_acceptance.REAL_ACCEPTANCE_ENABLED = False`, with reason
   `P3_3_STORAGE_INCOMPLETE`. Only a reviewed source change can lift it.
