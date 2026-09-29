@@ -22,6 +22,27 @@ P3-3 completion != PR-1B completion (or eligibility)
 | Replica A recheck | 2026-09-29 `04:10:40Z`, read-only, laptop, tool from merged `main` `44a53f2` |
 | Replica B evidence | owner-supplied after the P3-3B ceremony (the phone was not contacted by this review) |
 
+> **Erratum (2026-09-29): Replica B location.** This acceptance recorded
+> Replica B's identity but not its filesystem path, and the reviewed P3-3B
+> design named `$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01`.
+> Later owner read-only phone evidence (`REAL_REPLICA_B_DIRECT=FOUND`,
+> `NESTED_PATH=ABSENT`) established that the accepted real Replica B exists
+> at **`$HOME/lilith-owner-offline-dev-synthetic-01`**.
+>
+> - The replica identity is unchanged: `owner-offline-dev-synthetic-01`.
+> - The manifest is unchanged: `REPLICA.json` SHA-256
+>   `c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4`.
+> - The accepted record count is unchanged: **0**.
+> - The replica itself was **not moved**. No compatibility directory or
+>   symlink was created.
+> - Only the recorded filesystem location was wrong or incomplete.
+> - The direct `$HOME` path is now **canonical**. Its parent is `$HOME`.
+> - The old nested path is **non-canonical** and must remain absent.
+>
+> The acceptance result (`P3_3_COMPLETE`) and §2–§5 are otherwise
+> unchanged. See the [P3-3B](slice-15b2b-b1b3e-pr3-p33b-replica-b-ceremony.md)
+> erratum.
+
 ## 1. Replica A: laptop (read-only recheck)
 
 | Check | Result |

@@ -9,10 +9,33 @@
   the independence evidence (§7) is accepted.
 - No phone, DEV, or cloud contact was made to prepare it.
 
+> **Erratum (2026-09-29): Replica B location.** This reviewed design and its
+> script (`p33b_phone_commands.sh`, `d7b2f7a3…160a`) name the target
+> `$HOME/lilith-owner-freshness/owner-offline-dev-synthetic-01`. Later owner
+> read-only phone evidence (`REAL_REPLICA_B_DIRECT=FOUND`,
+> `NESTED_PATH=ABSENT`) established that the accepted real Replica B exists
+> at **`$HOME/lilith-owner-offline-dev-synthetic-01`**.
+>
+> - The replica identity is unchanged: `owner-offline-dev-synthetic-01`.
+> - The manifest is unchanged: `REPLICA.json` SHA-256
+>   `c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4`.
+> - The accepted record count is unchanged: **0**.
+> - The replica itself was **not moved**. No compatibility directory or
+>   symlink was created.
+> - Only the recorded filesystem location was wrong or incomplete.
+> - The direct `$HOME` path is now **canonical**. Its parent is `$HOME`.
+> - The old nested path is **non-canonical** and must remain absent.
+>
+> The ceremony logic and script below are left as reviewed. They are a
+> historical record and must not be re-run or copied as a path source. See
+> the [P3-3 acceptance](slice-15b2b-b1b3e-pr3-p33-storage-acceptance.md)
+> erratum and the [B-4 rehearsal staging](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-staging.md)
+> §0.
+
 | Field | Value |
 | --- | --- |
 | Source | merged `main` `44a53f2d0fde605f9b2ae46589febee806405575` (PR #101 + #102: PR-3, P3-2 … P3-6, P3-3A and the probe fix) |
-| Target | Samsung S25 Ultra, Termux app-private storage, `~/lilith-owner-freshness/owner-offline-dev-synthetic-01` |
+| Target | Samsung S25 Ultra, Termux app-private storage, `~/lilith-owner-freshness/owner-offline-dev-synthetic-01` (**non-canonical; see the erratum above**: the accepted replica is at `~/lilith-owner-offline-dev-synthetic-01`) |
 | Replica | `replicaId = owner-offline-dev-synthetic-01`, `environment = dev`, `authorityProfile = DEV_SYNTHETIC` |
 | Only mutation | `init-real-replica`, creating `REPLICA.json` plus an empty `records/` |
 | Never run | `propose-genesis`, `propose-accept`, `propose-reject`, `append`, `build-review-package`, `propose-envelope`, `append-envelope`, `init-acceptance-store` |
