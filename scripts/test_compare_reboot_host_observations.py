@@ -284,6 +284,190 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(codes, (0, 2, 1, 1, 1))
 
 
+LOCK_OK = "/run/lilith-dev-deploy.lock|regular empty file|0|0|600|0|1"
+
+
+def before_deploy() -> dict:
+    """Post-M-R2: the rebooted host with the broker started once."""
+    facts = post_facts()
+    facts["units"]["show"]["lilith-memory-broker.service"].update(
+        ActiveState="active", SubState="running", MainPID="1234", InvocationID="0" * 32,
+        ExecMainStartTimestamp="Wed 2026-09-30 01:05:00 UTC")
+    return facts
+
+
+def after_deploy(before: dict | None = None) -> dict:
+    """The same boot after one routine DEV deployment: only the deploy lock is new."""
+    facts = copy.deepcopy(before or before_deploy())
+    facts["host"].update(uptimeSeconds="900.00", utcNow="2026-09-30T01:30:00Z")
+    facts["namespaceInventory"]["/run"] = sorted(facts["namespaceInventory"]["/run"] + ["lilith-dev-deploy.lock"])
+    return facts
+
+
+def routine(before: dict, after: dict, lock: str | None = LOCK_OK) -> dict:
+    return C.compare_routine_deploy(C.parse_transcript(transcript(before)), C.parse_transcript(transcript(after)),
+                                    lock_stat=None if lock is None else C.parse_lock_stat(lock))
+
+
+class RoutineDeployTests(unittest.TestCase):
+    """§10: post-M-R2 -> post-routine-deploy. Only the reviewed deploy lock may appear."""
+
+    def assertRoutineFails(self, mutate, code, lock=LOCK_OK):
+        after = after_deploy()
+        mutate(after)
+        result = routine(before_deploy(), after, lock)
+        self.assertEqual(result["ROUTINE_DEPLOY_OBSERVATION_COMPARISON"], "FAIL", code)
+        self.assertIn(code, result["unexpected"])
+
+    def test_exact_reviewed_deploy_lock_creation_is_accepted(self):
+        result = routine(before_deploy(), after_deploy())
+        self.assertEqual(result["ROUTINE_DEPLOY_OBSERVATION_COMPARISON"], "PASS", result["unexpected"])
+        self.assertEqual(result["expected"], ["DEPLOY_LOCK_CREATED"])
+        self.assertIs(result["rawDigestEqual"], False)  # the raw digest legitimately differs
+        self.assertEqual(result["deployLock"], C.DEPLOY_LOCK_SPEC)
+        self.assertIn("DEPLOY_LOCK_IS_NOT_AUTHORITY", result["nonclaims"])
+
+    def test_lock_already_present_and_unchanged_needs_no_facts(self):
+        before = after_deploy()
+        after = copy.deepcopy(before)
+        after["host"]["utcNow"] = "2026-09-30T02:00:00Z"
+        result = routine(before, after, None)
+        self.assertEqual(result["ROUTINE_DEPLOY_OBSERVATION_COMPARISON"], "PASS", result["unexpected"])
+        self.assertIs(result["rawDigestEqual"], True)
+        self.assertEqual(routine(before, after)["unexpected"], [])  # facts still checked when given
+
+    def test_lock_creation_without_its_stat_facts_fails_closed(self):
+        result = routine(before_deploy(), after_deploy(), None)
+        self.assertEqual(result["unexpected"], ["DEPLOY_LOCK_FACTS_MISSING"])
+
+    def test_wrong_owner_mode_path_type_size_or_links_is_rejected(self):
+        cases = {
+            "uid": "/run/lilith-dev-deploy.lock|regular empty file|1001|0|600|0|1",
+            "gid": "/run/lilith-dev-deploy.lock|regular empty file|0|988|600|0|1",
+            "mode": "/run/lilith-dev-deploy.lock|regular empty file|0|0|644|0|1",
+            "path": "/run/lilith-dev-deploy.lock.new|regular empty file|0|0|600|0|1",
+            "type": "/run/lilith-dev-deploy.lock|symbolic link|0|0|777|0|1",
+            "links": "/run/lilith-dev-deploy.lock|regular empty file|0|0|600|0|2",
+        }
+        for field, line in cases.items():
+            with self.subTest(field):
+                result = routine(before_deploy(), after_deploy(), line)
+                self.assertIn("DEPLOY_LOCK_WRONG_SPEC:" + field, result["unexpected"])
+                self.assertEqual(result["ROUTINE_DEPLOY_OBSERVATION_COMPARISON"], "FAIL")
+        for line in ("/run/lilith-dev-deploy.lock|directory|0|0|700|40|2",
+                     "/run/lilith-dev-deploy.lock|regular file|0|0|600|12|1"):
+            with self.subTest(line):
+                self.assertIn("DEPLOY_LOCK_WRONG_SPEC:type", routine(before_deploy(), after_deploy(), line)["unexpected"])
+        self.assertIn("DEPLOY_LOCK_WRONG_SPEC:size",
+                      routine(before_deploy(), after_deploy(),
+                              "/run/lilith-dev-deploy.lock|regular empty file|0|0|600|12|1")["unexpected"])
+
+    def test_malformed_lock_stat_is_refused(self):
+        for text in ("", LOCK_OK + "\n" + LOCK_OK, "/run/lilith-dev-deploy.lock|regular empty file|0|0|600|0",
+                     "stat: cannot statx '/run/lilith-dev-deploy.lock': No such file or directory",
+                     "/run/x|y|0|0|600|0|1|extra"):
+            with self.subTest(text):
+                with self.assertRaises(C.CompareError) as caught:
+                    C.parse_lock_stat(text)
+                self.assertEqual(caught.exception.reason, "LOCK_STAT_MALFORMED")
+
+    def test_lock_facts_without_a_lock_entry_fail(self):
+        before = before_deploy()
+        after = copy.deepcopy(before)
+        after["host"]["utcNow"] = "2026-09-30T02:00:00Z"
+        self.assertIn("DEPLOY_LOCK_FACTS_WITHOUT_ENTRY", routine(before, after)["unexpected"])
+
+    def test_unexpected_additional_run_changes_are_rejected(self):
+        run = lambda f: f["namespaceInventory"]["/run"]  # noqa: E731
+        cases = {
+            "NAMESPACE_ENTRY_ADDED:/run:lilith-dev-deploy.lock2": lambda f: run(f).append("lilith-dev-deploy.lock2"),
+            "NAMESPACE_ENTRY_ADDED:/run:lilith-authority-dev.lock": lambda f: run(f).append("lilith-authority-dev.lock"),
+            "NAMESPACE_ENTRY_REMOVED:/run:lilith-memory": lambda f: run(f).remove("lilith-memory"),
+            "NAMESPACE_ENTRY_REMOVED:/run:lilith-recovery-witness": lambda f: run(f).remove("lilith-recovery-witness"),
+            "NAMESPACE_ENTRY_ADDED:/etc:lilith-dev-deploy.lock": lambda f: f["namespaceInventory"]["/etc"].append(
+                "lilith-dev-deploy.lock"),
+            "NAMESPACE_ENTRY_ADDED:/opt:lilith-extra": lambda f: f["namespaceInventory"]["/opt"].append("lilith-extra"),
+        }
+        for code, mutate in cases.items():
+            with self.subTest(code):
+                self.assertRoutineFails(mutate, code)
+
+    def test_persistent_state_drift_still_fails(self):
+        cases = {
+            "SECTION_CHANGED:currentBlob": lambda f: f["currentBlob"].update(ctimeNs=1),
+            "SECTION_CHANGED:hostKey": lambda f: f["hostKey"].update(inode=1),
+            "SECTION_CHANGED:releases": lambda f: f["releases"]["releaseEntries"].append("c" * 40),
+            "SECTION_CHANGED:hostFiles": lambda f: f["hostFiles"]["/usr/local/sbin/lilith-activation-verify"]
+            .update(sha256="1"),
+            "SECTION_CHANGED:accounts": lambda f: f["accounts"]["lilith-authority-dev"].update(gid=0),
+            "SECTION_CHANGED:listings": lambda f: f["listings"]["/etc/lilith-authority-custody/prepared"]
+            .update({"k": "file"}),
+            "SECTION_CHANGED:filesystems": lambda f: f["filesystems"]["/etc"].update(device=1),
+            "PR1_OBJECT_CHANGED:/var/lib/lilith-recovery-witness":
+                lambda f: f["pr1Objects"].update({"/var/lib/lilith-recovery-witness": stat(mode="2750")}),
+            "PR1_OBJECT_CHANGED:/etc/lilith-recovery-witness/credentials/lilith-recovery-witness.witness.cred":
+                lambda f: f["pr1Objects"].update({"/etc/lilith-recovery-witness/credentials/"
+                                                  "lilith-recovery-witness.witness.cred": stat("file", mode="0600")}),
+            "PR1_OBJECT_CHANGED:/etc/lilith-authority-custody":
+                lambda f: f["pr1Objects"]["/etc/lilith-authority-custody"].update(mode="0755"),
+        }
+        for code, mutate in cases.items():
+            with self.subTest(code):
+                self.assertRoutineFails(mutate, code)
+
+    def test_authority_witness_runtime_and_service_drift_still_fails(self):
+        cases = {
+            "PR1_OBJECT_CHANGED:/run/lilith-authority-dev":
+                lambda f: f["pr1Objects"]["/run/lilith-authority-dev"].update(inode=999),
+            "PR1_OBJECT_CHANGED:/run/lilith-recovery-witness":
+                lambda f: f["pr1Objects"].update({"/run/lilith-recovery-witness": None}),
+            "PR1_OBJECT_CHANGED:/run/credentials/lilith-authority-dev.service":
+                lambda f: f["pr1Objects"].update({"/run/credentials/lilith-authority-dev.service": stat(mode="0700")}),
+            "UNIT_PROPERTY_CHANGED:lilith-authority-dev.service:ActiveState":
+                lambda f: f["units"]["show"]["lilith-authority-dev.service"].update(ActiveState="active"),
+            "UNIT_PROPERTY_CHANGED:lilith-recovery-witness-signer.socket:UnitFileState":
+                lambda f: f["units"]["show"]["lilith-recovery-witness-signer.socket"].update(UnitFileState="enabled"),
+            "UNIT_PROPERTY_CHANGED:lilith-memory-broker.service:InvocationID":
+                lambda f: f["units"]["show"]["lilith-memory-broker.service"].update(InvocationID="f" * 32),
+            "UNIT_PROPERTY_CHANGED:lilith-memory-broker.service:NRestarts":
+                lambda f: f["units"]["show"]["lilith-memory-broker.service"].update(NRestarts="1"),
+            "ENABLEMENT_OR_DROPIN_CHANGED": lambda f: f["units"].update(enablementOrDropInEntries=["x"]),
+            "HOST_CHANGED:bootId": lambda f: f["host"].update(bootId=PRE_BOOT),
+            "HOST_CHANGED:kernel": lambda f: f["host"].update(kernel=OLD_KERNEL),
+            "HOST_CHANGED:rebootRequired": lambda f: f["host"].update(rebootRequired=True),
+            "AFTER_NOT_LATER": lambda f: f["host"].update(utcNow="2026-09-30T01:00:00Z"),
+        }
+        for code, mutate in cases.items():
+            with self.subTest(code):
+                self.assertRoutineFails(mutate, code)
+
+    def test_reboot_mode_is_unchanged_by_the_lock_rule(self):
+        # The reboot comparison never accepts a new lock: after a boot /run starts without it.
+        post = post_facts()
+        post["namespaceInventory"]["/run"].append("lilith-dev-deploy.lock")
+        self.assertIn("RUN_ENTRY_ADDED:lilith-dev-deploy.lock", run(pre_facts(), post)["unexpected"])
+
+    def test_routine_deploy_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            d = Path(directory)
+            (d / "before").write_text(transcript(before_deploy()), encoding="utf-8")
+            (d / "after").write_text(transcript(after_deploy()), encoding="utf-8")
+            (d / "lock").write_text(LOCK_OK + "\n", encoding="utf-8")
+            (d / "badlock").write_text(LOCK_OK.replace("|600|", "|666|") + "\n", encoding="utf-8")
+            with open(os.devnull, "w", encoding="utf-8") as sink:
+                saved = sys.stdout, sys.stderr
+                sys.stdout = sys.stderr = sink
+                try:
+                    codes = (C.main(["routine-deploy", str(d / "before"), str(d / "after"), str(d / "lock")]),
+                             C.main(["routine-deploy", str(d / "before"), str(d / "after")]),
+                             C.main(["routine-deploy", str(d / "before"), str(d / "after"), str(d / "badlock")]),
+                             C.main(["routine-deploy", str(d / "before")]),
+                             C.main(["routine-deploy", str(d / "before"), str(d / "after"), str(d / "missing")]))
+                finally:
+                    sys.stdout, sys.stderr = saved
+        self.assertEqual(codes, (0, 2, 2, 1, 1))
+
+
 class ContractTests(unittest.TestCase):
     def test_offline_only(self):
         tree = ast.parse(SOURCE)
@@ -295,6 +479,26 @@ class ContractTests(unittest.TestCase):
         for token in ("subprocess", "socket", "urllib", "os.system", "gcloud", "write_text", "write_bytes",
                       "unlink", "open("):
             self.assertNotIn(token, SOURCE.split('"""', 2)[2], token)
+
+    def test_deploy_lock_spec_matches_the_pinned_deploy_helper(self):
+        helper = (ROOT / "scripts/dev_deployer/lilith-dev-deploy").read_text(encoding="utf-8")
+        self.assertIn('readonly LOCK_PATH="/run/lilith-dev-deploy.lock"', helper)
+        self.assertIn("\numask 077\n", helper)
+        self.assertIn('exec 9>"${LOCK_PATH}"', helper)
+        # The lock is only ever created (never removed, chmod-ed or chown-ed): its one use is the exec.
+        self.assertEqual(helper.count("${LOCK_PATH}"), 1)
+        self.assertEqual(helper.count("/run/"), 1)
+        self.assertEqual(helper.count("lilith-dev-deploy.lock"), 1)
+        import hashlib
+        from scripts import verify_broker_dev_current_incarnation as broker
+        self.assertEqual(hashlib.sha256((ROOT / "scripts/dev_deployer/lilith-dev-deploy").read_bytes()).hexdigest(),
+                         broker.DEPLOY_HELPER_SHA)
+        self.assertEqual(C.DEPLOY_LOCK, "/run/" + C.DEPLOY_LOCK_NAME)
+        self.assertEqual(C.DEPLOY_LOCK_SPEC, {"path": C.DEPLOY_LOCK, "type": "regular empty file", "uid": "0",
+                                              "gid": "0", "mode": "600", "size": "0", "links": "1"})
+        record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline.md").read_text(encoding="utf-8")
+        self.assertIn(C.LOCK_STAT_FORMAT, record)
+        self.assertIn("routine-deploy", record)
 
     def test_tmpfiles_specs_match_the_installed_assets(self):
         authority = (ROOT / "services/authority-dev/deploy/lilith-authority-dev.tmpfiles.conf").read_text()

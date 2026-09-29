@@ -8,6 +8,7 @@ Status:
 - **NO DEV CONTACT BY THIS PREPARATION**; **NO DEV MUTATION**
 - **PR-1B NOT AUTHORIZED**; **FIRST MEMORY NOT AUTHORIZED**
 - Classification: **`PRE_PR1B_REBOOT_CEREMONY_READY`**
+- **Correction C-1** (after `PRE_REBOOT_GATE_PASS`): the §10 post-DR-5 observer check is a structural `routine-deploy` comparison that admits only the reviewed deploy-lock creation, not raw digest equality (§10 D-4)
 
 ```text
 reboot                          != rebaseline
@@ -402,7 +403,7 @@ gate uses `rebaseline` with the recorded candidate digest.
 
 ## 9. PR-1A P1A-9 rebaseline (post-reboot, read-only)
 
-Run in this order after §4.1 (Q1–Q9), then again after M-R2 (Q3, Q5, Q6 only).
+Run in this order after §4.1 (Q1–Q9), then again after M-R2 (Q3, Q5, Q6 only). The post-M-R2 Q3 observation is saved as `mr2/obs.txt`; it is the D-4 baseline (§10).
 
 | # | Check | Required |
 | --- | --- | --- |
@@ -464,11 +465,62 @@ used.
   - `UNOBSERVABLE_BY_DESIGN` for `prepared`, `retired`, the K-WIT blob path,
     and `holds`.
 
-**After that run** (owner session, read-only): `rebaseline` again, which
-must give the **same** candidate digest as B-4. `status --expect P1A-9`
-PASS, activation `GRANT_ABSENT`, and observer `stableSha256` equal to the
-post-M-R2 value. Together these prove the routine deploy did not touch the
-broker or authority state.
+**After that run** (owner session, read-only): all of the following, which
+together prove the routine deploy did not touch the broker or authority
+state.
+
+| # | Check | Required |
+| --- | --- | --- |
+| D-1 | `run_py $BRK rebaseline > dr5/rebaseline.json` | `BROKER_REBASELINE=PASS`, the **same** `baselineCandidateSha256` and incarnation as B-4 |
+| D-2 | `run_py $INS "status --expect P1A-9 $RELEASE_SHA"` | PASS |
+| D-3 | activation (Q6) | `GRANT_ABSENT` |
+| D-4 | `run_py $OBS observe > dr5/obs.txt`; `dev 'sudo -n stat -c "%n|%F|%u|%g|%a|%s|%h" /run/lilith-dev-deploy.lock' > dr5/lock-stat.txt`; then locally `python scripts/compare_reboot_host_observations.py routine-deploy mr2/obs.txt dr5/obs.txt dr5/lock-stat.txt`, where `mr2/obs.txt` is the Q3 observation taken after M-R2 | `ROUTINE_DEPLOY_OBSERVATION_COMPARISON=PASS unexpected=0` |
+
+**Why D-4 is a structural comparison, not raw digest equality (correction
+C-1).** The pre-reboot gate found `/run/lilith-dev-deploy.lock` on DEV. The
+pinned deploy helper (`scripts/dev_deployer/lilith-dev-deploy`, the
+`DEPLOY_HELPER_SHA` the broker verifier checks) creates it as root with
+`umask 077; exec 9>"${LOCK_PATH}"` and never removes it. `/run` is tmpfs, so
+the reboot removes it: the Q3 reboot comparison reports
+`RUN_ENTRY_NOT_RECREATED:lilith-dev-deploy.lock`, which is expected. The
+first routine deployment after the boot then creates it again. The observer's
+`/run` namespace inventory records the name, so the post-DR-5 `stableSha256`
+legitimately differs from the post-M-R2 one even with no drift. Requiring
+raw digest equality would fail with no real drift.
+
+`routine-deploy` mode therefore requires:
+
+- **every** observer section identical to the post-M-R2 observation:
+  - host facts, including `bootId`, `kernel`, and `rebootRequired` (only
+    `utcNow`/`uptimeSeconds` are volatile, and `utcNow` must be later);
+  - releases, host files, accounts, CURRENT, host key, listings,
+    filesystems;
+  - every unit property. Unlike the reboot comparison, the **broker's
+    lifetime properties are not exempt**: a broker restart fails
+    (`UNIT_PROPERTY_CHANGED:lilith-memory-broker.service:…`);
+  - enablement and drop-ins;
+  - every PR-1 object, including the OR-6 runtime directories at the
+    **same tmpfs inode** and both `/run/credentials/…` entries;
+  - every namespace root. No entry may be removed anywhere, and no entry may
+    be added outside `/run`;
+- in `/run`, at most one addition: exactly the name
+  `lilith-dev-deploy.lock`. It is accepted (`DEPLOY_LOCK_CREATED`) only
+  with the D-4 `stat` line for that exact path. That line must show
+  `regular empty file`, uid `0`, gid `0`, mode `600`, size `0`, and one
+  link. Anything else is unexpected:
+  - the addition without the `stat` line (`DEPLOY_LOCK_FACTS_MISSING`);
+  - a wrong path, type, owner, mode, size, or link count
+    (`DEPLOY_LOCK_WRONG_SPEC:<field>`);
+  - a `stat` line with no lock entry (`DEPLOY_LOCK_FACTS_WITHOUT_ENTRY`);
+  - a malformed or multi-line `stat` output (refused);
+  - any similar name (for example `lilith-dev-deploy.lock2`).
+
+If the lock is already present in both observations, the name set is
+unchanged and the raw digests are equal. If a `stat` line is supplied anyway,
+it is still checked. The lock is serialization state of the routine Core API
+helper. It carries no authority, custody, broker, or witness meaning
+(`DEPLOY_LOCK_IS_NOT_AUTHORITY`). The reboot comparison (Q3) never accepts
+it as an addition.
 
 A DR-5 FAIL, or a missing or changed PR-1 line, is a **STOP**. Do not rerun.
 
@@ -534,6 +586,7 @@ fixes it".
 | F-16 | owner declines M-R2 | M-R2 | `BROKER_BASELINE_NOT_ESTABLISHED` (fail-closed); not PR-2 eligible |
 | F-17 | DR-5 FAIL or PR1 line ≠ `P1A-9` | DR-5 | STOP; no rerun |
 | F-18 | post-DR-5 `rebaseline` digest ≠ B-4 | DR-5 | STOP: the routine deploy touched the broker |
+| F-18a | D-4 `routine-deploy` comparison `unexpected` non-empty (any delta other than the exact reviewed deploy-lock creation) | DR-5 | `ROUTINE_DEPLOY_OBSERVATION_UNEXPECTED`: STOP |
 | F-19 | needrestart, sudoers, or security configuration drift | any | STOP |
 | F-20 | unexplained filesystem or runtime state | any | STOP |
 | F-21 | any merge to main during the freeze (G1 → end of §9), other than the §10 evidence merge | any | repeat the affected gate steps; if they changed, STOP |
@@ -569,7 +622,8 @@ No snapshot, backup, or cloud revalidation is executed by this preparation.
 | `scripts/verify_broker_dev_current_incarnation.py` | third fixed operation `rebaseline` (§8); `ACCEPTED_CURRENT_BOOT_ID`; `CONTROLLER_POST_REBOOT_EXPECTED`; `_broker_checks(controller_expected=…)`; controller collection reads both contracts. `baseline` and `preservation` behaviour and pins unchanged |
 | `scripts/test_verify_broker_dev_current_incarnation.py` | `RebaselineTests` (9 tests): pass shape; the same host fails `preservation`/`baseline`; pre-reboot and restart-without-reboot refused; controller states; every drift class after reboot; broker-down fails closed; real supersession pins; the only-fixed-operations test now covers three operations |
 | `scripts/compare_reboot_host_observations.py` | new, offline-only PRE/POST observer comparator (§5, §7). It recomputes the observer's stable and section digests and never trusts them. There is no subprocess or network |
-| `scripts/test_compare_reboot_host_observations.py` | 16 tests: the expected reboot; suspicious changes; OR-6; `/run` namespace; host facts; transcript integrity; CLI exit codes; offline-only contract; tmpfiles specs pinned to the deploy assets; digest equality with the real observer (POSIX) |
+| `scripts/compare_reboot_host_observations.py` (correction C-1) | `routine-deploy BEFORE AFTER [LOCK_STAT]` mode for §10 D-4: every section identical (broker lifetime included), except exactly the reviewed `/run/lilith-dev-deploy.lock` creation, proven by a fixed `stat` line (`DEPLOY_LOCK_SPEC`) |
+| `scripts/test_compare_reboot_host_observations.py` | 16 reboot-mode tests, plus 12 C-1 tests (11 `RoutineDeployTests` and the lock-spec pin against the helper, its `DEPLOY_HELPER_SHA` and this record): the expected reboot; suspicious changes; OR-6; `/run` namespace; host facts; transcript integrity; CLI exit codes; offline-only contract; tmpfiles specs pinned to the deploy assets; digest equality with the real observer (POSIX) |
 | `services/authority-dev/tests/test_pr1s_installer_upgrade.py` | OR-6 `P1A-9` status test (§7) |
 | `scripts/test_deployer_authority_boundary_proof.py` | OR-6 DR-5 test (§7) |
 | `.github/workflows/ci.yml` | runs the new comparator test file |
