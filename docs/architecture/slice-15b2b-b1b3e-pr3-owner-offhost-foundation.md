@@ -604,8 +604,8 @@ acceptance semantics**, plus offline tooling to apply them.
   - `test_b1b3e_pr3_p34_ceremony_rehearsal.py`: 10 tests, OK;
   - `test_b1b3e_pr3_p35_pr1b_sequencing.py`: 19 tests, OK (P3-5);
   - `test_b1b3e_pr3_p36_acceptance_envelope.py`: 23 tests, OK (P3-6);
-  - `test_b1b3e_pr3_p33a_create_only_publication.py`: 22 tests, OK (P3-3A);
-  - full suites, all OK: `services/owner-memory-control` (626),
+  - `test_b1b3e_pr3_p33a_create_only_publication.py`: 30 tests, OK (P3-3A, including the probe-portability regressions);
+  - full suites, all OK: `services/owner-memory-control` (634),
     `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 

