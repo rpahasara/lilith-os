@@ -251,11 +251,22 @@ def with_l1b1_custody(obs: dict) -> dict:
     return obs
 
 
+IDENTITY_KEYS = ("bootId", "pid", "startTicks", "nRestarts", "releaseSha", "manifestSha256", "sharedLibrariesSha256")
+
+
+def identity_of(obs: dict) -> dict:
+    candidate = gate.evaluate(copy.deepcopy(obs))["baselineCandidate"]
+    return {key: candidate[key] for key in IDENTITY_KEYS}
+
+
 def preserve(obs: dict) -> dict:
-    """Evaluate `preservation` with the fixture's own accepted pins."""
+    """Evaluate `preservation` with the pre-reboot fixture's own accepted pins,
+    including its (pre-reboot, failed) Stage III controller contract."""
     accepted = gate.evaluate(observation())["baselineCandidateSha256"]
     return gate.evaluate_preservation(obs, accepted_incarnation=CURRENT_INVOCATION,
-                                      accepted_candidate_sha256=accepted)
+                                      accepted_candidate_sha256=accepted,
+                                      accepted_identity=identity_of(observation()),
+                                      controller_expected=gate.CONTROLLER_EXPECTED)
 
 
 class LegacyBaselineUnchangedTests(unittest.TestCase):
@@ -395,10 +406,17 @@ class PreservationTests(unittest.TestCase):
         self.assertNotIn("authorityMaturity", gate.evaluate(observation()))
 
     def test_real_pins_match_the_accepted_runtime_baseline_record(self) -> None:
-        record = (ROOT / "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md").read_text(encoding="utf-8")
-        self.assertIn(gate.ACCEPTED_CURRENT_INCARNATION, record)
-        self.assertIn(gate.ACCEPTED_CURRENT_BASELINE_SHA256, record)
-        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, CURRENT_INVOCATION)
+        record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline-acceptance.md"
+                  ).read_text(encoding="utf-8")
+        for value in (gate.ACCEPTED_CURRENT_INCARNATION, gate.ACCEPTED_CURRENT_BASELINE_SHA256,
+                      gate.ACCEPTED_CURRENT_BOOT_ID, *map(str, gate.ACCEPTED_CURRENT_IDENTITY.values())):
+            self.assertIn(value, record)
+        # The retired pre-reboot baseline stays documented in its own record, never accepted.
+        old = (ROOT / "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md").read_text(encoding="utf-8")
+        retired = gate.RETIRED_BROKER_BASELINES[0]
+        self.assertEqual(retired["runtimeIncarnation"], CURRENT_INVOCATION)
+        for value in (retired["runtimeIncarnation"], retired["baselineCandidateSha256"], retired["bootId"]):
+            self.assertIn(value, old)
         # The fixture is not the live host, so the real pin rejects it: no silent acceptance.
         self.assertIn("BASELINE_CANDIDATE_CHANGED",
                       gate.evaluate_preservation(with_l1b1_custody(observation()))["failures"])
@@ -523,20 +541,166 @@ class RebaselineTests(unittest.TestCase):
             self.assertIn(code, result["failures"])
 
     def test_real_supersession_pins_are_the_accepted_baseline(self) -> None:
-        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, BOOT_ID)
-        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, gate.ACCEPTED_BROKER_BOOT_ID)
+        # After the re-pin, `rebaseline` supersedes the currently accepted (post-reboot) baseline.
+        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, ACCEPTED_BOOT)
+        self.assertNotEqual(gate.ACCEPTED_CURRENT_BOOT_ID, gate.ACCEPTED_BROKER_BOOT_ID)
         result = gate.evaluate_rebaseline(rebooted(with_l1b1_custody(observation())))
         self.assertEqual(result["supersedes"], {"runtimeIncarnation": gate.ACCEPTED_CURRENT_INCARNATION,
                                                 "bootId": gate.ACCEPTED_CURRENT_BOOT_ID,
                                                 "baselineCandidateSha256": gate.ACCEPTED_CURRENT_BASELINE_SHA256})
         self.assertEqual(result["BROKER_REBASELINE"], "PASS", result["failures"])
-        # `rebaseline` never re-pins: preservation still names the old accepted incarnation.
-        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, CURRENT_INVOCATION)
+        # `rebaseline` itself never re-pins; the pins are reviewed constants.
+        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, ACCEPTED_INVOCATION)
 
     def test_controller_collection_reads_both_contracts(self) -> None:
         for key in (*gate.CONTROLLER_EXPECTED, *gate.CONTROLLER_POST_REBOOT_EXPECTED):
             self.assertIn(key, gate.CONTROLLER_PROPERTIES)
         self.assertEqual(len(gate.CONTROLLER_PROPERTIES), len(set(gate.CONTROLLER_PROPERTIES)))
+
+
+ACCEPTED_BOOT = "eea461c3-60f0-4b10-8ee9-556dcef19711"
+ACCEPTED_INVOCATION = "84798e5b74494e1ea362ce90f1cf04ad"
+ACCEPTED_CANDIDATE = "5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2"
+
+
+def accepted_obs() -> dict:
+    """The accepted post-reboot shape: custody present, broker started once, controller never run."""
+    return rebooted(with_l1b1_custody(observation()))
+
+
+def preserve_accepted(obs: dict) -> dict:
+    """`preservation` with the fixture's post-reboot pins and the real default controller contract."""
+    pinned = accepted_obs()
+    return gate.evaluate_preservation(obs, accepted_incarnation=NEW_INVOCATION,
+                                      accepted_candidate_sha256=gate.canonical_sha256(gate.evaluate(pinned)["baselineCandidate"]),
+                                      accepted_identity=identity_of(pinned))
+
+
+class RepinTests(unittest.TestCase):
+    """Pre-PR-1B re-pin: `preservation` pins the owner-accepted post-reboot baseline."""
+
+    def test_real_pins_are_exactly_the_accepted_baseline(self) -> None:
+        self.assertEqual(gate.ACCEPTED_CURRENT_INCARNATION, ACCEPTED_INVOCATION)
+        self.assertEqual(gate.ACCEPTED_CURRENT_BASELINE_SHA256, ACCEPTED_CANDIDATE)
+        self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, ACCEPTED_BOOT)
+        self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY, {
+            "bootId": ACCEPTED_BOOT, "pid": 2586, "startTicks": 69918, "nRestarts": "0",
+            "releaseSha": "817a83e44cec8965479fd97fc30b7a0b3ae49ab2",
+            "manifestSha256": "7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614",
+            "sharedLibrariesSha256": "40e68a1c27328c27b811da19bb17a1262cbacff18dcd7ab397e06bebb17a87bd"})
+        self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY["releaseSha"], gate.RELEASE_SHA)
+        self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY["manifestSha256"], gate.MANIFEST_SHA)
+        self.assertEqual(set(gate.ACCEPTED_CURRENT_IDENTITY), set(IDENTITY_KEYS))
+        self.assertIs(gate.ACCEPTED_CURRENT_CONTROLLER_EXPECTED, gate.CONTROLLER_POST_REBOOT_EXPECTED)
+        retired = gate.RETIRED_BROKER_BASELINES
+        self.assertEqual([r["runtimeIncarnation"] for r in retired], [CURRENT_INVOCATION])
+        self.assertEqual(retired[0]["baselineCandidateSha256"],
+                         "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5")
+        self.assertEqual(retired[0]["bootId"], BOOT_ID)
+        self.assertNotIn(gate.ACCEPTED_CURRENT_INCARNATION, [r["runtimeIncarnation"] for r in retired])
+
+    def test_preservation_accepts_the_exact_accepted_baseline(self) -> None:
+        result = preserve_accepted(accepted_obs())
+        self.assertEqual(result["BROKER_PRESERVATION"], "PASS", result["failures"])
+        self.assertIs(result["acceptedIdentityMatches"], True)
+        self.assertIs(result["baselineCandidateMatchesAccepted"], True)
+        self.assertEqual(result["runtimeIncarnation"], NEW_INVOCATION)
+
+    def assertRejected(self, mutate, *codes) -> None:
+        obs = accepted_obs()
+        mutate(obs)
+        result = preserve_accepted(obs)
+        self.assertEqual(result["BROKER_PRESERVATION"], "FAIL", codes)
+        for code in codes:
+            self.assertIn(code, result["failures"])
+
+    def test_preservation_rejects_the_retired_pre_reboot_baseline(self) -> None:
+        result = preserve_accepted(with_l1b1_custody(observation()))  # the old incarnation, as last accepted
+        self.assertEqual(result["BROKER_PRESERVATION"], "FAIL")
+        for code in ("RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE", "BASELINE_CANDIDATE_CHANGED",
+                     "ACCEPTED_IDENTITY_CHANGED:bootId", "ACCEPTED_IDENTITY_CHANGED:pid",
+                     "ACCEPTED_IDENTITY_CHANGED:startTicks", "STAGE3_CONTROLLER_CHANGED"):
+            self.assertIn(code, result["failures"])
+
+    def test_preservation_rejects_the_old_incarnation_alone(self) -> None:
+        self.assertRejected(lambda o: o["units"][gate.SERVICE].update(InvocationID=CURRENT_INVOCATION),
+                            "RUNTIME_INCARNATION_NOT_ACCEPTED_BASELINE")
+
+    def test_preservation_rejects_old_pid_and_start_ticks(self) -> None:
+        def old_process(o):
+            o["units"][gate.SERVICE].update(MainPID="132976")
+            o["process"].update(pid=132976)
+            o["brokerProcesses"] = [132976]
+        self.assertRejected(old_process, "ACCEPTED_IDENTITY_CHANGED:pid", "BASELINE_CANDIDATE_CHANGED")
+        self.assertRejected(lambda o: o["process"].update(startTicks=108213277),
+                            "ACCEPTED_IDENTITY_CHANGED:startTicks", "BASELINE_CANDIDATE_CHANGED")
+
+    def test_preservation_rejects_a_candidate_mismatch(self) -> None:
+        self.assertRejected(lambda o: o["libraries"][EXPAT].update(sha256="e" * 64),
+                            "ACCEPTED_IDENTITY_CHANGED:sharedLibrariesSha256", "BASELINE_CANDIDATE_CHANGED")
+        self.assertRejected(lambda o: o["process"].update(startTime="2026-09-30T00:00:00Z"),
+                            "BASELINE_CANDIDATE_CHANGED")
+        obs = accepted_obs()
+        pinned = accepted_obs()
+        result = gate.evaluate_preservation(obs, accepted_incarnation=NEW_INVOCATION,
+                                            accepted_candidate_sha256="0" * 64, accepted_identity=identity_of(pinned))
+        self.assertEqual(result["failures"], ["BASELINE_CANDIDATE_CHANGED"])
+
+    def test_preservation_rejects_restarts(self) -> None:
+        self.assertRejected(lambda o: o["units"][gate.SERVICE].update(NRestarts="1"),
+                            "BROKER_SERVICE_STATE_UNEXPECTED", "ACCEPTED_IDENTITY_CHANGED:nRestarts",
+                            "BASELINE_CANDIDATE_CHANGED")
+
+    def test_preservation_rejects_a_boot_mismatch(self) -> None:
+        self.assertRejected(lambda o: o["host"].update(bootId=BOOT_ID),
+                            "ACCEPTED_IDENTITY_CHANGED:bootId", "BASELINE_CANDIDATE_CHANGED")
+        self.assertRejected(lambda o: o["host"].update(bootId="11111111-2222-3333-4444-555555555555"),
+                            "ACCEPTED_IDENTITY_CHANGED:bootId", "BASELINE_CANDIDATE_CHANGED")
+
+    def test_preservation_pins_the_accepted_boots_controller_state(self) -> None:
+        self.assertRejected(lambda o: o["units"].update({gate.CONTROLLER: dict(gate.CONTROLLER_EXPECTED)}),
+                            "STAGE3_CONTROLLER_CHANGED")
+        self.assertRejected(lambda o: o["units"][gate.CONTROLLER].update(InvocationID="e" * 32),
+                            "STAGE3_CONTROLLER_CHANGED")
+
+    def test_every_broker_drift_class_still_fails(self) -> None:
+        for code, mutate in {
+            "RELEASE_MANIFEST_CHANGED": lambda o: o["release"].update(manifestSha256="0" * 64),
+            "BROKER_STATE_CHANGED": lambda o: o["files"][next(iter(gate.STATE_FILES))].update(sha256="0" * 64),
+            "SOCKET_UNIT_CHANGED": lambda o: o["units"][gate.SOCKET].update(UnitFileState="enabled"),
+            "STAGE3_ARM_GUARD_OR_CONSUMPTION_PRESENT": lambda o: o["stage3"]["absent"].update(
+                {gate.STAGE3_ABSENT[0]: False}),
+            "DEPLOYER_POLICY_CHANGED": lambda o: o["deployer"].update(helperSha256="0" * 64),
+        }.items():
+            with self.subTest(code):
+                self.assertRejected(mutate, code)
+
+    def test_rebaseline_is_unchanged_and_never_accepts_the_accepted_baseline(self) -> None:
+        # Same code path, same fixture results as before the re-pin (RebaselineTests use explicit pins).
+        self.assertEqual(rebase(accepted_obs())["BROKER_REBASELINE"], "PASS")
+        # Against the real pins, the accepted baseline itself is not a *new* candidate.
+        obs = accepted_obs()
+        obs["host"]["bootId"] = ACCEPTED_BOOT
+        obs["units"][gate.SERVICE]["InvocationID"] = ACCEPTED_INVOCATION
+        result = gate.evaluate_rebaseline(obs)
+        self.assertIn("REBOOT_NOT_OBSERVED", result["failures"])
+        self.assertIn("RUNTIME_INCARNATION_NOT_REPLACED", result["failures"])
+        self.assertIsNone(result["baselineCandidateSha256"])
+        # `baseline` keeps its historical pre-custody semantics.
+        self.assertIn("CUSTODY_PATH_PRESENT_BEFORE_B1B3D", gate.evaluate(accepted_obs())["failures"])
+
+    def test_preservation_pass_implies_no_authority_or_custody_acceptance(self) -> None:
+        result = preserve_accepted(accepted_obs())
+        self.assertEqual(result["BROKER_PRESERVATION"], "PASS")
+        self.assertEqual(result["authorityCustodyJudgment"], "NOT_PERFORMED")
+        self.assertEqual(result["authorityMaturity"], "NOT_ESTABLISHED_BY_PRESERVATION")
+        self.assertEqual(result["authorityCustody"]["brokerVerifierAssessment"], "NOT_ASSESSED_BY_BROKER_VERIFIER")
+        text = json.dumps(result)
+        for token in ("PR-1B", "PR1B", "AUTHORIZED", "K_WIT", "K-WIT", "INITIAL_CUSTODY", "FRESHNESS",
+                      "AUTHORITY_BOUNDARY_PROOF", "P1A-9"):
+            self.assertNotIn(token, text)
+        keys = [key for key in walk_keys(result) if "maturity" in key.lower() or key.lower() == "stage"]
+        self.assertEqual(keys, ["authorityMaturity"])
 
 
 class ParserTests(unittest.TestCase):
