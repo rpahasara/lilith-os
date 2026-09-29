@@ -319,5 +319,127 @@ class AndroidProbeScriptTests(unittest.TestCase):
             self.assertIn(line, text, line)
 
 
+class _NoOsLink:
+    """Temporarily remove os.link, as in the Termux Python 3.14 build on the S25."""
+
+    def __enter__(self):
+        self.saved = os.link
+        del os.link
+        return self
+
+    def __exit__(self, *exc):
+        os.link = self.saved
+        return False
+
+
+@unittest.skipUnless(POSIX, "POSIX primitives")
+class ProbeFailContainmentTests(unittest.TestCase):
+    """Regression: the probe crashed with AttributeError when os.link was absent."""
+
+    KEYS = ["directory_fsync", "hardlink", "rename_noreplace", "direct_o_excl", "symlink_detection",
+            "canonical_reread", "cleanup", "admitted_backend"]
+
+    def setUp(self):
+        self.t = Temp(self)
+        self.script = load_probe_script()
+
+    def full_block(self, result) -> None:
+        lines = self.script.render(result).strip().split("\n")
+        self.assertEqual(lines[0], "ANDROID_P3_PROBE")
+        self.assertEqual([line.split("=")[0] for line in lines[1:]], self.KEYS)
+
+    def test_os_link_attribute_absent(self):
+        base = self.t.sub("tmp")
+        with _NoOsLink():
+            self.assertFalse(hasattr(os, "link"))
+            result = self.script.probe(str(base))
+        self.assertEqual(result["hardlink"], "UNAVAILABLE")
+        self.assertEqual(result["rename_noreplace"], "PASS")                 # still evaluated
+        self.assertEqual(result["direct_o_excl"], "PASS")
+        for key in ("directory_fsync", "symlink_detection", "canonical_reread", "cleanup"):
+            self.assertEqual(result[key], "PASS", key)
+        self.assertEqual(result["admitted_backend"], "RENAME_NOREPLACE_V1")
+        self.full_block(result)
+        self.assertEqual(os.listdir(base), [])
+
+    def test_os_link_permission_denied(self):
+        with mock.patch.object(self.script.os, "link", side_effect=PermissionError(errno.EACCES, "Permission denied")):
+            result = self.script.probe(str(self.t.sub("tmp")))
+        self.assertEqual(result["hardlink"], "FAIL")
+        self.assertEqual(result["rename_noreplace"], "PASS")
+        self.assertEqual(result["admitted_backend"], "RENAME_NOREPLACE_V1")
+        self.full_block(result)
+
+    def test_rename_noreplace_evaluated_after_hardlink_failure(self):
+        calls = []
+        real = self.script._rename_noreplace
+
+        def recording(src, dst):
+            calls.append(dst)
+            return real(src, dst)
+
+        order = []
+        real_backend = self.script._backend
+
+        def tracking(root, name, publish):
+            order.append(name)
+            return real_backend(root, name, publish)
+
+        with mock.patch.object(self.script, "_rename_noreplace", side_effect=recording),                 mock.patch.object(self.script, "_backend", side_effect=tracking), _NoOsLink():
+            result = self.script.probe(str(self.t.sub("tmp")))
+        self.assertEqual(set(order), {"rename", "link", "direct"})           # every backend attempted
+        self.assertTrue(calls)                                                 # rename-noreplace really called
+        self.assertEqual((result["hardlink"], result["rename_noreplace"]), ("UNAVAILABLE", "PASS"))
+
+    def test_admitted_none_when_no_admitted_backend_passes(self):
+        with _NoOsLink(), mock.patch.object(self.script, "_rename_noreplace", side_effect=self.script.Unavailable()):
+            result = self.script.probe(str(self.t.sub("tmp")))
+        self.assertEqual((result["hardlink"], result["rename_noreplace"], result["direct_o_excl"]),
+                         ("UNAVAILABLE", "UNAVAILABLE", "PASS"))
+        self.assertEqual(result["admitted_backend"], "NONE")                  # DIRECT_O_EXCL is never admitted
+        self.full_block(result)
+
+    def test_unexpected_backend_error_is_contained(self):
+        with mock.patch.object(self.script, "_rename_noreplace", side_effect=ValueError("unexpected")),                 mock.patch.object(self.script, "_dir_fsync", wraps=self.script._dir_fsync):
+            result = self.script.probe(str(self.t.sub("tmp")))
+        self.assertEqual(result["rename_noreplace"], "FAIL")
+        self.assertEqual(result["hardlink"], "PASS")
+        self.assertEqual(result["admitted_backend"], "HARDLINK_PUBLISH_V1")
+        self.full_block(result)
+
+    def test_common_check_failure_is_contained(self):
+        with mock.patch.object(self.script.os, "symlink", side_effect=PermissionError(errno.EACCES, "no")):
+            result = self.script.probe(str(self.t.sub("tmp")))
+        self.assertEqual(result["symlink_detection"], "FAIL")
+        self.assertEqual(result["rename_noreplace"], "PASS")                   # later checks still ran
+        self.assertEqual(result["admitted_backend"], "NONE")                  # a common check failed
+        self.full_block(result)
+
+    def test_main_always_emits_the_complete_block(self):
+        base = self.t.sub("tmp")
+        out = io.StringIO()
+        with _NoOsLink(), mock.patch.object(self.script, "_base", return_value=str(base)), redirect_stdout(out):
+            self.assertEqual(self.script.main(), 0)
+        lines = out.getvalue().strip().split("\n")
+        self.assertEqual(lines[0], "ANDROID_P3_PROBE")
+        self.assertEqual(len(lines), 1 + len(self.KEYS))
+        self.assertIn("admitted_backend=RENAME_NOREPLACE_V1", lines)
+
+    def test_tool_probe_and_publisher_without_os_link(self):
+        with _NoOsLink():
+            probe = T.probe_storage(self.t.sub("store"))
+            self.assertEqual(probe["backends"]["hardlinkPublish"], T.UNAVAILABLE)
+            self.assertEqual(probe["backends"]["renameNoReplace"], T.PASS)
+            self.assertEqual((probe["result"], probe["admittedBackend"]), (T.P3_STORAGE_CAPABLE, "RENAME_NOREPLACE_V1"))
+            d = self.t.sub("d")
+            with self.assertRaises(COP.HardLinkUnavailable):
+                COP.publish(d, "000001-a.json", DATA, backend=COP.HARDLINK_PUBLISH_V1)
+            self.assertEqual(os.listdir(d), [])
+            with mock.patch.object(COP, "rename_noreplace",
+                                   side_effect=COP.RenameNoReplaceUnavailable(errno.ENOSYS, "x")):
+                none = T.probe_storage(self.t.sub("store2"))
+            self.assertEqual((none["result"], none["admittedBackend"]), (T.P3_STORAGE_INCAPABLE, "NONE"))
+
+
 if __name__ == "__main__":
     unittest.main()

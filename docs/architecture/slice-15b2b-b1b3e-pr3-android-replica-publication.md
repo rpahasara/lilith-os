@@ -259,6 +259,48 @@ app seccomp filter and SELinux policy decide it, and only the probe settles
 it. If it reports `UNAVAILABLE` or `FAIL`, the S25 remains
 `admitted_backend=NONE` for V1.
 
+### 11.1 Probe portability fix (fail-contained)
+
+**Observed on the real S25 Ultra**, in Termux private storage with Python
+3.14:
+
+- a shell `ln a b` gave `Permission denied`;
+- `android_p3_probe.py` then crashed with
+  `AttributeError: module 'os' has no attribute 'link'`, before printing any
+  result.
+
+That was a **probe bug**, not storage evidence. The fix:
+
+- **Hard-link backend.** `os.link` is never assumed:
+  - if the attribute is absent, the result is `hardlink=UNAVAILABLE`;
+  - if the call fails (for example `EACCES`), the result is `hardlink=FAIL`.
+
+  Both are backend results, never an abort. The same applies to the
+  in-repo publisher (`HardLinkUnavailable`, a subclass of
+  `BackendUnavailable`) and to the tool's `probe_storage`.
+- **Every backend and every common check is fail-contained.** Any error
+  becomes that item's `FAIL`/`UNAVAILABLE`. `rename_noreplace`,
+  `direct_o_excl`, `directory_fsync`, `symlink_detection`, and
+  `canonical_reread` are always evaluated. `os.symlink` is not assumed
+  either.
+- **The complete result block is always printed.** The only exceptions are
+  the fundamental safety preconditions: shared storage, not Termux
+  private storage, inside a replica, or failure to create the temporary
+  directory.
+- **Regression tests.** They cover:
+  - `os.link` absent;
+  - `os.link` permission denied;
+  - rename-noreplace still evaluated after a hard-link failure;
+  - `admitted_backend=RENAME_NOREPLACE_V1` when it passes;
+  - `NONE` when no admitted backend passes;
+  - unexpected errors contained;
+  - a common-check failure contained;
+  - `main()` always printing the block;
+  - the tool probe and publisher without `os.link`.
+
+The S25's `rename_noreplace` result is **still unknown** until the fixed
+probe is re-run on the phone. The S25 remains not admitted.
+
 ## 12. S25 independence nonclaims
 
 Even with `admitted_backend=RENAME_NOREPLACE_V1`, **phone capability is

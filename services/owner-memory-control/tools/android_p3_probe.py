@@ -102,17 +102,21 @@ def _dir_fsync(path: str) -> None:
 
 def _backend(root: str, name: str, publish) -> str:
     """Publish once, re-read, then prove a second publish at the final name is
-    refused by the primitive and the first bytes are untouched."""
-    directory = os.path.join(root, name)
-    os.mkdir(directory, 0o700)
-    final = os.path.join(directory, "000001-probe.json")
+    refused by the primitive and the first bytes are untouched.
+
+    Fail-contained: any error in one backend is that backend's result
+    (UNAVAILABLE when the primitive is absent, FAIL otherwise), never an
+    abort of the whole probe."""
     try:
-        publish(directory, final, PAYLOAD)
-    except Unavailable:
-        return "UNAVAILABLE"
-    except OSError:
-        return "FAIL"
-    try:
+        directory = os.path.join(root, name)
+        os.mkdir(directory, 0o700)
+        final = os.path.join(directory, "000001-probe.json")
+        try:
+            publish(directory, final, PAYLOAD)
+        except Unavailable:
+            return "UNAVAILABLE"
+        except Exception:                   # noqa: BLE001 - contained per backend
+            return "FAIL"
         if _read(final) != PAYLOAD:
             return "FAIL"
         try:
@@ -121,7 +125,7 @@ def _backend(root: str, name: str, publish) -> str:
         except FileExistsError:
             pass
         return "PASS" if _read(final) == PAYLOAD else "FAIL"
-    except (OSError, Unavailable):
+    except Exception:                       # noqa: BLE001 - contained per backend
         return "FAIL"
 
 
@@ -138,9 +142,12 @@ def _via_rename(directory: str, final: str, data: bytes) -> None:
 
 def _via_link(directory: str, final: str, data: bytes) -> None:
     pending = os.path.join(directory, ".pending-" + os.path.basename(final) + "." + os.urandom(4).hex())
+    link = getattr(os, "link", None)       # some Termux Python builds do not expose os.link
+    if link is None:
+        raise Unavailable()
     _create(pending, data)
     try:
-        os.link(pending, final)
+        link(pending, final)
     finally:
         os.unlink(pending)
     _dir_fsync(directory)
@@ -168,40 +175,58 @@ def _base(require_termux: bool) -> str:
         current = parent
 
 
+def _check_directory_fsync(root: str) -> bool:
+    _dir_fsync(root)
+    return True
+
+
+def _check_canonical_reread(root: str) -> bool:
+    path = os.path.join(root, "a.json")
+    _create(path, PAYLOAD)
+    raw = _read(path)
+    return json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")).encode() == PAYLOAD == raw
+
+
+def _check_symlink_detection(root: str) -> bool:
+    symlink = getattr(os, "symlink", None)
+    if symlink is None:
+        return False
+    target, link = os.path.join(root, "t.json"), os.path.join(root, "s.json")
+    _create(target, PAYLOAD)
+    symlink(target, link)
+    try:
+        _read(link)                         # O_NOFOLLOW must refuse the symlink
+        return False
+    except OSError:
+        return stat.S_ISLNK(os.lstat(link).st_mode)
+
+
 def probe(base: str) -> dict[str, str]:
     result = {"directory_fsync": "FAIL", "hardlink": "FAIL", "rename_noreplace": "UNAVAILABLE",
               "direct_o_excl": "FAIL", "symlink_detection": "FAIL", "canonical_reread": "FAIL", "cleanup": "FAIL"}
-    root = tempfile.mkdtemp(prefix=PREFIX, dir=base)
+    root = tempfile.mkdtemp(prefix=PREFIX, dir=base)      # fundamental: failure here is not contained
     try:
-        try:
-            _dir_fsync(root)
-            result["directory_fsync"] = "PASS"
-        except OSError:
-            pass
-        a = os.path.join(root, "a.json")
-        _create(a, PAYLOAD)
-        result["canonical_reread"] = "PASS" if json.loads(_read(a)) == json.loads(PAYLOAD) and \
-            json.dumps(json.loads(_read(a)), sort_keys=True, separators=(",", ":")).encode() == PAYLOAD else "FAIL"
-        link = os.path.join(root, "s.json")
-        try:
-            os.symlink(a, link)
+        for key, check in (("directory_fsync", lambda: _check_directory_fsync(root)),
+                           ("canonical_reread", lambda: _check_canonical_reread(root)),
+                           ("symlink_detection", lambda: _check_symlink_detection(root))):
             try:
-                _read(link)
-            except OSError:
-                result["symlink_detection"] = "PASS" if stat.S_ISLNK(os.lstat(link).st_mode) else "FAIL"
-        except OSError:
-            pass
+                result[key] = "PASS" if check() else "FAIL"
+            except Exception:               # noqa: BLE001 - contained per check
+                result[key] = "FAIL"
         result["rename_noreplace"] = _backend(root, "rename", _via_rename)
         result["hardlink"] = _backend(root, "link", _via_link)
         result["direct_o_excl"] = _backend(root, "direct", _via_direct)
     finally:
-        for current, directories, files in os.walk(root, topdown=False):
-            for name in files:
-                os.unlink(os.path.join(current, name))
-            for name in directories:
-                path = os.path.join(current, name)
-                os.unlink(path) if os.path.islink(path) else os.rmdir(path)
-        os.rmdir(root)
+        try:
+            for current, directories, files in os.walk(root, topdown=False):
+                for name in files:
+                    os.unlink(os.path.join(current, name))
+                for name in directories:
+                    path = os.path.join(current, name)
+                    os.unlink(path) if os.path.islink(path) else os.rmdir(path)
+            os.rmdir(root)
+        except OSError:
+            pass
         result["cleanup"] = "FAIL" if os.path.lexists(root) else "PASS"
     common = all(result[k] == "PASS" for k in ("directory_fsync", "symlink_detection", "canonical_reread", "cleanup"))
     admitted = "NONE"
