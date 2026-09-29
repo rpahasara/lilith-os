@@ -589,7 +589,7 @@ acceptance semantics**, plus offline tooling to apply them.
 | P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
 | P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_STORAGE_INCOMPLETE`**: Replica A empty; Replica B is waiting for an independent medium (§25) |
 | P3-4 | synthetic owner freshness ceremony rehearsal (§26) and runbook template | **PASSED**; does not close P3-3 |
-| P3-5 | PR-1B sequencing: the genesis pin is stored before the V2 genesis commit (RR-35, unchanged); owner record 1 is appended to both replicas after the commit; `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` = `FRESHNESS_PRECONDITION_MET` | not authorized |
+| P3-5 | PR-1B bootstrap sequencing design: dependency DAG, state machine (`pr1b_sequencing.py`), freshness-gate placement, PONRs, crash matrix, owner packages ([sequencing record](slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequencing.md)) | **done (design only)**; PR-1B eligibility FALSE while P3-3 is incomplete |
 | P3-6 | an acceptance envelope, if a later decision replaces D2 for non-synthetic authority | not started |
 
 ## 23. Validation
@@ -601,7 +601,8 @@ acceptance semantics**, plus offline tooling to apply them.
   - `test_b1b3e_pr3_p32_owner_freshness_tool.py`: 19 tests, OK;
   - `test_b1b3e_pr3_p33_storage_gate.py`: 16 tests, OK;
   - `test_b1b3e_pr3_p34_ceremony_rehearsal.py`: 10 tests, OK;
-  - full suites, all OK: `services/owner-memory-control` (561),
+  - `test_b1b3e_pr3_p35_pr1b_sequencing.py`: 19 tests, OK (P3-5);
+  - full suites, all OK: `services/owner-memory-control` (580),
     `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 

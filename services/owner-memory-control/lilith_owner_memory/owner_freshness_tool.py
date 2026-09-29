@@ -267,8 +267,15 @@ def load_register(paths: Sequence[Any]) -> tuple[OF.OwnerRegisterResultV1, tuple
         _distinct(replicas)
     except ToolRefusal as refusal:
         return OF.OwnerRegisterResultV1(OF.REGISTER_NOT_VERIFIED, refusal.reason, refusal.detail), ()
-    if any(not r.records for r in replicas):
+    if len(replicas) < MINIMUM_REPLICAS:
+        return OF.OwnerRegisterResultV1(OF.REGISTER_NOT_VERIFIED, "REPLICA_QUORUM_UNMET", str(len(replicas))), \
+            replicas
+    if all(not r.records for r in replicas):
         return OF.OwnerRegisterResultV1(OF.REGISTER_NOT_VERIFIED, "OWNER_REGISTER_EMPTY"), replicas
+    empty = [index for index, r in enumerate(replicas) if not r.records]
+    if empty:                          # some copies empty, others not: one is behind
+        return OF.OwnerRegisterResultV1(OF.REGISTER_NOT_VERIFIED, "REPLICAS_DIVERGENT",
+                                        f"replica{empty[0]}:PREFIX"), replicas
     return OF.reconcile_owner_replicas([list(r.records) for r in replicas], minimum_replicas=MINIMUM_REPLICAS), \
         replicas
 
