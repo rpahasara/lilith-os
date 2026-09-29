@@ -12,6 +12,13 @@ Status:
   owner tooling, phone tooling, or acceptance flag. No phone contact was
   made to prepare it
 - **Real M-B1 NOT AUTHORIZED**; **PR-1B NOT AUTHORIZED**
+- **Follow-up (2026-09-29):**
+  - The §6 read-only collection ran and is **accepted**
+    (`B4_POSTHOC_READONLY_COLLECTION=ACCEPTED`). Run 1's archive transport
+    is now established, which supersedes the §1 caveat.
+  - Run 1 stays `PASS_OBSERVED` / `INCOMPLETE`.
+  - The owner requires one fresh TEST-only rehearsal (run 2). See the
+    [post-hoc acceptance and run 2 record](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-run2.md).
 
 ```text
 PASS observed != reviewed gate proven != rehearsal accepted

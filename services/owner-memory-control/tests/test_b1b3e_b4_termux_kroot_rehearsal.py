@@ -327,5 +327,51 @@ class OperatorBlockTests(unittest.TestCase):
         self.assertTrue(out.endswith("PARENT_NOT_OK\n"), out)
 
 
+RUN2_DOC = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-run2.md"
+REVIEWED_OPERATOR_SHA256 = "353c988f67cd855372c7037f0b55d8655af63d52bb4ac26a44f1d43a7c98d6a7"
+RUN2_PRELUDE = (
+    "# ===== B-4 FRESH TEST-only rehearsal, run 2: derived from the reviewed operator block 353c988f =====\n"
+    "# Derivation (test-pinned): exactly (1) these prelude lines and (2) W=\"$HOME/lilith-b4-rehearsal-2\" (run 1's directory is kept).\n"
+    "# Run ONLY as a file, with airplane mode ON and USB unplugged BEFORE starting (the PAUSE below is then already satisfied):\n"
+    "#   bash \"$HOME/storage/downloads/b4_phone_commands.run2.sh\" 2>&1 | tee \"$HOME/lilith-b4-rehearsal-2.transcript.txt\"\n"
+    "# echo() enforces the block's own rule in file mode: any line it prints that begins with STOP ends the run with exit 1.\n"
+    "echo() { builtin echo \"$@\"; case \"${1-}\" in STOP*) exit 1;; esac; }\n")
+
+
+def _run2_block() -> str:
+    blocks = [part.split("\n```", 1)[0] + "\n" for part in RUN2_DOC.read_text(encoding="utf-8").split("```bash\n")[1:]]
+    run2 = [block for block in blocks if block.startswith("# ===== B-4 FRESH")]
+    assert len(run2) == 1, RUN2_DOC
+    return run2[0]
+
+
+class RunTwoTests(unittest.TestCase):
+    """Pins the run-2 script to the reviewed 353c988f block: only the prelude and the staging directory differ."""
+
+    def test_reviewed_block_is_unchanged(self):
+        self.assertEqual(hashlib.sha256(_bash_block(STAGING_DOC).encode()).hexdigest(), REVIEWED_OPERATOR_SHA256)
+
+    def test_run2_is_the_reviewed_block_plus_prelude_and_new_staging_dir(self):
+        reviewed = _bash_block(STAGING_DOC)
+        self.assertEqual(reviewed.count('W="$HOME/lilith-b4-rehearsal"\n'), 1)
+        expected = RUN2_PRELUDE + reviewed.replace('W="$HOME/lilith-b4-rehearsal"\n', 'W="$HOME/lilith-b4-rehearsal-2"\n')
+        self.assertEqual(_run2_block(), expected)
+        self.assertIn(f'R="{CANONICAL_REPLICA_B}"', _run2_block())
+
+    def test_recorded_run2_digest_matches_the_block(self):
+        text = RUN2_DOC.read_text(encoding="utf-8")
+        start = text.index("`b4_phone_commands.run2.sh` (SHA-256")
+        recorded = text[start:start + 200].split("`")[3]
+        self.assertEqual(recorded, hashlib.sha256(_run2_block().encode()).hexdigest())
+
+    @unittest.skipUnless(os.name == "posix", "runs the echo() stop wrapper under bash")
+    def test_stop_wrapper_ends_the_run(self):
+        wrapper = RUN2_PRELUDE.splitlines()[-1]
+        script = f'{wrapper}\necho PASS_TOKEN\ntrue && echo NEXT || echo "STOP: never"\nfalse && echo X || echo "STOP: gate"\necho NOT_REACHED\n'
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "PASS_TOKEN\nNEXT\nSTOP: gate\n")
+
+
 if __name__ == "__main__":
     unittest.main()
