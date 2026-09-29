@@ -1,13 +1,14 @@
 # Slice 15B2b-B1b-3e PR-3: Owner / Off-Host Freshness Foundation
 
-**Status: PR-3 DESIGN + SOURCE FOUNDATION + P3-2 OFFLINE TOOLING.**
+**Status: PR-3 DESIGN + SOURCE FOUNDATION + P3-2 OFFLINE TOOLING + P3-3 STORAGE (`P3_3_STORAGE_INCOMPLETE`).**
 - The pure, offline contract and the offline owner-workstation tooling are
   implemented and test proven.
 - Owner decisions PR3-D1..PR3-D12 are **ACCEPTED** (§19).
-- No live owner register or real owner storage exists. No owner key has
-  been generated.
+- P3-3: real Replica A is initialized and **empty**. There is no second
+  medium, so Replica B does not exist (§25). No freshness record exists.
+  No owner key has been generated.
 - No DEV or cloud contact was made.
-- P3-3 is not authorized. PR-1B is not authorized. First Memory is not
+- PR-1B is not authorized. First Memory is not
   authorized.
 
 | Field | Value |
@@ -553,7 +554,7 @@ PR-3 does **not** establish:
 - whole-host rollback prevention: **WHOLE-HOST ROLLBACK RESISTANCE = NOT
   ESTABLISHED** on DEV;
 - First Memory readiness;
-- a live owner register, or real owner storage (P3-3 is not authorized);
+- a live owner register: the one real replica holds no record, and two-replica storage is incomplete (§25);
 - an owner key.
 
 It establishes only **owner-controlled freshness observation and
@@ -573,8 +574,9 @@ acceptance semantics**, plus offline tooling to apply them.
    - rejection terminality and candidate ≠ acceptance;
    - source purity.
 3. The P3-2 tooling tests pass (§24).
-4. The owner has prepared the PR3-D6 storage locations. This is P3-3: owner
-   work, not authorized.
+4. Both PR3-D6 replicas exist, are empty, pass the P3-3 gate, and are shown
+   to be independent. **Not yet met:** Replica A exists; Replica B is
+   waiting for an independent medium (§25).
 5. There is no live effect. PR-3 creates no register content; record 1 can
    exist only after the V2 genesis commit.
 
@@ -584,7 +586,7 @@ acceptance semantics**, plus offline tooling to apply them.
 | --- | --- | --- |
 | P3-1 | pure contract, digest, register verification, replica reconciliation, classification, gate, and proposals, with synthetic tests | **done** (`368b36c`) |
 | P3-2 | offline owner-workstation tooling (§24) | **done (this revision)** |
-| P3-3 | real owner storage preparation per PR3-D6, including review of the §24.4 write items | owner action; **not authorized** |
+| P3-3 | real owner storage per PR3-D6, with the §24.4 write items resolved (§25.1) | **`P3_3_STORAGE_INCOMPLETE`**: Replica A empty; Replica B is waiting for an independent medium (§25) |
 | P3-4 | PR-1B sequencing: the genesis pin is stored before the V2 genesis commit (RR-35, unchanged); owner record 1 is appended to both replicas after the commit; `INITIAL_CUSTODY_RELEASE` requires `freshness_gate` = `FRESHNESS_PRECONDITION_MET` | not authorized |
 | P3-5 | an acceptance envelope, if a later decision replaces D2 for non-synthetic authority | not started |
 
@@ -595,7 +597,8 @@ acceptance semantics**, plus offline tooling to apply them.
 - Offline unit tests, run in WSL with the pinned wheels:
   - `test_b1b3e_pr3_owner_freshness.py`: 27 tests, OK;
   - `test_b1b3e_pr3_p32_owner_freshness_tool.py`: 19 tests, OK;
-  - full suites, all OK: `services/owner-memory-control` (535),
+  - `test_b1b3e_pr3_p33_storage_gate.py`: 16 tests, OK;
+  - full suites, all OK: `services/owner-memory-control` (551),
     `services/authority-dev` (240), and `services/recovery-witness` (44).
 - No network, DEV, or cloud access.
 
@@ -762,11 +765,214 @@ candidate is not a record:
 - `inspect-chain` reporting authenticity only;
 - no network, process, or key dependency.
 
+## 25. P3-3: owner off-host storage foundation
+
+**Result: `P3_3_STORAGE_INCOMPLETE`.** Replica A exists and is empty. There
+is no suitable second medium, so Replica B was not created. The two-copy
+policy (D6) is therefore unsatisfied, and **`FRESHNESS_UNKNOWN` remains
+mandatory**.
+
+The rest of this section records:
+
+- the accepted P3-3 storage decisions;
+- the gate that enforces them;
+- the actual state of each replica.
+
+### 25.1 Decisions (P3-3, owner-given)
+
+| Decision | Rule | Enforced by |
+| --- | --- | --- |
+| directory fsync REQUIRED | a real replica needs a strict directory fsync; there is no warning-only mode | `probe_storage` (`_directory_fsync_strict`), and `init_real_replica` requires `directoryFsync = PERFORMED` |
+| hard links REQUIRED | no rename-only fallback in V1; any alternate atomic write needs a separate design review | `probe_storage` (`hardLink`, `hardLinkNoReplace`) |
+| location policy | no Git working tree; no automatically synchronized root; not on DEV; not in the same tree as the other replica | `location_policy`, `init_real_replica --other-replica` |
+| independence | two directories are not two rollback domains; same device refused | `check_independence`; owner evidence (§25.4) |
+| no record creation | P3-3 never proposes or appends | no P3-3 command writes a record |
+
+P3-2's generic behavior is unchanged: `init-replica` still reports
+directory fsync rather than requiring it. Only `init-real-replica` applies
+the P3-3 gate.
+
+### 25.2 Gate source (commit `7880df8`)
+
+These additions are in `owner_freshness_tool.py`.
+
+- **`probe-storage --probe-parent DIR`.** It creates only a fresh
+  `.lilith-p3-probe-<random>` directory and removes it afterwards. It
+  refuses to run inside an initialized replica. It checks, in order:
+  - exclusive create;
+  - file fsync;
+  - hard-link creation;
+  - that a hard link cannot replace an existing path;
+  - strict directory fsync;
+  - rename within a directory;
+  - symlink detection (a symlink is refused as not a regular file);
+  - canonical reread;
+  - cleanup.
+
+  The result is `P3_STORAGE_CAPABLE` or `P3_STORAGE_INCAPABLE`.
+- **`location-check --path P`.** It refuses:
+  - `LOCATION_IN_GIT_WORKTREE`: any ancestor holds `.git`, whether a
+    directory or a worktree file;
+  - `LOCATION_AUTO_SYNC_ROOT`: a path component names a known sync root
+    (OneDrive, Dropbox, Google Drive / My Drive, iCloud, Box, Nextcloud,
+    ownCloud, pCloud, MEGA, Syncthing, Resilio), or the path is under an
+    `OneDrive*`/`Dropbox*` environment root.
+
+  Unknown sync or backup mechanisms cannot be excluded by code.
+- **`init-real-replica --replica DIR --replica-id ID --environment dev --profile DEV_SYNTHETIC [--other-replica OTHER]`.**
+  Admission runs in this order:
+  1. profile and ID are checked;
+  2. the location policy is applied;
+  3. the path must not exist;
+  4. against `--other-replica`: a distinct ID, and a distinct `st_dev`
+     (`REPLICA_SAME_DEVICE`);
+  5. the probe must pass on the parent;
+  6. `init_replica` runs, with directory fsync required;
+  7. an empty-replica proof follows.
+- **`check-independence --replica A --replica B`.** It refuses the same
+  ID, the same location, or the same device. A result of
+  `DISTINCT_DEVICES_OBSERVED` is necessary evidence only.
+
+Tests are in `test_b1b3e_pr3_p33_storage_gate.py` (16 tests). They cover:
+
+- a capable probe that cleans up;
+- hard links unsupported → incapable;
+- a link that replaces an existing path → incapable;
+- directory fsync unsupported → incapable, and `init-real-replica` refuses
+  with nothing created;
+- directory fsync reported but not performed → refused;
+- symlinks unavailable → incapable;
+- a probe refused inside a replica;
+- an initialized replica staying empty;
+- an existing directory refused;
+- Git working-tree locations refused (directory and `.git` file);
+- known auto-sync locations refused (path components and the OneDrive
+  environment root);
+- the same replica ID refused;
+- the same device refused;
+- the same replica path refused;
+- the CLI.
+
+### 25.3 Replica state
+
+**Replica A: owner primary, DEV_SYNTHETIC.**
+
+| Property | Value |
+| --- | --- |
+| Storage class | the owner workstation's WSL2 Ubuntu-24.04 distribution: an ext4 filesystem inside a WSL virtual disk (VHDX) on the workstation's internal NVMe SSD |
+| Replica ID | `owner-primary-dev-synthetic-01` (the tool's replica-ID grammar is lowercase, so this is the lowercase form of the suggested `OWNER-PRIMARY-DEV-SYNTHETIC-01`) |
+| Environment / profile | `dev` / `DEV_SYNTHETIC` |
+| Capability probe | **`P3_STORAGE_CAPABLE`**: all nine checks true, including strict directory fsync and hard-link no-replace |
+| Initialization | **`REAL_REPLICA_INITIALIZED_EMPTY`**, via `init-real-replica` from the tool at commit `7880df8`, staged outside any Git tree |
+| Contents | `REPLICA.json` (166 bytes, SHA-256 `fbdd045c…`), plus `records/`, **empty**. No other entry. `verify-replica` gives `REPLICA_VERIFIED`, `records = 0`, `headDigest = null` |
+| Permissions | replica directory and `records/` are `0700`; `REPLICA.json` is `0600`; owner `root:root` (the WSL default user) |
+| Filesystem identity | ext4 root of the distribution, one `st_dev` for the whole distribution. The raw device and UUID are private |
+| Git relationship | none: no `.git` in any ancestor; outside the LILITH repository and every worktree |
+| Auto-sync | none observed. The VHDX is under the user's local application-data directory, not under OneDrive, which backs up only Documents and Desktop. The distribution has Windows drive automount **disabled** and Windows interop **disabled** |
+| Backup relationship | File History is not configured, and no image-backup tool was observed. Windows restore points / VSS were **not examined** (that needs administrator rights): UNKNOWN |
+| Rollback paths | `wsl --export`/`--import`, a copy of the VHDX, any whole-disk image of the NVMe, restore points if enabled, and `wsl --unregister` (destruction) |
+
+**Replica B: owner offline.**
+
+| Property | Value |
+| --- | --- |
+| Candidate media | **none.** The workstation has exactly one physical disk (the internal NVMe, one `C:` volume) and no removable, USB, or secondary drive |
+| Capability probe | **not run**: there is no candidate filesystem to probe. A probe of another directory on the same NVMe would prove nothing about independence |
+| Initialization | **not performed.** Per §7 and §13 of the P3-3 task, Replica B is not fabricated on the same WSL virtual disk or on the same physical disk |
+| Replica ID reserved | `owner-offline-dev-synthetic-01` |
+
+### 25.4 Independence
+
+> Can one ordinary rollback operation restore both replicas together?
+
+This is **not applicable yet**, because only one replica exists.
+Independence is **NOT ESTABLISHED**.
+
+A future Replica B must satisfy all of the following:
+
+- its own physical medium, with a filesystem that passes the probe. That
+  means ext4, or another filesystem with hard links and directory fsync.
+  FAT/exFAT is not assumed acceptable, and NTFS through WSL drvfs is not
+  admitted unless it passes;
+- a distinct `st_dev` from Replica A;
+- no shared sync or backup path with Replica A;
+- initialization through `init-real-replica --other-replica <Replica A>`.
+
+Once both replicas exist, answering the question above will still require
+owner evidence about backups. Distinct devices are necessary but not
+sufficient.
+
 ```text
-PR-3 DESIGN / FOUNDATION + P3-2 OFFLINE TOOLING ONLY
-NO DEV CONTACT          NO CLOUD CONTACT        NO REAL OWNER REGISTER CREATED
-NO OWNER KEY GENERATED  NO K-WIT                NO REGISTRY
-NO LEDGER               NO WITNESS STATE        NO HOLD
-NO RECOVERY EPOCH       NO INITIAL_CUSTODY
-P3-3 NOT AUTHORIZED     PR-1B NOT AUTHORIZED    FIRST MEMORY NOT AUTHORIZED
+two directories   != two rollback domains
+two replica IDs   != independent custody
+removable media   != safe media
+offline           != authoritative
+storage capability != owner acceptance
+```
+
+### 25.5 Limitations
+
+1. **Agent reachability.** Replica A sits in a WSL distribution that the
+   same workstation's agent tooling can reach as root. D6 requires replicas
+   that no agent or automation can write, and a WSL location on the agent
+   workstation does **not** meet that requirement on its own. Before record
+   1, at least one of these must hold:
+   - Replica B, offline and disconnected when not in use, provides the
+     agent-unreachable copy;
+   - access to Replica A is otherwise separated from agent sessions.
+
+   This is an open custody item. P3-3 does not resolve it.
+2. **One physical disk.** Replica A shares the NVMe with the whole
+   workstation, so a workstation-level image restore rolls it back.
+3. **Restore points / VSS** were not examined.
+4. **Staged tool copy.** The tool copy used for initialization remains in
+   the WSL home directory, outside any Git tree.
+
+### 25.6 Privacy and redaction
+
+Public documentation records:
+
+- the storage class, independence property, capability result, and replica
+  IDs;
+- the replica contents digest.
+
+The following stay private (off-repository evidence, `SHA256SUMS`
+`f1f69883…`):
+
+- absolute paths;
+- VHDX location, device numbers, and filesystem UUIDs;
+- disk model.
+
+Neither real replica, nor any real `REPLICA.json`, is committed or placed
+on GitHub.
+
+### 25.7 Failure semantics and next step
+
+- Replica A is **kept**: it is not deleted.
+- No second replica is fabricated.
+- Every `classify` against the real replicas must be `FRESHNESS_UNKNOWN`
+  (`REPLICA_QUORUM_UNMET` or `REPLICA_MISSING`), with every gated operation
+  blocked.
+- **To complete P3-3:** the owner attaches an independent medium, then
+  runs, in order:
+  1. `probe-storage` on it;
+  2. `init-real-replica --replica <B> --replica-id owner-offline-dev-synthetic-01 --environment dev --profile DEV_SYNTHETIC --other-replica <A>`;
+  3. `check-independence`.
+
+  The owner also supplies the backup evidence for §25.4.
+
+**No freshness record exists.**
+
+- No `propose-*` or `append` was run against any real replica.
+- Replica A's `records/` is empty.
+- The accepted record count is **0**, and there is no record 1.
+
+```text
+P3-3 OWNER STORAGE FOUNDATION ONLY — P3_3_STORAGE_INCOMPLETE
+TWO INDEPENDENT OWNER REPLICA PATHS REQUIRED (ONE EXISTS)
+NO REAL FRESHNESS RECORD    NO RECORD 1       NO OWNER KEY
+NO DEV CONTACT              NO CLOUD CONTACT  NO K-WIT
+NO REGISTRY                 NO LEDGER         NO WITNESS STATE
+NO HOLD                     NO RECOVERY EPOCH NO INITIAL_CUSTODY
+PR-1B NOT AUTHORIZED        FIRST MEMORY NOT AUTHORIZED
 ```
