@@ -319,9 +319,9 @@ class GateMatrix(unittest.TestCase):
 
 
 class RealStateGuard(unittest.TestCase):
-    """Guard for the real P3-3 state, modelled in temporary directories only:
-    one EMPTY replica and no second replica can never be CURRENT. This must
-    stay until P3-3 is really complete."""
+    """Guard modelled in temporary directories only: one EMPTY replica and no
+    second replica can never be CURRENT. P3-3 is complete and B-3 enables real
+    acceptance, but this invariant is permanent: it is kept."""
 
     def test_one_empty_replica_and_no_replica_b_is_freshness_unknown(self):
         w, s = Rehearsal(self), F.Scenario()

@@ -195,6 +195,11 @@ The other PR-1B preconditions remain unmet:
 
 So **PR-1B remains `PR1B_NOT_ELIGIBLE`.**
 
+> **Superseded ([B-3](slice-15b2b-b1b3e-b3-real-acceptance.md)).** The block is lifted by the reviewed B-3
+> change. It is held and landed immediately before the B-5 decision, not
+> immediately before a record-1 ceremony, so that no source change happens
+> mid-PR-1B. The paragraph below records the state at P3-3.
+
 The source-level block `owner_acceptance.REAL_ACCEPTANCE_ENABLED = False`
 (reason `P3_3_STORAGE_INCOMPLETE`) and the P3-4 real-state guard **stay in
 place**. Lifting them is a separate, reviewed source change, made

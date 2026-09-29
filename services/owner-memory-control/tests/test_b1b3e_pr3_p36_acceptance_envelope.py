@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import synthetic_authority as SA  # noqa: F401  (sets sys.path)
@@ -409,27 +410,41 @@ class AttackTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
-    def test_p3_3_hard_block_on_real_profile(self):
-        self.assertIs(OA.REAL_ACCEPTANCE_ENABLED, False)
-        self.assertEqual(OA.real_acceptance_block("DEV_SYNTHETIC"), "P3_3_STORAGE_INCOMPLETE")
+    def test_real_acceptance_switch(self):
+        """B-3: enabled in source; setting it back to False is the reversible source-level disable."""
+        self.assertIs(OA.REAL_ACCEPTANCE_ENABLED, True)
+        self.assertEqual(OA.REAL_ACCEPTANCE_BLOCK_REASON, "REAL_ACCEPTANCE_DISABLED_IN_SOURCE")
+        self.assertIsNone(OA.real_acceptance_block("DEV_SYNTHETIC"))
         self.assertIsNone(OA.real_acceptance_block("TEST_ONLY"))
         complete = OA.AcceptanceResultV1(OA.ACCEPTANCE_COMPLETE, evidenced_record_version=1)
         self.assertEqual(OA.real_acceptance_gate(complete, authority_profile="TEST_ONLY"),
                          (OA.REAL_ACCEPTANCE_GATE_BLOCKED, "SYNTHETIC_PROFILE"))        # synthetic never satisfies
         self.assertEqual(OA.real_acceptance_gate(complete, authority_profile="DEV_SYNTHETIC"),
-                         (OA.REAL_ACCEPTANCE_GATE_BLOCKED, "P3_3_STORAGE_INCOMPLETE"))
+                         (OA.REAL_ACCEPTANCE_GATE_MET, None))
+        self.assertEqual(OA.real_acceptance_gate(OA.AcceptanceResultV1(OA.ACCEPTANCE_PARTIAL),
+                                                 authority_profile="DEV_SYNTHETIC"),
+                         (OA.REAL_ACCEPTANCE_GATE_BLOCKED, "ACCEPTANCE_NOT_COMPLETE"))
         w = P32.Workstation(self)
         dummy = w.write("dummy.json", {})
-        code, result = w.cli("append", "--replica", str(w.a), "--peer", str(w.b), "--candidate", str(dummy),
-                             "--trust", str(w.trust), "--chain", str(dummy), "--environment", "dev",
-                             "--profile", "DEV_SYNTHETIC", "--pin", str(dummy), "--confirm-digest", "x")
-        self.assertEqual((code, result["reason"], result["detail"]),
-                         (T.EXIT_REFUSED, "REAL_ACCEPTANCE_DISABLED", "P3_3_STORAGE_INCOMPLETE"))
-        code, result = w.cli("append-envelope", "--replica", str(w.a), "--replica", str(w.b), "--trust", str(w.trust),
-                             "--chain", str(dummy), "--environment", "dev", "--profile", "DEV_SYNTHETIC", "--pin",
-                             str(dummy), "--store", str(w.a), "--peer-store", str(w.b), "--candidate", str(dummy),
-                             "--confirm-digest", "x")
-        self.assertEqual((code, result["reason"]), (T.EXIT_REFUSED, "REAL_ACCEPTANCE_DISABLED"))
+        append = ("append", "--replica", str(w.a), "--peer", str(w.b), "--candidate", str(dummy),
+                  "--trust", str(w.trust), "--chain", str(dummy), "--environment", "dev",
+                  "--profile", "DEV_SYNTHETIC", "--pin", str(dummy), "--confirm-digest", "x")
+        envelope = ("append-envelope", "--replica", str(w.a), "--replica", str(w.b), "--trust", str(w.trust),
+                    "--chain", str(dummy), "--environment", "dev", "--profile", "DEV_SYNTHETIC", "--pin",
+                    str(dummy), "--store", str(w.a), "--peer-store", str(w.b), "--candidate", str(dummy),
+                    "--confirm-digest", "x")
+        for argv in (append, envelope):                  # enabled: still refused, now by input validation
+            code, result = w.cli(*argv)
+            self.assertEqual(code, T.EXIT_REFUSED, result)
+            self.assertNotEqual(result["reason"], "REAL_ACCEPTANCE_DISABLED")
+        with mock.patch.object(OA, "REAL_ACCEPTANCE_ENABLED", False):
+            self.assertEqual(OA.real_acceptance_block("DEV_SYNTHETIC"), "REAL_ACCEPTANCE_DISABLED_IN_SOURCE")
+            self.assertEqual(OA.real_acceptance_gate(complete, authority_profile="DEV_SYNTHETIC"),
+                             (OA.REAL_ACCEPTANCE_GATE_BLOCKED, "REAL_ACCEPTANCE_DISABLED_IN_SOURCE"))
+            for argv in (append, envelope):
+                code, result = w.cli(*argv)
+                self.assertEqual((code, result["reason"], result["detail"]),
+                                 (T.EXIT_REFUSED, "REAL_ACCEPTANCE_DISABLED", "REAL_ACCEPTANCE_DISABLED_IN_SOURCE"))
 
     def test_envelope_scope_authorizes_nothing(self):
         for name in OA.ENVELOPE_FIELDS:

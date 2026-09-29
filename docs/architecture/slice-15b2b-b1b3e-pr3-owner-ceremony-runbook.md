@@ -5,9 +5,13 @@ device identifiers, and it must stay that way: it is public-safe. It was
 rehearsed end to end on temporary synthetic replicas in P3-4 ([design
 record §26](slice-15b2b-b1b3e-pr3-owner-offhost-foundation.md)).
 
-**It is not usable for real acceptance yet.** P3-3 is
-`P3_3_STORAGE_INCOMPLETE`: the independent second replica does not exist,
-so any real classification is `FRESHNESS_UNKNOWN`.
+**Real use ([B-3](slice-15b2b-b1b3e-b3-real-acceptance.md)).** P3-3 is complete, and real acceptance is
+enabled in source (`REAL_ACCEPTANCE_ENABLED = True`); burned rehearsal
+identities are refused. A real ceremony is still usable **only inside an
+authorized PR-1B (B-5)**, at `APPEND_RECORD_1_REPLICA_A` after M-B9b. Until
+then real freshness is `FRESHNESS_UNKNOWN`, and no real `append` or
+`append-envelope` may be run. (Superseded status: while P3-3 was
+`P3_3_STORAGE_INCOMPLETE`, this runbook was not usable for real acceptance.)
 
 ```text
 synthetic ceremony success != real owner freshness established

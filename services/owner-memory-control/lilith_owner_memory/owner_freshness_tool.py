@@ -46,6 +46,7 @@ from typing import Any, Mapping, Sequence
 from lilith_memory.owner_proof import OwnerProofError
 
 from . import authority_contracts as A
+from . import burned_identities as BI
 from . import create_only_publish as COP
 from . import owner_acceptance as OA
 from . import owner_freshness as OF
@@ -293,6 +294,7 @@ class TrustInputsV1:
     anchor: R.TrustedWitnessAnchorV1
     registry_root: A.TrustedRegistryRootV1
     authority_public_keys: frozenset[bytes]
+    registry_digests: frozenset[str] = frozenset()     # of the trust-input registries (burned-identity check)
 
 
 def load_trust(path: Any) -> TrustInputsV1:
@@ -310,7 +312,47 @@ def load_trust(path: Any) -> TrustInputsV1:
         raise _refuse("TRUST_INPUTS_INVALID", str(exc)) from exc
     if not (value["environment"] == anchor.environment == root.environment):
         raise _refuse("TRUST_INPUTS_ENVIRONMENT_MISMATCH")
-    return TrustInputsV1(value["environment"], anchor, root, RC._authority_keys(*value["registries"]))
+    return TrustInputsV1(value["environment"], anchor, root, RC._authority_keys(*value["registries"]),
+                         _registry_digests(value["registries"]))
+
+
+def _registry_digests(registries: Sequence[Any]) -> frozenset[str]:
+    digests = set()
+    for registry in registries:
+        try:
+            digests.add(RC.registry_digest(registry))
+        except (OwnerProofError, ContractViolation, TypeError, KeyError, AttributeError):
+            continue                                    # a malformed registry never verifies anyway
+    return frozenset(digests)
+
+
+def _refuse_burned(authority_profile: str, trust: TrustInputsV1, pin: Any, chain_path: Any,
+                   environment: str) -> None:
+    """B-3: refuse a burned B-4 rehearsal identity on the real path, before
+    any candidate, package, or write. Every role is checked: the registry-root,
+    witness-anchor, and registry keys; the registry digests (trust inputs and
+    chain); the genesis digest (pin and chain). Passing grants nothing."""
+    if authority_profile not in OA.REAL_PROFILES:
+        return
+    if pin is not None and not isinstance(pin, WR.OwnerGenesisPinV1):
+        try:
+            pin = load_pin(pin)                         # a path; the path itself refuses a bad pin later
+        except ToolRefusal:
+            pin = None
+    keys = {trust.registry_root.public_key, trust.anchor.public_key, *trust.authority_public_keys}
+    registries, genesis = set(trust.registry_digests), set()
+    if pin is not None:
+        genesis.add(pin.genesis_witness_digest)
+    try:
+        chain = verify_chain(trust, chain_path, environment)
+    except ToolRefusal:
+        chain = None                                    # the path itself refuses the chain later
+    if chain is not None and chain.verified:
+        registries |= {witness.registry_digest for witness in chain.facts.witnesses}
+        genesis.add(chain.facts.witnesses[0].digest)
+    hit = BI.burned_identity(public_keys=keys, registry_digests=registries, genesis_witness_digests=genesis)
+    if hit is not None:
+        raise _refuse(BI.BURNED_REHEARSAL_IDENTITY, hit)
 
 
 def verify_chain(trust: TrustInputsV1, chain_path: Any, environment: str) -> RC.ChainResultV1:
@@ -410,14 +452,17 @@ def _successor_candidate(decision, register, trust, chain_path, pin, environment
 
 
 def propose_genesis(trust, chain_path, pin_path, out, *, environment, authority_profile) -> dict[str, Any]:
-    return _write_candidate(out, _genesis_candidate(trust, chain_path, load_pin(pin_path), environment,
-                                                    authority_profile))
+    pin = load_pin(pin_path)
+    _refuse_burned(authority_profile, trust, pin, chain_path, environment)
+    return _write_candidate(out, _genesis_candidate(trust, chain_path, pin, environment, authority_profile))
 
 
 def propose(decision: str, replica_paths, trust, chain_path, pin_path, out, *, environment,
             authority_profile) -> dict[str, Any]:
     register, _ = load_register(replica_paths)
-    return _write_candidate(out, _successor_candidate(decision, register, trust, chain_path, load_pin(pin_path),
+    pin = load_pin(pin_path)
+    _refuse_burned(authority_profile, trust, pin, chain_path, environment)
+    return _write_candidate(out, _successor_candidate(decision, register, trust, chain_path, pin,
                                                       environment, authority_profile))
 
 
@@ -455,7 +500,7 @@ def append(target_path, peer_path, candidate_path, trust, chain_path, pin_path, 
        accepted, and only `AHEAD_UNACCEPTED` or `CONFLICTING` can be rejected.
     """
     block = OA.real_acceptance_block(authority_profile)
-    if block is not None:                               # P3-6: no real acceptance while P3-3 is incomplete
+    if block is not None:                               # B-3: the reversible source-level disable
         raise _refuse("REAL_ACCEPTANCE_DISABLED", block)
     record, digest = load_candidate(candidate_path)
     if not isinstance(confirm_digest, str) or not confirm_digest:
@@ -463,6 +508,7 @@ def append(target_path, peer_path, candidate_path, trust, chain_path, pin_path, 
     if confirm_digest != digest:
         raise _refuse("OWNER_CONFIRMATION_MISMATCH")
     pin = load_pin(pin_path)
+    _refuse_burned(authority_profile, trust, pin, chain_path, environment)
     target, peer = load_replica(target_path), load_replica(peer_path)
     _distinct((target, peer))
     if (target.environment, target.authority_profile) != (environment, authority_profile):
@@ -894,6 +940,7 @@ def build_package(replica_paths: Sequence[Any], trust_path: Any, chain_path: Any
     prior = [] if not register.verified else [r.to_dict() for r in register.facts.records]
     record, _ = load_candidate(candidate_path)
     trust = load_trust(trust_path)
+    _refuse_burned(authority_profile, trust, pin_path, chain_path, environment)
     try:
         package = OA.build_review_package(
             prior_records=prior, chain=verify_chain(trust, chain_path, environment), candidate_record=record,
@@ -955,7 +1002,8 @@ def append_envelope(target_path, peer_path, replica_paths, candidate_path, trust
     - for ACCEPT_CURRENT, the chain classifies AUTHENTIC + CURRENT now;
     - the envelope is rebuilt and must be identical.
 
-    Real-profile writes are blocked while P3-3 is incomplete.
+    Real-profile writes need `REAL_ACCEPTANCE_ENABLED` (B-3) and refuse burned
+    rehearsal identities. Neither grants any authorization.
     """
     block = OA.real_acceptance_block(authority_profile)
     if block is not None:
@@ -994,6 +1042,7 @@ def append_envelope(target_path, peer_path, replica_paths, candidate_path, trust
         raise _refuse("ACCEPTANCE_STORES_NOT_APPENDABLE")
     records = register.facts.records
     trust = load_trust(trust_path)
+    _refuse_burned(authority_profile, trust, pin_path, chain_path, environment)
     chain = verify_chain(trust, chain_path, environment)
     try:
         package = OA.build_review_package(

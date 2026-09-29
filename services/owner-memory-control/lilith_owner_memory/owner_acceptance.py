@@ -14,8 +14,10 @@ record so the record's identity never changes:
 - `classify_acceptance`: acceptance-evidence state (`ACCEPTANCE_*`), kept
   separate from freshness (`CURRENT`/`STALE`/…). One never downgrades into
   the other.
-- `real_acceptance_block`: a hard block. Real-profile acceptance stays
-  disabled while P3-3 is `P3_3_STORAGE_INCOMPLETE`.
+- `real_acceptance_block`: the source-level switch for real-profile
+  acceptance writes. It was a hard block while P3-3 was incomplete; B-3
+  lifts it (`REAL_ACCEPTANCE_ENABLED = True`). Lifting it authorizes
+  nothing: not PR-1B (B-5), not M-B1, and not any record 1.
 
     record identity != acceptance evidence;  file existence != acceptance
     signature != acceptance;  model output != acceptance
@@ -43,11 +45,16 @@ from .contracts import ContractViolation, _canonical, _choice
 
 # ------------------------------------------------------------------ blocking ---
 
-# Real-profile acceptance stays disabled until P3-3 is complete. Only a
-# reviewed source change may lift this; no input, flag, or envelope can.
+# B-3: real-profile acceptance writes (freshness `append`, `append-envelope`)
+# are enabled in source. Only a reviewed source change may set this; no
+# input, flag, or envelope can. Setting it back to False is the reversible
+# source-level disable, reported as REAL_ACCEPTANCE_DISABLED_IN_SOURCE.
+#
+#     REAL_ACCEPTANCE_ENABLED != PR-1B authorized (B-5) != M-B1 authorized
+#     enabled != any record exists;  enabled != freshness CURRENT
 REAL_PROFILES = frozenset({"DEV_SYNTHETIC"})
-REAL_ACCEPTANCE_ENABLED = False
-REAL_ACCEPTANCE_BLOCK_REASON = "P3_3_STORAGE_INCOMPLETE"
+REAL_ACCEPTANCE_ENABLED = True
+REAL_ACCEPTANCE_BLOCK_REASON = "REAL_ACCEPTANCE_DISABLED_IN_SOURCE"
 
 
 def real_acceptance_block(authority_profile: str) -> str | None:
@@ -388,7 +395,9 @@ REAL_ACCEPTANCE_GATE_BLOCKED = "REAL_ACCEPTANCE_GATE_BLOCKED"
 
 def real_acceptance_gate(result: Any, *, authority_profile: str) -> tuple[str, str | None]:
     """The gate a REAL (non-synthetic) step would use. A TEST_ONLY (synthetic)
-    envelope never satisfies it, and while P3-3 is incomplete nothing does."""
+    envelope never satisfies it, and while real acceptance is disabled in
+    source nothing does. It has no production caller; it is not PR-1B
+    authorization."""
     if authority_profile not in REAL_PROFILES:
         return REAL_ACCEPTANCE_GATE_BLOCKED, "SYNTHETIC_PROFILE"
     block = real_acceptance_block(authority_profile)
