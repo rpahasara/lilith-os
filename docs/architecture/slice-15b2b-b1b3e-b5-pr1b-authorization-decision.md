@@ -2,6 +2,8 @@
 
 Status:
 
+- **Update (2026-09-30): the owner chose Outcome A, `B5_OWNER_AUTHORIZATION=GRANTED`.** See the
+  [grant record](slice-15b2b-b1b3e-b5-pr1b-authorization-granted.md). B-5 is CLOSED. **M-B1 is still NOT AUTHORIZED**, pending the five conditions there. The status lines below are historical.
 - **`B5_OWNER_AUTHORIZATION_DECISION_READY`**. The packet is prepared for
   the owner's decision. **No decision is recorded.**
 - **B-5 is OPEN. PR-1B is NOT AUTHORIZED.** `pr1bAuthorized` is not set
