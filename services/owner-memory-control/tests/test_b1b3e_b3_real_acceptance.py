@@ -55,7 +55,7 @@ def _burned_table(path) -> dict[str, str]:
 class BurnedIdentityRecordTests(unittest.TestCase):
     def test_source_equals_the_burned_records(self):
         keys, registries, genesis = set(), set(), set()
-        for path, count in ((HOLD, 6), (ACCEPTANCE, 6), (EXPANSION, 7)):
+        for path, count in ((HOLD, 6), (ACCEPTANCE, 6), (EXPANSION, 8)):
             table = _burned_table(path)
             self.assertEqual(len(table), count, path)
             for name, value in table.items():
@@ -69,8 +69,8 @@ class BurnedIdentityRecordTests(unittest.TestCase):
                     self.fail(name)
         self.assertEqual((keys, registries, genesis), (set(BI.BURNED_PUBLIC_KEY_SHA256), set(BI.BURNED_REGISTRY_DIGESTS),
                                                       set(BI.BURNED_GENESIS_WITNESS_DIGESTS)))
-        self.assertEqual(len(keys | registries | genesis), 19)
-        self.assertEqual(BI.CANONICAL_COUNT, 19)
+        self.assertEqual(len(keys | registries | genesis), 20)
+        self.assertEqual(BI.CANONICAL_COUNT, 20)
 
     def test_pure_check_per_role(self):
         for digest in BI.BURNED_REGISTRY_DIGESTS:

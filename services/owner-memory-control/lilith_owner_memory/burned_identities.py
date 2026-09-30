@@ -2,10 +2,10 @@
 
 Records: docs/architecture/slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-evidence-hold.md §4 (run 1),
 docs/architecture/slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md §4 (run 2), and
-docs/architecture/slice-15b2b-b1b3e-burned-identities-expansion.md §4 (two recorded simulations).
+docs/architecture/slice-15b2b-b1b3e-burned-identities-expansion.md §4 (recorded simulations and tests).
 
-The canonical set is 19 throwaway TEST identities, all permanently burned: 12
-from the two S25 Termux rehearsals and 7 recorded by WSL simulations. This module lets the real owner-freshness path refuse
+The canonical set is 20 throwaway TEST identities, all permanently burned: 12
+from the two S25 Termux rehearsals and 8 recorded by simulations or tests. This module lets the real owner-freshness path refuse
 them mechanically. Refusing a burned identity grants nothing: a fresh
 identity passes this check and still faces every other gate.
 
@@ -53,6 +53,8 @@ BURNED_PUBLIC_KEY_SHA256 = frozenset({
     "6c03535817deb8bf5bb60886d7f6d1d2e2a12a7edbad991b0129f5de48089616",   # syntheticKWitPublicKeySha256
     # M-B1 package WSL simulation (expansion record)
     "ae5d8275dfcb39e7e1b4de435cfc7d3c4797d105fabc31d0305c5d9297025c6c",   # candidate root publicKeySha256
+    # M-B1 pty test candidate, printed by a failing test (expansion record)
+    "d1719045c62b7601d7ff6679992290928200f632f139c7ad635341a26ee29a47",   # candidate root publicKeySha256
 })
 BURNED_REGISTRY_DIGESTS = frozenset({
     "c97a689bf9b0c928fc5764b4d1cdff187009bc3464d82da43d4955e1c8a74034",   # run 1 rehearsalRegistryDigest
@@ -64,7 +66,7 @@ BURNED_GENESIS_WITNESS_DIGESTS = frozenset({
     "abb70064a0ea21ebe12c8281eca0212add1467d62eb55992ab7a7f6bc5d5cc01",   # run 2 rehearsalGenesisCandidateDigest
     "8185246e2502f82d073d517ba4180bc47950d90f9986da7c5b6ad26b77d0dfd5",   # B-4 simulation rehearsalGenesisCandidateDigest
 })
-CANONICAL_COUNT = 19
+CANONICAL_COUNT = 20
 
 BURNED_REHEARSAL_IDENTITY = "BURNED_REHEARSAL_IDENTITY"
 

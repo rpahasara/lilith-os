@@ -1,9 +1,9 @@
-# Slice 15B2b-B1b-3e — Burned Identity Set Expansion (12 → 19)
+# Slice 15B2b-B1b-3e — Burned Identity Set Expansion (12 → 20)
 
 Status:
 
-- **The canonical, mechanically enforced burned set is now 19 identities.**
-  It was 12.
+- **The canonical, mechanically enforced burned set is now 20 identities.**
+  It was 12, then 19; see §3 for the 20th.
 - `lilith_owner_memory/burned_identities.py` enforces all 19. So does every
   path that uses it: the owner-freshness real-profile refusal (B-3) and the
   M-B1 phone check.
@@ -27,10 +27,10 @@ directory without their value ever being printed or recorded.
 - To keep them in that class, simulations **must redact** every generated
   fingerprint and digest, and delete the generated material.
 
-A simulation that prints a value makes it a recorded identity, which must
-then be burned. Two did, below.
+A simulation or test that prints a value makes it a recorded identity, which
+must then be burned. Two simulations and one failing test did, below.
 
-## 2. The 7 added identities
+## 2. The 8 added identities
 
 **B-4 path-correction WSL simulation** (2026-09-29).
 
@@ -49,6 +49,18 @@ then be burned. Two did, below.
 - It printed the candidate's `publicKeySha256` in full. The record declared
   it burned but showed only an abbreviation.
 
+## 3. The 20th identity (added during the pre-landing review)
+
+**M-B1 v2 pty test** (2026-09-30).
+
+- A failing pty test (`test_wrong_unlock_passphrase_is_a_burned_failed_candidate`,
+  since fixed) printed its throwaway TEST candidate's `publicKeySha256` in
+  full, in the assertion message.
+- The key itself lived only in a temporary directory, which was deleted.
+- The value was recorded, so it is burned.
+- Test failure messages now redact every 64-hex value, which closes the
+  leak.
+
 ## 4. Burned TEST identities
 
 | Identity | Value |
@@ -60,12 +72,13 @@ then be burned. Two did, below.
 | `b4SimSyntheticKActPublicKeySha256` | `e519c7e475e6f16b936fb74dd8ae5d970c117ce07a0e339e94da49d516e85882` |
 | `b4SimSyntheticKWitPublicKeySha256` | `6c03535817deb8bf5bb60886d7f6d1d2e2a12a7edbad991b0129f5de48089616` |
 | `mb1SimCandidateRootPublicKeySha256` | `ae5d8275dfcb39e7e1b4de435cfc7d3c4797d105fabc31d0305c5d9297025c6c` |
+| `mb1PtyTestCandidateRootPublicKeySha256` | `d1719045c62b7601d7ff6679992290928200f632f139c7ad635341a26ee29a47` |
 
 **Roles.**
 
-- The five `…PublicKeySha256` values are SHA-256 fingerprints of raw 32-byte
-  Ed25519 public keys: root, CLI root, K-ACT, K-WIT, and the M-B1 candidate
-  root. They are refused in any key role.
+- The six `…PublicKeySha256` values are SHA-256 fingerprints of raw 32-byte
+  Ed25519 public keys: root, CLI root, K-ACT, K-WIT, and the two M-B1
+  candidate roots. They are refused in any key role.
 - The registry digest is `rotation_contracts.registry_digest`.
 - The genesis digest is the genesis-candidate / pin / genesis-witness
   digest.
@@ -81,14 +94,15 @@ The mappings are the verified B-3 ones
 | B-4 phone run 2 ([acceptance](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md) §4) | 4 | 1 | 1 | 6 |
 | B-4 path-correction WSL simulation (this record) | 4 | 1 | 1 | 6 |
 | M-B1 package WSL simulation (this record) | 1 | 0 | 0 | 1 |
-| **canonical total** | **13** | **2** | **2** | **19** |
+| M-B1 v2 pty test (this record, §3) | 1 | 0 | 0 | 1 |
+| **canonical total** | **14** | **2** | **2** | **20** |
 
 Wherever a record says "12 burned identities", read it as the 12 **phone
 rehearsal** identities. They remain burned, and they are a subset of the
-canonical 19. The owner's B-5 statement ("all 12 rehearsal identities
+canonical 20. The owner's B-5 statement ("all 12 rehearsal identities
 remain permanently burned") is unchanged and still true.
 
-**No real identity may match any of the 19.**
+**No real identity may match any of the 20.**
 
 ## 6. Unrecorded ephemeral identities (§1 class)
 
@@ -100,4 +114,4 @@ neither candidates nor enumerable:
   Replica-B-touched cases printed no fingerprint);
 - any earlier offline run whose values were not printed.
 
-The M-B1 review still compares the real fingerprint against the 19 by hand.
+The M-B1 review still compares the real fingerprint against the 20 by hand.

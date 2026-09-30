@@ -88,7 +88,7 @@ can change it; only a reviewed source change can.
 
 ## 3. Burned-identity enforcement
 
-> **Update: the canonical set is now 19** ([expansion](slice-15b2b-b1b3e-burned-identities-expansion.md)). The 12 phone-rehearsal identities below are joined by 7 recorded simulation identities. All 19 are enforced by `burned_identities.py`, and the mappings are unchanged.
+> **Update: the canonical set is now 20** ([expansion](slice-15b2b-b1b3e-burned-identities-expansion.md)). The 12 phone-rehearsal identities below are joined by 8 recorded simulation and test identities. All 20 are enforced by `burned_identities.py`, and the mappings are unchanged.
 
 **The 12 identities.** Run 1 and run 2 each burned six:
 ([hold record](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-evidence-hold.md)

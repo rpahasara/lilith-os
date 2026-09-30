@@ -172,8 +172,8 @@ Phone loss after lineage binding may require a re-bootstrap.
    compromise.
 2. **The K-ROOT passphrase is entered only on the S25.** It is never typed,
    stored, or pasted on the agent-reachable laptop.
-3. **All 12 rehearsal identities stay permanently burned.** The canonical enforced set is now 19
-   ([expansion](slice-15b2b-b1b3e-burned-identities-expansion.md)); real identities must match none of the 19:
+3. **All 12 rehearsal identities stay permanently burned.** The canonical enforced set is now 20
+   ([expansion](slice-15b2b-b1b3e-burned-identities-expansion.md)); real identities must match none of the 20:
    - [hold record](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-evidence-hold.md)
      §4;
    - [acceptance](slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md)
