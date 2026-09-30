@@ -58,6 +58,18 @@ def _snippet(name: str) -> str:
     return match.group(1)
 
 
+def _r(text: str) -> str:
+    """Failure messages never show a generated identity (burned-identity rule): redact every 64-hex value."""
+    return re.sub(r"[0-9a-f]{64}", "<redacted>", str(text))
+
+
+class RedactedFailures:
+    """Every failure message of these test classes is redacted, including the default ones that print operands."""
+
+    def _formatMessage(self, msg, standardMsg):
+        return _r(super()._formatMessage(msg, standardMsg))
+
+
 def _code_lines() -> list[str]:
     """Shell lines of the block, outside the Python heredocs and comments."""
     lines, inside = [], False
@@ -168,8 +180,8 @@ class RecordAndPinTests(unittest.TestCase):
         self.assertEqual(text[start:start + 200].split("`")[3], hashlib.sha256(block.encode()).hexdigest())
         tar_sha = re.search(r"\*\*bundle SHA-256\*\* \| `([0-9a-f]{64})`", text).group(1)
         sums_sha = re.search(r"`SHA256SUMS` \(inside the bundle\) \| `([0-9a-f]{64})`", text).group(1)
-        for pin in (f"TAR_SHA={tar_sha}", f"SUMS_SHA={sums_sha}", "SRC=ce5e10d48106a2a08346202256e347712daab175",
-                    "NFILES=74", "TAR=lilith-mb1-kroot-ce5e10d.tar", 'R="$HOME/lilith-owner-offline-dev-synthetic-01"',
+        for pin in (f"TAR_SHA={tar_sha}", f"SUMS_SHA={sums_sha}", "SRC=3ec71c176963a26b1b7d14333130bd7aebd2d555",
+                    "NFILES=74", "TAR=lilith-mb1-kroot-3ec71c1.tar", 'R="$HOME/lilith-owner-offline-dev-synthetic-01"',
                     'K="$HOME/lilith-kroot-dev-synthetic"', 'KEY="$K/k-root.der"'):
             self.assertIn(pin, block)
 
@@ -191,7 +203,22 @@ class StructureTests(unittest.TestCase):
         body = block.split("fail_custody() {", 1)[1].split("\n}\n", 1)[0]
         self.assertNotIn("stop ", body)
         self.assertNotIn("exit", body)
+        self.assertNotRegex(body, r"\brm\b")                                 # custody never deletes
+        self.assertIn("trap '' INT TERM HUP", body)                          # and cannot be interrupted
+        self.assertEqual(body.count("custody complete"), 1)
+        self.assertIn('if [ "$ok" = 1 ]; then', body)
+        trap_line = lines.index("trap 'stop \"interrupted by a signal\"' INT TERM HUP")
+        self.assertLess(trap_line, started)                                   # armed before root-keygen can write
         self.assertIn('test ! -e "$FC" && test ! -e "$QK" && test ! -e "$FX" && echo NO_FAILED_CANDIDATE_PENDING', block)
+
+    def test_failure_messages_are_redacted(self):
+        class Probe(RedactedFailures, unittest.TestCase):
+            def runTest(self):
+                pass
+        with self.assertRaises(AssertionError) as caught:
+            Probe().assertIn("MISSING", "FINGERPRINT " + "ab" * 32)
+        self.assertNotIn("ab" * 32, str(caught.exception))
+        self.assertIn("<redacted>", str(caught.exception))
 
     def test_every_stop_is_a_hard_stop(self):
         code = _code_lines()
@@ -251,7 +278,7 @@ class StructureTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_CRYPTO, "needs cryptography and rfc8785")
-class EmbeddedCheckTests(unittest.TestCase):
+class EmbeddedCheckTests(RedactedFailures, unittest.TestCase):
     def py(self, name: str, *args: str) -> subprocess.CompletedProcess:
         path = os.pathsep.join(p for p in (PYPATH, os.environ.get("PYTHONPATH", "")) if p)
         return subprocess.run([sys.executable, "-B", "-c", _snippet(name), *args], capture_output=True, text=True,
@@ -277,11 +304,11 @@ class EmbeddedCheckTests(unittest.TestCase):
                 out.write_text(json.dumps(value), encoding="utf-8")
                 self.assertNotEqual(self.py("ANCHOR_CHECK", str(out)).returncode, 0, tamper)
 
-    def test_burned_check_refuses_each_of_the_19(self):
+    def test_burned_check_refuses_each_of_the_20(self):
         sys.path[:0] = PYPATH.split(os.pathsep)
         from lilith_owner_memory import burned_identities as BI
         every = BI.BURNED_PUBLIC_KEY_SHA256 | BI.BURNED_REGISTRY_DIGESTS | BI.BURNED_GENESIS_WITNESS_DIGESTS
-        self.assertEqual((len(every), BI.CANONICAL_COUNT), (19, 19))
+        self.assertEqual((len(every), BI.CANONICAL_COUNT), (20, 20))
         for value in every:
             result = self.py("BURNED_CHECK", value)
             self.assertNotEqual(result.returncode, 0, value)
@@ -300,8 +327,27 @@ class EmbeddedCheckTests(unittest.TestCase):
             self.assertNotEqual(self.py("AT_REST_CHECK", str(plain)).returncode, 0)
 
 
+# Fault injection for the custody self-failure tests (the script itself is never modified):
+# FAULT="<cmd>:<pattern>" fails <cmd> when its arguments contain <pattern>; FAULT="mkdirpoison" lets the
+# burn-record directory be created but makes every file inside it unwritable.
+_SHIM = """#!/bin/bash
+case "${FAULT-}" in
+  "@CMD@:"*) pattern="${FAULT#@CMD@:}"; case "$*" in *"$pattern"*) echo "shim: @CMD@ fault injected" >&2; exit 1;; esac;;
+esac
+if [ "@CMD@" = mkdir ] && [ "${FAULT-}" = mkdirpoison ]; then
+  case "$*" in *lilith-mb1-failed-candidate*)
+    "@REAL@" "$@" || exit 1
+    for f in reason.txt candidate-anchor.json candidate.publicKeySha256 candidate-key-file.sha256 FAILED_GENERATED_CANDIDATE; do
+      "@REAL@" "${@: -1}/$f"; done
+    exit 0;;
+  esac
+fi
+exec "@REAL@" "$@"
+"""
+
+
 @unittest.skipUnless(os.name == "posix" and HAVE_CRYPTO, "runs the pinned script under a real pseudo-terminal")
-class PtyRunTests(unittest.TestCase):
+class PtyRunTests(RedactedFailures, unittest.TestCase):
     """The pinned script, run under a pty so getpass reads the terminal exactly as on the S25. Only the bundle
     pins, the file count, the Termux prefix in priv(), and the /proc scan root are substituted."""
 
@@ -317,11 +363,17 @@ class PtyRunTests(unittest.TestCase):
         for d in (self.downloads, self.root / "tmp", self.root / "bin", self.root / "proc/1"):
             d.mkdir(parents=True)
         (self.root / "proc/1/comm").write_text("bash\n")
-        (self.root / "bin/python").symlink_to(sys.executable)
+        import shutil
+        for cmd in ("cp", "mv", "tar", "sha256sum", "mkdir"):
+            real = shutil.which(cmd, path="/usr/bin:/bin")
+            (self.root / "bin" / cmd).write_text(_SHIM.replace("@CMD@", cmd).replace("@REAL@", real), encoding="utf-8")
+            (self.root / "bin" / cmd).chmod(0o755)
+        (self.root / "bin/python").write_text(_SHIM.replace("@CMD@", "python").replace("@REAL@", sys.executable), encoding="utf-8")
+        (self.root / "bin/python").chmod(0o755)
         replica = self.home / "lilith-owner-offline-dev-synthetic-01"
         (replica / "records").mkdir(parents=True)
         (replica / "REPLICA.json").write_bytes(REPLICA_B_MANIFEST)
-        top = "lilith-mb1-kroot-ce5e10d"
+        top = "lilith-mb1-kroot-3ec71c1"
         files = {path: (ROOT / path).read_bytes() for path in BUILD.CLOSURE}
         for package in ("rfc8785", "fido2"):                                 # vendor/, as in the real bundle
             origin = Path(importlib.util.find_spec(package).origin).parent
@@ -340,13 +392,13 @@ class PtyRunTests(unittest.TestCase):
         block = _block()
         script = (block.replace(re.search(r"TAR_SHA=[0-9a-f]{64}", block).group(0), f"TAR_SHA={hashlib.sha256(buf.getvalue()).hexdigest()}")
                   .replace(re.search(r"SUMS_SHA=[0-9a-f]{64}", block).group(0), f"SUMS_SHA={hashlib.sha256(files['SHA256SUMS']).hexdigest()}")
-                  .replace("SRC=ce5e10d48106a2a08346202256e347712daab175", "SRC=stub0commit")
+                  .replace("SRC=3ec71c176963a26b1b7d14333130bd7aebd2d555", "SRC=stub0commit")
                   .replace("NFILES=74", f"NFILES={len(files)}")
                   .replace("/data/data/com.termux/*|/data/user/0/com.termux/*", f"{self.root}/*")
                   .replace("/proc/[0-9]*/comm", f"{self.root}/proc/[0-9]*/comm"))
         (self.downloads / "mb1_phone_commands.sh").write_text(script, encoding="utf-8")
 
-    def run_script(self, answers, env_extra=None, interrupt_at=None) -> tuple[str, str]:
+    def run_script(self, answers, env_extra=None, interrupt_at=None, during=None) -> tuple[str, str]:
         import pty
         env = {"HOME": str(self.home), "PREFIX": str(self.root), "TMPDIR": str(self.root / "tmp"), "TERM": "dumb",
                "PATH": f"{self.root / 'bin'}:/usr/bin:/bin", **(env_extra or {})}
@@ -366,6 +418,8 @@ class PtyRunTests(unittest.TestCase):
             while pending and pending[0][0].encode() in out[pos:]:
                 prompt, reply = pending.pop(0)
                 pos = out.index(prompt.encode(), pos) + len(prompt)
+                if during and prompt in during:
+                    during[prompt]()
                 os.write(fd, b"\x03" if prompt == interrupt_at else (reply + "\n").encode())
         os.waitpid(pid, 0)
         transcript = (self.home / "lilith-mb1.transcript.txt").read_text(encoding="utf-8")
@@ -380,16 +434,16 @@ class PtyRunTests(unittest.TestCase):
         return sorted(os.listdir(k)) if k.exists() else None
 
     def assertStopped(self, transcript: str, message: str):
-        self.assertTrue(transcript.endswith("RUN_EXIT=1\n"), transcript)
+        self.assertTrue(transcript.endswith("RUN_EXIT=1\n"), _r(transcript))
         self.assertIn(f"STOP: {message}", transcript)
         self.assertNotIn("MB1_KROOT_GENERATED", transcript)
         self.assertNotIn("MB1_KROOT_FINGERPRINT", transcript)
         self.assertFalse((self.home / "lilith-mb1-export.tar").exists())
-        self.assertTrue((self.downloads / "lilith-mb1-kroot-ce5e10d.tar").exists())
+        self.assertTrue((self.downloads / "lilith-mb1-kroot-3ec71c1.tar").exists())
 
     def test_clean_run(self):
         transcript, _ = self.run_script([self.GEN, self.KP, self.RP, self.UP])
-        self.assertTrue(transcript.endswith("MB1_KROOT_GENERATED\nRUN_EXIT=0\n"), transcript)
+        self.assertTrue(transcript.endswith("MB1_KROOT_GENERATED\nRUN_EXIT=0\n"), _r(transcript))
         self.assertFalse([l for l in transcript.splitlines() if l.startswith("STOP")])
         self.assertNotIn(TEST_PASSPHRASE, transcript)
         key = self.home / "lilith-kroot-dev-synthetic/k-root.der"
@@ -403,7 +457,7 @@ class PtyRunTests(unittest.TestCase):
         self.assertNotIn(key.read_bytes()[16:48].hex(), transcript)
         fp = re.search(r"MB1_KROOT_FINGERPRINT publicKeySha256=([0-9a-f]{64})", transcript).group(1)
         self.assertEqual((self.home / "lilith-kroot-dev-synthetic-public/k-root.publicKeySha256").read_text().strip(), fp)
-        self.assertFalse((self.downloads / "lilith-mb1-kroot-ce5e10d.tar").exists())
+        self.assertFalse((self.downloads / "lilith-mb1-kroot-3ec71c1.tar").exists())
 
     def test_passphrase_mismatch_writes_no_key(self):
         transcript, _ = self.run_script([self.GEN, self.KP, ("repeat: ", TEST_PASSPHRASE + "x")])
@@ -428,6 +482,9 @@ class PtyRunTests(unittest.TestCase):
         self.assertFalse([n for n in names if n.endswith(".der") or "FAILED-CANDIDATE" in n or "lilith-kroot-dev-synthetic/" in n])
         self.assertNotIn(key.read_bytes()[16:48], blobs)
         if transcript is not None:
+            self.assertIn("(PERMANENTLY BURNED; NEVER K-ROOT; custody complete)", transcript)
+            self.assertNotIn("MB1_FAILURE_CUSTODY_INCOMPLETE", transcript)
+            self.assertIn("MB1_INCIDENT: a candidate was generated. MANUAL, REVIEWED RECOVERY IS REQUIRED", transcript)
             self.assertIn("MB1_FAILED_GENERATED_CANDIDATE", transcript)
             self.assertNotIn(fp, transcript.split("MB1_FAILED_GENERATED_CANDIDATE")[0])   # not presented as recordable
 
@@ -437,7 +494,7 @@ class PtyRunTests(unittest.TestCase):
         self.assertFailedCandidate(transcript)
         (self.home / "lilith-mb1.transcript.txt").unlink()
         rerun, _ = self.run_script([self.GEN, self.KP, self.RP, self.UP])             # a failed candidate blocks a rerun
-        self.assertTrue(rerun.endswith("RUN_EXIT=1\n"), rerun)
+        self.assertTrue(rerun.endswith("RUN_EXIT=1\n"), _r(rerun))
         self.assertNotIn("MB1_KROOT_GENERATED", rerun)
         self.assertNotIn("OWNER_CONFIRMED_ON_PHONE", rerun)
 
@@ -445,6 +502,78 @@ class PtyRunTests(unittest.TestCase):
         transcript, _ = self.run_script([self.GEN, self.KP, self.RP, self.UP], interrupt_at=self.UP[0])
         self.assertNotIn("MB1_KROOT_GENERATED", transcript)
         self.assertFailedCandidate()                                         # tee is interrupted too: disk is authoritative
+
+    # ---- fail_custody() self-failure: every step, forced to fail in turn ----
+    WRONG_UNLOCK = [GEN, KP, RP, ("K-ROOT passphrase (unlock check): ", "wrong passphrase 123")]
+
+    def key_files(self) -> list[Path]:
+        return sorted(p for p in self.home.rglob("k-root.der"))
+
+    def assertIncomplete(self, fault: str, message: str, answers=None, during=None, remains=None):
+        transcript, _ = self.run_script(answers or self.WRONG_UNLOCK, {"FAULT": fault}, during=during)
+        self.assertTrue(transcript.endswith("RUN_EXIT=1\n"), _r(transcript))
+        self.assertIn(f"FAILURE_CUSTODY_STEP_FAILED: {message}", transcript)
+        self.assertIn("MB1_FAILURE_CUSTODY_INCOMPLETE: MANUAL CUSTODY RECOVERY REQUIRED", transcript)
+        self.assertIn("MB1_INCIDENT: a candidate was generated. MANUAL, REVIEWED RECOVERY IS REQUIRED", transcript)
+        self.assertNotIn("custody complete", transcript)                    # never claimed
+        self.assertNotIn("MB1_KROOT_GENERATED", transcript)
+        self.assertEqual(len(self.key_files()), 1, self.key_files())        # the candidate is never deleted
+        self.assertTrue(str(self.key_files()[0]).startswith(str(self.home)))   # and stays on the "phone"
+        if remains is not None:
+            self.assertTrue(remains.exists(), remains)
+        (self.home / "lilith-mb1.transcript.txt").unlink()
+        rerun, _ = self.run_script([self.GEN, self.KP, self.RP, self.UP])   # no rerun on an incident state
+        self.assertTrue(rerun.endswith("RUN_EXIT=1\n"), _r(rerun))
+        self.assertNotIn("OWNER_CONFIRMED_ON_PHONE", rerun)
+        self.assertEqual(len(self.key_files()), 1)
+        return transcript
+
+    def test_custody_failure_burn_directory(self):
+        self.assertIncomplete("mkdir:lilith-mb1-failed-candidate", "cannot create", remains=self.home / "lilith-kroot-dev-synthetic.FAILED-CANDIDATE/k-root.der")
+
+    def test_custody_failure_burn_record_write(self):
+        transcript = self.assertIncomplete("mkdirpoison", "cannot write reason.txt")
+        self.assertIn("FAILURE_CUSTODY_STEP_FAILED: cannot write the burn marker", transcript)
+
+    def test_custody_failure_anchor_copy(self):
+        self.assertIncomplete("cp:candidate-anchor.json", "cannot copy the candidate anchor")
+
+    def test_custody_failure_fingerprint_derivation(self):
+        self.assertIncomplete("python:fullmatch", "the candidate fingerprint could not be derived")
+
+    def test_custody_failure_encrypted_key_hash(self):
+        self.assertIncomplete("sha256sum:k-root.der", "cannot capture the encrypted key file hash")
+
+    def _after_public_copy(self):                                        # a STOP after the public copy and export exist
+        return {"during": {self.UP[0]: lambda: (self.downloads / "lilith-mb1-kroot-3ec71c1.tar").unlink()},
+                "answers": [self.GEN, self.KP, self.RP, self.UP]}
+
+    def test_custody_failure_public_copy_withdrawal(self):
+        self.assertIncomplete("mv:withdrawn-public", "an accepted-looking public copy REMAINS",
+                              remains=self.home / "lilith-kroot-dev-synthetic-public", **self._after_public_copy())
+
+    def test_custody_failure_success_export_withdrawal(self):
+        self.assertIncomplete("mv:withdrawn-export", "a success-format export REMAINS",
+                              remains=self.home / "lilith-mb1-export.tar", **self._after_public_copy())
+
+    def test_custody_failure_quarantine(self):
+        self.assertIncomplete("mv:FAILED-CANDIDATE", "quarantine failed; the candidate REMAINS",
+                              remains=self.home / "lilith-kroot-dev-synthetic/k-root.der")
+
+    def test_custody_failure_export_creation(self):
+        self.assertIncomplete("tar:failed-candidate-export", "the failure export could not be built")
+
+    def test_custody_failure_export_hash(self):
+        self.assertIncomplete("sha256sum:failed-candidate-export", "cannot hash the failure export")
+
+    def test_interrupt_during_keygen_is_an_incident_without_a_candidate(self):
+        transcript, _ = self.run_script([self.GEN, self.KP, self.RP], interrupt_at="repeat: ")
+        self.assertEqual(self.key_files(), [])                               # root-keygen never wrote the key
+        self.assertTrue((self.home / "lilith-mb1").exists())                 # staging remains: the incident state
+        (self.home / "lilith-mb1.transcript.txt").unlink()
+        rerun, _ = self.run_script([self.GEN, self.KP, self.RP, self.UP])
+        self.assertTrue(rerun.endswith("RUN_EXIT=1\n"), _r(rerun))
+        self.assertNotIn("OWNER_CONFIRMED_ON_PHONE", rerun)
 
     def test_ssh_session_stops_before_any_write(self):
         transcript, _ = self.run_script([], {"SSH_CONNECTION": "10.0.0.1 1 10.0.0.2 22"})
