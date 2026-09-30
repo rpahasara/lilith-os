@@ -53,6 +53,8 @@ B-5 GRANTED != M-B1 go != K-ROOT exists != freshness CURRENT != First Memory
 >
 > FIRST MEMORY remains NOT AUTHORIZED.
 
+> **Burned-set note (2026-09-30).** The owner's "all 12 rehearsal identities" remain burned. The canonical, mechanically enforced set they belong to is now **19** ([expansion](slice-15b2b-b1b3e-burned-identities-expansion.md)). Real identities must match none of the 19.
+
 ## 2. M-B1 gate: all five conditions are required, in order
 
 | # | Condition | State |
