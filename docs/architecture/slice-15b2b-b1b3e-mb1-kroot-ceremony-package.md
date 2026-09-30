@@ -2,7 +2,7 @@
 
 Status:
 
-- **`MB1_PACKAGE_PREPARED_READY_FOR_REVIEW`**. The package is prepared.
+- **`MB1_PACKAGE_REVISED_READY_FOR_REVIEW`** (v2). The package is prepared.
   **It is not reviewed yet, M-B1 is NOT AUTHORIZED, and M-B1 has not been
   executed.**
 - It satisfies only condition 1 of the owner's
@@ -17,6 +17,26 @@ Status:
 package prepared != package reviewed != M-B1 authorized != M-B1 executed
 ```
 
+> **Revision v2 (2026-09-30, before any review or execution).** The v1
+> package (bundle `a42083c6…eb24` from `c694061`, script `c2efe0fd…fba5`,
+> commit `1b17a25`) is **superseded and must not be used**. The review found
+> two issues:
+>
+> 1. **The burned set was incomplete.** Seven real-format TEST identities
+>    had been printed in full and declared burned, but were not enforced:
+>    six from the B-4 path-correction simulation, and v1's own simulation
+>    candidate `ae5d8275…`. The
+>    [expansion record](slice-15b2b-b1b3e-burned-identities-expansion.md)
+>    makes the canonical set **19**. `burned_identities.py` changed, so the
+>    bundle was rebuilt from that commit (`ce5e10d`).
+> 2. **A STOP after generation could leave an untracked candidate:**
+>    - the key in place;
+>    - its fingerprint only in staging;
+>    - no burn record or export;
+>    - a public copy that looked accepted, and no signal handling.
+>
+>    v2 adds failed-candidate custody (§6).
+
 | Stage | Meaning | State |
 | --- | --- | --- |
 | **package prepared** | the bundle is built deterministically from merged `main`; the operator script, record, and tests exist | **YES** (this record) |
@@ -28,23 +48,24 @@ package prepared != package reviewed != M-B1 authorized != M-B1 executed
 
 | Item | Value |
 | --- | --- |
-| source commit (merged `main`) | `c6940615875fd13df1636d7c105ad5b65c39d112` (`SOURCE_COMMIT` in the bundle) |
-| bundle | `lilith-mb1-kroot-c694061.tar`, 1 413 120 bytes |
-| **bundle SHA-256** | `a42083c6ea85300ffbf550e2e6e09a9822c9b69b236f0c69c1f53ef218b9eb24` |
-| `SHA256SUMS` (inside the bundle) | `92880077323536c8f756f5384ce83dffd11533cb05b990f30df3f20e5b564739` |
+| source commit | `ce5e10d48106a2a08346202256e347712daab175`: the burned-set expansion (19), on this branch, child of merged `main` `c694061`. It is `SOURCE_COMMIT` in the bundle. At run time it must be an ancestor of merged `main`, with the 17 bundled source files unchanged there (§3) |
+| bundle | `lilith-mb1-kroot-ce5e10d.tar` |
+| **bundle SHA-256** | `37418b4289f483d074d138541c41b3613ef1419fd72eadb4fd3d9799c1a5053d` |
+| `SHA256SUMS` (inside the bundle) | `bf3cbaaf73d43e00ddb193331e061f6be8a90a8335048f0dad6e554990ef84f6` |
 | files | **74**: 17 source files + 55 vendor files + `SOURCE_COMMIT` + `SHA256SUMS` |
-| top directory | `lilith-mb1-kroot-c694061/` |
-| **operator script** | `mb1_phone_commands.sh`, 14 799 bytes, **SHA-256 `c2efe0fd9bcaaebb47f5e57b4ef8fce862265af0ced67b9130055ad0a1fefba5`**; exactly the §4 block |
+| top directory | `lilith-mb1-kroot-ce5e10d/` |
+| **operator script** | `mb1_phone_commands.sh`, **SHA-256 `0336084adf7a2f9ddcbfec381fa1e3d0b1cc592a51686fbbbb8f2e39082855b6`**; exactly the §4 block |
 | builder | `services/owner-memory-control/tools/build_mb1_kroot_bundle.py` (this change) |
 | determinism | two independent builds are byte-identical |
-| laptop staging | `%USERPROFILE%\lilith-mb1-package\` (outside every Git tree): the tar and the operator script |
+| laptop staging | `%USERPROFILE%\lilith-mb1-package\` (outside every Git tree): the v2 tar, the operator script, and `STAGING.sha256`. v1 is under `superseded/` |
 
 **Contents.**
 
 - The 16-file import closure of
   `services/authority-dev/ceremony/lilith_authority_owner_dev.py`, computed
   and pinned by a test.
-- `lilith_owner_memory/burned_identities.py`.
+- `lilith_owner_memory/burned_identities.py`, with the canonical **19**
+  (`CANONICAL_COUNT = 19`).
 - The 55 vendor files (`fido2` 2.2.1, `rfc8785` 0.1.4). They are
   byte-identical to the verified B-4 bundle `659c50a4…`, whose own
   `SHA256SUMS` was re-verified before copying.
@@ -75,12 +96,17 @@ bundle). This is test-enforced.
 | `~/lilith-mb1-export.tar` | the **public-only** export for the laptop | the script |
 | `~/lilith-mb1.transcript.txt` | the stdout / stderr transcript (public) | `tee` |
 | `~/lilith-owner-offline-dev-synthetic-01` | Replica B: **read only** (snapshot before and after) | nothing |
+| `~/lilith-mb1-failed-candidate/` | **only after a post-generation STOP:** the public burn record of a `FAILED_GENERATED_CANDIDATE` | `fail_custody()` |
+| `~/lilith-kroot-dev-synthetic.FAILED-CANDIDATE/` | **only after a post-generation STOP:** the quarantined private candidate. It stays on the S25, and is never K-ROOT | `fail_custody()` (`mv` of the key directory) |
+| `~/lilith-mb1-failed-candidate-export.tar` | **only after a post-generation STOP:** the public-only failure export | `fail_custody()` |
 
 ## 3. Operator flow
 
 **Preconditions** (none of them is met yet):
 
-1. this package reviewed and merged;
+1. this package reviewed and merged. On the laptop, `git merge-base
+   --is-ancestor ce5e10d origin/main` must hold, and the 17 bundled source files
+   must equal `origin/main`'s;
 2. the `cfa0b3e` DEV deployment boundary results reviewed and accepted;
 3. a fresh PR-2 revalidation PASS immediately before eligibility;
 4. `CHECK_ELIGIBILITY` returns `PR1B_ELIGIBLE`;
@@ -106,8 +132,8 @@ bundle). This is test-enforced.
 5. On `RUN_EXIT=0`, write down the fingerprint (`MB1_KROOT_FINGERPRINT`).
    That is the E-21 owner record. The authoritative copy is also in
    `~/lilith-kroot-dev-synthetic-public/`.
-6. Confirm by eye that the fingerprint is none of the 12 burned identities.
-   The script has already refused them mechanically.
+6. Confirm by eye that the fingerprint is none of the **19** burned
+   identities. The script has already refused them mechanically.
 
 **Export:**
 
@@ -120,33 +146,42 @@ bundle). This is test-enforced.
 
 ## 4. Operator script
 
-`mb1_phone_commands.sh` (SHA-256 `c2efe0fd9bcaaebb47f5e57b4ef8fce862265af0ced67b9130055ad0a1fefba5`) is exactly this block:
+`mb1_phone_commands.sh` (SHA-256 `0336084adf7a2f9ddcbfec381fa1e3d0b1cc592a51686fbbbb8f2e39082855b6`) is exactly this block:
 
 ```bash
-# ===== M-B1: real K-ROOT generation (DEV_SYNTHETIC), S25 Termux ONLY (bundle lilith-mb1-kroot-c694061) =====
+# ===== M-B1: real K-ROOT generation (DEV_SYNTHETIC), S25 Termux ONLY (bundle lilith-mb1-kroot-ce5e10d) =====
 # Run ONLY after the owner's separate, explicit M-B1 go statement; ONLY on the S25; ONLY as a file; in a LOCAL
 # Termux session (never SSH); with airplane mode ON and USB unplugged BEFORE starting:
 #   bash "$HOME/storage/downloads/mb1_phone_commands.sh" 2>&1 | tee "$HOME/lilith-mb1.transcript.txt"; echo "RUN_EXIT=${PIPESTATUS[0]}" | tee -a "$HOME/lilith-mb1.transcript.txt"
 # The ONLY private write is $KEY (root-keygen: O_EXCL, O_NOFOLLOW, 0600). The passphrase is typed ONLY into this
 # phone's terminal (getpass on /dev/tty); it is never an argument, a variable, or a file. Only public files leave.
 # stop() is the only STOP path: it prints "STOP: ..." on stderr and exits 1. After a STOP: do not retry, delete, or edit.
+# Any STOP (or signal) after root-keygen starts runs fail_custody(): a generated candidate becomes a permanently burned
+# FAILED_GENERATED_CANDIDATE (quarantined on the phone, public identity recorded and exported); it is NEVER K-ROOT.
 set -u
-stop() { builtin echo "STOP: $*" >&2; exit 1; }
+KEYGEN_STARTED=0
+CUSTODY_RUNNING=0
+stop() { builtin echo "STOP: $*" >&2; [ "$KEYGEN_STARTED" = 1 ] && fail_custody "$*"; exit 1; }
+trap '' PIPE
+trap 'stop "interrupted by a signal"' INT TERM HUP
 vpass() { builtin echo "$1"; builtin echo "$1" >> "$E/verify.txt" || stop "cannot write verify.txt"; }
-TAR=lilith-mb1-kroot-c694061.tar
-TAR_SHA=a42083c6ea85300ffbf550e2e6e09a9822c9b69b236f0c69c1f53ef218b9eb24
-SUMS_SHA=92880077323536c8f756f5384ce83dffd11533cb05b990f30df3f20e5b564739
-SRC=c6940615875fd13df1636d7c105ad5b65c39d112
+TAR=lilith-mb1-kroot-ce5e10d.tar
+TAR_SHA=37418b4289f483d074d138541c41b3613ef1419fd72eadb4fd3d9799c1a5053d
+SUMS_SHA=bf3cbaaf73d43e00ddb193331e061f6be8a90a8335048f0dad6e554990ef84f6
+SRC=ce5e10d48106a2a08346202256e347712daab175
 NFILES=74
 DL="$HOME/storage/downloads"
 W="$HOME/lilith-mb1"                                   # staging and PUBLIC evidence
 E="$W/evidence"
-B="$W/lilith-mb1-kroot-c694061"
+B="$W/lilith-mb1-kroot-ce5e10d"
 K="$HOME/lilith-kroot-dev-synthetic"                   # the ONLY place private K-ROOT material may exist
 KEY="$K/k-root.der"
 PUB="$HOME/lilith-kroot-dev-synthetic-public"          # the authoritative S25 copy of the PUBLIC anchor and fingerprint
 X="$HOME/lilith-mb1-export.tar"                         # public-only export for the laptop
 R="$HOME/lilith-owner-offline-dev-synthetic-01"         # Replica B: read only
+FC="$HOME/lilith-mb1-failed-candidate"                 # PUBLIC burn record of a failed generated candidate
+QK="$HOME/lilith-kroot-dev-synthetic.FAILED-CANDIDATE"  # quarantined private candidate: stays on the S25, never K-ROOT
+FX="$HOME/lilith-mb1-failed-candidate-export.tar"       # public-only failure export for the laptop
 TMP="${TMPDIR:-$PREFIX/tmp}"
 priv() { case "$(realpath "$1")/" in /data/data/com.termux/*|/data/user/0/com.termux/*) return 0;; *) return 1;; esac; }
 snap() { echo "sha $(sha256sum "$R/REPLICA.json" | cut -d' ' -f1)"; echo "records $(ls -A "$R/records" | wc -l)"
@@ -173,7 +208,7 @@ import sys
 from lilith_owner_memory import burned_identities as BI
 fp = sys.argv[1]
 every = BI.BURNED_PUBLIC_KEY_SHA256 | BI.BURNED_REGISTRY_DIGESTS | BI.BURNED_GENESIS_WITNESS_DIGESTS
-assert len(every) == 12, "burned set is not the 12 accepted identities"
+assert len(every) == BI.CANONICAL_COUNT == 19, "burned set is not the 19 canonical identities"
 if fp in every:
     sys.exit("real K-ROOT fingerprint equals a burned rehearsal identity")
 print("NOT_A_BURNED_IDENTITY")
@@ -206,6 +241,40 @@ del key
 print("KEY_UNLOCKS_AND_MATCHES_ANCHOR")
 PYEOF
 )
+# Reads the candidate fingerprint for the burn record, tolerating a damaged file (argv[1] = root-keygen.json).
+FP_EXTRACT=$(cat <<'PYEOF'
+import json, re, sys
+try:
+    fp = json.load(open(sys.argv[1]))["publicKeySha256"]
+    print(fp if re.fullmatch(r"[0-9a-f]{64}", fp) else "UNKNOWN")
+except Exception:
+    print("UNKNOWN")
+PYEOF
+)
+# Failure custody: never calls stop() and never exits; it records, withdraws, quarantines, and exports, then returns.
+fail_custody() {
+  [ "$CUSTODY_RUNNING" = 1 ] && return 0
+  CUSTODY_RUNNING=1
+  if ! test -e "$KEY"; then builtin echo "NO_CANDIDATE_GENERATED (no key file was written)"; return 0; fi
+  builtin echo "FAILED_GENERATED_CANDIDATE: recording, quarantining, and exporting the failed candidate"
+  mkdir -m 700 "$FC" || { builtin echo "FAILURE_CUSTODY_INCOMPLETE cannot create $FC"; return 0; }
+  printf '%s\n' "$1" > "$FC/reason.txt"
+  cfp=UNKNOWN
+  if test -f "$E/root-keygen.json"; then cp "$E/root-keygen.json" "$FC/candidate-anchor.json"; cfp=$(python -B -c "$FP_EXTRACT" "$E/root-keygen.json"); fi
+  printf '%s\n' "$cfp" > "$FC/candidate.publicKeySha256"
+  sha256sum "$KEY" | cut -d' ' -f1 > "$FC/candidate-key-file.sha256"
+  printf 'FAILED_GENERATED_CANDIDATE\npublicKeySha256=%s\nstatus=PERMANENTLY_BURNED; NEVER K-ROOT; never regenerate, reuse, or reclassify\nutc=%s\n' "$cfp" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$FC/FAILED_GENERATED_CANDIDATE"
+  if test -e "$PUB"; then mv "$PUB" "$FC/withdrawn-public" && builtin echo "PUBLIC_COPY_WITHDRAWN"; fi
+  if test -e "$X"; then mv "$X" "$FC/withdrawn-export.tar" && builtin echo "SUCCESS_FORMAT_EXPORT_WITHDRAWN"; fi
+  if test -e "$QK"; then builtin echo "FAILURE_CUSTODY_INCOMPLETE $QK exists; the candidate stays at $KEY"
+  else mv "$K" "$QK" && builtin echo "CANDIDATE_QUARANTINED (private, on this phone only)"; fi
+  if tar -cf "$FX" -C "$HOME" lilith-mb1-failed-candidate $(test -d "$E" && builtin echo lilith-mb1/evidence) \
+     && ! tar -tf "$FX" | grep -q -e 'k-root\.der' -e 'lilith-kroot-dev-synthetic/' -e 'FAILED-CANDIDATE'; then
+    builtin echo "PHONE_SIDE_FAILURE_EXPORT_SHA256 $(sha256sum "$FX" | cut -d' ' -f1)"
+  else builtin echo "FAILURE_CUSTODY_INCOMPLETE the failure export could not be built or names private material"; fi
+  builtin echo "MB1_FAILED_GENERATED_CANDIDATE publicKeySha256=$cfp (PERMANENTLY BURNED; NEVER K-ROOT)"
+  return 0
+}
 
 # ---- G0 phone state (read-only) ----
 cd "$HOME" || stop "cannot enter HOME"
@@ -221,6 +290,7 @@ test ! -e "$W" && echo STAGING_ABSENT || stop "$W already exists"
 test ! -e "$K" && echo KROOT_DIR_ABSENT || stop "$K already exists: a K-ROOT may already exist"
 test ! -e "$PUB" && echo PUBLIC_DIR_ABSENT || stop "$PUB already exists"
 test ! -e "$X" && echo EXPORT_ABSENT || stop "$X already exists"
+test ! -e "$FC" && test ! -e "$QK" && test ! -e "$FX" && echo NO_FAILED_CANDIDATE_PENDING || stop "a failed generated candidate exists: it must be burned and disposed of by a reviewed step first"
 ls -A "$TMP" | grep -q -e lilith-mb1 -e lilith-b4-kroot-rehearsal && stop "stale directory in TMPDIR" || echo TMP_NO_STALE
 find "$HOME" \( -name 'k-root*' -o -name '*REHEARSAL-TEST*' \) 2>/dev/null | grep -q . && stop "a k-root or rehearsal key file already exists" || echo NO_KROOT_FILES_BEFORE
 test -f "$R/REPLICA.json" && echo REPLICA_B_PRESENT || stop "Replica B missing"
@@ -257,6 +327,7 @@ read -r answer < /dev/tty || stop "no confirmation"
 
 # ---- K1 the ONLY private write: root-keygen (the passphrase is asked twice by getpass on this terminal) ----
 mkdir -m 700 "$K" || stop "cannot create $K"
+KEYGEN_STARTED=1
 python -B "$TOOL" root-keygen "$KEY" > "$E/root-keygen.json" 2> "$E/root-keygen.stderr"
 rc=$?
 echo "exit=$rc" | tee "$E/root-keygen.exit" || stop "cannot write root-keygen.exit"
@@ -269,7 +340,7 @@ test "$(stat -c %a "$K")" = 700 && echo KROOT_DIR_0700 || stop "key directory mo
 test "$(ls -A "$K")" = k-root.der && echo KEY_FILE_ONLY_ENTRY || stop "unexpected entry beside the key"
 test -f "$E/root-keygen.stderr" && ! test -s "$E/root-keygen.stderr" && echo KEYGEN_STDERR_EMPTY || stop "root-keygen wrote to stderr"
 python -B -c "$ANCHOR_CHECK" "$E/root-keygen.json" > "$E/anchor-check.txt" || stop "root-keygen output is not a valid K-ROOT anchor"
-cat "$E/anchor-check.txt" || stop "cannot read anchor-check.txt"
+grep -qx ANCHOR_VALID "$E/anchor-check.txt" && echo ANCHOR_VALID || stop "cannot read anchor-check.txt"   # the fingerprint is shown only at the end
 FP=$(sed -n 's/^FINGERPRINT \([0-9a-f]\{64\}\)$/\1/p' "$E/anchor-check.txt")
 test "${#FP}" = 64 || stop "no fingerprint"
 python -B -c "$BURNED_CHECK" "$FP" > "$E/burned-check.txt" || stop "the real K-ROOT equals a burned identity: do NOT record or use it"
@@ -314,6 +385,7 @@ echo TRANSPORT_COPY_REMOVED
 
 # ---- result: record the fingerprint now (E-21) ----
 echo "PHONE_SIDE_EXPORT_SHA256 $(sha256sum "$X" | cut -d' ' -f1)"
+KEYGEN_STARTED=0                                        # accepted: every gate passed; no STOP path remains
 echo "MB1_KROOT_FINGERPRINT publicKeySha256=$FP"
 echo MB1_KROOT_GENERATED
 # Write the fingerprint down now; the authoritative copy is in $PUB. Copy ONLY $X (and the transcript) to Download.
@@ -328,7 +400,11 @@ transcript captures, and exits 1 at top level.
 - No gate runs inside a pipeline or a subshell whose exit could be
   swallowed.
 - There is no `echo()` redefinition.
-- This is test-enforced, following the reviewed B-4 run-2 pattern.
+- `INT`, `TERM`, and `HUP` are trapped into `stop`.
+- `SIGPIPE` is ignored, so a dead `tee` cannot kill the custody step.
+
+**Once `root-keygen` has started, every STOP first runs failed-candidate
+custody (§6).**
 
 **Pre-run (G0 / G1 / T1).** Any failure stops **before any write**:
 
@@ -340,8 +416,11 @@ transcript captures, and exits 1 at top level.
 - `~/lilith-mb1`, `~/lilith-kroot-dev-synthetic`,
   `~/lilith-kroot-dev-synthetic-public`, or the export already exists
   (rerun safety);
+- **a pending failed candidate** (`~/lilith-mb1-failed-candidate`, the
+  quarantine directory, or the failure export);
 - a stale TMPDIR directory;
-- **any existing `k-root*` or `*REHEARSAL-TEST*` file** under `$HOME`;
+- **any existing `k-root*` or `*REHEARSAL-TEST*` file** under `$HOME`,
+  including a quarantined candidate;
 - Replica B missing, not the accepted empty replica (`c068e533…`, 0
   records, `parent` line), or a nested Replica B;
 - the bundle is not in Download, or its tar hash, `SHA256SUMS` digest,
@@ -351,17 +430,15 @@ transcript captures, and exits 1 at top level.
 
 **Generation and checks (K1 / K2):**
 
-- `root-keygen` exits non-zero: passphrase mismatch, too short, or an
-  existing file;
+- `root-keygen` exits non-zero;
 - the key file is not regular, not `0600`, or not the only entry in a `0700`
   dir;
 - `root-keygen` wrote to stderr;
-- the output is not exactly `{registryRoot, publicKeySha256}` with a valid
-  `TrustedRegistryRootV1`, the expected root key ID, and the `dev`
-  environment;
-- the fingerprint is not the SHA-256 of the raw 32-byte key;
-- **the fingerprint equals any of the 12 burned identities** (checked
-  against all three burned sets);
+- the output is not exactly `{registryRoot, publicKeySha256}`: a valid
+  `TrustedRegistryRootV1`, the expected root key ID, `dev`, and a fingerprint
+  equal to the SHA-256 of the raw key;
+- **the fingerprint equals any of the 19 canonical burned identities**
+  (`len(every) == CANONICAL_COUNT == 19` is itself asserted);
 - the key loads without a passphrase;
 - the passphrase does not unlock it, or the unlocked key does not match the
   anchor.
@@ -369,7 +446,7 @@ transcript captures, and exits 1 at top level.
 **Verification (V):**
 
 - TMPDIR is not clean;
-- any `k-root*` or rehearsal key file exists outside `$KEY`;
+- any key file exists outside `$KEY`;
 - a key-like file is in shared Download;
 - any evidence file equals the key;
 - the bundle changed;
@@ -382,162 +459,192 @@ transcript captures, and exits 1 at top level.
 - the export names the key directory, `k-root.der`, or a tar, or is not
   **exactly** the 14-file public allowlist.
 
-**Cleanup.** The transport copy is removed only after everything above
-passes, and only with explicit existence, `cmp`, `rm`, and absence checks.
+**Cleanup.** The transport copy is removed only after everything above,
+with explicit existence, `cmp`, `rm`, and absence checks.
 
 **Acceptance requires `RUN_EXIT=0`, zero transcript lines beginning
 `STOP`, and `MB1_KROOT_GENERATED` as the last token before `RUN_EXIT`.**
 
-## 6. Partial failure and recovery
+## 6. Failed-candidate custody (every STOP after generation)
 
-The script never deletes or retries anything. The only removal is the
-transport copy, at the very end.
+**States.**
 
-| STOP point | State left | Rule (P3-5 crash matrix) |
+| State | Meaning | Marker |
 | --- | --- | --- |
-| G0 / G1 / T1 or the `GENERATE` refusal | no key. At most `~/lilith-mb1/` exists | nothing private was written. Report; a rerun needs the staging directory removed after review |
-| `root-keygen` refused (passphrase mismatch / too short) | **empty** `~/lilith-kroot-dev-synthetic/` and staging | no key exists (C-1). Report; the empty directory is removed only after review |
-| after `root-keygen` succeeded (any K2 / V / P / X gate) | **a key file exists; no fingerprint was presented as recordable** | **C-2:** the fingerprint was **not** recorded (`MB1_KROOT_GENERATED` never printed). **Do not record or use it.** Report; the reviewed recovery is discard and regenerate, never reuse |
-| burned-identity STOP | the key exists | as C-2, and the key must never be used |
+| **successful M-B1** | every gate passed. `KEYGEN_STARTED` is cleared **only then**, immediately before the success lines | `MB1_KROOT_FINGERPRINT` and `MB1_KROOT_GENERATED`, then `RUN_EXIT=0` |
+| **`FAILED_GENERATED_CANDIDATE`** | a key file was written, and a STOP or signal followed | `MB1_FAILED_GENERATED_CANDIDATE publicKeySha256=<fp> (PERMANENTLY BURNED; NEVER K-ROOT)`, then `RUN_EXIT=1`. **`MB1_KROOT_GENERATED` is never printed** |
+| **no candidate** | STOP before or during `root-keygen`, with no key file written (a passphrase mismatch or too short) | `NO_CANDIDATE_GENERATED`; nothing to burn |
 
-**A failed ceremony cannot look successful:**
+**`fail_custody()`.** It runs inside `stop()`, once. It never calls `stop()`
+and never exits, so it cannot recurse or be cut short by a gate. It never
+deletes anything, and it contacts nothing. In order:
 
-- `MB1_KROOT_GENERATED` and the recordable `MB1_KROOT_FINGERPRINT` are
-  printed only after every gate;
-- `RUN_EXIT` is the script's true exit status (the reviewed
-  `PIPESTATUS[0]` invocation);
-- any STOP leaves a `STOP:` line in the transcript.
+1. **Burn record:** it creates `~/lilith-mb1-failed-candidate/` (`0700`),
+   public only, holding:
+   - `FAILED_GENERATED_CANDIDATE`: the fingerprint, `PERMANENTLY_BURNED`,
+     "never K-ROOT; never regenerate, reuse, or reclassify", and the UTC
+     time;
+   - `candidate.publicKeySha256`: the fingerprint, from `root-keygen.json`.
+     It is `UNKNOWN` only if that file is missing or damaged; the ciphertext
+     hash then still identifies the file;
+   - `candidate-anchor.json`: the public anchor;
+   - `candidate-key-file.sha256`: the SHA-256 of the **encrypted** key
+     file, which identifies the quarantined file and reveals nothing;
+   - `reason.txt`: the STOP message.
+2. **Withdraw anything that looks accepted:** the public copy moves to
+   `withdrawn-public/`, and a success-format export, if already built, moves
+   to `withdrawn-export.tar`, both inside the burn record.
+3. **Quarantine:** the key directory is renamed
+   `~/lilith-kroot-dev-synthetic.FAILED-CANDIDATE/`. It stays in Termux
+   private storage on the S25, is never read again, and no path treats it
+   as K-ROOT.
+4. **Failure export:** `~/lilith-mb1-failed-candidate-export.tar` holds the
+   burn record and the public evidence. It is refused if any member names
+   `k-root.der`, the key directory, or the quarantine directory. It prints
+   `PHONE_SIDE_FAILURE_EXPORT_SHA256`.
+
+**Why the candidate can never become K-ROOT:**
+
+- There is no success marker, public copy, or success export.
+- A rerun stops in G0, on the burn record, the quarantine directory, and
+  the quarantined `k-root.der` (`NO_KROOT_FILES_BEFORE`), until a reviewed
+  disposal.
+- The burned fingerprint joins `burned_identities.py` through a reviewed
+  change. Every later bundle then refuses it mechanically.
+
+**Reviewed recovery** (not scripted, and not authorized here):
+
+1. Transfer the failure export and transcript (phone-side hash), and review
+   them.
+2. A reviewed change adds the candidate fingerprint to
+   `burned_identities.py`, which raises `CANONICAL_COUNT`. The bundle is
+   rebuilt and the script re-pinned.
+3. A separately reviewed phone disposal step deletes the quarantined key
+   file, and archives or removes `~/lilith-mb1/` and the burn record.
+4. A fresh owner M-B1 go statement is given for a new candidate.
+
+**Replica B and freshness are never touched** by custody.
 
 ## 7. Custody proofs
 
 **No K-ROOT private material can be copied to the laptop by this package.**
 
-- The script contains no network, MTP, `adb`, `ssh`, `scp`, `curl`, or `nc`
+- The script has no network, MTP, `adb`, `ssh`, `scp`, `curl`, or `nc`
   command (test-enforced). The phone is in airplane mode.
-- `$KEY` is used only as the `root-keygen` output path and in read-only
-  checks: `test`, `stat`, `ls`, the at-rest and unlock checks, and `cmp`.
-  It never appears in `cp`, `mv`, `tar`, `cat`, or `echo` (test-enforced).
-- The only artifact meant for the laptop, `~/lilith-mb1-export.tar`, is
-  built from an **explicit allowlist** that never names
-  `lilith-kroot-dev-synthetic/`. It is then checked to be exactly the
-  14-file public list, and every evidence and public file is
-  `cmp`-compared against the key.
-- The transcript holds only public output: `root-keygen` writes its JSON to
-  a file, and the key bytes are never printed.
-- **Simulation:** the key's bytes appear in neither the export nor the
-  transcript.
+- `$KEY` is used only as the `root-keygen` output path, in read-only
+  checks, and in the ciphertext hash of the burn record. It never appears
+  in `cp`, `tar`, `cat`, or `echo`. The only `mv` commands are the custody
+  withdrawals and the quarantine, all inside `$HOME` (test-enforced).
+- **Both exports are built from explicit lists that never name the key or
+  quarantine directory**, and both are checked after building:
+  - the success export must be exactly the 14-file public allowlist;
+  - the failure export must name no `k-root.der`, key directory, or
+    quarantine directory.
+- Every evidence and public file is `cmp`-compared against the key.
+- The transcript holds only public output.
+- **Simulation:** the key bytes appear in neither export nor the
+  transcript, in every case.
 
 **The passphrase is entered only on the S25.**
 
-- It is read only by `getpass`, from the controlling terminal
-  (`/dev/tty`), and nowhere else: twice by `root-keygen`, once by the
-  unlock check.
-- The package has **no** passphrase argument, environment variable, file,
-  or `read` (the `read` reads only the word `GENERATE`). The owner tool's
-  test hook (`main(passphrase=…)`) is not reachable from the CLI.
-- G0 refuses SSH sessions and a running `sshd`, and requires the local
-  terminal. So the terminal is the phone's own Termux session.
-- **Simulation:** the passphrase never appears in the transcript.
-- Airplane mode and the absence of screen mirroring or remote-input tools
-  are **owner attestations**.
+- It is read only by `getpass`, from the controlling terminal: twice by
+  `root-keygen`, once by the unlock check.
+- There is no passphrase argument, environment variable, file, or `read`
+  (the `read` reads only `GENERATE`).
+- SSH sessions and a running `sshd` are refused, and a local terminal is
+  required.
+- Airplane mode and the absence of remote-input tools are owner
+  attestations.
 
-**Replica B:** read-only snapshots before and after, which must be
-byte-identical.
-
-**No other authority action.** The package cannot generate K-WIT, create
-registry v1, create a genesis pin, append record 1, start any service, touch
-activation, contact DEV or PROD, or authorize First Memory. None of those
-tools or commands is in the script (test-enforced).
+**No other authority action.** No K-WIT, registry v1, genesis pin, record 1,
+service, activation, DEV, PROD, or First Memory action is possible from the
+script (test-enforced).
 
 ## 8. Evidence outputs
 
-**Public** (in the export):
+**Success export** (the 14-file public allowlist):
 
 - `evidence/`:
   - `g0.txt`;
   - `replica-b-before.txt`, `replica-b-after.txt`;
-  - `root-keygen.json` (the anchor and fingerprint);
-  - `root-keygen.exit`, `root-keygen.stderr` (empty);
+  - `root-keygen.json`, `root-keygen.exit`, `root-keygen.stderr`;
   - `anchor-check.txt`, `burned-check.txt`, `at-rest-check.txt`,
     `unlock-check.txt`;
   - `verify.txt`;
 - `evidence.sha256`;
-- `lilith-kroot-dev-synthetic-public/k-root-anchor.json` and
-  `k-root.publicKeySha256`.
+- the public anchor and fingerprint copy.
 
-Also public: the transcript, and the `PHONE_SIDE_EXPORT_SHA256` written
-down before transfer.
+Also public: the transcript and `PHONE_SIDE_EXPORT_SHA256`.
 
-**Allowed on the laptop:** only the export tar, the transcript, and their
-hashes. That is a **public working copy** of the anchor and fingerprint,
-never the authoritative copy (B-4 decision).
+**Failure export:** the burn record (§6) and the public evidence, plus
+`PHONE_SIDE_FAILURE_EXPORT_SHA256`.
 
-**Never on the laptop:** `k-root.der`, anything from
-`~/lilith-kroot-dev-synthetic/`, and the passphrase.
+**Allowed on the laptop:** only these exports, the transcript, and their
+hashes. **Never on the laptop:** `k-root.der`, the key or quarantine
+directory, or the passphrase.
 
 ## 9. Validation
 
-**Tests** (`test_b1b3e_mb1_kroot_package.py`):
+**Tests** (`test_b1b3e_mb1_kroot_package.py`, and the B-3 module for the
+set of 19):
 
-- **Builder:** the closure equals the computed import closure, plus
-  `burned_identities.py`. The build is deterministic and exact, with the
-  B-4 tar format. It refuses forbidden member names and a bad commit or
-  vendor set, and contains no rehearsal script.
-- **Record and pins:** the §4 block digest equals the recorded digest, and
-  the bundle pins match.
+- **Builder:** the closure, determinism, exactness, and refusals.
+- **Pins:** the recorded script digest, the bundle pins, and source commit
+  `ce5e10d`.
 - **Structure:**
-  - STOP only through `stop()`;
-  - only `root-keygen` is invoked, exactly once;
-  - no passphrase channel other than `getpass`;
-  - `$KEY` only in allowed commands;
-  - the export allowlist never names the key directory;
-  - Replica B is read only;
-  - none of the forbidden tools or commands appears.
-- **The embedded checks, run directly:**
-  - the anchor check accepts a real `root-keygen` output and refuses a
-    tampered one;
-  - the burned-identity check refuses each of the 12, and passes a fresh
-    fingerprint;
-  - the at-rest check refuses an unencrypted key.
-- **A real-pty run of the pinned script** against a bundle of the working
-  tree closure. Only the pins and the Termux prefix are substituted. It
-  covers a clean run, a passphrase mismatch, a wrong unlock passphrase, an
-  SSH session, and an owner decline.
+  - the STOP discipline, and the traps;
+  - only `root-keygen`;
+  - the passphrase channel;
+  - `$KEY` usage;
+  - the only `mv` commands are custody's;
+  - neither export names private directories;
+  - Replica B is read only.
+- **Embedded checks:**
+  - the anchor check;
+  - the burned-identity check, which refuses each of the 19 and asserts the
+    count;
+  - the at-rest check.
+- **Real-pty runs of the pinned script:**
+  - a clean run;
+  - a passphrase mismatch (no candidate);
+  - a wrong unlock passphrase (`FAILED_GENERATED_CANDIDATE`: the burn record
+    equals the candidate, the key is quarantined, no public copy, no
+    success marker, the failure export has no key);
+  - a rerun after a failure (G0 STOP);
+  - SSH, `sshd`, and an owner decline.
 
-**Full-fidelity WSL simulation** of the real bundle `a42083c6…` and the
-real `root-keygen`, under a pseudo-terminal:
+**Full-fidelity WSL simulation** of the real bundle `37418b42…` and the real
+`root-keygen` under a pty. Every generated identity is **redacted**, and
+destroyed with the simulated home.
 
 | Case | `RUN_EXIT` | Result |
 | --- | --- | --- |
-| clean | 0 | every token; key `0600`, the only entry; public copy; export exactly the 14-file allowlist; **key bytes in neither the export nor the transcript; passphrase not in the transcript**; Replica B unchanged; transport copy removed |
-| passphrase mismatch / too short | 1 | `root-keygen` refused; **no key file** |
-| owner types anything but `GENERATE` | 1 | STOP before the key directory exists |
-| wrong unlock passphrase | 1 | STOP after generation; **no fingerprint presented, no public copy, no export** (C-2) |
-| SSH session | 1 | STOP in G0 |
-| existing key directory / stale `k-root` file / nested Replica B / bad bundle hash | 1 | STOP before any write |
-| Replica B touched mid-run | 1 | `STOP: Replica B changed`; no export |
+| clean | 0 | every token; key `0600`; export is the 14-file allowlist; no key bytes in the export or transcript; no passphrase in the transcript; Replica B unchanged; transport copy removed |
+| passphrase mismatch / too short | 1 | no key file; no candidate |
+| owner declines | 1 | STOP before the key directory |
+| wrong unlock passphrase | 1 | `FAILED_GENERATED_CANDIDATE`: the burn record equals the candidate; quarantined; no key or public directory; failure export public only; the marker says burned |
+| rerun after that failure | 1 | G0 STOP; no generation |
+| **Ctrl-C at the unlock prompt** | 1 | the same custody state on disk. The transcript loses its tail (`tee` is also interrupted), so the on-disk burn record is authoritative |
+| Replica B touched mid-run | 1 | `STOP: Replica B changed`, then custody |
+| **failure after the public copy and export** (transport copy removed mid-run) | 1 | custody **withdraws both** into the burn record |
+| SSH / existing key dir / stale `k-root` / nested Replica B / bad bundle | 1 | STOP before any write |
 
-Every simulation key was deleted with its simulated home. The clean case
-printed a throwaway TEST fingerprint, `ae5d8275dfcb39e7…c6c`, which is
-**burned** like the rehearsal identities.
+## 10. Burned identities
 
-## 10. Review points addressed
+The canonical, mechanically enforced set is **19**
+([expansion record](slice-15b2b-b1b3e-burned-identities-expansion.md)):
 
-| Review point | How it is addressed |
-| --- | --- |
-| accidental write paths | exactly five, all new and refused if present: `~/lilith-mb1/`, the key directory, the public directory, the export, and the transcript |
-| path mistakes | canonical Replica B path; private and public directories distinct; the key directory must hold only `k-root.der` |
-| shell quoting hazards | `set -u`; every path quoted; the Python checks passed as `-c "$VAR"` from quoted heredocs; no `eval` |
-| rerun safety | every target must be absent; `O_EXCL` in `root-keygen` |
-| partial-failure behaviour | §6 |
-| evidence contamination | `cmp` against the key; the export allowlist; the transcript holds no secrets |
-| accidental key export | §7 |
-| a failed ceremony appearing successful | §6: the completion tokens come last, and the true `RUN_EXIT` |
+- the 12 phone-rehearsal identities;
+- the 6 B-4 path-correction simulation identities;
+- the v1 M-B1 simulation candidate `ae5d8275…`.
+
+**No real identity may match any of them.** v2's simulation identities
+were redacted and destroyed (the unrecorded ephemeral class).
 
 ## 11. State
 
 ```text
-MB1_PACKAGE_PREPARED_READY_FOR_REVIEW
+MB1_PACKAGE_REVISED_READY_FOR_REVIEW
 M-B1 NOT AUTHORIZED
 NO M-B1 COMMAND ISSUED
 NO REAL K-ROOT
