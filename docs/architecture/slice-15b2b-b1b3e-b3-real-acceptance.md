@@ -2,6 +2,8 @@
 
 Status:
 
+- **Update: MERGED.** Rebased as `3ec04be` and merged at `cfa0b3e` (PR #121). **B-3 is CLOSED.** B-5 is unchanged; see the
+  [B-5 decision packet](slice-15b2b-b1b3e-b5-pr1b-authorization-decision.md). The status lines below are historical.
 - **`B3_PATCH_PREPARED_NOT_LANDED`**. The patch is reviewed on its branch and
   **intentionally not merged**.
 - **B-3 stays OPEN on `main`** until this branch merges. B-3 closes only
