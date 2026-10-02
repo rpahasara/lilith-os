@@ -158,6 +158,10 @@ continuity baseline, for **broker runtime scope only**:
 | boot | `eea461c3-60f0-4b10-8ee9-556dcef19711` |
 | PID / start ticks | `35622` / `26369693` |
 | shared libraries | `818994544397da37d5a97e3799afff314608a7aa00cad50c968a90b86f41ce60` |
+| `nRestarts` | `0` |
+| release | `817a83e44cec8965479fd97fc30b7a0b3ae49ab2` |
+| manifest | `7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614` |
+| supersedes (retired on acceptance) | incarnation `84798e5b74494e1ea362ce90f1cf04ad`, candidate `5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2`, PID `2586` |
 
 **Owner statement:** `<to be supplied by the owner before merge>`.
 Merging this record with the statement filled in is the acceptance.
