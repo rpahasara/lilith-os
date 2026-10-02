@@ -163,8 +163,39 @@ continuity baseline, for **broker runtime scope only**:
 | manifest | `7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614` |
 | supersedes (retired on acceptance) | incarnation `84798e5b74494e1ea362ce90f1cf04ad`, candidate `5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2`, PID `2586` |
 
-**Owner statement:** `<to be supplied by the owner before merge>`.
-Merging this record with the statement filled in is the acceptance.
+**Owner statement** (verbatim, given 2026-10-02 after this record merged in
+#127 with the placeholder still in place; recorded here by a one-purpose
+follow-up change):
+
+```text
+I accept the recovered broker candidate:
+
+a30bd7d6e26a75e4eba863c08622aebbbaf72928bc9dc7737fc1f7aa6473069d
+
+with broker incarnation:
+
+c4b9cb38d7a041dc91db0d8ada7e8d04
+
+as the accepted recovered DEV broker runtime candidate following the controlled broker-only restart.
+
+I accept that:
+- the boot remains eea461c3-60f0-4b10-8ee9-556dcef19711;
+- the broker has no deleted shared-library mappings;
+- the post-restart candidate is stable across both accepted observation gates;
+- activation remains NOT_ACCEPTED / GRANT_ABSENT;
+- authority and witness material remain absent;
+- Replica A remains empty;
+- freshness remains UNKNOWN.
+
+This acceptance authorizes only the reviewed broker re-pin in PR #128.
+
+It does not re-grant B-5.
+It does not authorize Condition 3.
+It does not authorize PR-1B eligibility.
+It does not authorize M-B1.
+It does not authorize K-ROOT generation.
+It does not authorize First Memory.
+```
 
 - Acceptance does not re-grant B-5, and does not authorize PR-1B, M-B1,
   First Memory, or activation.
@@ -230,7 +261,7 @@ The pre-state seal before the mutation is `6a0cc242…`.
 
 ```text
 BROKER_PRESERVATION_RECOVERY_READY_FOR_OWNER_REVIEW
-BROKER RESTARTED (one mutation, M-BR1); NEW CANDIDATE a30bd7d6… PENDING OWNER ACCEPTANCE
+BROKER RESTARTED (one mutation, M-BR1); NEW CANDIDATE a30bd7d6… OWNER ACCEPTED (§6, broker runtime scope only)
 BROKER PRESERVATION NOT YET RESTORED (needs acceptance + re-pin)
 B-5 GRANT REMAINS VOID
 CONDITION 3 NOT YET RE-RUN
