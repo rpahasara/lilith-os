@@ -406,17 +406,17 @@ class PreservationTests(unittest.TestCase):
         self.assertNotIn("authorityMaturity", gate.evaluate(observation()))
 
     def test_real_pins_match_the_accepted_runtime_baseline_record(self) -> None:
-        record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline-acceptance.md"
-                  ).read_text(encoding="utf-8")
+        record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-broker-restart-recovery.md").read_text(encoding="utf-8")
         for value in (gate.ACCEPTED_CURRENT_INCARNATION, gate.ACCEPTED_CURRENT_BASELINE_SHA256,
                       gate.ACCEPTED_CURRENT_BOOT_ID, *map(str, gate.ACCEPTED_CURRENT_IDENTITY.values())):
             self.assertIn(value, record)
-        # The retired pre-reboot baseline stays documented in its own record, never accepted.
-        old = (ROOT / "docs/architecture/slice15b2b-b1b3d-current-runtime-baseline.md").read_text(encoding="utf-8")
-        retired = gate.RETIRED_BROKER_BASELINES[0]
-        self.assertEqual(retired["runtimeIncarnation"], CURRENT_INVOCATION)
-        for value in (retired["runtimeIncarnation"], retired["baselineCandidateSha256"], retired["bootId"]):
-            self.assertIn(value, old)
+        # Every retired baseline stays documented in its own record, never accepted.
+        self.assertEqual([r["runtimeIncarnation"] for r in gate.RETIRED_BROKER_BASELINES],
+                         [CURRENT_INVOCATION, PREVIOUS_ACCEPTED_INVOCATION])
+        for retired in gate.RETIRED_BROKER_BASELINES:
+            old = (ROOT / retired["record"]).read_text(encoding="utf-8")
+            for value in (retired["runtimeIncarnation"], retired["baselineCandidateSha256"], retired["bootId"]):
+                self.assertIn(value, old)
         # The fixture is not the live host, so the real pin rejects it: no silent acceptance.
         self.assertIn("BASELINE_CANDIDATE_CHANGED",
                       gate.evaluate_preservation(with_l1b1_custody(observation()))["failures"])
@@ -559,8 +559,11 @@ class RebaselineTests(unittest.TestCase):
 
 
 ACCEPTED_BOOT = "eea461c3-60f0-4b10-8ee9-556dcef19711"
-ACCEPTED_INVOCATION = "84798e5b74494e1ea362ce90f1cf04ad"
-ACCEPTED_CANDIDATE = "5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2"
+ACCEPTED_INVOCATION = "c4b9cb38d7a041dc91db0d8ada7e8d04"
+ACCEPTED_CANDIDATE = "a30bd7d6e26a75e4eba863c08622aebbbaf72928bc9dc7737fc1f7aa6473069d"
+# The 2026-09-29 post-reboot baseline, retired by the 2026-10-02 broker restart.
+PREVIOUS_ACCEPTED_INVOCATION = "84798e5b74494e1ea362ce90f1cf04ad"
+PREVIOUS_ACCEPTED_CANDIDATE = "5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2"
 
 
 def accepted_obs() -> dict:
@@ -584,19 +587,23 @@ class RepinTests(unittest.TestCase):
         self.assertEqual(gate.ACCEPTED_CURRENT_BASELINE_SHA256, ACCEPTED_CANDIDATE)
         self.assertEqual(gate.ACCEPTED_CURRENT_BOOT_ID, ACCEPTED_BOOT)
         self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY, {
-            "bootId": ACCEPTED_BOOT, "pid": 2586, "startTicks": 69918, "nRestarts": "0",
+            "bootId": ACCEPTED_BOOT, "pid": 35622, "startTicks": 26369693, "nRestarts": "0",
             "releaseSha": "817a83e44cec8965479fd97fc30b7a0b3ae49ab2",
             "manifestSha256": "7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614",
-            "sharedLibrariesSha256": "40e68a1c27328c27b811da19bb17a1262cbacff18dcd7ab397e06bebb17a87bd"})
+            "sharedLibrariesSha256": "818994544397da37d5a97e3799afff314608a7aa00cad50c968a90b86f41ce60"})
         self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY["releaseSha"], gate.RELEASE_SHA)
         self.assertEqual(gate.ACCEPTED_CURRENT_IDENTITY["manifestSha256"], gate.MANIFEST_SHA)
         self.assertEqual(set(gate.ACCEPTED_CURRENT_IDENTITY), set(IDENTITY_KEYS))
         self.assertIs(gate.ACCEPTED_CURRENT_CONTROLLER_EXPECTED, gate.CONTROLLER_POST_REBOOT_EXPECTED)
         retired = gate.RETIRED_BROKER_BASELINES
-        self.assertEqual([r["runtimeIncarnation"] for r in retired], [CURRENT_INVOCATION])
+        self.assertEqual([r["runtimeIncarnation"] for r in retired], [CURRENT_INVOCATION, PREVIOUS_ACCEPTED_INVOCATION])
         self.assertEqual(retired[0]["baselineCandidateSha256"],
                          "3549585487ad46ead96a0cb1af30a15be0c4ac17575663816e8e11dc80a7eee5")
         self.assertEqual(retired[0]["bootId"], BOOT_ID)
+        # The same-boot restart retires the post-reboot baseline but keeps its boot.
+        self.assertEqual(retired[1]["baselineCandidateSha256"], PREVIOUS_ACCEPTED_CANDIDATE)
+        self.assertEqual(retired[1]["bootId"], ACCEPTED_BOOT)
+        self.assertNotEqual(gate.ACCEPTED_CURRENT_BASELINE_SHA256, PREVIOUS_ACCEPTED_CANDIDATE)
         self.assertNotIn(gate.ACCEPTED_CURRENT_INCARNATION, [r["runtimeIncarnation"] for r in retired])
 
     def test_preservation_accepts_the_exact_accepted_baseline(self) -> None:
