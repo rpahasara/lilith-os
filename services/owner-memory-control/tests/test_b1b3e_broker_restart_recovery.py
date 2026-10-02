@@ -37,7 +37,7 @@ class BrokerRestartRecoveryRecordTests(unittest.TestCase):
             self.assertIn(line, self.state)
 
     def test_acceptance_is_pending_and_nothing_downstream_is_claimed(self):
-        self.assertIn("PENDING OWNER ACCEPTANCE", self.state)
+        self.assertIn("OWNER ACCEPTED (§6, broker runtime scope only)", self.state)
         for line in ("B-5 GRANT REMAINS VOID", "CONDITION 3 NOT YET RE-RUN", "CONDITION 4 NOT EVALUATED",
                      "CONDITION 5 OPEN", "M-B1 NOT AUTHORIZED", "NO REAL K-ROOT", "NO K-WIT", "NO REGISTRY V1",
                      "NO GENESIS PIN", "NO REAL RECORD 1", "FRESHNESS=UNKNOWN", "FIRST MEMORY NOT AUTHORIZED"):
@@ -45,6 +45,18 @@ class BrokerRestartRecoveryRecordTests(unittest.TestCase):
         for claim in ("BROKER_PRESERVATION=PASS", "CONDITION_3_FRESH_PR2=PASS", "PR1B_ELIGIBLE",
                       "B5_OWNER_AUTHORIZATION=GRANTED"):
             self.assertNotIn(claim, self.state)
+
+
+    def test_owner_statement_is_recorded_verbatim_and_scoped(self):
+        section = self.text.split("## 6. Owner acceptance", 1)[1].split("## 7.", 1)[0]
+        self.assertNotIn("<to be supplied by the owner before merge>", self.text)
+        for line in ("I accept the recovered broker candidate:", CANDIDATE, INCARNATION,
+                     "- the boot remains eea461c3-60f0-4b10-8ee9-556dcef19711;",
+                     "This acceptance authorizes only the reviewed broker re-pin in PR #128.",
+                     "It does not re-grant B-5.", "It does not authorize Condition 3.",
+                     "It does not authorize PR-1B eligibility.", "It does not authorize M-B1.",
+                     "It does not authorize K-ROOT generation.", "It does not authorize First Memory."):
+            self.assertIn(line, section)
 
 
 if __name__ == "__main__":
