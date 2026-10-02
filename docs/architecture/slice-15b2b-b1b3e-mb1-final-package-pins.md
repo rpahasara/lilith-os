@@ -13,6 +13,13 @@ Status:
 - The provisional design pins in the source-and-design record (bundle
   `08cfe650…` from `3ec71c1`, script `a63bf5aa…`) are **superseded and must
   not be used**. Their `SOURCE_COMMIT` is not merged `main`.
+- **Revision r2 (2026-10-02, before merge):** the first final script
+  `4e463796ced5c8375fd45bbf318cee9c7222ab9e5d9b9e20190ab451a470c091` is
+  **superseded and must not be used**.
+  - Its comment above `BURNED_CHECK` said "12 permanently burned
+    rehearsal identities", which contradicts the enforced canonical 20.
+  - r2 corrects that one comment line (§3). No behavior changes.
+  - The bundle is unchanged, and this was verified by rebuilding it (§2.7).
 - **M-B1 is NOT AUTHORIZED.** Conditions 2–5 of the
   [B-5 grant](slice-15b2b-b1b3e-b5-pr1b-authorization-granted.md) §2 are
   untouched.
@@ -34,12 +41,12 @@ package finalized != package reviewed and merged != M-B1 authorized != M-B1 exec
 | `SHA256SUMS` (inside the bundle) | `4816f8c93de7a2088fd3570edbdf141a2a1db12bedd330da46d83fd9336c6498` |
 | files | **74**: 17 source files + 55 vendor files + `SOURCE_COMMIT` + `SHA256SUMS` |
 | top directory | `lilith-mb1-kroot-1e2eae3/` |
-| **operator script** | `mb1_phone_commands.sh`, **SHA-256 `4e463796ced5c8375fd45bbf318cee9c7222ab9e5d9b9e20190ab451a470c091`**, 20128 bytes; exactly the §3 block |
+| **operator script** | `mb1_phone_commands.sh`, **SHA-256 `09cbc9bee7b58af7bab45bb903c6e10cb51ae6c62b20705be12de274bbe5216b`**, 20128 bytes; exactly the §3 block |
 | builder | `services/owner-memory-control/tools/build_mb1_kroot_bundle.py`, unchanged at `1e2eae3` |
-| laptop staging | `%USERPROFILE%\lilith-mb1-package\`: the final tar, the final script, and `STAGING.sha256`. The provisional `3ec71c1` tar and `a63bf5aa` script are under `superseded/` |
+| laptop staging | `%USERPROFILE%\lilith-mb1-package\`: the final tar, the final script, and `STAGING.sha256`. The provisional `3ec71c1` tar and `a63bf5aa` script, and the superseded `4e463796` script, are under `superseded/` |
 
 The owner's M-B1 go statement (Condition 5) must name **these two
-values**: bundle `7f07e158…c2c1` and script `4e463796…c091`.
+values**: bundle `7f07e158…c2c1` and script `09cbc9be…216b`.
 
 ## 2. How the pins were produced
 
@@ -78,11 +85,20 @@ All of it ran on the laptop, offline, with no key material.
    - The merged script's `BURNED_CHECK` snippet **refused all 20 canonical
      identities (20/20)**, and accepted a fresh random value.
    - No identity was printed.
+7. **r2 bundle re-verification (2026-10-02).** The script fix touches no
+   bundled file.
+   - No file of the 17-file closure changed between `1e2eae3` and the r2
+     head (`git diff --name-only`, which is empty).
+   - The bundle was rebuilt twice more, from two fresh detached worktrees at
+     `1e2eae3`. Both builds are byte-identical to each other and to the
+     staged tar: `7f07e158…c2c1`. **The bundle is unchanged.**
+   - The bundled `BURNED_CHECK` again refused 20/20.
 
 ## 3. Final operator script
 
 The final script is the reviewed v3 block (§4 of the source-and-design
-record, `a63bf5aa…`) with **exactly six lines changed**, and nothing else:
+record, `a63bf5aa…`) with **exactly seven lines changed**: six pin lines and
+one comment line. Nothing else changes.
 
 | Line | Provisional (`a63bf5aa…`) | Final |
 | --- | --- | --- |
@@ -93,17 +109,28 @@ record, `a63bf5aa…`) with **exactly six lines changed**, and nothing else:
 | `SRC=` | `3ec71c176963…d555` | `1e2eae30fb70…955e6a` |
 | `B=` | `"$W/lilith-mb1-kroot-3ec71c1"` | `"$W/lilith-mb1-kroot-1e2eae3"` |
 
+| comment above `BURNED_CHECK` (r2) | `ANY of the 12 permanently burned rehearsal identities` | `ANY of the 20 canonical permanently burned identities` |
+
+The comment line is a shell comment outside the Python heredoc. Bash never
+executes it, so it cannot change ceremony behavior.
+
 `NFILES=74`, every path, every gate, the custody code, and every Python
 snippet are unchanged. A test re-derives this block from the merged v3 block
-by these six substitutions and requires byte equality.
+in two steps, and requires byte equality at each:
 
-**Known cosmetic note, left unchanged on purpose:** the comment above
-`BURNED_CHECK` still says "the 12 permanently burned rehearsal identities".
-The check itself asserts `len(every) == BI.CANONICAL_COUNT == 20`, and
-refused 20/20 (§2). The comment is kept as reviewed so that the final script
-differs from the reviewed v3 only in the pins.
+1. the six pin substitutions give the superseded r1 script `4e463796…`;
+2. the one comment substitution gives r2.
 
-`mb1_phone_commands.sh` (SHA-256 `4e463796ced5c8375fd45bbf318cee9c7222ab9e5d9b9e20190ab451a470c091`) is exactly this block:
+So r2 differs from the previously reviewed final script (r1) in exactly that
+one comment line.
+
+**Runtime wording, left unchanged on purpose:** the burned check's exit
+message still says "equals a burned rehearsal identity". It prints only on
+refusal, and the refusal covers all 20. Not every one of the 20 is a
+rehearsal identity, but changing the message would change the ceremony's
+output, which is behavior, so it was not touched.
+
+`mb1_phone_commands.sh` (SHA-256 `09cbc9bee7b58af7bab45bb903c6e10cb51ae6c62b20705be12de274bbe5216b`) is exactly this block:
 
 ```bash
 # ===== M-B1: real K-ROOT generation (DEV_SYNTHETIC), S25 Termux ONLY (bundle lilith-mb1-kroot-1e2eae3) =====
@@ -159,7 +186,7 @@ print("ANCHOR_VALID")
 print("FINGERPRINT " + d["publicKeySha256"])
 PYEOF
 )
-# Refuses a real identity that equals ANY of the 12 permanently burned rehearsal identities (argv[1] = fingerprint).
+# Refuses a real identity that equals ANY of the 20 canonical permanently burned identities (argv[1] = fingerprint).
 BURNED_CHECK=$(cat <<'PYEOF'
 import sys
 from lilith_owner_memory import burned_identities as BI
@@ -393,19 +420,31 @@ go statement naming the §1 hashes.
 
 - `test_b1b3e_mb1_finalization.py`:
   - the record pins equal the block;
-  - the block is the six-line derivation of the merged v3 block;
+  - the block is the merged v3 block plus six pin substitutions (giving r1
+    `4e463796…`) plus the one comment substitution (giving r2);
   - the merged v3 block itself is still `a63bf5aa…`;
+  - no comment or text in the block names a burned count other than 20;
   - with git available, the source commit is an ancestor of `HEAD`, and the
     17 bundled source files are unchanged since it;
   - a fake-vendor build at the source commit has `SOURCE_COMMIT` equal to
     it, and source members equal to `git show`;
   - the burned set is the canonical 20.
-- In a git checkout, the 7 finalization tests pass (all 7 ran).
-- **The full owner-memory-control suite (WSL, Python 3.12, pinned deps):
-  722 OK, 4 skipped.** That is 715 plus the 7 new tests. The run used a
+- In a git checkout, the 9 finalization tests pass (all 9 ran).
+- **The full owner-memory-control suite (WSL, Python 3.12, pinned deps;
+  r2 tree): 724 OK, 4 skipped.** That is 715 plus the 9 new tests. The run used a
   `git archive` copy with no `.git`, so the 4 skips are git-dependent: the
   2 known ones, plus the 2 finalization git tests above.
 - `scripts/validate_repository.py` passes, and `git diff --check` is clean.
+
+**CI note (outside the M-B1 package).**
+- The PR also carries a separate commit that bumps `next` from `16.3.5`
+  to `16.3.6`.
+- Advisory GHSA-vcvr-r3jv-pc5j (critical; `>= 16.2.0, < 16.3.6`) was
+  published 2026-09-30 14:48 UTC. Since then the CI step
+  `npm audit --audit-level=high` has failed, including main's own push run
+  for `1e2eae3`.
+- The bump changes only `package.json` and the `next` / `@next/*` entries in
+  `package-lock.json`. It touches no bundled file and no ceremony artifact.
 
 ## 6. What this record does not do
 

@@ -4,7 +4,8 @@ Record: docs/architecture/slice-15b2b-b1b3e-mb1-final-package-pins.md.
 
 Nothing here runs on the phone, generates a key, or rebuilds the real bundle
 (the real vendor set is not in the repository). It pins the final operator
-script to the reviewed v3 block plus exactly the six pin substitutions.
+script to the reviewed v3 block plus exactly the six pin substitutions (r1,
+superseded) plus the one burned-count comment correction (r2).
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ sys.path.insert(0, str(ROOT / "services/owner-memory-control"))
 from lilith_owner_memory import burned_identities as BI  # noqa: E402
 
 V3_SCRIPT_SHA = "a63bf5aa97d6a098923afc52fb9f71ebc0939c8526de28a1afb4271c4a84599e"
+R1_SCRIPT_SHA = "4e463796ced5c8375fd45bbf318cee9c7222ab9e5d9b9e20190ab451a470c091"   # superseded by r2
 SRC = "1e2eae30fb7023a44776d1f8d25e2bb958955e6a"
 TAR_SHA = "7f07e158aa5a0b3c31ee63e25ae25116c92f26a402bc6924422d7c95e2edc2c1"
 SUMS_SHA = "4816f8c93de7a2088fd3570edbdf141a2a1db12bedd330da46d83fd9336c6498"
@@ -38,6 +40,10 @@ PIN_SUBSTITUTIONS = (
     ("SUMS_SHA=44e453acd0209177cc964a741447c2701345628e73c87d11884cf20edbb7a619\n", f"SUMS_SHA={SUMS_SHA}\n"),
     ("SRC=3ec71c176963a26b1b7d14333130bd7aebd2d555\n", f"SRC={SRC}\n"),
     ('B="$W/lilith-mb1-kroot-3ec71c1"', 'B="$W/lilith-mb1-kroot-1e2eae3"'),
+)
+COMMENT_SUBSTITUTION = (
+    "# Refuses a real identity that equals ANY of the 12 permanently burned rehearsal identities (argv[1] = fingerprint).\n",
+    "# Refuses a real identity that equals ANY of the 20 canonical permanently burned identities (argv[1] = fingerprint).\n",
 )
 
 
@@ -67,14 +73,31 @@ class FinalPinTests(unittest.TestCase):
     def test_merged_v3_block_is_unchanged(self):
         self.assertEqual(hashlib.sha256(_block(PACKAGE).encode()).hexdigest(), V3_SCRIPT_SHA)
 
-    def test_final_block_is_v3_with_exactly_the_six_pin_substitutions(self):
+    def test_final_block_is_v3_with_six_pins_then_one_comment_correction(self):
         derived = _block(PACKAGE)
         for old, new in PIN_SUBSTITUTIONS:
             self.assertEqual(derived.count(old), 1)
             derived = derived.replace(old, new)
+        self.assertEqual(hashlib.sha256(derived.encode()).hexdigest(), R1_SCRIPT_SHA)
+        old, new = COMMENT_SUBSTITUTION
+        self.assertEqual(derived.count(old), 1)
+        derived = derived.replace(old, new)
         self.assertEqual(_block(FINAL), derived)
+        self.assertNotEqual(hashlib.sha256(_block(FINAL).encode()).hexdigest(), R1_SCRIPT_SHA)
         for stale in ("3ec71c1", "08cfe650", "44e453ac"):
             self.assertNotIn(stale, _block(FINAL))
+
+    def test_comment_correction_is_outside_executed_code(self):
+        lines = _block(FINAL).splitlines()
+        at = lines.index(COMMENT_SUBSTITUTION[1].rstrip("\n"))
+        self.assertTrue(lines[at].startswith("# "))
+        self.assertEqual(lines[at + 1], "BURNED_CHECK=$(cat <<'PYEOF'")   # a shell comment above the heredoc, never executed
+
+    def test_no_stale_burned_count_in_the_block(self):
+        for line in _block(FINAL).splitlines():
+            if "burned" in line.lower():
+                numbers = set(re.findall(r"\b\d+\b", re.sub(r"argv\[\d+\]", "", line)))
+                self.assertLessEqual(numbers, {"20"}, line)
 
     def test_recorded_pins_match_the_block(self):
         text, block = FINAL.read_text(encoding="utf-8"), _block(FINAL)
