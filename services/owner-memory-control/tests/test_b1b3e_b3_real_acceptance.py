@@ -32,6 +32,7 @@ ROOT = SA.ROOT
 DOCS = ROOT / "docs/architecture"
 HOLD = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-evidence-hold.md"       # run 1, §4
 ACCEPTANCE = DOCS / "slice-15b2b-b1b3e-b4-termux-kroot-rehearsal-acceptance.md"    # run 2, §4
+EXPANSION = DOCS / "slice-15b2b-b1b3e-burned-identities-expansion.md"             # recorded simulations, §4
 MODULES = ROOT / "services/owner-memory-control/lilith_owner_memory"
 
 
@@ -52,23 +53,24 @@ def _burned_table(path) -> dict[str, str]:
 
 
 class BurnedIdentityRecordTests(unittest.TestCase):
-    def test_source_equals_the_two_accepted_records(self):
+    def test_source_equals_the_burned_records(self):
         keys, registries, genesis = set(), set(), set()
-        for path in (HOLD, ACCEPTANCE):
+        for path, count in ((HOLD, 6), (ACCEPTANCE, 6), (EXPANSION, 8)):
             table = _burned_table(path)
-            self.assertEqual(len(table), 6, path)
+            self.assertEqual(len(table), count, path)
             for name, value in table.items():
                 if name.endswith("PublicKeySha256"):
                     keys.add(value)
-                elif name == "rehearsalRegistryDigest":
+                elif name.endswith("RegistryDigest"):
                     registries.add(value)
-                elif name == "rehearsalGenesisCandidateDigest":
+                elif name.endswith("GenesisCandidateDigest"):
                     genesis.add(value)
                 else:
                     self.fail(name)
         self.assertEqual((keys, registries, genesis), (set(BI.BURNED_PUBLIC_KEY_SHA256), set(BI.BURNED_REGISTRY_DIGESTS),
                                                       set(BI.BURNED_GENESIS_WITNESS_DIGESTS)))
-        self.assertEqual(len(keys | registries | genesis), 12)
+        self.assertEqual(len(keys | registries | genesis), 20)
+        self.assertEqual(BI.CANONICAL_COUNT, 20)
 
     def test_pure_check_per_role(self):
         for digest in BI.BURNED_REGISTRY_DIGESTS:
