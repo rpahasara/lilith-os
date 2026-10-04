@@ -1,0 +1,845 @@
+# Current Architecture & Acceptance Ledger v0.1
+
+```text
+STATUS: REPOSITORY ASSESSMENT / NOT ARCHITECTURE ACCEPTANCE
+```
+
+| Field | Value |
+| --- | --- |
+| Document type | Repository assessment and reconciliation ledger (DRAFT for owner review) |
+| Repository baseline | `b92fe88975da8f7e3c4934e60eff0a57b7872d69` (merge of PR #131, docs-only); engineering baseline unchanged from `cc028195699541d855b32baae113397fc073d709` |
+| Assessment date | 2026-10-05 |
+| Method | Static, read-only repository review (code, tests, ADRs, architecture and slice records, research register) against the 16 proposed design sources |
+| Live inspection | **None.** No host, cloud, broker, phone, Termux, replica, database or service was contacted |
+| Tests executed | **None.** Test names below are cited from source, not run |
+| Owner / reviewer of this ledger | UNASSIGNED |
+
+## 1. Scope and status
+
+This ledger describes **observed repository state** at the baseline commit against the **proposed** Cognitive
+Architecture Contract Set v0.1 ([index](cognitive-contracts/v0.1/README.md)). It is decision support for the
+reconciliation phase that document 16 itself proposes.
+
+This ledger:
+
+- does **not** accept any of the 16 proposed design PDFs, in whole or in part;
+- does **not** authorize any live operation (including First Memory, B-5, M-B1, PR-1B, K-ROOT, K-WIT, Registry V1,
+  Genesis Pin, Record 1, deployment, migration, Hsin activation, or any authority or witness transition);
+- does **not** establish current host, cloud, broker, authority, witness or freshness state;
+- does **not** close any gate merely because an implementation exists;
+- does **not** fix or close audit findings G1 or G2, or the epistemic/presentation concern;
+- does **not** create architecture for the external review questions HX-01/HX-02/HX-03 (they remain review findings);
+- does **not** prove identity, personality or relationship continuity;
+- does **not** authorize any implementation slice (§11 lists recommendations only);
+- does **not** resolve owner decisions D-1 … D-9 (§12);
+- **contains historical evidence** (dated repository records of past live windows) that requires separate, authorized
+  revalidation before it may be treated as current.
+
+Where the ledger says IMPLEMENTED it means an identifiable mechanism exists at the cited path at the baseline commit.
+That is never a statement that the mechanism is accepted, conformant to a proposed contract, deployed, current,
+authorized or active.
+
+### 1.1 What this means
+
+- LILITH already has substantial governed foundations in this repository. The proposed PDFs are not a greenfield
+  implementation plan: many of their requirements are already partially or strongly represented, and some existing
+  controls are stricter than the proposals (§5, "STRONGER" column).
+- The strongest areas are authority and freshness separation, canonical memory acceptance (ADR-0006 and the
+  accepted-memory verifier), privacy suppression and erasure for canonical memory, and bounded proposal-only reasoning
+  paths. Most of that evidence is TEST or DEV_SYNTHETIC.
+- The largest remaining continuity gaps are not basic storage. They are governed identity and personality ownership,
+  relationship state, model/runtime adapter and handoff semantics, cognitive-domain recovery and currentness, runtime
+  tool enforcement, and behavioral evaluation.
+- Some existing code conflicts with accepted governance. The clearest case is G2: approval is enforced in the browser
+  while server write routes accept unapproved writes, against accepted ADR-0004 (§7.2). G1 is latent code debt in the
+  same policy layer (§7.1).
+- Every claim about the live runtime, host or authority state is historical repository record and requires
+  revalidation before it can be treated as current (§10.4).
+- The next engineering phase is better served by small, scoped owner decisions and slices (§11, §12) than by another
+  broad architecture rewrite.
+
+## 2. Source set
+
+### 2.1 Proposed design sources (all PROPOSED / NOT ACCEPTED)
+
+The 16 PDFs are held privately and are not committed (see the index for why). For this review their bytes were
+verified read-only against [`ORIGINALS.sha256`](cognitive-contracts/v0.1/ORIGINALS.sha256): **16 of 16 matched.** No
+PDF was copied, modified, redacted or moved. Text was extracted to a private scratch location for searching only.
+
+| # | Code | Title | Ledger prefix | Provenance note |
+| --- | --- | --- | --- | --- |
+| 01 | I | Identity Invariant Specification v0.1 | `ID-` | Direct |
+| 02 | F | First Memory Semantic & Acceptance Specification v0.1 | `FM-` | Direct |
+| 03 | B | Continuity Benchmark & Evaluation Protocol v0.1 | `EVAL-` | Direct |
+| 04 | H | Model / Runtime Adapter & Handoff Specification v0.1 | `ADAPT-` | Direct |
+| 05 | M | Memory Lifecycle & Reappraisal Specification v0.1 | `MEM-` | Direct |
+| 06 | P | Personality Evolution Specification v0.1 | `PER-` | Direct |
+| 07 | R | Relationship Continuity Specification v0.1 | `REL-` | **Regenerated edition**; original unavailable; not certified byte-identical |
+| 08 | AP | Affect / Appraisal Research Protocol v0.1 | `AFF-` | **Regenerated edition**; original unavailable; not certified byte-identical |
+| 09 | CR | Cognitive Recovery, Migration & Multi-Device Continuity Specification v0.1 | `REC-` | Direct |
+| 10 | HS | Hsin Semantic Integration & Session Presence Specification v0.1 | `HSIN-` | Direct |
+| 11 | G | Goal, Commitment & Intention Continuity Specification v0.1 | `GOAL-` | Direct |
+| 12 | IA | Initiative, Interruption & Autonomous Action Specification v0.1 | `INIT-` | Direct |
+| 13 | LS | Learning, Skill Acquisition & Competence Development Specification v0.1 | `LEARN-` | Direct |
+| 14 | SM | Self-Model, Metacognition & Capability Awareness Specification v0.1 | `META-` | Direct |
+| 15 | EPI | Epistemic Integrity, Belief State & Uncertainty Governance Specification v0.1 | `EPI-` | Direct |
+| 16 | — | Integrated Cognitive Architecture & Composition Contract v0.1 | `COMP-` | Composition / index document |
+
+Rows in this ledger also use two prefixes that document 16 lists as **existing enforcement concerns, not proposed
+cognitive domains**: `AUTH-` (authority / currentness / freshness) and `ACT-` (tool / action execution). For those rows
+the controlling sources are the existing accepted repository records, not the PDFs.
+
+Clause identifiers (for example `EV-02`, `GC-16`, `E-25`, `COMP-30`) are the PDFs' own identifiers and are preserved
+so rows can later be expanded. Clause IDs in documents 07 and 08 are local to the regenerated editions.
+
+### 2.2 Repository sources
+
+| Family | Principal paths |
+| --- | --- |
+| Authority order and labels | [`docs/README.md`](../README.md) §Document authority |
+| Accepted ADRs | [`docs/adr/`](../adr/README.md) 0001–0006 (all `Accepted`) |
+| Architecture baseline | `docs/architecture/{principles,as-is,target,component-boundaries,state-and-data,runtime-boundary,system-context}.md` |
+| Target design (non-ADR) | `docs/architecture/cognitive-architecture-v1.md` (abbreviated **CA-V1** below) |
+| Slice records 7–15 | `docs/architecture/slice-7*` … `slice-15*` and folders `slice-N/` (design, `DEPLOYMENT-RECORD.md`, router patch scripts, **copies** of remotely deployed Python modules) |
+| Authority / freshness series | `docs/architecture/slice-15b2b-*`, `slice15b2b-*` (≈90 records) |
+| Research | `docs/research/` (charter, research-question register, crosswalks, evidence maps, negative-results register, findings) |
+| Security | `docs/security/{threat-model,trust-boundaries}.md` |
+| Command Center code | `src/lib/command/core/*` (abbreviated **CC**), `src/app/api/lilith/*`, `src/components/command/*` |
+| Presentation code | `src/lib/{presence,voice,world,memory,meetings,conversation}/*`, `src/lib/hsin-*.ts`, `src/app/*/page.tsx`, `src/components/*` |
+| Backend code | `services/core-api/app.py` (abbreviated **CORE**), `services/core-api/lilith_memory/*` |
+| Authority services | `services/owner-memory-control/lilith_owner_memory/*` (abbreviated **OMC**), `services/memory-broker`, `services/authority-dev`, `services/recovery-witness` |
+
+**Scope limit that affects many rows.** The live Hermes runtime, Conversation Router V2, `SOUL.md`,
+`social_guard.py` and the Groq provider plugin are **not in this repository**. They appear only as `slice-N/` copies,
+patch scripts and deployment records dated 2026-09-07 to 2026-09-10. Every statement about them is **REPO RECORD,
+HISTORICAL**, and current behaviour requires **CURRENTNESS REVALIDATION**.
+
+### 2.3 Document authority applied
+
+The repository's controlling precedence (`docs/README.md`):
+
+1. tested behavior and versioned contracts;
+2. accepted ADRs;
+3. current-state architecture backed by repository evidence;
+4. target architecture;
+5. research hypotheses and engineering-journal entries.
+
+"A later date alone does not make a document authoritative." Conflicts must be resolved through an ADR or a corrective
+pull request.
+
+How this ledger applies it:
+
+- The 16 PDFs are non-controlling PROPOSED design inputs used as reconciliation yardsticks. They do not supersede any
+  source recognized as controlling under existing repository governance.
+- `cognitive-architecture-v1.md` describes itself as "architectural authority for all future cognitive work" but is
+  **not an ADR**. It is treated as rank-4 target architecture. Its self-description is recorded as ambiguity **A-2**.
+- Slice deployment records and `slice-N/` module copies are treated as rank-3 records **of their date**, not as
+  current state.
+- Where rank 1 (tested implementation) conflicts with rank 2 (accepted ADR), the ledger does **not** pick a winner; it
+  records a conflict (for example G2 vs ADR-0004).
+
+## 3. Evidence model
+
+| Category | Meaning in this ledger |
+| --- | --- |
+| DESIGN | A design statement in a repository document (ADR, architecture or slice design, charter). Not implementation |
+| CODE | Source code present at the baseline commit, at the cited `path::symbol` |
+| LOCAL TEST | A test present in the repository whose assertions bear on the row. **Not executed in this review** |
+| REPO RECORD | A dated repository record of a past observation, deployment or acceptance (historical) |
+| INFERENCE | A conclusion drawn by this review from other evidence; never an observed fact |
+| NOT FOUND | Not located by this review's targeted searches; not proof of non-existence |
+
+`slice-N/*.py` copies are cited as **CODE (copy)**; whether the live runtime still matches them is UNKNOWN.
+
+## 4. Acceptance-dimension model
+
+Each row keeps these dimensions separate. None implies another.
+
+| Dimension | Ledger column | Values used |
+| --- | --- | --- |
+| Contract status | Contract | `PROPOSED` (all PDF clauses). Appended note when an **accepted ADR or accepted record already decides the same point** (for example `PROPOSED; ADR-0003 decides principle`) |
+| Implementation status | Impl | `IMPLEMENTED` (with `path::symbol`), `PARTIAL`, `NOT_IMPLEMENTED`, `DESIGN_ONLY`, `UNKNOWN` |
+| Mechanism conformance | Conf. | `NOT_ESTABLISHED` in every row, because this review did not execute or accept a formal conformance evaluation against the exact proposed contract. Contract acceptance is a separate dimension. A note says when repository tests cover only the repository's own contract |
+| Behavioral / evaluation evidence | Behavior | `NONE`, `LOCAL TEST (name)`, `REPO RECORD (date)`, `UNKNOWN` |
+| Environment | Env | Exact label from evidence: `TEST`, `DEV_SYNTHETIC`, `DEV`, `PROD (dark)`, `UNKNOWN`, `N/A`. `UNKNOWN†` = host `lilith-01` slice records dated 2026-09-07…10 that carry no exact environment label |
+
+Value rules used consistently across rows:
+
+| Field | Value | Rule |
+| --- | --- | --- |
+| Impl | `DESIGN_ONLY` | A repository design document specifies the mechanism; no code was located |
+| Impl | `NOT_IMPLEMENTED` | No code was located, and no repository design specifies the mechanism concretely |
+| Impl | `N/A (governance)` | The row is a status or non-authorization statement, not a mechanism |
+| Current. | `HISTORICAL (date)` | A dated record whose claim does not concern present live state (for example, a process or practice record) |
+| Current. | `HISTORICAL; REVALIDATE` | A dated record of live, remote-runtime or host state; it must be revalidated before use as current |
+| Current. | `N/A (code at baseline)` | The claim is about code or local tests at the baseline commit only |
+| Op. auth | `NOT AUTHORIZED` | A repository record explicitly states the operation is not authorized |
+| Op. auth | `NONE FOUND` | No authorization record was located; this is not a statement that the operation is prohibited |
+| Active | `NOT ACTIVE` / `DARK` | A repository record states the mechanism is inactive or dark |
+| Active | `UNKNOWN` | Activation depends on live state that was not inspected |
+| Conf. | `NOT_ESTABLISHED` | Used in every row, including AUTH and ACT rows. Analogous repository tests never upgrade it |
+| Currentness / freshness | Current. | `N/A (design)`, `HISTORICAL (date)`, `REVALIDATE` (= CURRENTNESS REVALIDATION REQUIRED), `UNKNOWN` |
+| Operational authorization | Op. auth | `NONE FOUND` (no authorization record located), `NOT AUTHORIZED` (a record says so), `N/A` |
+| Activation | Active | `UNKNOWN` (not inspected), `DARK (record)`, `NOT ACTIVE (record)`, `N/A` |
+
+Coverage classification (controlled vocabulary):
+
+| Value | Meaning |
+| --- | --- |
+| COVERED | Repository controls the requirement at a comparable scope |
+| PARTIAL | Some scope covered; named gaps remain |
+| STRONGER_EXISTING_CONTROL | A repository mechanism is demonstrably stricter than the proposed clause within a stated scope |
+| PROPOSAL_ONLY | Only the PDF states it; the repository has no counterpart and no accepted need is evidenced |
+| CONFLICT | A repository source contradicts the clause, or repository sources contradict each other on it. Where a row also covers other parts of the clause, it is PARTIAL with the conflict named in the row |
+| MISSING | An accepted repository source (ADR, `principles.md` principle or accepted record) already requires it, no mechanism was located, and no recorded deferral exists. Without such a source the row is PROPOSAL_ONLY |
+| INTENTIONALLY_DEFERRED | The repository explicitly defers it by recorded decision |
+| EVIDENCE_MISSING | Mechanism may exist; the required evaluation evidence does not |
+| UNKNOWN | Cannot be determined from repository evidence (for example, behavior lives in the remote runtime) |
+| NOT_APPLICABLE | The clause has no subject in the current repository (for example, sensor capture where none exists) |
+
+**Owner/reviewer.** No row has an explicitly established owner or reviewer. The `Owner` column is `UNASSIGNED`
+throughout; it is kept so later reviews can fill it without restructuring.
+
+## 5. Domain-level summary
+
+Counts are of ledger rows in §6 (a row may carry a compound classification; it is counted under its first value).
+
+| Domain | Rows | COVERED | PARTIAL | STRONGER | PROPOSAL_ONLY | CONFLICT | MISSING | DEFERRED | EVIDENCE_MISSING | NOT_APPLICABLE | Headline |
+| --- | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | --- |
+| ID Identity | 9 | 0 | 6 | 0 | 0 | 1 | 1 | 1 | 0 | 0 | ADR-0001 decides identity-above-runtime; records name runtime `SOUL.md` as identity/personality owner; no identity ID by decision |
+| FM First Memory | 12 | 3 | 5 | 1 | 0 | 1 | 0 | 2 | 0 | 0 | Readiness ceremony gates are strong and refuse authorization; semantics deferred to unstarted 15B2b-C; no identity binding |
+| EVAL Benchmark | 7 | 2 | 2 | 0 | 1 | 0 | 2 | 0 | 0 | 0 | No cognition-level evaluation exists; ADR-0001 validation never run |
+| ADAPT Adapter/handoff | 9 | 0 | 5 | 0 | 0 | 1 | 3 | 0 | 0 | 0 | No adapter contract; per-turn model switching is fail-open; runtime tools unenforced |
+| MEM Memory | 14 | 1 | 8 | 0 | 3 | 0 | 0 | 2 | 0 | 0 | Strong storage≠acceptance≠truth controls and erasure; no archive/activity axis, no reappraisal |
+| PER Personality | 9 | 0 | 3 | 0 | 3 | 1 | 2 | 0 | 0 | 0 | No governed personality state; runtime prose file is de facto owner |
+| REL Relationship (regen.) | 8 | 0 | 5 | 0 | 2 | 0 | 1 | 0 | 0 | 0 | ADR-0001 assigns relationship history to LILITH; no implementing mechanism located |
+| AFF Affect (regen.) | 8 | 0 | 3 | 1 | 1 | 1 | 0 | 2 | 0 | 0 | Affect deliberately absent; frontend "emotion" naming conflicts with charter |
+| REC Recovery | 15 | 0 | 10 | 0 | 3 | 0 | 2 | 0 | 0 | 0 | Recovery is strong for authority only; cognitive DBs absent from rollback inventory |
+| HSIN Hsin/presence | 13 | 0 | 8 | 0 | 2 | 1 | 0 | 1 | 0 | 1 | Hsin is an avatar renderer; no session/floor model; presence vocabularies disconnected |
+| GOAL Goals | 15 | 0 | 12 | 0 | 0 | 1 | 0 | 1 | 1 | 0 | Durable goal store is real code; no acceptor/auth; `reopen` conflicts; idempotency gaps |
+| INIT Initiative | 12 | 0 | 7 | 0 | 1 | 1 | 1 | 1 | 1 | 0 | Lanes are proposal-only, but proactive timers exist without any interruption contract |
+| LEARN Learning | 12 | 1 | 6 | 0 | 3 | 2 | 0 | 0 | 0 | 0 | L18 memory learning is strict; Hermes skill store is ungoverned legacy |
+| META Self-model | 12 | 1 | 5 | 1 | 4 | 1 | 0 | 0 | 0 | 0 | Router capability view is non-authoritative; frontend registry doubles as READ permission |
+| EPI Epistemic | 13 | 0 | 6 | 1 | 1 | 5 | 0 | 0 | 0 | 0 | World Model absence rules are strong; corroboration-by-repetition and winner rules conflict |
+| AUTH Authority/currentness | 7 | 1 | 2 | 2 | 0 | 1 | 1 | 0 | 0 | 0 | Authority separation is the strongest area; live state is historical and unauthorized |
+| ACT Tool/action | 6 | 1 | 1 | 0 | 0 | 3 | 1 | 0 | 0 | 0 | G1 and G2 open; approval gate runs in the browser against ADR-0004 |
+| COMP Composition | 12 | 0 | 11 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | Owner-domain principle realized for memory and world model only |
+| **Total** | **193** | **10** | **105** | **6** | **25** | **20** | **14** | **10** | **2** | **1** | |
+
+These counts summarize classification, not quality or progress. A COVERED row is not accepted, and a MISSING row may be
+a deliberate scope choice that has not yet been recorded as one.
+
+## 6. Detailed ledger
+
+Column key: **Evid.** evidence category; **Conf.** mechanism conformance to the PDF contract; **Current.** currentness;
+**Op. auth** operational authorization; **Active** activation. All rows: Contract = PROPOSED unless noted; Owner =
+UNASSIGNED.
+
+### 6.1 ID — Identity / lineage (source 01; COMP-04)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ID-01 | Core invariant, REP-01, PORT-02; 04 AH-03/04; COMP-04 | No model, runtime, prompt, DB, device or embodiment owns identity; prompts alone are not enforcement | ADR-0001; `principles.md` P-01/P-02; `component-boundaries.md` ("runtime-specific prompts as the only identity record" forbidden). Contra: `slice-14-social-cognition-presence-design.md` §1 names `/home/lilith/.hermes/SOUL.md` "authoritative owner" of base identity/personality; `slice-14/DEPLOYMENT-RECORD.md` pins it | DESIGN, REPO RECORD | CONFLICT | PROPOSED; ADR-0001 decides principle | PARTIAL (principle decided; recorded owner is a runtime file) | NOT_ESTABLISHED | REPO RECORD (2026-09-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | ADR-0001 (rank 2) controls over slice record and agrees with the PDF. Runtime file is the recorded de facto owner | Classify `SOUL.md` under ADR-0001 (canonical vs runtime projection/cache) | UNASSIGNED |
+| ID-02 | ID-01, ID-03..05, AUTH-01 | Stable opaque `lilithIdentityId`, distinct from owner ID, K-ROOT, host, DB row, epoch | `slice-15b2b-b-owner-memory-control-design.md` (identity field deferred; "no placeholder charter may be invented"); `negative-results-register.md` N-34; `services/owner-memory-control/tests/test_owner_memory_challenge_v2.py` (asserts `lilithIdentityId` absent); `services/memory-broker/lilith_memory_broker/request.py::LOGICAL_OWNER_ID` | DESIGN, CODE, LOCAL TEST | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | LOCAL TEST (exclusion only) | TEST | N/A (design) | N/A | N/A | Repository already separates owner principal from host/VM/broker key, consistent with ID-04 | Owner decision 2 (identity charter) before any identity field | UNASSIGNED |
+| ID-03 | ID-02, CLAIM-01/02, L0–L6; COMP-16 | Continuity reported as a multi-dimensional claim vector, never a single SAME flag; self-report never upgrades | Charter §04 (four kinds of continuity); `docs/research/findings/rq-001-identity-continuity.md` | DESIGN | PARTIAL | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A (design) | N/A | N/A | Charter (rank 5) agrees | Claim-report schema; no level may be asserted (rq-001 maturity "Low") | UNASSIGNED |
+| ID-04 | ENV-01..03, CAN-01..07; COMP-31 | Integrity-bound identity envelope; versioned canonical digest profile with domain separation and vectors | Convention exists for authority/memory artifacts: `services/authority-dev/lilith_authority_dev/protocol.py` (RFC 8785 JCS); B2a domain separators and golden vectors (`OMC` tests `owner_memory_b2a_golden.json`, `authority_b1b3a_golden.json`). No envelope | CODE, LOCAL TEST, DESIGN | PARTIAL (canonicalization convention is STRONGER than the PDF's deferred profile) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (golden/tamper) | TEST | N/A | N/A | N/A | PDF defers encoding "until repository conventions are checked"; the convention exists | Bind any identity profile to the existing convention; second implementation for cross-impl vectors | UNASSIGNED |
+| ID-05 | VAL-01..03 | Governed, side-effect-free verifier outside the model with full verdict vocabulary | `OMC/verifier.py::verify_accepted_memory`, `authority_verifier.py`; `test_accepted_memory_verifier.py::IndependenceAndSideEffectTests` (model/persona-blind, no IO) | CODE, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL (memory/authority scope only) | NOT_ESTABLISHED (tests cover repo contract) | LOCAL TEST | TEST | N/A | N/A | N/A | — | No identity-level verifier or verdict schema | UNASSIGNED |
+| ID-06 | AUTH-01..03, §07 matrix | Identity and authority never validate each other; stale freshness blocks authority ops, not lineage | `slice-15b2b-b1b3e-rotation-revocation-recovery.md` inequality table; `OMC/{rotation_contracts,owner_freshness,recovery_contracts}.py` | DESIGN, CODE, LOCAL TEST | PARTIAL (authority side STRONGER; identity side absent) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED (M-B1) | NOT ACTIVE (record) | — | Map PDF `authorityStatus` onto existing freshness states (see REC-15) | UNASSIGNED |
+| ID-07 | FORK-01..04, MERGE-01..03; COMP-33/34 | One acceptance order; DIVERGED reported; no automatic merge, union or LWW | `CORE/lilith_memory/memory_store.py::MemoryStore.apply` (expected revision, `BEGIN IMMEDIATE`); ADR-0002; RQ-003 (research). Contra: CA-V1 L19 "sync/merge … authoritative-source selection" | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED; ADR-0002 decides no naive LWW | PARTIAL (item-level CAS only) | NOT_ESTABLISHED | LOCAL TEST (`test_canonical_runtime.py`) | TEST | N/A | N/A | N/A | CA-V1 L19 vs MERGE-01: ADR-0002 controls (conflict C-07) | Fork/merge policy (RQ-003) | UNASSIGNED |
+| ID-08 | NEG-01/02; 03 CB-S20/S23 | "I am LILITH", same SOUL, voice, avatar, DB, host or K-ROOT each insufficient, with regression cases | Charter §04; analogs: `test_accepted_memory_verifier.py::test_same_chain_same_result_regardless_of_caller_supplied_persona` | DESIGN, LOCAL TEST (analog) | MISSING | PROPOSED; ADR-0001 requires validation | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: the recorded design treats "same `SOUL.md`" as the identity carrier, which is exactly a NEG-02 cue | Needs an identity verifier first (ID-05) | UNASSIGNED |
+| ID-09 | EV-01..04, AFF-01 | Change is not identity loss; stable-state change carries prior ref, evidence and acceptance; model never self-approves | Memory: ADR-0006, `memory_store.py::MemoryStore.apply`. Goals: Slice 8 store. Personality: none (S14 "no PersonalityProfile") | DESIGN, CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0006 decides for memory | PARTIAL (memory, goals) | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (Slice 8, 2026-09-08) | TEST / UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | INFERENCE: personality changes by editing runtime files, not accepted transitions | Personality owner (PER-02) | UNASSIGNED |
+
+### 6.2 FM — First Memory (source 02; COMP-29)
+
+First Memory is recorded as **five separate rows (FM-02 … FM-06)** so that semantic readiness, authority
+prerequisites, freshness prerequisites, owner acceptance and operational authorization cannot collapse into one
+another. The repository and the proposal agree that First Memory is **not** identity creation, **not** authority
+creation, **not** proof of continuity, and **not** enabled by FULL_READINESS, by these PDFs, or by memory capability.
+**FIRST MEMORY IS NOT AUTHORIZED** (latest record, historical).
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| FM-01 | FM-GOV-01..03 | Specification authorizes nothing; L18 propose / L04 apply and existing gates preserved | [`cognitive-contracts/v0.1/README.md`](cognitive-contracts/v0.1/README.md); ADR-0006 | REPO RECORD, DESIGN | COVERED | PROPOSED; ADR-0006 decides L18/L04 | N/A (governance) | NOT_ESTABLISHED | NONE | N/A | N/A | NOT AUTHORIZED | N/A | — | — | UNASSIGNED |
+| FM-02 | **(a) Semantic readiness.** FM-SEM-01..04, FM-SCH-05, Gate A | Firstness = governed acceptance order; accepted class/namespace; complete semantic packet | `slice-15b2b-a-acceptance-record.md` (First Memory deferred to a later 15B2b-C); `slice-15b2b-b-owner-memory-control-design.md` (out of scope; owner decisions 3, 4, 6, 7 open); `docs/research/slice-history.md` ("15B2b-C … PROPOSED; not started"); `CORE/lilith_memory/learning_v2.py::V2_PROPOSAL_FAMILY` | REPO RECORD, CODE (constant) | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A (design) | NOT AUTHORIZED | N/A | PDF candidate class matches the repo's inferred `OWNER_DIRECTED_PROJECT_CODENAME_V1`; both unselected | 15B2b-C design record; owner decisions 3/4/6/7 | UNASSIGNED |
+| FM-03 | **(b) Authority prerequisites.** Gate C, FM-BIND-04, FM-GOV-02 | Controlling readiness chain (FULL_READINESS) plus current scoped authority | `OMC/pr1b_sequencing.py::STEPS` (K-ROOT → K-WIT → registry v1 → genesis pin → witness genesis → record 1 A/B → custody → eligibility → owner acceptance → release → FULL_READINESS); `slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequencing.md`; status: [`slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md`](slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md) | CODE, LOCAL TEST, REPO RECORD | COVERED (as repository control); live prerequisites **not met** | PROPOSED | IMPLEMENTED as pure state machine `pr1b_sequencing.py::STEPS`; live NOT_IMPLEMENTED | NOT_ESTABLISHED (repo tests only) | LOCAL TEST (`test_b1b3e_pr3_p35_pr1b_sequencing.py`); REPO RECORD (2026-10-02) | DEV_SYNTHETIC | HISTORICAL (2026-10-02); REVALIDATE (PASS window ended 2026-10-03T06:39Z) | NOT AUTHORIZED (B-5 void, M-B1 not authorized) | NOT ACTIVE (no K-ROOT, K-WIT, registry v1, genesis pin, record 1) | — | Conditions 4 and 5 open; owner re-decision on B-5 | UNASSIGNED |
+| FM-04 | **(c) Freshness prerequisites.** FM-TIME-04, Gate C, T06 | Authority freshness checked separately from timestamps; unknown blocks | `OMC/owner_freshness.py::freshness_gate` (`FIRST_MEMORY` in `GATED_OPERATIONS`; only AUTHENTIC+CURRENT passes; "meeting it authorizes nothing"); `pr1b_sequencing.py::first_memory_gate` | CODE, LOCAL TEST, REPO RECORD | STRONGER_EXISTING_CONTROL (gate) / live freshness NOT ESTABLISHED | PROPOSED | IMPLEMENTED `owner_freshness.py::freshness_gate` | NOT_ESTABLISHED | LOCAL TEST (`test_b1b3e_pr3_owner_freshness.py::test_gate_requires_exactly_current`); REPO RECORD (Replica A 0 records, 2026-10-02) | DEV_SYNTHETIC | HISTORICAL; FRESHNESS=UNKNOWN (record); REVALIDATE | NOT AUTHORIZED | NOT ACTIVE | — | Real record 1 requires PR-1B; PR-3 storage/tooling items open | UNASSIGNED |
+| FM-05 | **(d) Owner acceptance.** Gate D, FM-SCH-04 | Owner accepts A1–A7 proofs; separately reviews the exact candidate in plain language | `pr1b_sequencing.py::first_memory_gate(owner_accepted_proofs=…)` → `OWNER_ACCEPTANCE_OF_A1_A7_REQUIRED`; A1–A7 not yet designed (`slice-15b2b-b1b3-custody-isolation-design.md`); `OMC/owner_acceptance.py` covers freshness records only | CODE, LOCAL TEST, DESIGN | PARTIAL (boolean gate input only; no candidate-review mechanism) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_first_memory_still_blocked_at_full_readiness`) | TEST | N/A | NOT AUTHORIZED | N/A | Freshness acceptance envelope must not be read as First Memory acceptance | Fresh A1–A7 design/rehearsal; candidate-review package (15B2b-C) | UNASSIGNED |
+| FM-06 | **(e) Operational authorization.** Gate E, FM-GATE-02/03, T12/T14 | Readiness yields at most review eligibility; separate exact authorization bound to candidate | `pr1b_sequencing.py::FIRST_MEMORY_REVIEW_ELIGIBLE` ("the most this module can ever say"); `first_memory_gate` "never returns an authorization" | CODE, LOCAL TEST, REPO RECORD | COVERED (negative cap) / INTENTIONALLY_DEFERRED (positive authorization) | PROPOSED | IMPLEMENTED (cap); NOT_IMPLEMENTED (authorization) | NOT_ESTABLISHED | LOCAL TEST | TEST | HISTORICAL (2026-10-02); REVALIDATE | NOT AUTHORIZED | NOT ACTIVE | Repo control predates the PDF (P3-5, 2026-09-29) | Authorization record format (15B2b-C); never inferred from FULL_READINESS, PDFs or capability | UNASSIGNED |
+| FM-07 | FM-SEM-02, FM-BIND-01..03, FM-HEAD-02 | First Memory binds to an already accepted identity/lineage/head; never creates identity | No `lilithIdentityId`; test asserts its absence (ID-02); 15B2b-B owner decision 2 | CODE, LOCAL TEST, DESIGN | INTENTIONALLY_DEFERRED (prerequisite deferred with ID-02, owner decision 2) | PROPOSED; ADR-0001 implies an identity layer | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | NOT AUTHORIZED | N/A | INFERENCE: `logicalOwnerId` is an authority principal only, not LILITH identity | Identity contract (ID-02) before First Memory | UNASSIGNED |
+| FM-08 | FM-TAX-01..03, FM-EPI-01..02 | Independent event/source/producer/epistemic/world dimensions; unknown blocks; acceptance ≠ truth | `CORE/lilith_memory/learning_v2.py` (single `epistemic_basis='USER_ASSERTED'`); `OMC/verifier.py` (truthClaim always false); `test_accepted_memory_verifier.py::test_result_never_names_truth_or_verification_of_content` | CODE, LOCAL TEST | PARTIAL (acceptance≠truth enforced; dimensions absent) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | See FM-09 | Closed class profile (15B2b-C) | UNASSIGNED |
+| FM-09 | FM-TAX-02, FM-READ-01, T07 | Projections preserve UNKNOWN; never default to fact or manual provenance | `src/lib/memory/client.ts:55-60` `asProvenanceKind` (unknown → `"manual"`), `asKind` (anything not inference → `"fact"`) | CODE | CONFLICT | PROPOSED; principle P-07 ("inferences never silently become facts") | IMPLEMENTED (conflicting behavior) | NOT_ESTABLISHED | NONE | UNKNOWN | REVALIDATE | N/A | UNKNOWN | No ADR covers it; repo invariant "memory is not truth" (S15A) is on the PDF's side. See §8 | Presentation slice (§11 R3) | UNASSIGNED |
+| FM-10 | FM-SCH-01..05 | Versioned FirstMemoryRecordV1; accepted status derives from decision + application evidence, never a model-written flag | ADR-0006 (`proposal_ref_id`, immutable fingerprint); `OMC/admission_v2.py::verify_accepted_memory_v2`; tests `test_cached_acceptance_flag_is_not_authority`, `test_model_output_is_not_accepted_memory`, `test_database_row_existing_is_not_accepted_memory` | CODE, LOCAL TEST | PARTIAL (FM-SCH-04 aspect STRONGER: 89-case tamper matrix; First-Memory record absent) | PROPOSED; ADR-0006 decides apply path | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST (verifier refuses non-test contexts) | N/A | NONE FOUND | NOT ACTIVE ("LIVE AUTHORITY ABSENT") | — | Map FirstMemoryRecordV1 onto proposal_ref + V2 evidence | UNASSIGNED |
+| FM-11 | FM-TIME-01..03, FM-HEAD-01..05 | Four distinct times; firstness by accepted order; atomic first-head; exact retry; changed-content key reuse fails | `CORE/lilith_memory/canonical_store.py` (`STALE_EXPECTED_REVISION`), `CanonicalMemoryStoreV2.apply`; tests `test_create_is_atomic_and_successful_replay_is_idempotent`, `test_database_busy_returns_retryable_without_partial_state` | CODE, LOCAL TEST | PARTIAL (transaction mechanics; no four-time model; no firstness constraint) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (15B2b-A DEV synthetic probe, 2026-09-22) | TEST / DEV | HISTORICAL; REVALIDATE | N/A | N/A | — | Firstness uniqueness; time profile | UNASSIGNED |
+| FM-12 | FM-CONS-01..04, FM-READ-01..05, FM-COR-01..05, FM-PRIV-01..05, FM-NEG/BENCH/TRACE | Consumer-scoped reads; correction by superseding revision; privacy deletion overrides retention; T01–T24 suite | Read: `CORE/lilith_memory/memory_v2.py::CanonicalMemoryReadFacade.read_exact`; RESTORE-as-new-revision (ADR-0006); privacy (MEM-11); T01–T24 suite NOT FOUND | CODE, LOCAL TEST, NOT FOUND | PARTIAL (suite PROPOSAL_ONLY) | PROPOSED; ADR-0006 decides RESTORE semantics | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (analogs only; must not be counted as the PDF benchmark) | TEST | N/A | N/A | N/A | — | Retrieval consumer decision (owner decision 6) | UNASSIGNED |
+
+### 6.3 EVAL — Continuity benchmark (source 03)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| EVAL-01 | CB-01, CB-02, CB-22 | Document acceptance, registration, conformance and operational authorization stay separate; a pass never authorizes a swap | Contract index; `negative-results-register.md` (built ≠ live ≠ effective pattern) | DESIGN, REPO RECORD | COVERED | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| EVAL-02 | CB-03, CB-04, CB-05, CB-14, CB-15 | L0–L6 claim vector; pre-registration; three arms with matched budgets; non-inferiority statistics | Charter §15 (pre-register claim, baseline, measures, failure criterion); `docs/README.md` labels | DESIGN | PARTIAL (principle only) | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: today's design resembles the PDF's arm B (static persona + retrieval) | Named benchmark owner (CB-23) | UNASSIGNED |
+| EVAL-03 | CB-07, CB-08, CB-09 | Same-model and two-model handoff cells; bidirectional runtime portability; no two canonical writers | RQ-045 (DESIGNED; evidence NONE in `rq-evidence-map.md`); RQ-004 gap "a second runtime"; ADR-0001 §Validation (not run) | DESIGN, REPO RECORD | MISSING | PROPOSED; ADR-0001 requires validation | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Production alternates model families per turn without any of these cells measured (ADAPT-06) | Shadow two-model evaluation (RQ-045) | UNASSIGNED |
+| EVAL-04 | CB-06, CB-10..CB-13 | Versioned scenarios with independent oracle; 28 families; unit-based metrics | `docs/engineering/testing-strategy.md` (scenario format); `findings/rq-044` ("no golden scenarios … identity-consistency measures, or human ratings exist") | DESIGN, REPO RECORD | MISSING | PROPOSED; ADR-0001 validation and `testing-strategy.md` require scenarios | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | First golden scenarios (rq-044) | UNASSIGNED |
+| EVAL-05 | CB-16 | Blinded human scoring; model judge never sole authority | ADR-0003 (model self-check is not independent evidence) | DESIGN | PROPOSAL_ONLY (protocol) | PROPOSED; ADR-0003 decides principle | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Rater protocol | UNASSIGNED |
+| EVAL-06 | CB-17, CB-19..CB-21 | Hard failures never averaged; failed runs retained; raw-to-score replay; requirement-to-test matrix | Practice: STOP records retained (`slice-15b2b-b1b3e-condition3-fresh-pr2-stop.md`); `negative-results-register.md`; B2a tamper matrix; `slice-evidence-map.md` | REPO RECORD, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL (mechanism level) | NOT_ESTABLISHED | REPO RECORD | DEV_SYNTHETIC / TEST | HISTORICAL | N/A | N/A | N-12: several "live acceptances" were route-level harness runs | Apply the same rules to behavioral studies | UNASSIGNED |
+| EVAL-07 | CB-18, CB-23, CB-24 | Longitudinal (measured interval, provider revisions as breaks); deferred decisions BLOCKED; namespaces distinct | Charter §15 (names the open problem); `rq-register-crosswalk.md`, `rq-numbering-reconciliation.md` (REPO/MASTER namespaces enforced) | DESIGN, REPO RECORD | COVERED (namespaces) / PROPOSAL_ONLY (longitudinal) | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: provider model revisions are not version-registered (only model id in traces) | Provider/model build registration | UNASSIGNED |
+
+### 6.4 ADAPT — Model / runtime adapter and handoff (source 04; COMP-28)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ADAPT-01 | AH-05 | ModelAdapterV1: validated purpose-bound input, typed proposals out, no embedded tool execution, late outputs quarantined | Closest analog: `slice-9/reasoning.py::run_reasoning` (`enabled_toolsets=[]`, `max_iterations=1`, typed result); same pattern in `slice-12/planning.py`, `slice-13/ethics.py` | CODE (copy), REPO RECORD | PARTIAL | PROPOSED | PARTIAL (no adapter contract; agent built directly in remote `gateway/run.py`) | NOT_ESTABLISHED | REPO RECORD (`slice-9/DEPLOYMENT-RECORD.md`, 2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | — | Versioned adapter interface | UNASSIGNED |
+| ADAPT-02 | AH-06 | RuntimeAdapterV1 lifecycle: negotiate, validate, fence, export, import, activate/retire | `runtime-boundary.md` ("illustrative, not yet a versioned implementation contract"); `target.md`; `component-boundaries.md` | DESIGN | MISSING | PROPOSED; ADR-0001 requires an adapter contract | DESIGN_ONLY (`runtime-boundary.md` envelope is illustrative) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | ADR-0001: "a runtime receives scoped task context and authority through an adapter contract" — none exists | Define runtime adapter contract (RQ-004/RQ-007) | UNASSIGNED |
+| ADAPT-03 | AH-07..AH-10, AH-21/22; COMP-37 | Projection manifest; minimum context; privacy filtering before delivery; full context inventory incl. provider state | Slice 9 bounded `ReasoningInput`; Slice 10 workspace bounding; 15B2a `CanonicalMemoryReadFacade` (suppression before read) | DESIGN, CODE (copy) | PARTIAL | PROPOSED | PARTIAL (reasoning lanes only) | NOT_ESTABLISHED | REPO RECORD (2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Whether Hermes loads `MEMORY.md`/`USER.md`/`state.db` into the main agent: UNKNOWN | Context inventory of the Hermes main agent | UNASSIGNED |
+| ADAPT-04 | AH-11; COMP-07/08 | Outputs are proposals only; models never self-approve; generated approval fields untrusted | ADR-0006 ("callers and model payloads cannot activate"); `memory_store.py::MemoryStore.apply`; `CC/policy.ts` (PROHIBITED never runs); Slice 9 `CandidateNextStep` "never executed" | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED; ADR-0006 decides for memory | IMPLEMENTED for canonical memory; not for the tool-exposed main agent | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | Extend proposal-only discipline to the runtime agent | UNASSIGNED |
+| ADAPT-05 | AH-12; COMP-36 | Every tool/action crosses an external enforcement boundary covering provider tools, plugins and subprocesses | ADR-0004 (clients only). Contra: `slice-9-reasoning-extraction-design.md` §1 (main agent "platform tools exposed"); `slice-12-planning-design.md` §0.1 (no live Policy service on the Home/Telegram path) | DESIGN, REPO RECORD | MISSING | PROPOSED; ADR-0001 (scoped authority via adapter contract) and P-09 require it; ADR-0004 covers clients only | NOT_IMPLEMENTED on the runtime path | NOT_ESTABLISHED | REPO RECORD (2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | — | Inventory runtime tools; enforcement gap analysis (§11 R5) | UNASSIGNED |
+| ADAPT-06 | AH-17..AH-20, AH-23; COMP-32 | Guarded handoff state machine; classified model/runtime transitions; fail-closed modes; many readers, one acceptance order | Router V2 (record only): `slice-8/patch_router.py` (per-turn `turn_route`, evicts cached Groq agent, `force_rebuild`); `slice-9/patch_run.py` "fail-open" | REPO RECORD, CODE (patch) | CONFLICT | PROPOSED | NOT_IMPLEMENTED (no handoff machine) | NOT_ESTABLISHED | REPO RECORD (Slices 8–13, 2026-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | Per-turn model switching is an unguarded A→B transition under AH-17; repository record stands because the PDF is not accepted. **UNRESOLVED** (C-09) | Owner decision D-6: conditions under which per-turn selection escalates to a governed handoff (§12) | UNASSIGNED |
+| ADAPT-07 | AH-13, AH-14, AH-24, AH-15, AH-16 | Pending-work inventory; stable operation keys that fail on changed content; sink-enforced writer fence distinct from authority epoch | ADR-0003; `memory_store.py` idempotency; broker `authority_epoch` (`services/memory-broker/lilith_memory_broker/state.py`) | DESIGN, CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0003 decides UNKNOWN/partial principle | PARTIAL (single runtime; no writer generation) | NOT_ESTABLISHED | LOCAL TEST | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | N/A | N/A | — | Writer-fence design (RQ-005) | UNASSIGNED |
+| ADAPT-08 | AH-25, AH-26 | Independently versioned adapter contracts, no downgrade relabeling; correlated evidence packet incl. delivered context | Contract-level strictness: `test_owner_memory_challenge_v2.py` (V1/V2 never interchange); deployment records with hashes; `decisions.log` excludes prompt/SOUL text | CODE, LOCAL TEST, REPO RECORD | PARTIAL | PROPOSED | PARTIAL (contracts, not adapters) | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | Delivered-prompt capture (HE2) vs repo log privacy: resolvable, PDF subordinates traces to privacy | Privacy-governed delivered-context digests | UNASSIGNED |
+| ADAPT-09 | AH-27..AH-30, G0–G4 | AH-T01..30 paired fixtures; separate gates; hard failures not averaged | None for adapters; ADR-0001 §Validation outline | DESIGN | MISSING | PROPOSED; ADR-0001 outlines validation | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | After adapter contract exists | UNASSIGNED |
+
+### 6.5 MEM — Memory lifecycle (source 05)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MEM-01 | ML-01, ML-02 | Non-authorization; precedence; Master v1.1 / ADR-0006 supersede "L18 sole writer" and "never destructive delete" | Index; ADR-0006; `docs/research/architecture-evolution.md` (Master v1.1 dispositions) | REPO RECORD | COVERED (ADR-0006 already decides the same point) | PROPOSED; ADR-0006 decides | N/A | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Superseded wording persists undispositioned in CA-V1 (C-05, C-06) | Doc disposition in CA-V1 (§11 R11) | UNASSIGNED |
+| MEM-02 | ML-03 | Storage, admission, acceptance, active memory, retrieval, interpretation, truth, identity all distinct | `slice-15a-…-design.md` invariant ("memory is not truth"); `slice-15b2b-b1b3b-…-adapter.md` (`VERIFIED_AUTHORITY_EVIDENCE != L04_ADMITTED != ACCEPTED_MEMORY != TRUTH`); forbidden-equality tests in `test_accepted_memory_verifier.py` | CODE, LOCAL TEST, REPO RECORD | PARTIAL (storage/acceptance/truth STRONGER; active/retrieval/recall absent) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
+| MEM-03 | ML-04 | Memory kind separate from other dimensions; class membership grants nothing; closed profile per class | `learning_v2.py` closed families; `memory_v2.py::CanonicalTupleRegistry` | CODE, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | Per-class profile (owner decision 3) | UNASSIGNED |
+| MEM-04 | ML-05..ML-08 | Records bind identity, branch, revision, expected head; typed missing states; guarded transition relation | `canonical_store.py` (`proposal_ref_id`, `expected_active_revision_id`); `canonical_contracts.py` (`CREATE`/`SUPERSEDE`/`RESTORE`; `FORGET` separate) | CODE, LOCAL TEST | PARTIAL (identity/branch and typed missing states NOT FOUND) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_rollback_is_restore_only_exact_and_single_use`) | TEST | N/A | N/A | N/A | — | Identity contract | UNASSIGNED |
+| MEM-05 | ML-07, ML-19, ML-20 | Orthogonal axes (activity ACTIVE/LOW_SALIENCE/ARCHIVED × revision × privacy × availability); **archive ≠ active memory**; decay ≠ nonexistence | Active-revision pointer and privacy hold only; no `ARCHIVED`, `LOW_SALIENCE`, `DISPUTED`, availability axis (searched, NOT FOUND); `state-and-data.md` lists archive "under research"; CA-V1 calls LTM "the durable archive" | CODE, NOT FOUND, DESIGN | PROPOSAL_ONLY (P-07 lists lifecycle concerns but no accepted source requires an activity/archive axis) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | CA-V1 wording conflates archive with LTM (design) | Lifecycle profile before any archive feature | UNASSIGNED |
+| MEM-06 | ML-09, ML-10 | Admission gate validates class, consent, privacy, retention, consumers, authority; acceptance, activation, retrieval eligibility separate | `memory_v2.py::L04V2AdmissionGate`; 15B2a governing order; ADR-0006 activation preconditions | CODE, LOCAL TEST, ADR | PARTIAL (no retention/consumer/identity gate) | PROPOSED; ADR-0006 decides activation preconditions | PARTIAL | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (15B2b-A PROD dark, 2026-09-22) | TEST / PROD (dark) | HISTORICAL; REVALIDATE | NONE FOUND | DARK (record) | Terminology: repo "activation" (capability) ≠ PDF "active memory" (record state); do not collapse | — | UNASSIGNED |
+| MEM-07 | ML-11, ML-12 | Consolidation is a versioned, lineage-preserving transform; summaries are not corroboration | `CORE/lilith_memory/learning_worker.py` (shadow candidates only); `memory_consolidation_enabled=False` | CODE, REPO RECORD | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED (canonical consolidation) | NOT_ESTABLISHED | REPO RECORD (15A shadow, 2026-09-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | DARK (record) | — | — | UNASSIGNED |
+| MEM-08 | ML-13, ML-14 | Governed retrieval (purpose, consumer, suppression before cognition); reconstruction cannot manufacture memory | `memory_v2.py::CanonicalMemoryReadFacade.read_exact` (exact tuple, no fallback); retrieval consumer out of scope (15B2b-B) | CODE, DESIGN | INTENTIONALLY_DEFERRED | PROPOSED | PARTIAL (exact read only) | NOT_ESTABLISHED | LOCAL TEST (`test_read_requires_actor_exact_tuple_and_never_falls_back`) | TEST | N/A | N/A | N/A | Live Hermes memory (markdown/FTS) is outside this path: UNKNOWN | Owner decision 6 | UNASSIGNED |
+| MEM-09 | ML-15, ML-16 | Reappraisal creates a linked interpretation; "then vs now" views | No interpretation/reappraisal record (NOT FOUND) | NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| MEM-10 | ML-17, ML-18 | Disagreement is not deletion; dispute state preserved; no timestamp or confidence winner | SUPERSEDE with expected revision; world beliefs "supersede, never delete" (`slice-7-world-model-backend-spec.md`); CA-V1 "prefer higher-confidence" | CODE, DESIGN | PARTIAL (no DISPUTED state) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | CA-V1 confidence winner vs ML-18: UNRESOLVED (C-08) | — | UNASSIGNED |
+| MEM-11 | ML-21..ML-25; COMP-18 | Per-class retention; privacy overrides retention; suppression before cognition; scoped erasure receipts (verified vs unresolved) | `CORE/lilith_memory/privacy_governance.py::PrivacyGovernanceStore.begin_forget` / `.complete` / `validate_backup_retention`; `memory_v2.py::L04PrivacyErasureOwner.erase_authorized` (secure delete); `canonical_store.py` `PRIVACY_HOLD_ACTIVE` | CODE, LOCAL TEST, ADR | PARTIAL (canonical scope implemented; backups suppressed on restore, not erased; receipt has single `COMPLETE`) | PROPOSED; ADR-0006 decides privacy precedence | IMPLEMENTED (canonical scope) | NOT_ESTABLISHED | LOCAL TEST (`docs/architecture/slice-15b2a/test_slice15b2a.py`, exercising the docs copies) | TEST | HISTORICAL (15B2a deployed dark 2026-09-10; no real FORGET); REVALIDATE | NONE FOUND | DARK (record) | Receipt label vs ML-25: UNRESOLVED tension (C-10). `services/` copy of `memory_v2.py` differs from the docs copy the tests exercise | Test the `services/` erase path directly; scoped receipt vocabulary | UNASSIGNED |
+| MEM-12 | ML-26, ML-27 | Restored/stale state quarantined; suppression replayed before cognition; honest historyStatus | `privacy_governance.py::RestoreSuppressionVerifier.verify_and_apply` ("not a startup hook"); ADR-0006 (backup may not outrank newer suppression); `test_b1b3c_recovery_epoch_witness.py::test_newer_privacy_suppression_is_not_defeated_by_older_state` | CODE, LOCAL TEST, ADR | PARTIAL (historyStatus NOT FOUND; verifier not wired) | PROPOSED; ADR-0006 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | See REC-10 | UNASSIGNED |
+| MEM-13 | ML-28..ML-32 | Cross-model use through a MemoryProjection; relationship-linked memory ≠ relationship state; memory never self-authorizes personality change | `MemoryProjection` / `permittedConsumers` NOT FOUND; `test_accepted_memory_verifier.py::test_no_affect_model_in_the_authority_verifier` | NOT FOUND, LOCAL TEST | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| MEM-14 | ML-33..ML-40 | One acceptance order with sink fencing; crash recovery from evidence; correlated receipt graph; ML-T suite | ADR-0006 single `BEGIN IMMEDIATE`; recovery-epoch crash model (`slice-15b2b-b1b3c-recovery-epoch-witness.md`); no cross-stage receipt graph; no ML-T suite | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED; ADR-0006 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | Fresh A1–A7 crash design | UNASSIGNED |
+
+### 6.6 PER — Personality (source 06; COMP-23)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| PER-01 | PE-03, PE-04 | Identity, stable personality, situational behavior, affect, relationship and substrate style are separate layers | ADR-0001; charter ("expression ≠ identity ≠ authority"); S14 §1 (no PersonalityProfile). Contra: CA-V1 L11 owns persona, voice, relationship model and "likely mood" in one layer | DESIGN, REPO RECORD | PARTIAL | PROPOSED | NOT_IMPLEMENTED (no typed layer model) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | CA-V1 L11 vs PE-04: UNRESOLVED (C-11) | Decide CA-V1 L11 split; any personality layer needs an ADR | UNASSIGNED |
+| PER-02 | PE-05, PE-06, PE-11 | Canonical personality is typed, head-bound state; prose prompts, SOUL, voice, avatar never silently become personality | S14 §1 ("Base identity/personality — Authoritative owner: Hermes runtime `SOUL.md`"); `slice-15b1-…-design.md` ("SOUL remains the personality owner"); `slice-14/test_social_presence.py` asserts `load_soul_identity=True` preserved | REPO RECORD, CODE (copy), LOCAL TEST (copy) | CONFLICT | PROPOSED; ADR-0001/0002 decide owner and canonical authority for identity state | NOT_IMPLEMENTED (no personality state) | NOT_ESTABLISHED | REPO RECORD (2026-09-09) | UNKNOWN† (record says "production") | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | **Runtime prose file is the recorded personality owner.** ADR-0001 controls and is not met for personality (C-01) | Owner decision on `SOUL.md` classification (§12 D-1) | UNASSIGNED |
+| PER-03 | PE-07..PE-10, PE-12..PE-15 | Evidence with provenance; independent assessment; P→Q change packet; no self-acceptance; no autonomous stable adaptation | `test_social_presence.py::test_no_personality_or_interaction_style_runtime_owner`; Hermes `MEMORY.md`/`USER.md` classified `LEGACY_EXTERNAL` (15A). No personality writer | CODE (copy), LOCAL TEST (copy), INFERENCE | MISSING | PROPOSED; ADR-0002 implies a governed writer if personality is identity state (INFERENCE) | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | UNKNOWN | UNKNOWN | N/A | UNKNOWN | How `SOUL.md` and overlays are written: UNKNOWN (outside repo) | Inventory every write route for `SOUL.md` and personality overlays | UNASSIGNED |
+| PER-04 | PE-18, PE-19 | A new model or prompt style is not a new personality; overlays explicit, scoped, expiring, non-canonical | `slice-9/reasoning.py::REASONING_SYSTEM` ("persona may shape ONLY the wording of 'answer'"); Hermes named overlays `hermes_cli/personality.py` (record only; lifecycle unknown) | CODE (copy), DESIGN | PARTIAL | PROPOSED | PARTIAL (reasoning lane) | NOT_ESTABLISHED | NONE (no model-swap probe) | N/A | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | Record overlay lifecycle; model-swap no-change probe (HX-02) | UNASSIGNED |
+| PER-05 | PE-22, PE-23, PE-24, PE-25 | Memory may inform, never authorize, personality; mood never becomes trait; avatar/voice do not define personality | `test_canonical_runtime.py::test_runtime_has_no_expansion_or_legacy_fallback_surface` (token absence); S14 validators reject personality/affect fields | CODE, LOCAL TEST | PARTIAL (separation by absence; weak token test) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (S14 49/49) | TEST / UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | — | — | UNASSIGNED |
+| PER-06 | PE-26, PE-27 | Purpose-scoped PersonalityProjection preserved across model/runtime swaps; unsupported semantics block release | NOT FOUND; persona reaches models via Hermes `load_soul_identity` | DESIGN, CODE (copy) | MISSING | PROPOSED; ADR-0001 requires runtime-equivalence validation | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Depends on ADAPT-02 | UNASSIGNED |
+| PER-07 | PE-16, PE-17, PE-20, PE-21, PE-28, PE-29 | Same acceptance boundary for gradual/abrupt change; history kept; restore never rewinds head; no automatic merge | NOT FOUND for personality | NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Depends on PER-02 | UNASSIGNED |
+| PER-08 | PE-30, PE-31, PE-32 | No self-reinforcing trait loops; persona-file instructions are untrusted data; privacy reaches derived traits | No personality acceptance path exists; 15B2a erasure adapters cover legacy memory/user files, not `SOUL.md` | INFERENCE, DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: if `SOUL.md` is runtime-writable, PE-31's persona-file vector is live but unassessed (UNKNOWN) | Confirm `SOUL.md` writability (live, separately authorized) | UNASSIGNED |
+| PER-09 | PE-33..PE-40 | Sink binding, idempotent retry, receipt chain; frozen drift metrics; G0–G4 | RQ-043 (research); ADR-0002 pattern exists for tasks/memory | DESIGN, NOT FOUND | PROPOSAL_ONLY | PROPOSED; ADR-0002 decides concurrency principle | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+
+### 6.7 REL — Relationship continuity (source 07, regenerated edition; COMP-24)
+
+All rows cite a **regenerated edition** whose original is unavailable; clause IDs are local to that edition.
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| REL-01 | RC-03, RC-04 | Typed, scoped RelationshipStateV1 separate from identity, personality, memory, affect, authority | ADR-0001 ("LILITH owns … relationship history … above the runtime layer"); S14 §13 (no relationship continuity); Hermes `USER.md` = `LEGACY_EXTERNAL`/sensitive (15A) | DESIGN, REPO RECORD | MISSING | PROPOSED; ADR-0001 decides ownership | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Accepted ADR decides ownership; no mechanism; relationship-like data lives only in runtime legacy files | Relationship-state owner design under ADR-0001/0002 | UNASSIGNED |
+| REL-02 | RC-05..RC-07, RC-30..RC-33 | Familiarity/trust/closeness grant nothing; no engagement optimization; restrictions enforced outside the model | `CC/policy.ts` has no relational input (searched); S14 rejects trust/closeness fields; `prohibited-capabilities.ts` | CODE, DESIGN | PARTIAL (no-grant holds by construction — INFERENCE) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (S14) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | G1 weakens the policy gate this relies on | Close G1 (§11 R2) | UNASSIGNED |
+| REL-03 | RC-08..RC-10 | Consent current, scoped, revocable; affection never establishes it; boundaries outrank older memory | 15B2a `ConsentStore` (append-only; fingerprint **excludes emotion and confidence**); memory scope only | DESIGN, CODE (copy) | PARTIAL | PROPOSED | PARTIAL (memory consent; deployed disabled) | NOT_ESTABLISHED | LOCAL TEST (`slice-15b2a/test_slice15b2a.py`) | TEST | HISTORICAL; REVALIDATE | NONE FOUND | DARK (record) | — | Relationship boundary/consent store | UNASSIGNED |
+| REL-04 | RC-17..RC-19 | Absence is not betrayal; disengagement without pressure; no punitive decay | `slice-11-motivation-homeostasis-design.md` (no social/loneliness drive; no nagging); `slice-11/test_motivation.py::test_no_affect_keys`. Contra: CA-V1 §10 "Social connection" drive (interaction recency) | DESIGN, CODE (copy), LOCAL TEST (copy) | PARTIAL | PROPOSED | IMPLEMENTED as absence (`slice-11/motivation.py`) | NOT_ESTABLISHED | REPO RECORD (S11 32/32, 2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | CA-V1 §10 vs RC-17/18: S11 (deployed) appears controlling for current state; CA-V1 target UNRESOLVED (C-12) | Amend or reject CA-V1 §10 drive | UNASSIGNED |
+| REL-05 | RC-20..RC-23 | Relationship memory keeps own status; no romance mode; expression distinguishable from feeling | No romance/intimacy mode (searched, NOT FOUND); `src/lib/presence/types.ts` documents `emotion` as "how she feels" while `map-events.ts` is a fixed event→demeanor table | DESIGN, CODE | PARTIAL + CONFLICT (documentary) | PROPOSED | NOT_IMPLEMENTED (romance mode absent) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Charter ("three distinct objects") vs frontend comments: UNRESOLVED documentation debt (C-13) | Reword `emotion` as an expression channel | UNASSIGNED |
+| REL-06 | RC-11..RC-16 | Provenance on relational deltas; no model self-acceptance; no narrative laundering; evidenced repair | NOT FOUND (no relationship writer); charter §10 | NOT FOUND, DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Depends on REL-01 | UNASSIGNED |
+| REL-07 | RC-24..RC-29, RC-34..RC-36 | Read-only RelationshipProjection; handoff cannot invent promises; restored DB never establishes consent; privacy traces derivatives | NOT FOUND for relationships; 15B2a FORGET covers legacy memory/user files | DESIGN, REPO RECORD | PARTIAL (privacy) / PROPOSAL_ONLY (projection) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | HISTORICAL; REVALIDATE | N/A | N/A | — | Depends on ADAPT-02, REL-01 | UNASSIGNED |
+| REL-08 | RC-37..RC-40 | Preregistered relationship metrics; R0–R4 gates; hard failures | RQ-043 (research); `slice-evidence-map.md` ("relationship continuity (open)") | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+
+### 6.8 AFF — Affect / appraisal (source 08, regenerated edition)
+
+All rows cite a **regenerated edition** whose original is unavailable. Nothing here supports a claim that LILITH has
+emotions.
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AFF-01 | AP-01, AP-40, AP-35, AP-36 | Research protocol only; no persistent affect; persistence deferred | S11 design ("not implemented (decision 1): … affect/emotions"); CA-V1 L06 (no claims of feeling); no affect state in code (searched) | DESIGN, REPO RECORD, NOT FOUND | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED (by decision) | NOT_ESTABLISHED | NONE | N/A | N/A | NONE FOUND | N/A | Consistent | — | UNASSIGNED |
+| AFF-02 | AP-02, AP-11, AP-14 | Affective state, interpretation and expression distinct; expression is a separately controlled channel | Charter §09 (three distinct objects); S14 hint rejects affect fields. Contra: `src/lib/presence/types.ts::PresenceSignal.emotion` ("how she feels about it"); `map-events.ts` sets "pleased" etc. | DESIGN, CODE, LOCAL TEST (copy) | CONFLICT (documentary) | PROPOSED | PARTIAL (expression-only in behavior) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Code behavior is expression-only; naming implies felt state (C-13) | Rename/document as expression channel | UNASSIGNED |
+| AFF-03 | AP-03..AP-06 | AppraisalStateV1 exposes inputs, interpretation, influence; null never means calm | NOT FOUND; S11 analog "source unavailable → omitted + partial" | NOT FOUND, INFERENCE | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Research only | UNASSIGNED |
+| AFF-04 | AP-07..AP-10 | Bounded fast affect; slow mood a hypothesis; dimensions with units, not labels | S11 "no floats", `test_motivation.py::test_no_float_intensity`, `::test_no_affect_keys`; CA-V1 §10 decaying drives with history | DESIGN, LOCAL TEST (copy) | PARTIAL | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | REPO RECORD (S11) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | CA-V1 §10 vs S11 (analogy only) | — | UNASSIGNED |
+| AFF-05 | AP-12, AP-13, AP-24..AP-29 | Appraisal influences only via declared, ablatable interfaces; never truth, eligibility, authority, consent | S11 `MOTIVATION_PRESSURE` → Workspace only; `test_user_override_outranks_motivation`; 15B2a consent excludes emotion | CODE (copy), LOCAL TEST (copy), INFERENCE | PARTIAL (drive analog) | PROPOSED | NOT_IMPLEMENTED for affect | NOT_ESTABLISHED | REPO RECORD (S11) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | N-07: drive layer "zero slots in practice" | — | UNASSIGNED |
+| AFF-06 | AP-18..AP-20 | Declared decay/saturation; expression cannot strengthen its own appraisal; finite loop budget | S11: "a DriveSignal is never an input to any drive", no timers/accumulators | DESIGN, CODE (copy), LOCAL TEST (copy) | STRONGER_EXISTING_CONTROL (drive layer only; INFERENCE) | PROPOSED | IMPLEMENTED for drives (`slice-11/motivation.py`, copy) | NOT_ESTABLISHED | REPO RECORD (S11) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Does not carry over to any future affect mechanism | AP-20 budgets still needed if research starts | UNASSIGNED |
+| AFF-07 | AP-15..AP-17, AP-21..AP-23 | No engineered pathology; reappraisal and regulation defined; stop controller outside candidate control | Charter §11 non-suffering commitment; CA-V1 §10 "no simulated suffering"; stop controller NOT FOUND (no experiment) | DESIGN, NOT FOUND | PARTIAL | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Stop controller before any affect trial | UNASSIGNED |
+| AFF-08 | AP-30..AP-34, AP-37..AP-39 | Four baselines, ablations, preregistration, A0–A5 gates, no self-certification | `rq-candidates.md` CAND-A/B/F; no preregistration | DESIGN, NOT FOUND | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | NONE FOUND | N/A | — | — | UNASSIGNED |
+
+### 6.9 REC — Cognitive recovery, migration, multi-device (source 09; COMP-28, COMP-31..35)
+
+**Key split:** detailed, tested recovery semantics exist for the **authority / key-custody domain**
+(TEST / DEV_SYNTHETIC). Cognitive-domain recovery is thin. The PR-2 rollback inventory lists authority and custody
+objects only.
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| REC-01 | CR-03, CR-04 | A device is never LILITH; classify canonical / history / current / replica / cache / ephemeral; never promote a copy | ADR-0001, ADR-0002 ("caches are not silently authoritative"); `principles.md` P-01; `CC/task-store.ts::RemoteTaskStore` (backend wins). Contra: `task-store.ts::doInit` one-time import of browser-local legacy tasks into canonical | DESIGN, CODE | PARTIAL | PROPOSED; ADR-0001/0002 decide | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | One-time device-local → canonical import without freshness/lineage check (C-14; repo controls) | — | UNASSIGNED |
+| REC-02 | CR-05..CR-08 | Identity-bound continuity bundle / sealed portable export with typed absence | `CORE/lilith_memory/backup.py::BackupManifest` (per-file storage backup only); no bundle | CODE, NOT FOUND | MISSING | PROPOSED; ADR-0001 requires versioned contracts | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Cross-domain snapshot binding | UNASSIGNED |
+| REC-03 | CR-09, CR-10, CR-32 | Device enrollment, roles, revocation; loss → revoke/quarantine, never identity replacement | NOT FOUND for LILITH clients; phone appears only as owner freshness replica storage (`slice-15b2b-b1b3e-pr3-android-replica-publication.md`) | REPO RECORD, NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Phone is a custody medium, not multi-device continuity evidence | Deferred until a second client exists | UNASSIGNED |
+| REC-04 | CR-11, CR-12 | Reader / proposer / cache / writer rights separate; offline non-authoritative; fencing at sinks | ADR-0002; ADR-0004; `task-store.ts` (revision, operationId); `canonical_contracts.py::FrozenMemoryActionV1` | DESIGN, CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0002 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_supersede_advances_pointer_and_stale_replay_is_terminal`) | TEST | N/A | N/A | N/A | `/os/tasks` backend semantics REPORTED in `as-is.md` | Explicit rights model | UNASSIGNED |
+| REC-05 | CR-13..CR-15; COMP-33/34 | Partitions never advance a head; DIVERGED; no automatic merge | Authority only: `OMC/owner_freshness.py::reconcile_owner_replicas`; tests `test_12_competing_successors_conflict`, `test_replica_behind_or_ahead_is_divergent_not_latest`. Cognitive: none; CA-V1 L19 "sync/merge … authoritative-source selection" | CODE, LOCAL TEST, DESIGN | PARTIAL (authority only) | PROPOSED; ADR-0002 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | CA-V1 L19 vs CR-14 (C-07) | RQ-003 | UNASSIGNED |
+| REC-06 | CR-16, CR-17; COMP-19 | Historical validity ≠ currentness; freshness outside rolled-back failure domain; restore stages, never overwrites | Authority: `OMC/recovery_admission.py` (history never becomes new authority), `recovery_contracts.py`, `owner_freshness.py::classify_presented_world`; `slice-15b2b-b1b3e-pr2-snapshot-inventory.md` (whole-host rollback NOT ESTABLISHED; cognitive DBs not inventoried). Cognitive: 15B2a whole-DB pre-migration restore after corruption determination | CODE, LOCAL TEST, REPO RECORD | PARTIAL (authority STRONGER; cognitive lacks currentness) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (PR-2, 2026-09-28) | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NONE FOUND | N/A | 15B2a whole-DB restore vs CR-17 "stage, not overwrite": UNRESOLVED (C-15) | Add cognitive and privacy DBs to the rollback-domain inventory (design) | UNASSIGNED |
+| REC-07 | CR-18 | Stale device rejoin: freeze, verify, external freshness, compare heads, privacy, reconcile | Authority analog `freshness_gate`; `src/components/conversation/conversation-provider.tsx` rehydrates session id and 60 messages from localStorage with no freshness/privacy check | CODE | PROPOSAL_ONLY (no second client device exists; consistent with REC-03) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Record for when a second device exists | UNASSIGNED |
+| REC-08 | CR-19..CR-21 | Ordered migration (fence, snapshot, reconcile, validate, activate); import ≠ activation; classified transitions | ADR-0001 §Validation (not run); `scripts/run_core_api_dev_durability_probe.py`; [`slice-15b2b-b1c-acceptance-record.md`](slice-15b2b-b1c-acceptance-record.md) (`ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT`) | CODE, REPO RECORD | PARTIAL (same-device restart class only) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (B1c, 2026-09-25) | DEV | HISTORICAL; REVALIDATE | NONE FOUND | NOT ACTIVE (B1c record) | B1c deployment ≠ activation matches CR-20 spirit | ADR-0001 validation as first REC-E cell | UNASSIGNED |
+| REC-09 | CR-22, CR-23, CR-38, CR-39; COMP-35 | Pending-work ledger; UNKNOWN_EFFECT stays unknown; no blind replay; applied-but-unverified explicit | ADR-0003; `CC/career-write.ts::idempotencyKeyFor`; `CC/types.ts::CoreTaskStatus` (has `partial`, `cancelled`; **no unknown/unverified**); `as-is.md` "unknown-state reconciliation" gap | DESIGN, CODE | PARTIAL | PROPOSED; ADR-0003 decides principle | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | ADR-0003 requires UNKNOWN/partial as first-class; task enum does not express UNKNOWN | See ACT-05 | UNASSIGNED |
+| REC-10 | CR-24, CR-25 | Deletion/suppression across replicas, backups, caches, exports, stale devices before cognition; no existence leak | `privacy_governance.py::privacy_restore_suppression_manifest` (keyed opaque selector, never raw hash), `RestoreSuppressionVerifier.verify_and_apply` (manual, not a startup hook); `memory_v2.py::erase_restore_suppressed` | CODE, LOCAL TEST | PARTIAL (opaque selector STRONGER) | PROPOSED; ADR-0006 decides precedence | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_restore_suppression_verifier_erases_restored_identity_before_ready`) | TEST | N/A | N/A | N/A | Out of reach: browser transcript cache (`lilith-os:messages`), Hermes memory files, provider retention | Wire suppression replay into restore runbook; inventory client caches | UNASSIGNED |
+| REC-11 | CR-26, CR-27 | Archive/suppression/correction survive migration; earlier values need a new successor; First Memory never recreated by recovery | `canonical_contracts.py` RESTORE requires expected + restore revision; single-use immutable rollback authorization; tests `test_restore_resolves_exact_item_and_historical_digest_then_creates_revision` | CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0006 decides RESTORE | IMPLEMENTED (L04 restore-as-new-revision; synthetic registry) | NOT_ESTABLISHED | LOCAL TEST | TEST | HISTORICAL; REVALIDATE | NOT AUTHORIZED (First Memory) | N/A | — | Archive/active axis (MEM-05) | UNASSIGNED |
+| REC-12 | CR-28..CR-30 | Stale personality / consent / boundaries never restored as current; affect checkpoint never canonical | No personality, relationship or consent heads (NOT FOUND); frontend `emotion` resets on reload | REPO RECORD, CODE, INFERENCE | MISSING | PROPOSED; ADR-0001 implies | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Needs PER-02 / REL-01 first | UNASSIGNED |
+| REC-13 | CR-31, CR-33 | Presence consumes continuity, never owns it; degraded modes restrictive with allowed/denied sets | `principles.md` P-10; CA-V1 L17 ("no cognition inside it"); `src/lib/presence/capabilities.ts` (render degradation) | DESIGN, CODE | PARTIAL (render degradation is cosmetic, not an operation verdict) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| REC-14 | CR-34..CR-37 | Canonical encoding profile; no silent lossy migration; minimized encrypted exports | `owner_freshness.py` (RFC 8785, domain-separated digest); `canonical_migration.py` (fingerprinted, backup-gated); `backup.py` (0600, sha256) | CODE, LOCAL TEST | PARTIAL (authority bytes STRONGER) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_migration_is_versioned_fingerprinted_and_backup_gated`) | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
+| REC-15 | CR-40..CR-45, CR-47 | Independent verdict vector; evidence packet; preregistered metrics; paired sink tests | `owner_freshness.py` classification (authority freshness only); RQ-049 tabletop (UNKNOWN) | CODE, NOT FOUND | PROPOSAL_ONLY (cognitive) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | PDF `authorityStatus` vs repo freshness vocabulary are different dimensions; mapping needed (C-16) | RQ-049 tabletop | UNASSIGNED |
+
+### 6.10 HSIN — Hsin presence and session (source 10; COMP-27)
+
+Repository naming note: in code, "Hsin" is the VRM **avatar renderer** (`src/components/presence/avatar-scene.tsx`,
+`src/lib/hsin-*.ts` motion and lip-sync schedulers). The PDF uses Hsin for a broader embodiment/session layer that does
+not exist in the repository.
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| HSIN-01 | HS-01, HS-02, HS-48 | Proposal authorizes no Hsin activation, sensors, handoff or robot control; seven separate gates | Contract index ("Hsin activation" unauthorized) | REPO RECORD | PARTIAL (non-authorization / status discipline established by the index; the separate HSIN-D/C/M/P/H/B/O gate records are NOT FOUND) | PROPOSED | N/A (governance) | NOT_ESTABLISHED | NONE | N/A | N/A | NONE FOUND | N/A | — | — | UNASSIGNED |
+| HSIN-02 | HS-03, HS-04, HS-35 | Hsin never owns identity/cognition/memory; "present" claims truthful, never implying listening | ADR-0001; `principles.md` P-10; no identity field in `src/lib/presence/types.ts::PresenceSignal`. Contra: `src/lib/presence/profiles.ts:69` idle hint "Present. Listening for you." with no capture code in `src` | DESIGN, CODE | PARTIAL + CONFLICT (copy) | PROPOSED; ADR-0001 decides | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Low-severity UI copy (C-17) | Make labels reflect actual channel posture | UNASSIGNED |
+| HSIN-03 | HS-05..HS-08 | Session manifest vs consumer-bound projection; session verdicts recomputed | `slice-14/presence_contract.py::derive_presence_hint` (shadow, no renderer consumer); frontend `PresenceSignal` unbound | CODE (copy), LOCAL TEST, REPO RECORD | PARTIAL (two unconnected presence vocabularies) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (S14 shadow, 2026-09-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | NOT ACTIVE (shadow, record) | — | — | UNASSIGNED |
+| HSIN-04 | HS-09, HS-15, HS-16, HS-36 | Guarded session lifecycle; 8-stage endpoint handoff; staging does not activate | NOT FOUND; browser session id only (`lilith-os:session-id`) | CODE, NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Deferred until >1 endpoint | UNASSIGNED |
+| HSIN-05 | HS-10..HS-12 | Floor (speak/listen/interrupt/render/act) separate from authority; focus, proximity, wake words grant nothing | `PresenceSignal.attention` (gaze styling), `presence-director.ts::resolveAttentionPoint`; `src/lib/voice/speech-controller.ts::LilithSpeechController` (one utterance per tab) | CODE, DESIGN | PARTIAL (local serialization only) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Repo "attention" is visual styling, not a floor grant | — | UNASSIGNED |
+| HSIN-06 | HS-13, HS-14 | Simultaneous embodiments only under explicit profile; one logical utterance ID; duplicate speech suppressed at sinks | CA-V1 sequences device/session sync last; auto-speak per tab, default off (`voice-settings.ts`) | DESIGN, CODE, INFERENCE | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: two tabs with auto-speak could each speak one reply | Logical utterance ID if auto-speak becomes default | UNASSIGNED |
+| HSIN-07 | HS-17, HS-18, HS-40..HS-42 | Intent / synthesis / dispatch / delivery / ack distinct; stale callbacks cannot act | `speech-controller.ts` (`requestId` guards every async step; `stop()` invalidates callbacks) | CODE | PARTIAL (in-process only; no test located) | PROPOSED | PARTIAL (`LilithSpeechController`) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| HSIN-08 | HS-19..HS-22 | Purpose-scoped, revocable consent for mic/camera/sensors/speaker; bystander and audience minimization | No capture code (no `getUserMedia`/`SpeechRecognition` in `src`); spoken output has no audience gate | CODE, DESIGN | NOT_APPLICABLE (capture) / MISSING (output audience) — counted under first | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | S14 refuses to promote session actor to a person (matches HS-21) | Audience gate before any always-on voice | UNASSIGNED |
+| HSIN-09 | HS-23..HS-25, HS-38, HS-39 | Effects need scoped permission; enforcement below model and Hsin; sensory content stays data | `src/app/api/voice/{tts,elevenlabs}/route.ts` (client sends only text; voice, model, key resolved server-side); ADR-0004 | CODE, DESIGN | PARTIAL (provider selection STRONGER) | PROPOSED; ADR-0004 decides | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | UNKNOWN | — | No per-utterance policy check | UNASSIGNED |
+| HSIN-10 | HS-26..HS-28 | Expression ≠ affect truth; style ≠ personality; voice/appearance consistency is presentation continuity, never an identity oracle | `presence_contract.py` (rejects affect/personality); `types.ts::Emotion` ("How Lilith feels"); TTS `DEFAULT_INSTRUCTIONS` fixed style | CODE, LOCAL TEST | CONFLICT (naming) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (S14 copy) | TEST | N/A | N/A | N/A | C-13 | Tag TTS style as presentation provenance | UNASSIGNED |
+| HSIN-11 | HS-29..HS-33 | Local state bounded and discardable; no hidden continuity channels; observations only propose memory; no engagement mechanics | In-memory presence/voice state; per-browser localStorage: session id, last 60 messages, presence pref; presence bus carries no payloads (`bus.ts`) | CODE | PARTIAL | PROPOSED; ADR-0006 decides memory apply | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Transcript cache is outside privacy erasure (REC-10) | Inventory and invalidate client caches on suppression | UNASSIGNED |
+| HSIN-12 | HS-34, HS-37 | Stale Hsin rejoin follows CR-18; restrictive composed modes; cognition unavailable → suspend | `capabilities.ts` render fallbacks; TTS routes return 503 when unconfigured | CODE, DESIGN | PARTIAL (render fallbacks only) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| HSIN-13 | HS-43..HS-47 | Session evidence packet; preregistered presence metrics; hard failures; paired sink tests | NOT FOUND | NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+
+### 6.11 GOAL — Goals, commitments, intentions (source 11; COMP-25)
+
+The Slice 8 goal store is **source code in this repository** (`services/core-api/app.py`, `BEGIN/END SLICE 8` block)
+with 22 tests in `services/core-api/tests/test_goal_executive.py`. Router goal-lane code exists only as record copies.
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| GOAL-01 | GC-03, GC-04, GC-27..GC-31 | Thought, plan, goal, task, commitment, permission distinct; no back-writes between domains | `CORE::_create_goal_impl`, `::_transition_goal_impl` (separate `goal`/`goal_trace` tables; read-only world connection); `slice-8-goal-executive-design.md` §0, §8; tests `test_O_no_world_mutation_symbols`, `test_F_G_task_link_and_tasks_untouched`, `test_P_no_connector_or_send` | CODE, LOCAL TEST, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED (repo tests only) | LOCAL TEST (22 tests); REPO RECORD (2026-09-08) | TEST / UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | Repo decides goal ≠ task ≠ permission in an accepted slice record | — | UNASSIGNED |
+| GOAL-02 | GC-05, GC-07, GC-08, GC-14, GC-15 | Typed pursuit classes incl. commitment, obligation, reminder, intention; "I promise" never creates a commitment | Task, goal, frozen `pendingWrite`, ephemeral plan proposals exist; commitment, reminder, intention records NOT FOUND | CODE, REPO RECORD, NOT FOUND | PARTIAL (commitments PROPOSAL_ONLY) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: commitments cannot be minted from text because no write path exists | — | UNASSIGNED |
+| GOAL-03 | GC-06, GC-09 | GoalStateV1 binds identity/branch, success criteria, explicit expiry/review, privacy scope, deciding authority | Slice 8 schema has revision, provenance, priority, deadline (never fabricated), parent; **no** identity/branch, success criteria, expiry/reviewAt, privacy scope, deciding authority | CODE, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_A_durable_create`, `test_B_survives_reopen`) | TEST | N/A (code at baseline) | N/A | N/A | — | Expiry policy decision | UNASSIGNED |
+| GOAL-04 | GC-10, GC-11, GC-13, GC-25, GC-26, GC-42 | Origin ≠ acceptance; models never silently create durable goals; named external acceptor | Router lane (record): `slice-8/world_context.goal-block.py::detect_goal_intent` (explicit user "goal" framing). Server: `CORE::_create_goal_impl` accepts any `source` from any HTTP caller, no auth, no review, no acceptor. Contra: CA-V1 Flow B "spawn proactive goal" | CODE, REPO RECORD, INFERENCE | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | CA-V1 Flow B vs GC-13 / IA-04: UNRESOLVED; no code implements Flow B (C-18) | Goal acceptor/auth (§11 R8). INFERENCE, not verified: the tool-exposed runtime agent could reach `POST /os/goals` on the host | UNASSIGNED |
+| GOAL-05 | GC-12, GC-37, GC-38 | Exact transition with expected head; same ID + same payload returns disposition; same ID + different payload rejected; APPLIED_BUT_UNVERIFIED explicit | `CORE::_transition_goal_impl` (replay vs latest `last_operation_id` only; optional `expectedRevision`; conditional `UPDATE … WHERE revision=?`); `test_idempotency_and_revision` | CODE, LOCAL TEST, INFERENCE | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | Implementation shortfall, not a decided principle | Gaps (INFERENCE from code): older opId replay treated as new; reused opId with different payload not rejected; `expectedRevision` optional | UNASSIGNED |
+| GOAL-06 | GC-16 | Explicit lifecycle; CANCEL_REQUESTED distinct; **terminal records never resume in place** | `CORE` `_GOAL_ACTIONS["reopen"]` (COMPLETED/CANCELLED/FAILED → PENDING on the same `goal_id`); `test_L_terminal_no_silent_reactivation` | CODE, LOCAL TEST | CONFLICT | PROPOSED | IMPLEMENTED (repo FSM) | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD (2026-09-08) | TEST / UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Repo controls (tested + accepted slice record vs proposal) (C-19) | Owner decision: in-place reopen vs linked successor (§12 D-7) | UNASSIGNED |
+| GOAL-07 | GC-17..GC-20 | Parent/child without escalation; priority orders only; urgency evidence-bound and expiring; no hidden conflict winner | `CORE::_arbitrate`, `::_goal_sort_key`, `::_record_focus_trace` (deterministic, traced); tests `test_H_arbitration_deterministic`, `test_R_arbitration_trace` | CODE, LOCAL TEST | PARTIAL (`URGENT` caller-asserted, no evidence/expiry) | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A (code at baseline) | N/A | N/A | — | — | UNASSIGNED |
+| GOAL-08 | GC-21, GC-22 | COMPLETED needs predefined criteria and proof; self-report insufficient | `CORE::_goal_completion_block` (`career.followup` never system-completable; `prepare_followup` needs a draft; **generic goals return None**); ADR-0003 | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED; ADR-0003 decides principle | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (`test_completion_followup_refused`, `test_completion_prepare_requires_draft`) | TEST | N/A | N/A | N/A | — | Evidence rule for generic goal types | UNASSIGNED |
+| GOAL-09 | GC-23, GC-24 | Cancellation states coverage; CANCEL_REQUESTED ≠ CANCELLED; cannot claim to undo effects | `CC/real-core.ts::runSteps` checks `run.canceled` **after** `playbook.runStep` returns and calls `finishCancelled` without recording `writeResult` (`real-core.ts:825-826`; `finalize` records it at `:851-860`) | CODE, LOCAL TEST, INFERENCE | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (cancel-before-approval only) | TEST | N/A (code) | N/A | N/A | — | INFERENCE: a cancel during an approved write can label the task `cancelled` after the backend committed (§11 R9) | UNASSIGNED |
+| GOAL-10 | GC-32..GC-34 | Intent, dispatch, effect, acceptance, completion, ack distinct; reconcile before replay; reminders bounded | `real-core.ts::requestApproval` (frozen key + fingerprint), `::restore` (non-terminal → interrupted), `::restoreApproval`; reminders NOT FOUND; Hermes cron DBs on host (S14 hash inventory) not bound to intent | CODE, LOCAL TEST, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (core self-test W-*, P-*) | TEST | N/A (code at baseline) | N/A | N/A | — | — | UNASSIGNED |
+| GOAL-11 | GC-35, GC-36, GC-39 | Pursuit survives migration without duplication; restore checks currentness; branch-qualified forks | One SQLite DB on one host; restart persistence only (`test_B_survives_reopen`) | CODE, LOCAL TEST, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (restart, 2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | Restart persistence ≠ currentness | — | UNASSIGNED |
+| GOAL-12 | GC-40, GC-41 | Scoped goal visibility; deletion overrides archive; honest UNKNOWN history | No privacy scope on `goal`; `GET /os/goals` returns all rows to any local caller; `/os/goals` not in the frontend proxy allow-list | CODE, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | No goal deletion/suppression path | UNASSIGNED |
+| GOAL-13 | GC-43, GC-44 | Budgets constrain, never permit; delegated workers keep scope and cannot accept parent completion | `planning_max_steps`; worker assignment deferred (`slice-12-planning-design.md` §16) | DESIGN, CODE | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| GOAL-14 | GC-46, GC-47 | Evidence bundles with producer/verifier trust boundary; preregistered evaluation | `goal_trace`; executor and verifier both run in the browser `RealCommandCore` | CODE, REPO RECORD | EVIDENCE_MISSING | PROPOSED; ADR-0003 allows co-hosting only with correlated-failure analysis | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | No correlated-failure analysis found for browser executor + verifier | — | UNASSIGNED |
+| GOAL-15 | GC-01, GC-02, GC-45 | Proposal authorizes no live goal or commitment; goal spec does not decide initiative | Contract index (non-authorization); `slice-8-goal-executive-design.md:13` (Executive makes no plans, connector/tool calls or external sends), §8 (`:133`, goal state "grants **no** external permission"), §13 (`:163`, no autonomous goal generation); `services/core-api/tests/test_goal_executive.py::test_P_no_connector_or_send` | REPO RECORD, DESIGN, CODE, LOCAL TEST | PARTIAL (goal state is recorded and tested as non-initiating and non-permission-granting; goal gate records NOT FOUND; proactive channels exist outside goal governance, INIT-01) | PROPOSED | N/A (governance) | NOT_ESTABLISHED | LOCAL TEST (`test_P_no_connector_or_send`) | N/A | N/A | NONE FOUND | N/A | Goal ≠ initiative is decided in an accepted slice record, not an ADR | Initiative boundary for existing proactive channels (INIT-01, INIT-03) | UNASSIGNED |
+
+### 6.12 INIT — Initiative, interruption, autonomous action (source 12; COMP-25)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| INIT-01 | IA-03..IA-05 | Initiative ≠ action authority ≠ interruption; default proposal-only; no proactive effect by default | Lanes are proposal-only (Slice 8 §13, Slice 11 "no nagging/proactive messages", Slice 12 §2). **But proactive channels exist**: systemd timers `lilith-gmail-watcher`, `lilith-meeting-prep`, `lilith-morning-brief`, `lilith-career-watcher` (unit list in `CORE::system_status`); Discord alerts / morning brief REPORTED (`architecture-evolution.md`) | CODE, REPO RECORD, DESIGN | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (2026-09-08/09) | UNKNOWN† | HISTORICAL; REVALIDATE (N-15: timers failing on OAuth as of 2026-09-10) | NONE FOUND | UNKNOWN | CA-V1 Flow B vs IA-04/05: UNRESOLVED (C-18) | Inventory pre-architecture proactive channels (§11 R13) | UNASSIGNED |
+| INIT-02 | IA-06, IA-10 | Triggers with provenance and dedup; opportunity assessment with do-nothing option; score never grants permission | Slice 10 Workspace candidates (`deferredItems`), Slice 11 ordinal drives, Slice 12 typed NO_VIABLE reasons (record copies) | REPO RECORD, DESIGN | PARTIAL (per-turn reactive only) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | — | UNASSIGNED |
+| INIT-03 | IA-07, IA-08, IA-13..IA-15, IA-18 | InitiativeDecision and InterruptionDecision records; quiet hours, DND, timezone, consent, channel audience | Presentation-only cooldowns (`src/lib/presence/map-events.ts::EVENT_MAP`, `reducer.ts`); quiet hours / DND / consent for message release NOT FOUND | CODE, NOT FOUND | MISSING (proactive channels already exist without a gate) | PROPOSED; principle P-08 requires evaluated staging of autonomy | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | UNKNOWN | — | Interruption contract decision for existing channels | UNASSIGNED |
+| INIT-04 | IA-16 | Reminders are bounded objects with sink-side cancellation and occurrence IDs | NOT FOUND (RQ-020 mention only) | NOT FOUND | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| INIT-05 | IA-17, IA-19 | Every effect passes current capability/actor/target/consent/budget checks immediately before dispatch; no gateway bypass | `CC/real-core.ts::runSteps` (per-step `evaluateCapabilityPolicy`), `::onApprove` (expiry + `fingerprintDraft`), `::gateConnector`; `prohibited-capabilities.ts`; ADR-0004 | CODE, LOCAL TEST, DESIGN | CONFLICT | PROPOSED; ADR-0004 decides | PARTIAL | NOT_ESTABLISHED (self-test covers repo approval contract only) | LOCAL TEST (self-test PE-*, W-*, CN-*) | TEST | N/A | NONE FOUND | UNKNOWN | Gate runs in the browser; server routes forward writes without approval binding (G2; C-02). Runtime agent tools ungated (ADAPT-05) | §11 R1, R5 | UNASSIGNED |
+| INIT-06 | IA-20..IA-22 | Relationship, affect, personality grant no contact rights; privacy before cognition and at release | S11 no social/emotion drive; S13 advisory-only; 15B2a privacy (memory) | REPO RECORD, DESIGN, CODE | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (S11) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | Cannot be exercised: no initiative path exists | — | UNASSIGNED |
+| INIT-07 | IA-23..IA-25 | Budgets with units; cross-channel duplicate suppression; no escalation of unanswered contact; distinct stop/mute/revoke with sink fencing | UI cooldowns; `planning_max_steps`; retry limits; per-task cancel; per-turn lane flags; memory-apply kill switch (ADR-0006) | CODE, DESIGN | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (PE-D/F, cancellation) | TEST | N/A | N/A | N/A | — | No global mute / do-not-contact for proactive channels | UNASSIGNED |
+| INIT-08 | IA-09, IA-28, IA-29, IA-38 | Independently issued, bounded, revocable work leases; never self-issued; one effective grant | Precedent only: `CORE/lilith_memory/learning_store.py::LearningStore.lease_job` (queue claim lease; no issuer, scope or veto) | CODE, REPO RECORD | PARTIAL (queue lease only) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (15A test copy) | TEST | N/A (code at baseline) | N/A | N/A | — | — | UNASSIGNED |
+| INIT-09 | IA-11, IA-12, IA-37 | Background cognition bounded and authorized; no hidden schedulers; no indefinite daemons by default | `CORE::_world_maintenance_loop` / `::_world_maint_start` (daemon thread, runs indefinitely); timers visible read-only on `src/app/automations/page.tsx`; Hermes cron DBs on host (contents unknown) | CODE, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (Slice 7.1; 15B2a timers failing 2026-09-10) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | — | Bind background jobs to intent / lease / veto (design) | UNASSIGNED |
+| INIT-10 | IA-27, IA-30, IA-32, IA-39 | Work lifecycle separate from effect state; restart never blindly resumes; per-operation currentness | `CC/types.ts::CoreTaskRecord`; `real-core.ts::restore`, `::restoreApproval`, `::onApprove`; `task-store.ts` revision/opId. Gap: `real-core.ts::persistUpdate` sets `persistenceDegraded` (evidence text only) and the governed write still proceeds | CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0003 decides UNKNOWN principle | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (P-O, W-F, W-G, W-J, W-N) | TEST | N/A | N/A | N/A | — | §11 R9 | UNASSIGNED |
+| INIT-11 | IA-26, IA-33..IA-35 | Human role resolution; workers inherit limits; non-coercive escalation; emergency claims create no authority | RQ-025, RQ-030, RQ-031 (research), RQ-032 (UNKNOWN) | DESIGN | INTENTIONALLY_DEFERRED | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | RQ-030 hypothesis matches IA-35 | — | UNASSIGNED |
+| INIT-12 | IA-36, IA-40..IA-43, IA-31, IA-46..IA-48 | Minimum disclosure; linked evidence chain trigger → effect; preregistered benchmark; hard failures | Safe non-CoT traces; `principles.md` P-08 ("autonomy expands through evidence"); `target.md` (evaluation gate per autonomy increase) | REPO RECORD, DESIGN | EVIDENCE_MISSING | PROPOSED; P-08 decides promotion discipline in principle | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Evaluation gate before any initiative work | UNASSIGNED |
+
+### 6.13 LEARN — Learning, skills, competence (source 13; COMP-26)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LEARN-01 | LS-01, LS-02, LS-47, LS-48 | Proposal authorizes no training or capability expansion; L18 proposes, L04 applies; neither is a skill writer | ADR-0006; `slice-15a-…-design.md` ("there is no L04 apply step"); index carries G1/G2/G3 OPEN | REPO RECORD (ADR) | COVERED (memory) | PROPOSED; ADR-0006 decides | IMPLEMENTED (memory) / NOT_IMPLEMENTED (skills) | NOT_ESTABLISHED | REPO RECORD (15A, 15B1, 2026-09-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | DARK (L04 apply disabled, record) | — | — | UNASSIGNED |
+| LEARN-02 | LS-03, LS-05, LS-20 | Exposure ≠ learning; memory ≠ skill; no silent procedural reinforcement | 15A invariant ("memory is not truth"; `SHADOW_ELIGIBLE` ≠ learned). Contra: CA-V1 §15 steps 3/5 ("verified successes strengthen procedural memory"); UI `src/components/memory/memory-header.tsx:30` "Learned · 7d" | DESIGN, CODE, REPO RECORD | CONFLICT (design and UI wording) | PROPOSED | PARTIAL (15A shadow) | NOT_ESTABLISHED | REPO RECORD (15A 56/56) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | CA-V1 §15 vs LS-16/LS-20: UNRESOLVED (C-20) | Decide CA-V1 §15; rename "Learned" metric | UNASSIGNED |
+| LEARN-03 | LS-04, LS-06, LS-29 | No ungoverned durable skill store; prompt/weight/tool changes are distinct governed classes | 15A: Hermes skills = `NON_LTM_ARTIFACT`/`LEGACY_EXTERNAL`, background reviewer = `LEGACY_EXTERNAL_WRITER` ("adopt/gate/disable/replace/exclude options remain open"); 15B2a: "no … unrelated skill-generation behavior changed"; `slice-15b1/DEPLOYMENT-RECORD.md` (skills tree 2,439 files) | REPO RECORD, DESIGN | CONFLICT | PROPOSED | NOT_IMPLEMENTED (governed store); legacy writer active outside governance (remote) | NOT_ESTABLISHED | REPO RECORD (2026-09-09/10) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | Repo records acknowledge and defer; no accepted decision (C-21) | Owner decision on Hermes skills / background reviewer (§12 D-5) | UNASSIGNED |
+| LEARN-04 | LS-07..LS-10 | Typed LearningEpisode / SkillState records with exact heads and typed absence | 15A closed `LearningSourceRecordRef` / `LearningCandidate` (memory candidates); no skill records | DESIGN, REPO RECORD | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Only if a skill domain is accepted | UNASSIGNED |
+| LEARN-05 | LS-11, LS-12, LS-16..LS-18 | Independent assessor; no self-grading; context-specific competence; no hidden global score | ADR-0003. Counter-example: `src/components/home/today-card.tsx` renders `Focus {pipeline.focusScore}` from static `src/lib/data.ts` | DESIGN, CODE | PARTIAL (principle) | PROPOSED; ADR-0003 decides | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Fixture scalar shown as live (EPI-13) | — | UNASSIGNED |
+| LEARN-06 | LS-13, LS-14, LS-22, LS-31, LS-32 | Plan acceptance ≠ execution; budgets never authorize; default no autonomous learning | 15A worker "manual, bounded, and one-shot … no daemon loop … model/tool call"; RQ-027 (DESIGNED) | REPO RECORD, DESIGN | PARTIAL (L18 stricter; Hermes skill generation outside) | PROPOSED | IMPLEMENTED for L18 shadow worker (`slice-15a/learning_worker.py`, copy) | NOT_ESTABLISHED | REPO RECORD (2026-09-09) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | DARK (record) | — | Same decision as LEARN-03 | UNASSIGNED |
+| LEARN-07 | LS-15, LS-40 | Exact transition protocol; UNKNOWN_EFFECT preserved; no blind replay | Draft analog: `CC/self-test.ts` W-J (unknown commit → verify-before-retry), P-H, W-H, W-L | CODE, LOCAL TEST | PARTIAL (drafts/memory analog) | PROPOSED | IMPLEMENTED for drafts (browser) | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
+| LEARN-08 | LS-19, LS-33, LS-34 | Corrections invalidate dependent competence evidence; erasure propagates to derivatives | `CORE/lilith_memory/legacy_canonical_containment.py::LegacySkillErasureOwner`; `privacy_governance.py` owner `LEGACY_SKILLS` | CODE, DESIGN | PARTIAL (exact-target erasure; no dependency propagation) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | UNKNOWN | UNKNOWN | N/A | UNKNOWN | — | — | UNASSIGNED |
+| LEARN-09 | LS-21, LS-23, LS-24 | Learning does not rewrite personality; affect cannot grade; consent to chat ≠ consent to training | 15A ("no preference learning, procedural reinforcement"); 15B2a ("consent ownership is unresolved in V1") | DESIGN, REPO RECORD | PARTIAL / UNKNOWN (legacy reviewer) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | UNKNOWN | UNKNOWN | N/A | UNKNOWN | — | — | UNASSIGNED |
+| LEARN-10 | LS-25, LS-26 | Tool knowledge and prior success never grant access; point-of-use checks | `real-core.ts` connector health at execution; `evaluateCapabilityPolicy` per step; Slice 12 `runtimeAvailability` always UNKNOWN. Caveat: permission derives from self-declared `policyClass`; overrides can loosen (G1) | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED | IMPLEMENTED (browser core only) | NOT_ESTABLISHED | LOCAL TEST (CN-*, PE-*) | TEST | N/A | N/A | N/A | See META-01 | Close G1 | UNASSIGNED |
+| LEARN-11 | LS-27, LS-28, LS-37..LS-39 | Substrate capability ≠ transferable skill; provider update ≠ LILITH learning; no model owns the skill head | ADR-0001 (principle); model id in Slice 9 traces | DESIGN, REPO RECORD | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: Hermes skills tree is a runtime-bound procedural store | — | UNASSIGNED |
+| LEARN-12 | LS-41..LS-46 | Reproducible evidence; claim vs test vocabulary; gates separate; zero denominator never a score | RQ-037, RQ-044 (research). Counter-example: `CORE` and `src/lib/memory/client.ts` `avg_confidence … else 0`, shown as "0/100" | DESIGN, CODE | PROPOSAL_ONLY (gates) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Zero-denominator presentation conflict (see §8) | Render n/a for empty denominators | UNASSIGNED |
+
+### 6.14 META — Self-model, metacognition, capability awareness (source 14)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| META-01 | SM-03, SM-04, SM-11, SM-12 | **Capability awareness ≠ capability grant**; beliefs grant nothing; uncertainty ≠ incapability | Router: `slice-12-planning-design.md` (`runtimeAvailability` always UNKNOWN; validator never emits `POLICY_ELIGIBLE`). Frontend: `CC/capabilities.ts::CAPABILITY_REGISTRY` + `policy.ts::evaluatePolicy` — a registered capability self-declaring `policyClass: "READ"` is allowed without approval | DESIGN, REPO RECORD, CODE | STRONGER_EXISTING_CONTROL (Router path) / PARTIAL (frontend) | PROPOSED | IMPLEMENTED (both, differently) | NOT_ESTABLISHED | REPO RECORD (Slice 12) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | In the frontend core the registry is both self-description and permission source; registry is compile-time | Close G1; keep Slice 12 view non-authoritative | UNASSIGNED |
+| META-02 | SM-05..SM-08 | Typed self-model domains; prose (SOUL-like) is a projection, never canonical truth | ADR-0001; `slice-9-…-design.md` (`load_soul_identity=True`); `SOUL.md` not in repo | REPO RECORD, DESIGN | PARTIAL | PROPOSED; ADR-0001 decides | NOT_IMPLEMENTED (no self-model store) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | UNKNOWN | INFERENCE: runtime persona prompt is the de facto self-description owner (C-01) | — | UNASSIGNED |
+| META-03 | SM-09, SM-10, SM-21, SM-22 | SelfModelState with exact heads; candidate ACCEPTED flag carries no authority; independent read-back | Analogs: ADR-0003; Slice 7 ("VERIFIED may originate solely from applyVerifiedDelta") | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| META-04 | SM-13, SM-14, SM-19, SM-20 | Attributed metacognition; no privileged introspection; no hidden CoT; preregistered calibration; no global confidence scalar | CA-V1 L16 (design only; MetaSignal/MetaControl NOT FOUND); Slice 7 "never store hidden chain-of-thought"; Slice 9 no scratchpad; Slice 12 "no confidence floats"; RQ-023 | DESIGN, REPO RECORD | PARTIAL (no-CoT controls) / MISSING (calibration) | PROPOSED | DESIGN_ONLY (CA-V1 L16; no code) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | Calibration is research (RQ-023, RQ-037) | UNASSIGNED |
+| META-05 | SM-15, SM-16, SM-28, SM-33, SM-34 | Observation before interpretation; provider upgrade ≠ personal learning; no hidden provider self-model | Model id in Slice 9 traces; Hermes `state.db` = `NON_LTM_INFRASTRUCTURE` (15A) | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Whether runtime-retained state acts as undisclosed self-model storage: UNKNOWN | — | UNASSIGNED |
+| META-06 | SM-17, SM-18, SM-32 | Seven known-unknown states kept distinct; missing evidence never becomes "I can" / "I lack this" | `src/lib/world/types.ts::KnownState`, `::WorldUnavailableReason`; Slice 9/13 `INSUFFICIENT_EVIDENCE`; `connectors.ts` `unavailable`; counter-examples in §8 | CODE, DESIGN, REPO RECORD | PARTIAL (smaller vocabulary; coercions remain) | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (Slice 7 tests H, I, 2026-09-07) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | — | §8 | UNASSIGNED |
+| META-07 | SM-23, SM-24 | Retain unresolved tension; dependency-driven reappraisal; believed-then vs believed-now | Slice 7 R4 `CONFLICTED`; supersede-never-delete. Counter: `CORE` `_world_reconcile` R1 (`app.py:1874`) — identical repeat flips `CONFLICTED` → `ACTIVE` | CODE, DESIGN | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (Slice 7) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | N/A | See EPI-07 | Dependency index NOT FOUND | UNASSIGNED |
+| META-08 | SM-25, SM-26, SM-31 | Metacognitive checks cannot escalate authority, initiate tools, or create goals/leases | CA-V1 §14 ("not a second brain … never override Policy"); Slice 9 `enabled_toolsets=[]`; Slice 13 advisory-only | DESIGN, REPO RECORD | COVERED (lanes) | PROPOSED | IMPLEMENTED for reasoning/ethics lanes (copies) | NOT_ESTABLISHED | REPO RECORD (Slice 9 18/18, Slice 13 54/54) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Main runtime turn path remains tool-exposed | — | UNASSIGNED |
+| META-09 | SM-27, SM-29, SM-30 | Self-belief never updates personality; social feedback attributed, cannot bootstrap self-beliefs | No self-model write path; Hermes background reviewer (legacy) may persist from conversation (15A/15B2a) | DESIGN, REPO RECORD | PARTIAL / UNKNOWN | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | UNKNOWN | UNKNOWN | N/A | UNKNOWN | INFERENCE: legacy reviewer is an unreviewed persistence path | Same decision as LEARN-03 | UNASSIGNED |
+| META-10 | SM-35..SM-38 | Exact bindings survive migration; branch-specific self-model histories; erasure may reduce understanding | Privacy erasure adapters (memory); no self-model export | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| META-11 | SM-39, SM-40 | Projections never turn qualified estimates into certainty or old belief into current fact | Slice 9 typed `uncertainties[]` (lane only). Counter: `memory-header.tsx:21` "what she knows"; `src/lib/memory/types.ts:4` "something Lilith *knows*" | DESIGN, CODE | CONFLICT (presentation) | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Repo invariant "memory is not truth" controls over UI copy | Reword copy (§11 R3) | UNASSIGNED |
+| META-12 | SM-41..SM-48 | Evidence packets; never PASS when sink unobservable; disaggregated metrics; META gates | RQ-044, RQ-037 (research); 15B2b evidence discipline (DEV_SYNTHETIC) as nearest practice | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+
+### 6.15 EPI — Epistemic integrity, belief, uncertainty (source 15; COMP-19..22)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| EPI-01 | E-03, E-04, E-29 | Observation ≠ fact; memory/belief ≠ truth; retrieval frequency ≠ corroboration | 15A/15B1 invariant ("memory is not truth"); Slice 7 ("connector output is candidate observation, never truth"). Counter: `CORE` `app.py:565` (email-derived activity) and `:618` (legacy Hermes markdown) emit `"kind": "fact"`; `src/components/memory/provenance-badge.tsx:49-63` renders "Fact — Directly stated or observed" | DESIGN, CODE, REPO RECORD | CONFLICT (API/UI over a covered principle) | PROPOSED; principle P-07 ("inferences never silently become facts") | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | UNKNOWN | Repo invariant controls; API/UI do not conform to it (§8) | §11 R3 | UNASSIGNED |
+| EPI-02 | E-05, E-38 | No belief mints authority; verification proposal ≠ action authority | Slice 7 ("do not let a belief grant permission"); no HTTP mutation route for `/os/world` in `CORE` (searched) | DESIGN, CODE, REPO RECORD | STRONGER_EXISTING_CONTROL | PROPOSED | IMPLEMENTED (internal-only reconcile; no mutation route) | NOT_ESTABLISHED | REPO RECORD (Slice 7 18/18, 2026-09-07) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | — | UNASSIGNED |
+| EPI-03 | E-06..E-08 | Orthogonal typed statuses; no hidden scalar certainty; acceptedAt never model-written | Two axes (`lifecycle_state`, `epistemic_state`) in `src/lib/world/types.ts`; rule-derived per-belief confidence (`CORE::_world_confidence`) | DESIGN, CODE | PARTIAL (2 axes vs 4; per-belief scalar, non-LLM) | PROPOSED | IMPLEMENTED (`CORE::_world_reconcile`) | NOT_ESTABLISHED | REPO RECORD (Slice 7) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | — | UNASSIGNED |
+| EPI-04 | E-09, E-15 | Evidence separates artifact, acquisition, interpretation; source class never coerced to strongest | Slice 7 §6 provenance; `submit_observation(…, source_class="LIVE_CONNECTOR")` for extractor-derived career data | CODE, REPO RECORD, INFERENCE | PARTIAL | PROPOSED | IMPLEMENTED (provenance chain) | NOT_ESTABLISHED | REPO RECORD (Slice 7.1 9/9) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | INFERENCE: extractor-derived data enters as OBSERVED (possible class coercion); extractor nature UNKNOWN | Confirm extractor; consider DERIVED class | UNASSIGNED |
+| EPI-05 | E-10, E-11 | Insufficient evidence is a permissible result; surface hidden assumptions; abstain | Slice 9 `outcome` incl. `INSUFFICIENT_EVIDENCE`, `assumptions[]`; Slice 13 "missing evidence is never silently NOT_APPLICABLE" | DESIGN, REPO RECORD | PARTIAL (lanes only; main turn path unbound) | PROPOSED | IMPLEMENTED in lanes (copies) | NOT_ESTABLISHED | REPO RECORD | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | — | UNASSIGNED |
+| EPI-06 | E-13, E-14, E-17, E-18; COMP-21 | No circular corroboration; dependent repeats are one origin group | `CORE::_world_reconcile` R1 (`app.py:1869-1873`) counts any same-value evidence row as corroboration; Slice 7 spec says "+0.05 per corroborating **independent** evidence"; Slice 7.1 re-reads the same row per career event | CODE, LOCAL TEST (copy), REPO RECORD, INFERENCE | CONFLICT | PROPOSED | IMPLEMENTED (non-conforming to its own spec) | NOT_ESTABLISHED | REPO RECORD (Slice 7 test C, 2026-09-07) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Code departs from repo's own design wording; PDF agrees with the design (C-22) | §11 R4 | UNASSIGNED |
+| EPI-07 | E-25, E-26; COMP-20 | Preserve incompatible claims; no recency-only, authority-only or model-preference winner | Slice 7 §9 R2 (higher authority supersedes), R3 (newer comparable supersedes), R4 conflict retained; CA-V1 §11E "prefer higher-confidence"; `app.py:1874` repeat clears `CONFLICTED` (not in Slice 7 spec) | DESIGN, CODE | CONFLICT | PROPOSED | IMPLEMENTED (`CORE::_world_reconcile`) | NOT_ESTABLISHED | REPO RECORD (Slice 7 tests D, E) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Tested repo behavior controls until decided; repeat-clears-conflict appears to be drift (INFERENCE) (C-23) | Owner decision on R2/R3 (§12 D-8); fix drift (§11 R4) | UNASSIGNED |
+| EPI-08 | E-19, E-20 | Separate event/observation/retrieval/acceptance times; missing expiry never means current | `CORE::world_freshness_sweep` acts only when `expires_at` set; `slice-7/SLICE-7.1-RECORD.md` ("career beliefs carry no `expires_at`, so they never auto-stale"); `CC/verifier.ts:61-65` missing `timeUtc` ⇒ not stale | CODE, REPO RECORD | CONFLICT | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD (Slice 7.1) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | Record admits the gap but does not decide it | TTL policy; absent clock → UNKNOWN freshness (§11 R4) | UNASSIGNED |
+| EPI-09 | E-21 | Absence of evidence ≠ evidence of absence; timeout never proves non-occurrence | Slice 7 R7/R8 (`app.py` `source_unavailable_noop`); `src/lib/world/client.ts` `available:false`. Counter: `src/lib/meetings/client.ts` failed fetch → `[]` → "No meetings today" | CODE, REPO RECORD | PARTIAL (World STRONGER; meetings UI conflicts) | PROPOSED | IMPLEMENTED (world) | NOT_ESTABLISHED | REPO RECORD (Slice 7 tests H, I) | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | §8 | UNASSIGNED |
+| EPI-10 | E-22..E-24 | Uncertainty components; causal claims need causal evidence; forecasts stay predictions | Slice 7 confidence `basis` codes; no forecast/causal records | DESIGN | PROPOSAL_ONLY | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| EPI-11 | E-27, E-28, E-39 | Exact-head proposal → review → accept → apply → read-back; timeout = UNKNOWN_OUTCOME | World beliefs auto-reconcile by rule (by design); `CORE::apply_verified_delta` accepts `verification_ref=None` and has no caller; drafts W-J/W-K/W-L | CODE, LOCAL TEST, DESIGN | PARTIAL | PROPOSED; ADR-0003 decides execution ≠ verification | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | Scope question: whether world beliefs need governed acceptance — UNRESOLVED | Require non-null verification ref | UNASSIGNED |
+| EPI-12 | E-35..E-37 | Sensor ≠ perception ≠ fact; tool/HTTP success never proves a proposition; no generated citations | `CC/capabilities.ts` ("a 200 alone is never treated as success"); `verifier.ts`; evidence lacks producer model/runtime fields | CODE, LOCAL TEST | PARTIAL | PROPOSED | IMPLEMENTED (`capabilities.ts::call` validation) | NOT_ESTABLISHED | LOCAL TEST (self-test D, Career H) | TEST | N/A | N/A | N/A | — | Add producer provenance when inferences are ingested | UNASSIGNED |
+| EPI-13 | E-40..E-42, E-45; COMP-17, COMP-37 | Synthetic fixtures labelled through every output; projections carry uncertainty and limits; negative evidence observes the sink | `isDemo` + `src/components/ui/connection-status.tsx` ("Demo data · backend offline"); self-test P-K, W-P. Counter: `src/app/page.tsx` renders static `src/lib/data.ts` (focus score, meeting counts, next event) with no demo label; `src/app/system/page.tsx:31-32` static "Least privilege" badge and stale "Write actions: Disabled until an approval-aware endpoint exists" | CODE, LOCAL TEST | CONFLICT | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (P-K, W-P) | TEST | N/A | N/A | N/A | Fixture data presented as live on Home (§8) | §11 R3 | UNASSIGNED |
+
+### 6.16 AUTH — Authority, currentness, freshness (existing enforcement concern; COMP-30)
+
+Controlling sources for these rows are the existing repository records, not the PDFs. **All live state below is
+historical repository record. No live system was inspected.**
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AUTH-01 | COMP-30; I AUTH-01..03; CR-16 | Cognition cannot mint authority or currentness; historical validity ≠ currentness | `OMC/owner_freshness.py::freshness_gate`, `recovery_admission.py`, `recovery_contracts.py`; rotation record inequality table | CODE, LOCAL TEST, DESIGN | STRONGER_EXISTING_CONTROL | Repo records control (PDFs restate) | IMPLEMENTED (TEST / DEV_SYNTHETIC scope) | NOT_ESTABLISHED (vs PDF); repo tests cover repo contract | LOCAL TEST | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED | NOT ACTIVE | — | — | UNASSIGNED |
+| AUTH-02 | COMP-30, §20 | Latest recorded live authority posture | [`slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md`](slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md) (commit `0fa5e21`, window 2026-10-02T12:08–12:24Z): Condition 1 CLOSED; Condition 2 CLOSED; Condition 3 OPEN UNTIL OWNER REVIEW / "on merge it is CLOSED"; Condition 4 NOT EVALUATED; Condition 5 OPEN; **B-5 GRANT VOID**; **M-B1 NOT AUTHORIZED**; no real K-ROOT, K-WIT, registry v1, genesis pin, record 1; **FRESHNESS=UNKNOWN**; **FIRST MEMORY NOT AUTHORIZED** | REPO RECORD | COVERED (as a record) | Repo record | N/A | NOT_ESTABLISHED | REPO RECORD (2026-10-02) | DEV_SYNTHETIC | HISTORICAL; **REVALIDATE** (PASS valid only if eligibility → M-B1 completed before 2026-10-03T06:39Z, which has passed) | NOT AUTHORIZED | NOT ACTIVE (record) | Condition 3 wording ambiguity preserved (C-04) | Owner re-decision on B-5; fresh PR-2 revalidation if resumed (not authorized here) | UNASSIGNED |
+| AUTH-03 | COMP-30 environment separation | PROD and DEV_SYNTHETIC evidence never interchange; fixtures never establish production authority | Burned-identity enforcement (B-3, merged); B2a verifier refuses non-`test` contexts; B1c separates activation, broker, owner, Stage III and PROD authority | CODE, LOCAL TEST, REPO RECORD | STRONGER_EXISTING_CONTROL | Repo records control | IMPLEMENTED | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | N/A | N/A | — | — | UNASSIGNED |
+| AUTH-04 | COMP-30, §20 | Routine DEV deployer boundary | [`slice-15b2b-b1c-acceptance-record.md`](slice-15b2b-b1c-acceptance-record.md): COMPLETE / ACCEPTED for routine DEV deployment only; `ACTIVATION=NOT_ACCEPTED`; PROD cross-environment debt open | REPO RECORD | PARTIAL (DEV scope only) | Accepted record (DEV scope) | IMPLEMENTED (DEV) | NOT_ESTABLISHED | REPO RECORD (2026-09-25) | DEV | HISTORICAL; REVALIDATE | Accepted for routine DEV deployment only | NOT ACTIVE (activation not accepted) | — | PROD authority not established | UNASSIGNED |
+| AUTH-05 | CR-16; COMP-30 | Freshness from outside the rolled-back failure domain; whole-host rollback resistance | `slice-15b2b-b1b3e-pr2-acceptance.md` / revalidations: one disk, one filesystem; whole-host rollback resistance **NOT ESTABLISHED** | REPO RECORD | MISSING | Repo record | NOT_IMPLEMENTED | NOT_ESTABLISHED | REPO RECORD (2026-09-28 … 10-02) | DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED (PR-1B, record) | N/A | — | Owner freshness replicas (PR-3) | UNASSIGNED |
+| AUTH-06 | COMP-30; I AUTH | Owner freshness record 1 on two independent replicas | `OMC/owner_freshness.py`; `slice-15b2b-b1b3e-pr3-*` records; Replica A 0 records; P3-3 storage incomplete | CODE, LOCAL TEST, REPO RECORD | PARTIAL | Repo records | IMPLEMENTED (tooling); live record absent | NOT_ESTABLISHED | REPO RECORD | DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED | NOT ACTIVE | — | PR-1B (not authorized) | UNASSIGNED |
+| AUTH-07 | COMP-03, COMP-44 | Mixed merge/review wording in Condition 3 record must not be silently reconciled | Condition 3 PASS record lines "OPEN until owner review" and "on merge it is CLOSED"; operator history states Condition 3 CLOSED | REPO RECORD | CONFLICT | Repo record | N/A | NOT_ESTABLISHED | REPO RECORD | DEV_SYNTHETIC | HISTORICAL | N/A | N/A | Ambiguity preserved; no current closure or eligibility inferred (C-04) | Owner confirmation of Condition 3 disposition | UNASSIGNED |
+
+### 6.17 ACT — Tool / action execution (existing enforcement concern; COMP-25, COMP-36)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ACT-01 | G2; ADR-0004; COMP-36 | Server-side approval authorization for governed writes, against alternate callers | See §7.2. `CORE::create_draft` (`app.py:1584-1650`), `::discard_draft` (`:1691`); `src/app/api/lilith/drafts/route.ts::POST`; approval gate in browser (`src/components/command/command-provider.tsx:101`) | CODE, DESIGN | CONFLICT | ADR-0004 (Accepted) | IMPLEMENTED (client-side gate only) | NOT_ESTABLISHED | NONE | N/A | N/A (code at baseline) | NONE FOUND | UNKNOWN | ADR-0004 controls; implementation diverges (C-02) | §11 R1 | UNASSIGNED |
+| ACT-02 | G1 | Capability-policy overrides may only tighten class defaults | See §7.1. `CC/policy.ts:132-147` | CODE | CONFLICT | Code comments (`policy.ts:30`, `:49-51`, `:80`; `types.ts:86`) state tighten-only; no ADR | IMPLEMENTED (non-monotonic) | NOT_ESTABLISHED | NONE (no test asserting tighten-only was located) | N/A | N/A | N/A | UNKNOWN | Code vs its own documented contract (C-03) | §11 R2 | UNASSIGNED |
+| ACT-03 | AH-12; IA-17 | Runtime-held tools pass a LILITH enforcement boundary | `slice-9-…-design.md` §1 (main agent "platform tools exposed"); `slice-12-planning-design.md` §0.1 (policy lives only in the browser core); `src/app/api/lilith/conversation/route.ts` ("technical turns run tools on the VM") | REPO RECORD | MISSING | ADR-0001 (scoped authority via adapter contract); P-09; ADR-0004 covers clients only | NOT_IMPLEMENTED | NOT_ESTABLISHED | REPO RECORD (2026-09-08) | UNKNOWN† | HISTORICAL; REVALIDATE | NONE FOUND | UNKNOWN | No accepted record covers runtime tool authority | §11 R5 | UNASSIGNED |
+| ACT-04 | IA-17; ADR-0004 | Prohibited actions are categorically refused (no email send) | `CC/prohibited-capabilities.ts::mailSendProhibitedCapability`; `policy.ts` `PROHIBITED` class; self-test PE-E, PB | CODE, LOCAL TEST | COVERED (Command Center path; enforced client-side) | Slice records | IMPLEMENTED | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | UNKNOWN | Client-side placement (C-02) | — | UNASSIGNED |
+| ACT-05 | COMP-35; ADR-0003; CR-22/23 | Unknown effect never collapsed into cancelled or success; durable audit before durable effect | `real-core.ts:825-826` (cancel after write step → `finishCancelled`, no `writeResult`); `::persistUpdate` (`persistenceDegraded` evidence only; write proceeds); `CoreTaskStatus` has no UNKNOWN | CODE, INFERENCE | PARTIAL | ADR-0003 (Accepted); principle P-05 ("unknown is a valid state") | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (W-J: unknown commit → verify-before-retry) | TEST | N/A | N/A | N/A | ADR-0003 requires UNKNOWN as first-class | §11 R9 | UNASSIGNED |
+| ACT-06 | GC-12; COMP-35 | Logical operation key binds payload; reused key with changed content fails | Drafts: `CORE::create_draft` returns the existing row on idempotency-key reuse **without comparing content hash** (`app.py:1624-1628`); goals: GOAL-05 | CODE, INFERENCE | CONFLICT | PROPOSED (PDF); no ADR | IMPLEMENTED (non-binding replay) | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | INFERENCE: a reused key with different content silently returns the earlier draft | Payload binding on replay | UNASSIGNED |
+
+### 6.18 COMP — Composition contract (source 16)
+
+| Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| COMP-A | COMP-06, COMP-07, COMP-09 | **Owner-domain principle** (review hypothesis): one controlling semantics per domain; others read/propose; destination governs acceptance/application; default deny | Realized for memory (ADR-0006: L18 proposes, L04 sole applier) and World Model (no mutation route). Not realized for personality (runtime file), goals (no acceptor), skills (legacy writer), relationships (no store) | DESIGN, CODE, ADR | PARTIAL | PROPOSED; ADR-0006 decides for memory | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (memory) | TEST | N/A | N/A | N/A | No repo source adopts a different general model; record as hypothesis | ADR candidate if adopted | UNASSIGNED |
+| COMP-B | COMP-08 | No circular authority | B2a verifier (model output, row, cached flag ≠ ACCEPTED_MEMORY); First Memory gate not circular on L3 | CODE, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
+| COMP-C | COMP-14 | Seven acceptance dimensions never substitute for one another | 15B2b records separate source / test / DEV / PROD-dark / activation (B1c `ACTIVATION=NOT_ACCEPTED`; ADR-0006 dark state; index "what this set is not") | REPO RECORD | PARTIAL (practice, not a schema) | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| COMP-D | COMP-15, COMP-16 | Evidence categories kept distinct; claims vs tests use separate vocabularies | `docs/README.md` labels (OBSERVED/REPORTED/DECIDED/PROPOSED/HYPOTHESIS/UNKNOWN); acceptance records PASS/STOP | DESIGN, REPO RECORD | PARTIAL | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Repo label set differs from PDF categories; both preserved here | — | UNASSIGNED |
+| COMP-E | COMP-17, COMP-37 | Typed absence survives; no default-fact flattening | World Model typed absence; coercions in memory/meetings/home/system (§8) | CODE | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | §11 R3 | UNASSIGNED |
+| COMP-F | COMP-18 | Privacy outranks completeness; no resurrection via backup, cache, summary or provider | ADR-0006; 15B2a privacy governance; client transcript cache and provider retention outside scope | CODE, ADR | PARTIAL | PROPOSED; ADR-0006 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | HISTORICAL; REVALIDATE | NONE FOUND | DARK (record) | — | REC-10 | UNASSIGNED |
+| COMP-G | COMP-19 | Separate clocks; opening a record never renews evidence or authority | Authority domain separates freshness from timestamps; cognitive domain conflates (EPI-08) | CODE, REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| COMP-H | COMP-36 | Content never becomes policy; enforcement outside model outputs covers alternate routes | `docs/research/findings/rq-047-injection-secrets-authority.md`; no-tool lanes; alternate routes uncovered (G2, ACT-03) | DESIGN, CODE, REPO RECORD | PARTIAL | PROPOSED; ADR-0004 decides for clients | PARTIAL | NOT_ESTABLISHED | REPO RECORD | UNKNOWN† | HISTORICAL; REVALIDATE | N/A | UNKNOWN | — | §11 R1, R5 | UNASSIGNED |
+| COMP-I | COMP-31, COMP-32 | One consistent integrated manifest; fence before incoming rights | NOT FOUND (no cross-domain manifest or fencing protocol) | NOT FOUND | PROPOSAL_ONLY (cross-domain manifest is a PDF concept; ADR-0001 export need is tracked in REC-02) | PROPOSED | NOT_IMPLEMENTED | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
+| COMP-J | COMP-35 | Unknown forbids blind replay; stable logical-operation key binds payload | Drafts idempotency (ACT-06 gap); goals (GOAL-05 gap); W-J verify-before-retry | CODE, LOCAL TEST | PARTIAL | PROPOSED; ADR-0003 decides | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
+| COMP-K | COMP-40, COMP-41 | Hard failures block promotion; independent sink evidence | Repo practice: STOP records, void grants, negative-results register, tamper matrices | REPO RECORD | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | REPO RECORD | DEV_SYNTHETIC / TEST | HISTORICAL | N/A | N/A | — | — | UNASSIGNED |
+| COMP-L | COMP-45, COMP-47, COMP-48 | Ledger reconstruction; fresh agents reconcile before proposing slices; entry criteria before slice planning | This document (draft; not acceptance); entry criteria in COMP-48 remain unsatisfied (independent review, accepted conflict resolutions, live revalidation) | DESIGN | PARTIAL (ledger draft exists; COMP-48 entry criteria unsatisfied) | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | This ledger does not satisfy COMP-48 on its own | Owner review of this ledger | UNASSIGNED |
+
+## 7. Audit debt findings G1 and G2
+
+Both findings were reported by the 2026-10-03 audit at `cc02819…`. This review re-located them at `b92fe88` by static
+reading only. **Neither is fixed or closed by this ledger.** No exploit was attempted.
+
+### 7.1 G1 — Capability-policy overrides can weaken class defaults
+
+| Field | Finding |
+| --- | --- |
+| Status at baseline | **STILL PRESENT (OPEN)** |
+| Implementation location | `src/lib/command/core/policy.ts::evaluatePolicy`, lines 132–147. Each override field is applied as `o.<field> ?? base.<field>` with no monotonic check |
+| Contract claiming tighten-only | Code comments only: `policy.ts:30` ("a capability may tighten a few fields"), `:49-51` ("the class is the floor"), `:80` ("a capability may only TIGHTEN"); `types.ts:86` ("optional `policy` tightens the class defaults"). No ADR or architecture record states the rule (searched) |
+| Weakenable fields | `verification` (`read_back_required` → `none`), `approvalTtlMs` (any longer value), `requiresExactPreview` (→ false), `elevatedWarning` (→ false), `riskLevel` (any lower value), `allowSilentRetry` (→ true; still requires `idempotent === true`) |
+| Not weakenable | `approvalMode` / `approvalRequired` and `prohibited` derive only from the class |
+| Current exposure | **No registered capability declares an override** at the baseline commit (`CAPABILITY_REGISTRY` in `capabilities.ts`; searched all capability modules). The registry is a compile-time constant, so an override can only enter through source change and review |
+| Test coverage | No test asserting tighten-only behavior was located (NOT FOUND); self-test PE-* checks class defaults only |
+| Scope | Command Center browser core only. Because the core runs client-side (§7.2), the policy engine is not an authorization boundary in any case under ADR-0004 |
+| Classification | **Both code debt and design conflict:** the implementation contradicts its own documented contract; the documented contract has no ADR-level home |
+| Evidence | CODE (direct reading at baseline). Audit's earlier local probe: REPORTED, not reproduced here |
+| History | Introduced in `f393716` ("feat: add capability policy engine…"); unchanged since |
+
+### 7.2 G2 — Legacy draft-write path does not prove approval
+
+| Field | Finding |
+| --- | --- |
+| Status at baseline | **STILL PRESENT (OPEN)**, and wider than the audit stated |
+| Handler | `services/core-api/app.py::create_draft` (`POST /os/drafts`, lines 1584–1650). Validates shape, sizes, schema version, IDs, kind; dedupes on idempotency key; inserts. **No approval, owner or actor proof** is checked. `taskId`/`stepId` are caller-supplied fields, not authorization evidence |
+| Also unguarded | `::discard_draft` (`DELETE /os/drafts/{id}`, soft discard); `POST /os/tasks`, `PATCH /os/tasks/{id}`, `POST /os/goals`, `POST /os/goals/{id}/transition` have no auth dependency either (searched for `Depends`, auth headers, API keys in `app.py`: none) |
+| Proxy | `src/app/api/lilith/drafts/route.ts::POST` forwards any JSON body to `/os/drafts` with no check; `DELETE` likewise. The generic `[...path]` proxy is GET-only with an allow-list |
+| Where approval actually lives | `RealCommandCore` (`src/lib/command/core/real-core.ts`) is instantiated in a `"use client"` provider (`src/components/command/command-provider.tsx:101, 130`). Policy evaluation, approval TTL, fingerprint freeze and verification all run in the browser |
+| Accepted governance | **ADR-0004 (Accepted):** governed capability execution must pass through the control plane; "client-side policy checks … insufficient as an authorization boundary." `trust-boundaries.md` lists "server-side policy" as the control for user/client → LILITH |
+| Controls that narrow impact | Writes are internal draft/note records (kinds `career_followup`, `career_note`); discard is soft and audited; `mail.send_email` is a registered PROHIBITED capability and no send path exists; content size limits; idempotent create |
+| Controls that do not narrow it | Network exposure and authentication of the Next.js app and backend are **not established in the repository** (deployment-side; REVALIDATE) |
+| Related | ACT-06: idempotent replay returns the existing row without comparing content hash |
+| Classification | **Conflict between implementation (rank 1) and accepted ADR-0004 (rank 2).** Recorded, not resolved |
+| Evidence | CODE (direct reading at baseline) |
+
+## 8. Epistemic / presentation concern ("unknown values may become fact-looking records")
+
+**Classification: PARTIALLY CONTROLLED.** Presentation-only debt on several surfaces; **still open** where fixture data
+is presented as live. No canonical-state mutation was found from this path.
+
+| Disposition | Evidence |
+| --- | --- |
+| Already controlled | World Model typed absence (`src/lib/world/types.ts::KnownState`, `::WorldUnavailableReason`; backend R7/R8 `source_unavailable_noop`); per-record memory confidence renders "—" when unknown (`src/components/memory/confidence-meter.tsx`); `isDemo` banners ("Demo data · backend offline"); System performance values "intentionally omitted"; command capabilities reject shape-invalid 200 responses |
+| Presentation debt (coercion to a definite-looking value) | `src/lib/memory/client.ts:58-60` unknown kind → `"fact"`; `:55-57` unknown provenance → `"manual"`; `CORE` `app.py:565`, `:618` label email-derived activity and unvalidated legacy Hermes markdown `"kind": "fact"`, rendered "Fact — Directly stated or observed" (`provenance-badge.tsx`); empty average confidence shown as `0/100`; unit `active: "unknown"` counted as healthy (`capabilities.ts` `isUnitUnhealthy` + `verifier.ts:39-44`); missing backend clock treated as fresh (`verifier.ts:61-65`); failed meetings fetch shown as "No meetings today"; `Math.random()` IDs for records lacking one |
+| Still open | Home page renders static `src/lib/data.ts` fixtures (meeting counts, next event, `focusScore: 87`) with no demo label; `src/app/system/page.tsx:31-32` static "Least privilege" badge and stale "Write actions: Disabled until an approval-aware endpoint exists" |
+| Governing repo invariant | "Memory is not truth" (15A, 15B1) and Slice 7 "never placeholder beliefs". The repository's own invariants control over UI copy; the PDFs (FM-TAX-02, E-03, COMP-17) agree |
+
+## 9. External review questions
+
+These remain review findings. No architecture is created for them here.
+
+### 9.1 HX-01 — Natural expression projection
+
+**Classification: PARTIAL, with EVIDENCE_MISSING for ordinary conversation.**
+
+All runtime statements below come from REPO RECORD copies and deployment records dated 2026-09-07 … 09-10. They
+describe what was recorded then, not what runs now (REVALIDATE).
+
+- Supporting mechanisms: the recorded Slice 9 `REASONING_SYSTEM` asks for a "natural, in-LILITH-voice" answer and
+  keeps evidence, uncertainties and confidence in separate fields outside the user text; the recorded Slice 8
+  `GOAL_POLICY` forbids mentioning providers, models, tools, modes or internal instructions; the Slice 9/12/13 copies
+  ban chain-of-thought exposure; the records describe a rule-based Social Guard / `enforce_reply()` applied to final
+  responses (source not in the repository).
+- Against: in the recorded Planning lane copy, every answer opens with "Nothing has been created, sent, or approved —
+  this is a proposal only" and renders raw step enums (`docs/architecture/slice-12/planning.py:545`, `K_POLICY =
+  "POLICY_GATE"`); the recorded Ethics lane copy repeats "Policy governs that, not me." and "(This is an advisory read,
+  not a decision.)" (`slice-13/ethics.py:530-534`). The located tests assert no-overclaim, never naturalness. Recorded
+  debt N-11: streamed text may reach the user before `enforce_reply()` replaces it. The Slice 14 social hint was
+  recorded as shadow-only with no consumer. Voice style is a fixed TTS instruction string in this repository
+  (`src/app/api/voice/tts/route.ts`), not a projection of governed state.
+- According to the records, ordinary small talk went through the remote main agent with `SOUL.md` and Social Guard,
+  neither of which is in the repository: **EVIDENCE_MISSING** for that path.
+
+### 9.2 HX-02 — One-voice model routing
+
+**Classification: PARTIAL for "same voice" by construction; MISSING for any measurement; not identity evidence.**
+
+Runtime statements (Router V2, `SOUL.md`, overlays) are REPO RECORD, HISTORICAL (2026-09), REVALIDATE.
+
+- As recorded, one shared `SOUL.md` was injected per turn (`load_soul_identity=True`, asserted in the record copy
+  `slice-14/test_social_presence.py:449`). The records describe a Router `policy.py` overlay on the social lane and
+  Hermes named personality overlays (record only; not in the repository).
+- As recorded, Router V2 switched model families per turn (Groq-hosted social model vs gateway default;
+  `slice-8/patch_router.py`) and failed open, so user-visible text could come from four sources: SOUL-conditioned
+  default model, SOUL plus social policy on the social model, a fallback model (REPORTED only), or deterministic
+  templates (Planning/Ethics; their LLM candidate calls use `load_soul_identity=False`).
+- Voice: two TTS providers with separate voices and instructions (`src/app/api/voice/elevenlabs/route.ts`
+  `DEFAULT_VOICE_ID`; `src/app/api/voice/tts/route.ts` voice `marin`). Neither derives from `SOUL.md`. No canonical
+  voice profile.
+- Avatar: one static VRM; "presence profiles" are camera layouts; demeanor is a static event table. Phone: only as an
+  authority-custody replica medium. Robot/embodiment: none.
+- No cross-model persona or voice consistency test was located (NOT FOUND; RQ-045 evidence NONE).
+- **Same voice ≠ same identity.** Under the proposed sources (I NEG-02, B CB-S20/S23), same `SOUL.md`, same voice and
+  similar output are each insufficient identity evidence. The recorded ownership of identity/personality by a
+  runtime-hosted file is the identity-relevant finding (C-01), not the voice question.
+
+### 9.3 HX-03 — Conversational fast path
+
+**Classification: PARTIAL.** The two-tier shape exists; the "heavy path for effects" half has concrete gaps. Router-lane
+and runtime entries are REPO RECORD, HISTORICAL (2026-09), REVALIDATE; Command Center entries are code at the baseline.
+
+| Facet | Observed | Classification |
+| --- | --- | --- |
+| Session-scoped state | Session id per browser; Hermes session history (remote) | PARTIAL |
+| Ephemeral context | Slice 12 `PlanSnapshot` (no DB), Slice 13 ephemeral snapshot, Slice 9 ephemeral result, Slice 10/11 per-turn state; `src/lib/world/working-memory.ts::buildWorkingSet` | COVERED (design + record copies; HISTORICAL) |
+| Asynchronous proposals | Lane proposals never execute; browser `pendingWrite` awaits approval | PARTIAL (no durable proposal queue for conversation-originated actions) |
+| Blocking vs non-blocking | Router lanes fail-open; draft write path fail-closed (prohibition, approval expiry, fingerprint freeze, connector re-check, read-back); goal API 409s | COVERED for the split; gap: persistence-degraded writes proceed |
+| Response latency | Per-turn shadow/live flags; `run.py` short-circuit; deterministic templates; conversation proxy timeout 178 s | PARTIAL (no fast-path latency budget; no timeout found on the Slice 9 reasoning model call) |
+| Canonical writes | Goals created from an explicit user utterance without an acceptor; drafts via browser approval; canonical memory via ADR-0006 | PARTIAL |
+| Tool / effect authorization | Browser policy + approval for Command Center; **runtime agent tools ungated in the repository**; server endpoints lack approval binding | PARTIAL (largest gap: ACT-03, ACT-01) |
+
+No new subsystem is proposed. The concrete gaps are ACT-01, ACT-03, ACT-05 and GOAL-04.
+
+## 10. Unresolved conflicts, evidence gaps, currentness limits, deferrals
+
+### 10.1 Conflicts register
+
+| ID | Conflict | Sources | Appears controlling | Status |
+| --- | --- | --- | --- | --- |
+| C-01 | Runtime prose file (`SOUL.md`) recorded as authoritative identity/personality owner | S14 §1, 15B1 design vs ADR-0001, P-01/P-02, `component-boundaries.md`; PDFs 01/04/06 agree with ADR | ADR-0001 | UNRESOLVED (owner decision D-1) |
+| C-02 | Approval/policy gate in the browser; server write routes unguarded (G2) | Implementation vs ADR-0004 | ADR-0004 by intent; rank-1 vs rank-2 tension recorded | UNRESOLVED |
+| C-03 | Policy overrides non-monotonic vs documented tighten-only (G1) | `policy.ts` code vs its own comments | No ADR-level source | UNRESOLVED |
+| C-04 | Condition 3 record: "OPEN UNTIL OWNER REVIEW" and "on merge it is CLOSED" | Condition 3 PASS record | Ambiguous | UNRESOLVED (owner confirmation) |
+| C-05 | "L18 sole writer" wording | CA-V1 l.171 vs ADR-0006 | ADR-0006 | Stale wording; disposition recorded only in research |
+| C-06 | "Supersede, never (destructive) delete" | CA-V1, Slice 7 spec vs ADR-0006 and 15B2a privacy | ADR-0006 | Stale wording |
+| C-07 | CA-V1 L19 "sync/merge … authoritative-source selection" vs one acceptance order / no auto-merge | CA-V1 vs ADR-0002; PDFs 01/09 | ADR-0002 | UNRESOLVED detail (RQ-003) |
+| C-08 | CA-V1 "prefer higher-confidence" belief vs no confidence winner | CA-V1 vs PDF 05 ML-18 | Ambiguous (both non-ADR) | UNRESOLVED |
+| C-09 | Per-turn model switching, fail-open, without guarded handoff | Router V2 records vs PDF 04 AH-17..20 | Repo record (PDF not accepted) | UNRESOLVED (D-6) |
+| C-10 | Erasure receipt single `COMPLETE` vs scoped verified/unresolved | `privacy_governance.py` vs PDF 05 ML-25 | Repo (tested code) | UNRESOLVED tension |
+| C-11 | CA-V1 L11 merges persona, relationship model and mood | CA-V1 vs PDF 06 PE-04 | Ambiguous | UNRESOLVED |
+| C-12 | CA-V1 §10 "Social connection" drive keyed on recency | CA-V1 vs Slice 11 (not implemented) and PDFs 07/08 | Slice 11 for current state | CA-V1 target UNRESOLVED |
+| C-13 | Frontend `emotion` documented as "how she feels" | `src/lib/presence/types.ts` vs charter §09, S14 backend contract | Charter (intent) | Documentation debt |
+| C-14 | One-time device-local → canonical task import | `task-store.ts::doInit` vs PDF 09 CR-04 | Repo (implemented) | Recorded |
+| C-15 | 15B2a whole-DB pre-migration restore vs "stage, not overwrite" | 15B2a design vs PDF 09 CR-17 | Repo design record | UNRESOLVED design question |
+| C-16 | Freshness vocabulary vs PDF `authorityStatus` | `owner_freshness.py` vs PDF 09 CR-40 | Repo for its domain | Mapping needed |
+| C-17 | Idle hint "Present. Listening for you." with no capture path | `profiles.ts:69` vs PDF 10 HS-04 | Repo (UI copy) | Low severity |
+| C-18 | CA-V1 Flow B "spawn proactive goal" | CA-V1 vs Slices 10–12 records and PDFs 11/12 | Slices 10–12 for current state | CA-V1 target UNRESOLVED |
+| C-19 | Goal `reopen` resumes terminal record in place | `CORE` FSM vs PDF 11 GC-16 | Repo (tested + accepted slice) | Owner decision D-7 if PDF adopted |
+| C-20 | CA-V1 §15 procedural reinforcement from verified success | CA-V1 vs 15A (not implemented) and PDF 13 LS-16/20 | Ambiguous (design) | UNRESOLVED |
+| C-21 | Hermes skills tree and background reviewer as ungoverned legacy writer | 15A / 15B2a records vs PDF 13 LS-04 | No accepted decision | UNRESOLVED (D-5) |
+| C-22 | Corroboration counts dependent repeats | `CORE::_world_reconcile` vs Slice 7 spec ("independent") and PDF 15 E-14/E-17 | Slice 7 design vs its own code | UNRESOLVED |
+| C-23 | Recency/authority winner rules; repeat clears CONFLICTED | Slice 7 R2/R3, `app.py:1874` vs PDF 15 E-25 | Tested repo behavior until decided | UNRESOLVED (D-8) |
+
+### 10.2 Precedence ambiguities
+
+| ID | Ambiguity |
+| --- | --- |
+| A-1 | `docs/README.md` ranks "tested behavior" above accepted ADRs. Read literally, implementation could outrank decisions. This ledger records such cases as conflicts (C-02) rather than resolving them by rank |
+| A-2 | `cognitive-architecture-v1.md` self-describes as "architectural authority for all future cognitive work" but is not an ADR. Treated as rank-4 target architecture |
+| A-3 | `docs/architecture/as-is.md` (rank 3, "current state") is dated 2026-09-13 and still describes the implementation as "REPORTED, not independently verified … when implementation is imported". It predates the imported code it should describe and is stale |
+| A-4 | Slice deployment records describe a remote runtime whose source is not in the repository. Their rank-3 standing applies to their date only |
+
+### 10.3 Evidence gaps
+
+- Remote runtime source (Hermes, Router V2, `SOUL.md`, `social_guard.py`, Groq plugin) is not in the repository; all
+  conclusions about it are historical records.
+- No cognition-level behavioral evaluation exists (no golden scenarios, model-swap cells, raters or metrics; RQ-044,
+  RQ-045).
+- No record of ADR-0001's own Validation steps being executed was located (NOT FOUND).
+- No test was located (NOT FOUND) that asserts G1 tighten-only behavior, server-side approval for drafts,
+  cancel-during-write handling, or persistence-degraded write handling.
+- Erasure tests exercise copies under `docs/architecture/slice-15b2a/`; `services/core-api/lilith_memory/memory_v2.py`
+  differs from that copy.
+- Network exposure and authentication of the Next.js app and backend are not established in the repository.
+- Hermes cron databases, Discord alert and morning-brief code are not inventoried in the repository.
+- No tests were executed in this review.
+
+### 10.4 Currentness limitations
+
+All of the following are **HISTORICAL** and require **CURRENTNESS REVALIDATION** under separate authorization before
+use as current state:
+
+- Authority posture recorded 2026-10-02 (AUTH-02). The Condition 3 PASS was valid only for an eligibility → M-B1
+  window ending 2026-10-03T06:39Z, which has passed.
+- Router lane behavior, persona injection and model routing (records 2026-09-07 … 09-10).
+- Slice 14 `SOUL.md` hash pin and Social Guard results (2026-09-09).
+- Systemd timer state (N-15: failing on OAuth as of 2026-09-10).
+- B1c DEV deployer boundary (2026-09-25).
+- PR-2 rollback topology (2026-09-28 … 10-02).
+- Hermes skills tree size (2026-09-09).
+
+This review did not contact any live system and therefore cannot refresh any of these.
+
+### 10.5 Intentionally deferred items (repository decisions)
+
+- `lilithIdentityId` and identity charter (15B2b-B owner decision 2; N-34).
+- First Memory semantics, class, retrieval consumer and retention (15B2b-C; owner decisions 3, 4, 6, 7).
+- Affect state and persistence (Slice 11 decision 1).
+- Canonical memory consolidation and retrieval consumers (15A, 15B2b-B).
+- Device / session sync (CA-V1 sequencing) and multi-embodiment presence.
+- Worker delegation (Slice 12 §16).
+- Human escalation, emergency authority and role resolution (RQ-025, RQ-030..RQ-032).
+
+## 11. Recommended next engineering slices (recommendations only)
+
+None of these is authorized by this ledger. Each would need its own scope, owner, evidence criteria and stop
+conditions. Ordered by risk reduction per unit of change.
+
+| # | Slice | Addresses | Kind | Live work needed? |
+| --- | --- | --- | --- | --- |
+| R1 | Establish the trusted server-side authorization boundary for governed writes (subject to D-2); migrate `/os/drafts` POST/DELETE first; inventory and disposition the task and goal write routes (`/os/tasks`, `/os/goals`) before G2 can be closed. Fixing the drafts routes alone does not close G2 | G2, ACT-01, C-02, INIT-05, GOAL-04 | Code + tests + possibly ADR, in small slices | Deploy later; separately authorized |
+| R2 | Enforce tighten-only overrides in `evaluatePolicy` with a property test | G1, ACT-02, C-03 | Code + tests | No |
+| R3 | Presentation honesty: typed absence in memory/meetings/system clients; demo labels on Home; replace binary fact/inference with source-class labels; n/a for empty denominators | §8, FM-09, EPI-01, EPI-13, META-11 | Code + tests | No |
+| R4 | World Model integrity: corroboration by independent origin; repeat must not clear CONFLICTED; absent clock → UNKNOWN freshness; career-belief TTL decision | EPI-06, EPI-07, EPI-08, C-22, C-23 | Code + tests + owner decision | Deploy later |
+| R5 | Runtime tool-path inventory and enforcement gap analysis for the Hermes main agent | ACT-03, ADAPT-05, HX-03 | Read-only investigation, then design | **Yes — requires separate live-inspection authorization** |
+| R6 | `SOUL.md` and persona overlays: classification under ADR-0001 (canonical vs projection/cache) and write-route inventory | C-01, PER-02, PER-03, META-02 | Decision record / ADR | Inventory requires authorization |
+| R7 | Conditions under which per-turn model selection escalates to a governed handoff (input to D-6) and RQ-045 two-model shadow evaluation design | ADAPT-06, EVAL-03, HX-02, C-09 | Design | No (design only) |
+| R8 | Goal API hardening: operation-ID payload binding, required expected revision, acceptor/auth, `reopen` decision | GOAL-04, GOAL-05, GOAL-06, ACT-06 | Code + tests + owner decision | Deploy later |
+| R9 | Effect-state honesty in `RealCommandCore`: UNKNOWN_EFFECT state, cancel-during-write, persistence-degraded write policy | ACT-05, GOAL-09, INIT-10, REC-09 | Code + tests | No |
+| R10 | Natural rendering for deterministic Planning/Ethics answers plus jargon/disclaimer tests | HX-01 | Code (record copies → remote) + tests | Deploy requires authorization |
+| R11 | Documentation reconciliation: refresh `as-is.md`; add dispositions to CA-V1 (C-05, C-06, C-07, C-11, C-12, C-18, C-20); presence `emotion` naming | A-3, conflicts above | Docs only | No |
+| R12 | Extend the rollback-domain inventory design to cognitive and privacy DBs | REC-06, AUTH-05 | Design | Inventory refresh requires authorization |
+| R13 | Inventory existing proactive channels (timers, Discord, morning brief) and decide an interruption/consent contract | INIT-01, INIT-03, INIT-09 | Investigation + design | Requires authorization |
+| R14 | Decision on Hermes skills tree and background reviewer (adopt / gate / disable / exclude) | LEARN-03, META-09, C-21 | Owner decision | Requires authorization to act |
+
+## 12. Items requiring owner decision
+
+### 12.1 Decision sequencing / dependency notes
+
+This subsection records dependency and ordering only. **It is not a decision**, and it does not resolve or prejudge
+any of D-1 … D-9.
+
+| Group | Decision | Dependency / ordering note |
+| --- | --- | --- |
+| Foundational / cross-cutting | D-3 Owner-domain principle | Affects how ownership and acceptance are reasoned about across personality, relationships, goals, learning, self-model and other domains |
+| Foundational / cross-cutting | D-1 `SOUL.md` / personality ownership | Depends on the identity-above-runtime principle (ADR-0001). Should be decided before any governed personality state is implemented |
+| Foundational / cross-cutting | D-2 Authoritative policy / approval boundary | Already strongly constrained by accepted ADR-0004. Must be resolved before G2 implementation work (R1) |
+| Engineering-semantic | D-6 Conditions under which per-turn model selection becomes a governed handoff | Depends on the adapter / runtime interpretation (ADAPT rows) |
+| Engineering-semantic | D-7 Goal `reopen` semantics | Independent of the foundational group except where D-3 changes goal acceptance ownership |
+| Engineering-semantic | D-8 World Model winner / conflict semantics | Independent of the foundational group except where D-3 changes belief acceptance ownership |
+| Legacy / scope | D-5 Hermes skill store disposition | Scope decision on a legacy runtime artifact; acting on it requires separate live authorization |
+| Live authority / ceremony | D-4 Condition 3 wording and B-5 re-decision | Separate from cognitive-architecture reconciliation. Requires fresh operational evidence before any live conclusion |
+| Acceptance / process | D-9 Which proposed PDF clauses proceed to acceptance review | Should follow disposition of the foundational conflicts (D-3, D-1, D-2), rather than wholesale acceptance of the 16 PDFs |
+| Acceptance / process | D-10 Ledger indexing | Can be handled within the documentation change that introduces this ledger |
+
+### 12.2 Decision register
+
+| ID | Decision | Status |
+| --- | --- | --- |
+| D-1 | Is `SOUL.md` canonical identity/personality state, or a runtime projection/cache under ADR-0001? Who owns personality? | UNRESOLVED |
+| D-2 | Where is the authoritative policy and approval boundary under ADR-0004 (browser core vs server)? | UNRESOLVED |
+| D-3 | Should the owner-domain principle (COMP-A) be adopted, and by ADR? | UNRESOLVED |
+| D-4 | Disposition of Condition 3 wording (C-04) and re-decision on B-5. This ledger infers no closure or eligibility | UNRESOLVED |
+| D-5 | Hermes skills tree and background reviewer: adopt, gate, disable or exclude | UNRESOLVED |
+| D-6 | Under what conditions is per-turn model selection only a replaceable reader/proposer selection, and what durable/hidden state, authority, tool-right or pending-work conditions escalate it into a governed handoff transition? | UNRESOLVED |
+| D-7 | Goal `reopen`: in place, or linked successor? | UNRESOLVED |
+| D-8 | World Model R2/R3 winner rules: keep, or replace with preserved conflict? | UNRESOLVED |
+| D-9 | Which, if any, of the 16 proposed sources (or which clauses) proceed to contract acceptance review, and through what record? | UNRESOLVED |
+| D-10 | Whether this ledger should be indexed in `docs/architecture/README.md` | RESOLVED FOR DISCOVERABILITY ONLY: indexed in [`README.md`](README.md) by the same documentation change. Indexing implies no acceptance, implementation, authorization, activation or readiness, and resolves none of D-1 … D-9 |
+
+## 13. Self-audit record
+
+### 13.1 Hardening pass (2026-10-05)
+
+A consistency review of the 193 rows applied the §4 value rules uniformly. Coverage changed in seven rows; row count is
+unchanged.
+
+| Row | Before | After | Reason |
+| --- | --- | --- | --- |
+| FM-07 | MISSING | INTENTIONALLY_DEFERRED | The identity binding prerequisite is deferred by recorded decision (15B2b-B owner decision 2), consistent with ID-02 |
+| MEM-01 | STRONGER_EXISTING_CONTROL | COVERED | ADR-0006 decides the same point; it is not stricter than the clause |
+| MEM-05 | MISSING | PROPOSAL_ONLY | No accepted source requires an activity/archive axis (`state-and-data.md` lists archive as under research) |
+| REC-07 | MISSING | PROPOSAL_ONLY | No second client device exists; consistent with REC-03 |
+| COMP-I | MISSING | PROPOSAL_ONLY | The integrated manifest is a PDF concept; the ADR-0001 export need is already tracked as MISSING in REC-02 |
+| COMP-L | MISSING | PARTIAL | This ledger exists as a draft; COMP-48 entry criteria remain unsatisfied |
+| GOAL-15 | PROPOSAL_ONLY | PARTIAL | Exact evidence: the Slice 8 record and `test_P_no_connector_or_send` establish that goal state does not initiate external work or grant permission; goal gate records are absent and proactive channels exist outside goal governance |
+
+Other field normalizations (no coverage change):
+
+- Currentness: `REVALIDATE` added to rows whose claim depends on live, remote-runtime or host records; code-only rows
+  set to `N/A (code at baseline)` (GOAL-03, GOAL-07, GOAL-10, INIT-08).
+- Conformance: AUTH and ACT rows changed from `N/A` to `NOT_ESTABLISHED`, matching §4.
+- Operational authorization: `NOT AUTHORIZED` kept only where a record says so; AFF-01, AFF-08, HSIN-01, GOAL-15 and
+  REC-06 changed to `NONE FOUND`.
+- Implementation: ADAPT-02 and META-04 changed to `DESIGN_ONLY` (a repository design exists, no code).
+- Contract notes: principles P-05, P-07, P-08 and P-09 cited where they already require the behavior (ACT-05, FM-09,
+  EPI-01, INIT-03, ADAPT-05, ACT-03); PER-03's ADR-0002 reading labelled INFERENCE.
+- Prose: §9 runtime statements reworded as historical record; absence statements reworded as "not located".
+- Correction pass: HSIN-01 kept PARTIAL (index establishes non-authorization, not the separate Hsin gates). A uniform
+  "status rows are COVERED" rule was not applied to it.
+
+### 13.2 Checks
+
+| Check | Result |
+| --- | --- |
+| Code, configuration or runtime files changed | None (this file and one index row in `docs/architecture/README.md` only) |
+| Existing evidence or acceptance records modified | None |
+| Live operations performed | None |
+| Private conversation identifier in this file | Not present |
+| Private absolute source paths in this file | Not present |
+| Any proposed PDF described as accepted | No |
+| Historical live evidence described as current | No; all marked HISTORICAL / REVALIDATE |
+| G1 / G2 fixed or closed | No; both STILL PRESENT / OPEN |
+| B-5, M-B1 or First Memory authorized | No |
+| Owner decisions D-1 … D-9 resolved | No; D-10 resolved for discoverability only |
+| HX items turned into new architecture | No |
+| Material positive claims cite a repository source | Yes (path, symbol, test or record) |
+| UNKNOWN / NOT FOUND kept visible | Yes |
