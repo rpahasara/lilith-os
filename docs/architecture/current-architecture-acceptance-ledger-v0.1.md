@@ -530,7 +530,7 @@ historical repository record. No live system was inspected.**
 
 | Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| COMP-A | COMP-06, COMP-07, COMP-09 | **Owner-domain principle** (review hypothesis): one controlling semantics per domain; others read/propose; destination governs acceptance/application; default deny | Realized for memory (ADR-0006: L18 proposes, L04 sole applier) and World Model (no mutation route). Not realized for personality (runtime file), goals (no acceptor), skills (legacy writer), relationships (no store) | DESIGN, CODE, ADR | PARTIAL | PROPOSED; ADR-0006 decides for memory | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (memory) | TEST | N/A | N/A | N/A | No repo source adopts a different general model; record as hypothesis | ADR candidate if adopted | UNASSIGNED |
+| COMP-A | COMP-06, COMP-07, COMP-09 | **Owner-domain principle** (decided by [ADR-0007](../adr/0007-owner-domain-canonical-state-ownership.md)): one controlling semantic owner per domain; others read/propose; destination governs acceptance/application; default deny | Realized for memory (ADR-0006: L18 proposes, L04 sole applier). World Model structurally aligned but partial (no mutation route; no accepted owner designation). Not realized for personality (runtime file), goals (no acceptor), skills (legacy writer), relationships (no store) | DESIGN, CODE, ADR | PARTIAL | ADR-0007 (Accepted) decides the general principle; ADR-0006 decides for memory | PARTIAL | NOT_ESTABLISHED | LOCAL TEST (memory) | TEST | N/A | N/A | N/A | ADR-0007 controls. Acceptance does not establish conformance; non-conformance remains debt: `SOUL.md` personality ownership (C-01, D-1), goal acceptor gap (GOAL-04), Hermes skills tree / background reviewer (C-21, D-5), device-local task import (C-14) | Conformance work per ADR-0007 Validation (ownership inventory); D-1, D-5, §11 R8 | UNASSIGNED |
 | COMP-B | COMP-08 | No circular authority | B2a verifier (model output, row, cached flag ≠ ACCEPTED_MEMORY); First Memory gate not circular on L3 | CODE, LOCAL TEST | PARTIAL | PROPOSED | PARTIAL | NOT_ESTABLISHED | LOCAL TEST | TEST | N/A | N/A | N/A | — | — | UNASSIGNED |
 | COMP-C | COMP-14 | Seven acceptance dimensions never substitute for one another | 15B2b records separate source / test / DEV / PROD-dark / activation (B1c `ACTIVATION=NOT_ACCEPTED`; ADR-0006 dark state; index "what this set is not") | REPO RECORD | PARTIAL (practice, not a schema) | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | — | — | UNASSIGNED |
 | COMP-D | COMP-15, COMP-16 | Evidence categories kept distinct; claims vs tests use separate vocabularies | `docs/README.md` labels (OBSERVED/REPORTED/DECIDED/PROPOSED/HYPOTHESIS/UNKNOWN); acceptance records PASS/STOP | DESIGN, REPO RECORD | PARTIAL | PROPOSED | DESIGN_ONLY | NOT_ESTABLISHED | NONE | N/A | N/A | N/A | N/A | Repo label set differs from PDF categories; both preserved here | — | UNASSIGNED |
@@ -769,7 +769,7 @@ any of D-1 … D-9.
 
 | Group | Decision | Dependency / ordering note |
 | --- | --- | --- |
-| Foundational / cross-cutting | D-3 Owner-domain principle | Affects how ownership and acceptance are reasoned about across personality, relationships, goals, learning, self-model and other domains |
+| Foundational / cross-cutting | D-3 Owner-domain principle | Affects how ownership and acceptance are reasoned about across personality, relationships, goals, learning, self-model and other domains. Resolved by [ADR-0007](../adr/0007-owner-domain-canonical-state-ownership.md) (Accepted) |
 | Foundational / cross-cutting | D-1 `SOUL.md` / personality ownership | Depends on the identity-above-runtime principle (ADR-0001). Should be decided before any governed personality state is implemented |
 | Foundational / cross-cutting | D-2 Authoritative policy / approval boundary | Already strongly constrained by accepted ADR-0004. Must be resolved before G2 implementation work (R1) |
 | Engineering-semantic | D-6 Conditions under which per-turn model selection becomes a governed handoff | Depends on the adapter / runtime interpretation (ADAPT rows) |
@@ -786,7 +786,7 @@ any of D-1 … D-9.
 | --- | --- | --- |
 | D-1 | Is `SOUL.md` canonical identity/personality state, or a runtime projection/cache under ADR-0001? Who owns personality? | UNRESOLVED |
 | D-2 | Where is the authoritative policy and approval boundary under ADR-0004 (browser core vs server)? | UNRESOLVED |
-| D-3 | Should the owner-domain principle (COMP-A) be adopted, and by ADR? | UNRESOLVED |
+| D-3 | Should the owner-domain principle (COMP-A) be adopted, and by ADR? | RESOLVED — ADR-0007 ACCEPTED (2026-10-05): [ADR-0007](../adr/0007-owner-domain-canonical-state-ownership.md) is the accepted controlling source for the general owner-domain principle. Acceptance does not establish that existing mechanisms conform (see COMP-A) and resolves no other decision |
 | D-4 | Disposition of Condition 3 wording (C-04) and re-decision on B-5. This ledger infers no closure or eligibility | UNRESOLVED |
 | D-5 | Hermes skills tree and background reviewer: adopt, gate, disable or exclude | UNRESOLVED |
 | D-6 | Under what conditions is per-turn model selection only a replaceable reader/proposer selection, and what durable/hidden state, authority, tool-right or pending-work conditions escalate it into a governed handoff transition? | UNRESOLVED |
@@ -839,7 +839,7 @@ Other field normalizations (no coverage change):
 | Historical live evidence described as current | No; all marked HISTORICAL / REVALIDATE |
 | G1 / G2 fixed or closed | No; both STILL PRESENT / OPEN |
 | B-5, M-B1 or First Memory authorized | No |
-| Owner decisions D-1 … D-9 resolved | No; D-10 resolved for discoverability only |
+| Owner decisions D-1 … D-9 resolved | No, at assessment. D-3 was later resolved by owner acceptance of ADR-0007 (2026-10-05); D-10 resolved for discoverability only; all others remain UNRESOLVED |
 | HX items turned into new architecture | No |
 | Material positive claims cite a repository source | Yes (path, symbol, test or record) |
 | UNKNOWN / NOT FOUND kept visible | Yes |
