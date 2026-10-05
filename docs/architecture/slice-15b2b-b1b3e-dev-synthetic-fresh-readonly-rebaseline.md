@@ -180,6 +180,12 @@ Blockers:
 
 The `au4labs-web-rp-2026` owner-confirmation blocker is closed (§4.1).
 
+> **Later current state (2026-10-05, pointer only; the status above is
+> preserved as written).** The remaining blockers were addressed by the
+> [B-5 packet refresh and owner risk review](slice-15b2b-b1b3e-b5-packet-refresh-owner-risk-review.md):
+> `TECHNICAL_PACKET_COMPONENTS_COMPLETE = YES` and
+> `B5_PACKET_READY_FOR_SEPARATE_OWNER_DECISION`. B-5 remains WITHHELD.
+
 ## 8. Incidental notes
 
 - Contact effects inherent to authorized read-only access: 14 OS Login / IAP
