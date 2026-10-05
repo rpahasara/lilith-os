@@ -238,3 +238,11 @@ NO REAL K-ROOT / K-WIT / REGISTRY V1 / GENESIS PIN / RECORD 1
 NO REPLICA A / B CHANGE
 NO DEV, CLOUD, PACKAGE OR RUNTIME MUTATION
 ```
+
+> **Later current state (2026-10-06, pointer only; the state above is
+> preserved as written and was true at this record's date).** In a
+> separate, later decision the owner granted B-5 for this DEV_SYNTHETIC
+> packet:
+> [B-5 owner grant for the current packet](slice-15b2b-b1b3e-b5-pr1b-authorization-current-grant.md).
+> That grant is not eligibility. Condition 3, `CHECK_ELIGIBILITY`, M-B1 and
+> First Memory remain not established / not authorized.

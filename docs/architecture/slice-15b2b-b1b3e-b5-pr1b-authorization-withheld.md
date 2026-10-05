@@ -112,3 +112,13 @@ ACTIVATION NOT AUTHORIZED
 FIRST MEMORY NOT AUTHORIZED
 SUBSTRATE-DRIFT POLICY OPEN
 ```
+
+> **Later current state (2026-10-06, pointer only; this record is preserved
+> as written and was true at its date).** The substrate-drift policy was
+> later accepted ([ADR-0015](../adr/0015-operational-evidence-invalidated-by-material-substrate-drift.md)),
+> the [B-5 packet](slice-15b2b-b1b3e-b5-packet-refresh-owner-risk-review.md)
+> was refreshed, and the owner then made a new explicit decision granting
+> B-5 for the current DEV_SYNTHETIC packet:
+> [B-5 owner grant for the current packet](slice-15b2b-b1b3e-b5-pr1b-authorization-current-grant.md).
+> That grant is not eligibility; M-B1 and First Memory remain NOT
+> AUTHORIZED.
