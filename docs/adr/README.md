@@ -17,6 +17,7 @@ ADRs preserve consequential decisions, their alternatives, evidence, and tradeof
 | [0009](0009-governed-effects-authorized-at-trusted-effect-boundary.md) | Governed effects are authorized at a non-bypassable trusted effect boundary | Accepted | 2026-10-05 |
 | [0010](0010-procedural-skills-governed-above-runtimes.md) | Procedural skills are governed above runtimes | Accepted | 2026-10-05 |
 | [0011](0011-replaceable-cognitive-execution-governed-handoffs.md) | Replaceable cognitive execution and governed handoffs | Accepted | 2026-10-05 |
+| [0012](0012-terminal-goal-history-linked-successors.md) | Terminal goal history is preserved through linked successors | Accepted | 2026-10-05 |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 
