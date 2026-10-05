@@ -284,6 +284,24 @@ No code changes here. No eligibility evaluation is run or authorized.
 - Whether network exposure becomes a global invalidator.
 - Clock-trust policy.
 
+**Current state (2026-10-05 owner decision; the list above is unchanged as
+accepted):** the
+[Condition 3 validity-window owner decision](slice-15b2b-b1b3e-condition3-validity-window-owner-decision.md)
+decides, separately from this policy's acceptance:
+
+- the Condition 3 / eligibility window: **event-bounded and
+  sequence-bounded, with no universal fixed wall-clock duration**. Fixed
+  validity durations for other evidence classes **remain open** where
+  applicable;
+- package holds vs scheduling: **scheduling** around the owner-authorized
+  eligibility sequence; no hold authorized;
+- apt timers: **no change**;
+- needrestart: the current exclusion posture is **kept unchanged**; no
+  mutation authorized.
+
+Still open: whether a controlled restart can avoid a full PR-2 window,
+network exposure as a global invalidator, and clock-trust policy.
+
 ## 12. Unresolved items carried, not closed
 
 - AUTH-05: whole-host rollback resistance NOT ESTABLISHED.
