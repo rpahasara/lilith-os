@@ -14,6 +14,7 @@ ADRs preserve consequential decisions, their alternatives, evidence, and tradeof
 | [0006](0006-family-neutral-canonical-memory-apply.md) | Canonical memory apply uses family-neutral proposal identity | Accepted | 2026-09-22 |
 | [0007](0007-owner-domain-canonical-state-ownership.md) | Canonical state domains have one controlling semantic owner | Accepted | 2026-10-05 |
 | [0008](0008-canonical-personality-ownership-soul-projection.md) | Canonical personality is owned above runtimes; `SOUL.md` is a runtime projection | Accepted | 2026-10-05 |
+| [0009](0009-governed-effects-authorized-at-trusted-effect-boundary.md) | Governed effects are authorized at a non-bypassable trusted effect boundary | Accepted | 2026-10-05 |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 
