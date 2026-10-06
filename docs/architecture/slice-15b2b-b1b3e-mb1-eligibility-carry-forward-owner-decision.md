@@ -153,3 +153,10 @@ FRESHNESS=UNKNOWN
 NO IMPLEMENTATION CHANGE
 NO LIVE SYSTEM CONTACTED
 ```
+
+> **Later current state (2026-10-06, pointer only; this record is preserved
+> as written).** The owner later defined "same continuous sequence" for M-B1
+> as `MB1_SEQUENCE_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_HANDOFF`
+> ([continuity owner decision](slice-15b2b-b1b3e-mb1-sequence-continuity-owner-decision.md)).
+> The rule above is unchanged. M-B1, K-ROOT, K-WIT and First Memory remain
+> NOT AUTHORIZED.
