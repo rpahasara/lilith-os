@@ -406,3 +406,12 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT ACCESS; NOTHING SIGNED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** This package was reviewed and merged (PR #153,
+> control `1f544e6`). The
+> [final package pins](slice-15b2b-b1b3e-mb3-final-package-pins.md) record the bundle built from that commit:
+> `lilith-mb3-registry-1f544e6.tar`, SHA-256 `fce71811…0cb0`, reproducible
+> byte-identically; phone script `db02909d…bd54` re-confirmed. That authorizes
+> nothing: the M-B3 preparation sequence, PREPARE and `SIGN_REGISTRY_V1`
+> remain NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
