@@ -1001,7 +1001,7 @@ One logical transition per row. PRE always includes: the preservation set
 | M-B2 | root | K-WIT custody | keygen `witness` → K-WIT blob | publication; blob hash; scans clean; K-ACT unchanged | destroy the blob (before M-B4) | none | **custody created** | any private pattern; CURRENT changed |
 | M-B3 | owner, off-host | registry v1 | build + sign registry v1 at E0, K-ACT current | digest in the register; verifies offline | discard (never installed) | **authority object created off-host** | none | succession/single-current fails; K-ACT record ≠ publication |
 | M-B4 | root | trust anchors | install `registry-root.json`, `witness-anchor.json` | bytes equal owner copies | remove | none | none | anchor ≠ publication |
-| M-B5 | root | registry bytes | install registry v1 + `current` pointer | verifies on-host under the anchor | remove (nothing binds it yet) | none on host (story 4) | none | verification fails |
+| M-B5 | root | registry bytes | install registry v1 (`authority-registry.v1.json`; no pointer — the witness decides the head at M-B9b) | verifies on-host under the anchor | remove (nothing binds it yet) | none on host (story 4) | none | verification fails |
 | M-B6 | signer uid (via root) | ledger | provision `authority_ledger.db` at sequence 1 | sequence 1; head = owner value; fingerprint | remove (before M-B9 only) | none | none | head ≠ owner-computed |
 | M-B7 | owner + root | genesis candidate | none on host (read-only construction and digest, both sides) | host digest = owner digest | — | none | none | digests differ |
 | M-B8 | owner / root | pin | owner stores the pin off-host (PR-3 foundation); root installs the on-host copy | copy digest = off-host = candidate digest | remove the copy (before M-B9b) | none | none | mismatch |
@@ -1013,6 +1013,12 @@ One logical transition per row. PRE always includes: the preservation set
 | M-B13 | owner | acceptance | off-host reproduction (RR-38 B), then the explicit decision naming the package digest, recorded off-host (PR-3 full material in place) | owner digest = package digest | — | none | none | any mismatch; owner declines |
 | M-B14 | root | release | write INITIAL_CUSTODY RELEASED (hold CLI with the approved package digest; re-run must match) | RELEASED bound to the genesis head | **forward only** | none | none | re-run digest ≠ approved digest |
 | M-B15 | root verifier | full readiness | none (read-only) | FULL_READINESS READY; E-19 activation dark | — | none | none | anything else |
+
+> **Erratum (2026-10-07, G-7 of the M-B4/M-B5 preflight; the rest of this table is unchanged).** The M-B5 row
+> previously read "install registry v1 + `current` pointer". No pointer exists: the installer installs only
+> `authority-registry.v<N>.json` (its listing check refuses any other name), and the runtime reader states
+> "registry storage != accepted registry head (the witness decides the head)". See the
+> [M-B4/M-B5 remediation record](slice-15b2b-b1b3e-mb4-mb5-trust-install-remediation.md) §7.
 
 ## 28. Future phases
 

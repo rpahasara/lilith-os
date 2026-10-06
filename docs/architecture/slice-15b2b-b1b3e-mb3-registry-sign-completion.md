@@ -271,3 +271,16 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO RUNTIME, SIGNER, PACKAGE, WORKFLOW OR INFRASTRUCTURE CHANGE
 ```
+
+> **Later current state (2026-10-07, pointer only; the text above is
+> preserved as written).** The owner recorded a governed derivation of the
+> installable representations
+> ([owner decision](slice-15b2b-b1b3e-mb4-mb5-installable-representation-owner-decision.md)).
+> Registry V1 is installed as the signed transport file `3f0a59c0…6156`
+> minus exactly one terminal LF (representation pin `46b0bfc5…8b1e`). Its
+> identity (digest `fa662721…14fc`, E-21 signature) is unchanged and the
+> transport file is preserved. A repository-only
+> [remediation](slice-15b2b-b1b3e-mb4-mb5-trust-install-remediation.md)
+> added the derivation tooling, tests, a read-only content verifier and a
+> bounded removal tool. Nothing is installed. M-B4/M-B5, genesis, record 1,
+> First Memory and PROD remain NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
