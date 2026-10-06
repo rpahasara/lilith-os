@@ -354,3 +354,13 @@ PACKAGE_REFINALIZATION_REQUIRED = YES
 PHONE DISPOSITION PROCEDURE = REVIEWED HERE; NOT AUTHORIZED
 NO LIVE SYSTEM CONTACTED BY THIS RECORD; NO K-ROOT OR K-WIT ACCESS; NOTHING SIGNED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The incident fix merged (PR #155, `f9fb9e1`). The
+> [replacement final package pins](slice-15b2b-b1b3e-mb3-replacement-final-package-pins.md) record the replacement bundle
+> `lilith-mb3-registry-f9fb9e1.tar` (`ad37758e…a736`, reproducible
+> byte-identically) and the corrected phone script `b58b9321…ecc7`. The
+> attempt-1 bundle `fce71811…`, script `db02909d…` and candidate `b7e24530…`
+> stay historical. The replacement package is finalized, not transferred; phone
+> disposition, a replacement preparation sequence, PREPARE and SIGN remain NOT
+> AUTHORIZED, and FRESHNESS is UNKNOWN.
