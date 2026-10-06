@@ -244,3 +244,12 @@ FIRST MEMORY = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The owner-authorized M-B1 sequence ran under
+> this continuity decision and completed: `CHECK_ELIGIBILITY` returned `PR1B_ELIGIBLE`
+> once, the one-attempt M-B1 ran with `RUN_EXIT=0`, and the owner accepted
+> M-B1 / `GENERATE_K_ROOT` as completed
+> ([M-B1 completion and owner acceptance](slice-15b2b-b1b3e-mb1-kroot-completion.md);
+> E-21 `publicKeySha256=cb36daf1…92cf`). K-WIT, registry / genesis, record 1
+> and First Memory remain NOT AUTHORIZED.
