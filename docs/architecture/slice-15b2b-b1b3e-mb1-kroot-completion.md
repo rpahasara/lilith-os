@@ -196,3 +196,13 @@ FIRST MEMORY = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO RUNTIME, SEQUENCER, SCRIPT, BUNDLE OR WORKFLOW CHANGE
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The owner defined what "fresh PR-2 immediately
+> before `GENERATE_K_WIT`" means:
+> [M-B2 PR-2 continuity owner decision](slice-15b2b-b1b3e-mb2-pr2-continuity-owner-decision.md)
+> (`MB2_PR2_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_ATTEMPT`). The
+> [M-B2 preflight](slice-15b2b-b1b3e-mb2-kwit-preflight.md) is now
+> `READY_FOR_OWNER_MB2_DECISION`. That authorizes nothing: M-B2, M-B3,
+> registry / genesis, record 1 and First Memory remain NOT AUTHORIZED, and
+> FRESHNESS is UNKNOWN.
