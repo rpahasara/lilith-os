@@ -357,3 +357,18 @@ FRESHNESS=UNKNOWN
 NO RUNTIME, SEQUENCER, KEYGEN, INSTALLER, WORKFLOW OR INFRASTRUCTURE CHANGE
 NO LIVE SYSTEM CONTACTED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** One owner-authorized, owner-attended M-B2
+> sequence ran under this decision on control `4d16d76`: fresh DR-5, the
+> deployment freeze, `KNOWN_EMPTY`, K-ACT / host preservation, the fresh
+> PR-2 (`2026-10-06T08:59:59Z`–`09:04:46Z`, PASS) and the final read-only
+> gates, then the separate one-attempt owner go and exactly one
+> `lilith-authority-keygen-dev witness` invocation (exit 0, no stderr, no
+> prompt). The owner accepted **M-B2 / `GENERATE_K_WIT` COMPLETED / ACCEPTED**
+> ([completion record](slice-15b2b-b1b3e-mb2-kwit-completion.md); K-WIT
+> `publicKeySha256=5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf`).
+> `K_WIT_CUSTODIED` is established with C-4 `KNOWN_CUSTODY_DEBT`; it confers
+> no signing or registry authority. The freeze ended at sequence
+> completion. M-B3, registry / genesis, record 1, First Memory and PROD
+> remain NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
