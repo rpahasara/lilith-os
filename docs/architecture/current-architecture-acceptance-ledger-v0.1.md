@@ -508,7 +508,7 @@ historical repository record. No live system was inspected.**
 | Row | Source clauses | Requirement | Repo location | Evid. | Coverage | Contract | Impl | Conf. | Behavior | Env | Current. | Op. auth | Active | Conflict / precedence | Blocker / next | Owner |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AUTH-01 | COMP-30; I AUTH-01..03; CR-16 | Cognition cannot mint authority or currentness; historical validity ≠ currentness | `OMC/owner_freshness.py::freshness_gate`, `recovery_admission.py`, `recovery_contracts.py`; rotation record inequality table | CODE, LOCAL TEST, DESIGN | STRONGER_EXISTING_CONTROL | Repo records control (PDFs restate) | IMPLEMENTED (TEST / DEV_SYNTHETIC scope) | NOT_ESTABLISHED (vs PDF); repo tests cover repo contract | LOCAL TEST | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED | NOT ACTIVE | — | — | UNASSIGNED |
-| AUTH-02 | COMP-30, §20 | Latest recorded live authority posture | [`slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md`](slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md) (commit `0fa5e21`, window 2026-10-02T12:08–12:24Z): Condition 1 CLOSED; Condition 2 CLOSED; Condition 3 OPEN UNTIL OWNER REVIEW / "on merge it is CLOSED"; Condition 4 NOT EVALUATED; Condition 5 OPEN; **B-5 GRANT VOID**; **M-B1 NOT AUTHORIZED**; no real K-ROOT, K-WIT, registry v1, genesis pin, record 1; **FRESHNESS=UNKNOWN**; **FIRST MEMORY NOT AUTHORIZED**. Later owner records (2026-10-05): [C-04 disposition](slice-15b2b-b1b3e-condition3-c04-owner-disposition.md): Condition 3 historically CLOSED on merge for its window only, lapsed, **not satisfied today**; [B-5 re-decision](slice-15b2b-b1b3e-b5-pr1b-authorization-withheld.md): **B-5 WITHHELD**, no current grant | REPO RECORD | COVERED (as a record) | Repo record | N/A | NOT_ESTABLISHED | REPO RECORD (2026-10-02; owner records 2026-10-05) | DEV_SYNTHETIC | HISTORICAL; **REVALIDATE** (PASS valid only if eligibility → M-B1 completed before 2026-10-03T06:39Z, which has passed) | NOT AUTHORIZED | NOT ACTIVE (record) | Condition 3 wording disposed by owner (C-04 resolved, Option A) | Any future B-5 grant needs a new owner decision on fresh evidence, a fresh PR-2 revalidation, and evidence current under the ACCEPTED substrate-drift policy ([ADR-0015](../adr/0015-operational-evidence-invalidated-by-material-substrate-drift.md) + [policy](substrate-drift-and-evidence-revalidation-policy-v0.1.md), §13.1n) before eligibility (none authorized here). A final Condition 3 window must follow the event- and sequence-bounded [validity-window owner decision](slice-15b2b-b1b3e-condition3-validity-window-owner-decision.md); the [2026-10-05 read-only rebaseline](slice-15b2b-b1b3e-dev-synthetic-fresh-readonly-rebaseline.md) is observational evidence for its window only, and the B-5 packet is NOT_READY (§13.1o). Later the same day the [packet refresh and owner risk review](slice-15b2b-b1b3e-b5-packet-refresh-owner-risk-review.md) recorded `B5_PACKET_READY_FOR_SEPARATE_OWNER_DECISION` (B-5 still WITHHELD; §13.1p). On 2026-10-06 a new explicit [owner decision](slice-15b2b-b1b3e-b5-pr1b-authorization-current-grant.md) recorded `B5_OWNER_AUTHORIZATION=GRANTED` for that current DEV_SYNTHETIC packet only; it is not eligibility, and Condition 3, `CHECK_ELIGIBILITY`, M-B1 and First Memory remain NOT ESTABLISHED / NOT AUTHORIZED (§13.1q) | UNASSIGNED |
+| AUTH-02 | COMP-30, §20 | Latest recorded live authority posture | [`slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md`](slice-15b2b-b1b3e-condition3-fresh-pr2-pass.md) (commit `0fa5e21`, window 2026-10-02T12:08–12:24Z): Condition 1 CLOSED; Condition 2 CLOSED; Condition 3 OPEN UNTIL OWNER REVIEW / "on merge it is CLOSED"; Condition 4 NOT EVALUATED; Condition 5 OPEN; **B-5 GRANT VOID**; **M-B1 NOT AUTHORIZED**; no real K-ROOT, K-WIT, registry v1, genesis pin, record 1; **FRESHNESS=UNKNOWN**; **FIRST MEMORY NOT AUTHORIZED**. Later owner records (2026-10-05): [C-04 disposition](slice-15b2b-b1b3e-condition3-c04-owner-disposition.md): Condition 3 historically CLOSED on merge for its window only, lapsed, **not satisfied today**; [B-5 re-decision](slice-15b2b-b1b3e-b5-pr1b-authorization-withheld.md): **B-5 WITHHELD**, no current grant | REPO RECORD | COVERED (as a record) | Repo record | N/A | NOT_ESTABLISHED | REPO RECORD (2026-10-02; owner records 2026-10-05) | DEV_SYNTHETIC | HISTORICAL; **REVALIDATE** (PASS valid only if eligibility → M-B1 completed before 2026-10-03T06:39Z, which has passed) | NOT AUTHORIZED | NOT ACTIVE (record) | Condition 3 wording disposed by owner (C-04 resolved, Option A) | Any future B-5 grant needs a new owner decision on fresh evidence, a fresh PR-2 revalidation, and evidence current under the ACCEPTED substrate-drift policy ([ADR-0015](../adr/0015-operational-evidence-invalidated-by-material-substrate-drift.md) + [policy](substrate-drift-and-evidence-revalidation-policy-v0.1.md), §13.1n) before eligibility (none authorized here). A final Condition 3 window must follow the event- and sequence-bounded [validity-window owner decision](slice-15b2b-b1b3e-condition3-validity-window-owner-decision.md); the [2026-10-05 read-only rebaseline](slice-15b2b-b1b3e-dev-synthetic-fresh-readonly-rebaseline.md) is observational evidence for its window only, and the B-5 packet is NOT_READY (§13.1o). Later the same day the [packet refresh and owner risk review](slice-15b2b-b1b3e-b5-packet-refresh-owner-risk-review.md) recorded `B5_PACKET_READY_FOR_SEPARATE_OWNER_DECISION` (B-5 still WITHHELD; §13.1p). On 2026-10-06 a new explicit [owner decision](slice-15b2b-b1b3e-b5-pr1b-authorization-current-grant.md) recorded `B5_OWNER_AUTHORIZATION=GRANTED` for that current DEV_SYNTHETIC packet only; it is not eligibility, and Condition 3, `CHECK_ELIGIBILITY`, M-B1 and First Memory remain NOT ESTABLISHED / NOT AUTHORIZED (§13.1q). In [eligibility sequence 3](slice-15b2b-b1b3e-pr1b-eligibility-sequence3.md) (2026-10-05T20:09–20:15Z) the canonical evaluator was called once and returned `PR1B_ELIGIBLE`; its Condition 3 window then expired (REVALIDATE). Whether the result may serve a later M-B1 is an open owner/architecture decision (AMBIGUOUS); M-B1, K-ROOT, K-WIT and First Memory remain NOT AUTHORIZED (§13.1r). The owner then resolved that question as B: the completed result is not reusable for a later M-B1, and a future M-B1 sequence must freshly establish eligibility in the same continuous sequence ([carry-forward owner decision](slice-15b2b-b1b3e-mb1-eligibility-carry-forward-owner-decision.md), §13.1s) | UNASSIGNED |
 | AUTH-03 | COMP-30 environment separation | PROD and DEV_SYNTHETIC evidence never interchange; fixtures never establish production authority | Burned-identity enforcement (B-3, merged); B2a verifier refuses non-`test` contexts; B1c separates activation, broker, owner, Stage III and PROD authority | CODE, LOCAL TEST, REPO RECORD | STRONGER_EXISTING_CONTROL | Repo records control | IMPLEMENTED | NOT_ESTABLISHED | LOCAL TEST; REPO RECORD | TEST / DEV_SYNTHETIC | HISTORICAL; REVALIDATE | N/A | N/A | — | — | UNASSIGNED |
 | AUTH-04 | COMP-30, §20 | Routine DEV deployer boundary | [`slice-15b2b-b1c-acceptance-record.md`](slice-15b2b-b1c-acceptance-record.md): COMPLETE / ACCEPTED for routine DEV deployment only; `ACTIVATION=NOT_ACCEPTED`; PROD cross-environment debt open | REPO RECORD | PARTIAL (DEV scope only) | Accepted record (DEV scope) | IMPLEMENTED (DEV) | NOT_ESTABLISHED | REPO RECORD (2026-09-25) | DEV | HISTORICAL; REVALIDATE | Accepted for routine DEV deployment only | NOT ACTIVE (activation not accepted) | — | PROD authority not established | UNASSIGNED |
 | AUTH-05 | CR-16; COMP-30 | Freshness from outside the rolled-back failure domain; whole-host rollback resistance | `slice-15b2b-b1b3e-pr2-acceptance.md` / revalidations: one disk, one filesystem; whole-host rollback resistance **NOT ESTABLISHED** | REPO RECORD | MISSING | Repo record | NOT_IMPLEMENTED | NOT_ESTABLISHED | REPO RECORD (2026-09-28 … 10-02) | DEV_SYNTHETIC | HISTORICAL; REVALIDATE | NOT AUTHORIZED (PR-1B, record) | N/A | — | Owner freshness replicas (PR-3) | UNASSIGNED |
@@ -1164,6 +1164,57 @@ This documentation pass contacted no live system.
 
 This documentation pass contacted no live system.
 
+### 13.1r Current-state reconciliation (PR-1B eligibility sequence 3, 2026-10-05)
+
+**New record:** [PR-1B Eligibility Sequence 3](slice-15b2b-b1b3e-pr1b-eligibility-sequence3.md).
+
+- One continuous owner-authorized DEV_SYNTHETIC eligibility sequence at control `92ab039` (2026-10-05T20:09:38Z–20:15:28Z): import-only evaluator preflight PASS in WSL Ubuntu-24.04 (0 evaluator calls, nothing installed); DR-5 CURRENT (latest deploy `37356261343` / `47f2655` equal to the accepted run; `92ab039` deploy skipped); B-5 grant usable; fresh final Condition 3 PASS (20:10:01Z–20:15:09Z), equal to the accepted rebaseline apart from volatile fields.
+- `evaluate_eligibility` called exactly once with all 12 inputs `True`: `PR1B_ELIGIBLE`, `reasons = []`. **`PR1B_ELIGIBLE = TRUE`** as a completed result.
+- The Condition 3 window expired at sequence end: `CONDITION_3_CURRENT = NOT_ESTABLISHED` now (REVALIDATE, not FAIL). The expiry does not reverse the evaluation.
+- **M-B1 carry-forward: AMBIGUOUS — owner/architecture decision required.** The M-B1 operator preconditions and the validity-window decision impose no contemporaneity between eligibility and M-B1. The sequencer crash matrix (C-1, "re-check eligibility"), the non-persisted single-bootstrap sequencer, P3-5 §13 and policy §2 treat eligibility as revocable. No accepted rule settles it, and none is added.
+- A fresh PR-2 immediately before `GENERATE_K_WIT` remains mandatory.
+- Sequences 1 and 2 (same evening) produced no eligibility result. They are recorded as provenance only.
+
+**No coverage classification changed; row count and §5 totals are unchanged** (193 rows; COVERED 11, PARTIAL 109, STRONGER 6, PROPOSAL_ONLY 25, CONFLICT 15, MISSING 14, DEFERRED 10, EVIDENCE_MISSING 2, NOT_APPLICABLE 1). AUTH-02 stays COVERED (as a record) and HISTORICAL / REVALIDATE.
+
+**Status text updated in this pass:** the AUTH-02 blocker cell; the §13.2 authorization check row; one index row in `docs/architecture/README.md`; later-state pointers appended to the B-5 grant record and the 2026-09-29 PR-1B eligibility review (original text preserved).
+
+**Operational posture after this pass:**
+
+- B-5 GRANTED (current DEV_SYNTHETIC packet only);
+- `PR1B_ELIGIBLE = TRUE` (completed evaluation; M-B1 usability undecided);
+- Condition 3 NOT CURRENTLY ESTABLISHED (expired; REVALIDATE);
+- M-B1, K-ROOT, K-WIT, registry / genesis mutation NOT AUTHORIZED;
+- First Memory NOT AUTHORIZED;
+- FRESHNESS=UNKNOWN.
+
+This documentation pass contacted no live system.
+
+### 13.1s Current-state reconciliation (M-B1 eligibility carry-forward owner decision)
+
+**New record:** [M-B1 Eligibility Carry-Forward: Owner Decision (B)](slice-15b2b-b1b3e-mb1-eligibility-carry-forward-owner-decision.md).
+
+- The owner resolved the §13.1r carry-forward question as **`B. FRESH_ELIGIBILITY_EVALUATION_REQUIRED_FOR_M_B1`**. Classification A is not accepted. The pre-decision classification C stays visible in the Sequence 3 record §9 as history and is no longer current.
+- Sequence 3 is unchanged as a completed, successful result: `COMPLETED_HISTORICAL_RESULT = PR1B_ELIGIBLE`; `REUSABLE_FOR_LATER_M_B1 = NO`. Its Condition 3 expiry stays REVALIDATE, not FAIL.
+- Rule (sequence-based, no TTL). A future M-B1 execution sequence must, in one continuous owner-authorized sequence: recheck current prerequisites and stop conditions; run a fresh final Condition 3; run `CHECK_ELIGIBILITY` exactly once; obtain `PR1B_ELIGIBLE`; and continue to M-B1 only inside that sequence, and only with a separate owner M-B1 go.
+- This aligns operations with the existing sequencer crash matrix C-1 ("re-check eligibility; nothing written"). No implementation changed.
+- Unchanged: the M-B1 go must name script `09cbc9be…` and bundle `7f07e158…`; M-B1 G0 / G1 / T1, Replica B and custody gates; B-5 grant usable; Condition 1 holding; a fresh PR-2 immediately before `GENERATE_K_WIT` remains mandatory.
+
+**No coverage classification changed; row count and §5 totals are unchanged** (193 rows; COVERED 11, PARTIAL 109, STRONGER 6, PROPOSAL_ONLY 25, CONFLICT 15, MISSING 14, DEFERRED 10, EVIDENCE_MISSING 2, NOT_APPLICABLE 1). D-1 … D-10 are unchanged; D-4 is not reopened.
+
+**Status text updated in this pass:** the AUTH-02 blocker cell; one index row in `docs/architecture/README.md` (and the Sequence 3 row's carry-forward wording); the Sequence 3 record's status, §9 heading note, §10 first row and §12 state.
+
+**Operational posture after this pass:**
+
+- B-5 GRANTED (current DEV_SYNTHETIC packet only);
+- Sequence 3 `PR1B_ELIGIBLE` = completed historical result, not reusable for M-B1;
+- Condition 3 NOT CURRENTLY ESTABLISHED;
+- M-B1 go NOT GIVEN; M-B1, K-ROOT, K-WIT, registry / genesis mutation NOT AUTHORIZED;
+- First Memory NOT AUTHORIZED;
+- FRESHNESS=UNKNOWN.
+
+This documentation pass contacted no live system.
+
 ### 13.2 Checks
 
 | Check | Result |
@@ -1176,7 +1227,7 @@ This documentation pass contacted no live system.
 | Any proposed PDF described as accepted | No |
 | Historical live evidence described as current | No; all marked HISTORICAL / REVALIDATE |
 | G1 / G2 fixed or closed | No; both STILL PRESENT / OPEN |
-| B-5, M-B1 or First Memory authorized | No, at assessment. B-5 was later GRANTED by a separate owner decision for the current DEV_SYNTHETIC packet only (2026-10-06, §13.1q); M-B1 and First Memory remain NOT AUTHORIZED |
+| B-5, M-B1 or First Memory authorized | No, at assessment. B-5 was later GRANTED by a separate owner decision for the current DEV_SYNTHETIC packet only (2026-10-06, §13.1q); `CHECK_ELIGIBILITY` later returned `PR1B_ELIGIBLE` (§13.1r); M-B1 and First Memory remain NOT AUTHORIZED |
 | Owner decisions D-1 … D-9 resolved | No, at assessment. D-3 was later resolved by owner acceptance of ADR-0007 (2026-10-05), D-1 by owner acceptance of ADR-0008 (2026-10-05), D-2 by owner acceptance of ADR-0009 (2026-10-05), D-4 by owner decisions (C-04 disposition; B-5 WITHHELD; 2026-10-05) D-5 by owner acceptance of ADR-0010 (2026-10-05), D-6 by owner acceptance of ADR-0011 (2026-10-05) D-7 by owner acceptance of ADR-0012 (2026-10-05), D-8 by owner acceptance of ADR-0013 (2026-10-05) and D-9 by owner acceptance of ADR-0014 (2026-10-05; source governance only, no source or clause accepted); D-10 resolved for discoverability only. The register now has no unresolved owner decision among D-1 … D-10; this does not resolve implementation or conformance debt or the open items in §7, §10 and §11 (see §13.1l) |
 | HX items turned into new architecture | No |
 | Material positive claims cite a repository source | Yes (path, symbol, test or record) |

@@ -259,3 +259,14 @@ NO REPLICA A / B CHANGE
 NO LIVE SYSTEM CONTACTED
 NO DEV, CLOUD, PACKAGE OR RUNTIME MUTATION
 ```
+
+> **Later current state (2026-10-05T20:15Z, pointer only; the state above is
+> preserved as written and was true at this record's date).** Inside a
+> separate owner-authorized eligibility sequence, the canonical evaluator
+> was called once and returned `PR1B_ELIGIBLE`
+> ([eligibility sequence 3](slice-15b2b-b1b3e-pr1b-eligibility-sequence3.md)).
+> Its Condition 3 window has since expired. By a later
+> [owner decision](slice-15b2b-b1b3e-mb1-eligibility-carry-forward-owner-decision.md),
+> that completed result is not reusable for a later M-B1: a future M-B1
+> sequence must freshly establish eligibility. M-B1, K-ROOT, K-WIT and First
+> Memory remain NOT AUTHORIZED.
