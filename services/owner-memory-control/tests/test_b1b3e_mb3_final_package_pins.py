@@ -35,6 +35,7 @@ FILE_PINS = {
     "build_mb3_registry_bundle.py": "7f90d3ed05c370735f330805ae2a16b68598b77a8901a9ad492719774bad7293",
     "verify_mb3_registry.py": "e710cfa623d494e243ab4a1fbaefe28e8d079e58398368f9dcabd645e06b5507",
 }
+FIXED_SCRIPT_SHA = "b58b93215dc5c1e724846c7fc16acc2c29d81725a2ba13badcdccfd7b9eaecc7"   # pre-merge attempt-1 fix; final pin after re-finalization
 UNAUTHORIZED = ("M-B3 PREPARATION SEQUENCE = NOT AUTHORIZED", "M-B3 PREPARE ON S25 = NOT AUTHORIZED",
                 "M-B3 / SIGN_REGISTRY_V1 = NOT AUTHORIZED", "REGISTRY_SIGNED = NOT REACHED",
                 "M-B4/M-B5 / INSTALL_TRUST_AND_REGISTRY = NOT AUTHORIZED", "REGISTRY EFFECTIVENESS = NOT AUTHORIZED",
@@ -94,8 +95,18 @@ class RecordTests(unittest.TestCase):
 
 class SourceTests(unittest.TestCase):
     def test_tool_files_still_hash_to_the_pins(self):
+        # The phone script is superseded by the attempt-1 incident fix (incident record); the other tools are unchanged.
         for name, digest in FILE_PINS.items():
+            if name == "mb3_phone_ceremony.py":
+                continue
             self.assertEqual(hashlib.sha256((TOOLS / name).read_bytes()).hexdigest(), digest, name)
+        self.assertEqual(hashlib.sha256((TOOLS / "mb3_phone_ceremony.py").read_bytes()).hexdigest(), FIXED_SCRIPT_SHA)
+        incident = _load("mb3_incident_tests_for_pins", Path(__file__).resolve().with_name("test_b1b3e_mb3_sign_incident.py"))
+        self.assertEqual(hashlib.sha256(incident.attempt1_script_bytes()).hexdigest(), FILE_PINS["mb3_phone_ceremony.py"])
+        self.assertIn("(slice-15b2b-b1b3e-mb3-sign-attempt1-incident.md)", self.text_final())
+
+    def text_final(self) -> str:
+        return FINAL.read_text(encoding="utf-8")
 
     def test_builder_layout_matches_the_pinned_bundle(self):
         build = _load("build_mb3_registry_bundle_final", TOOLS / "build_mb3_registry_bundle.py")
@@ -108,9 +119,14 @@ class SourceTests(unittest.TestCase):
             self.skipTest("git or the control commit is unavailable")
         self.assertEqual(_git("merge-base", "--is-ancestor", CONTROL, "HEAD").returncode, 0)
         build = _load("build_mb3_registry_bundle_final2", TOOLS / "build_mb3_registry_bundle.py")
-        changed = _git("diff", "--name-only", CONTROL, "HEAD", "--", *build.CLOSURE, build.PHONE_SCRIPT)
+        changed = _git("diff", "--name-only", CONTROL, "HEAD", "--", *build.CLOSURE)
         self.assertEqual(changed.returncode, 0)
         self.assertEqual(changed.stdout.strip(), "")
+        # The phone script (outside the bundle) differs from the control commit only by the attempt-1 fix.
+        incident = _load("mb3_incident_tests_for_ancestry", Path(__file__).resolve().with_name("test_b1b3e_mb3_sign_incident.py"))
+        at_control = subprocess.run(["git", "-C", str(ROOT), "show", f"{CONTROL}:{build.PHONE_SCRIPT}"],
+                                    capture_output=True, check=True).stdout
+        self.assertEqual(incident.attempt1_script_bytes(), at_control)
 
 
 if __name__ == "__main__":

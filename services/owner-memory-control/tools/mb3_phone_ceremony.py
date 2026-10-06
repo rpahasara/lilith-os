@@ -123,9 +123,11 @@ def _signer_subprocess(argv: list[str], stdout_fd: int, stderr_fd: int, env: dic
 
 
 def _tty_confirm(prompt: str) -> str:
-    with open("/dev/tty", "r+", encoding="utf-8") as tty:
-        tty.write(prompt)
-        tty.flush()
+    # Separate write-only and read-only handles: a terminal is not seekable, and text-mode "r+"
+    # (BufferedRandom) refuses it with UnsupportedOperation (M-B3 attempt-1 incident).
+    with open("/dev/tty", "w", encoding="utf-8") as out, open("/dev/tty", "r", encoding="utf-8") as tty:
+        out.write(prompt)
+        out.flush()
         return tty.readline().strip()
 
 

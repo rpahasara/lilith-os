@@ -35,7 +35,8 @@ CLASSIFICATION = "MB3_SIGNING_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_A
 E21 = "cb36daf176d813359b8bd0fe6361f549fd3334a52d0cd1f85cc5247cb26592cf"
 KWIT = "5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf"
 KACT = "dd13a1fb302375a4e7ec81131a72920e23e365e06a0b6dc9bb7ab124dadc01ed"
-SCRIPT_PIN = "db02909d8f769f5a0570386aef55c3a472bdbc6c52949830ab94c1b624e6bd54"
+SCRIPT_PIN = "db02909d8f769f5a0570386aef55c3a472bdbc6c52949830ab94c1b624e6bd54"   # reviewed pin; superseded by the attempt-1 fix
+CURRENT_SCRIPT_PIN = "b58b93215dc5c1e724846c7fc16acc2c29d81725a2ba13badcdccfd7b9eaecc7"   # pre-merge fixed script (incident record)
 UNAUTHORIZED = ("M-B3 / SIGN_REGISTRY_V1 = NOT AUTHORIZED", "M-B4/M-B5 / INSTALL_TRUST_AND_REGISTRY = NOT AUTHORIZED",
                 "REGISTRY EFFECTIVENESS = NOT AUTHORIZED", "GENESIS = NOT AUTHORIZED", "RECORD 1 = NOT AUTHORIZED",
                 "FIRST MEMORY = NOT AUTHORIZED", "PROD = NOT AUTHORIZED", "FRESHNESS=UNKNOWN")
@@ -148,8 +149,12 @@ class PackageTests(unittest.TestCase):
         self.text = PACKAGE.read_text(encoding="utf-8")
 
     def test_phone_script_pin(self):
-        self.assertEqual(hashlib.sha256(PHONE_SCRIPT.read_bytes()).hexdigest(), SCRIPT_PIN)
+        # The package record keeps the reviewed pin as history; the attempt-1 incident record supersedes it.
         self.assertGreaterEqual(self.text.count(SCRIPT_PIN), 3)
+        self.assertIn("(slice-15b2b-b1b3e-mb3-sign-attempt1-incident.md)", self.text)
+        self.assertEqual(hashlib.sha256(PHONE_SCRIPT.read_bytes()).hexdigest(), CURRENT_SCRIPT_PIN)
+        incident = (ARCH / "slice-15b2b-b1b3e-mb3-sign-attempt1-incident.md").read_text(encoding="utf-8")
+        self.assertIn(CURRENT_SCRIPT_PIN, incident)
 
     def test_status_and_deferred_pins(self):
         self.assertIn("**`MB3_PACKAGE_SOURCE_AND_DESIGN_READY_FOR_REVIEW`.**", self.text)
