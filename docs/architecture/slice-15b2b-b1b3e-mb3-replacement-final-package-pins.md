@@ -258,3 +258,12 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT ACCESS; NOTHING SIGNED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The owner-authorized phone incident disposition ran
+> once with the reviewed block (`73f71355…54e1`) and passed:
+> [disposition completion record](slice-15b2b-b1b3e-mb3-attempt1-disposition-completion.md). The attempt-1 state is archived in
+> `~/lilith-mb3-incident-attempt1` (manifest `94483e8b…181d`), the active M-B3
+> paths are clear, K-ROOT custody is preserved, and no replacement file was
+> transferred. A replacement preparation sequence, PREPARE and SIGN remain NOT
+> AUTHORIZED, and FRESHNESS is UNKNOWN.
