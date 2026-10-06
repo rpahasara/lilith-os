@@ -164,7 +164,9 @@ class MB3CompletionTests(unittest.TestCase):
         ledger = LEDGER.read_text(encoding="utf-8")
         self.assertIn("### 13.1z Current-state reconciliation (M-B3 / SIGN_REGISTRY_V1 completion and owner acceptance",
                       ledger)
-        self.assertIn("(§13.1z) | UNASSIGNED |", ledger)
+        auth02 = next(line for line in ledger.splitlines() if line.startswith("| AUTH-02 |"))
+        self.assertIn("(§13.1z)", auth02)                       # later passes append after it (§13.1aa …)
+        self.assertTrue(auth02.endswith("| UNASSIGNED |"))
         for name in POINTED[:4]:
             if name.endswith("-completion.md") or name.endswith("-pins.md"):
                 self.assertNotIn("REGISTRY_SIGNED = REACHED", (ARCH / name).read_text(encoding="utf-8"))
