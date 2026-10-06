@@ -269,3 +269,14 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT ACCESS; NOTHING SIGNED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** Attempt 2 ran under its own owner-authorized
+> preparation, transfer, PREPARE and one-attempt SIGN steps, with fresh gates
+> and a new candidate. The owner accepted the result:
+> [M-B3 completion record](slice-15b2b-b1b3e-mb3-registry-sign-completion.md).
+> M-B3 / `SIGN_REGISTRY_V1` COMPLETED / ACCEPTED; Registry V1 `fa662721…14fc`
+> (signed file `3f0a59c0…6156`) is signed and owner-accepted, not installed
+> and not effective. The attempt-1 candidate stays historical, not burned and
+> not reusable. M-B4/M-B5, genesis, record 1, First Memory and PROD remain
+> NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
