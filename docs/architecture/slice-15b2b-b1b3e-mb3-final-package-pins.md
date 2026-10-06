@@ -208,3 +208,14 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT ACCESS; NOTHING SIGNED
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The first M-B3 SIGN attempt stopped before the
+> signer ran (`A_NO_SIGNATURE`, no burn): the attempt-1 phone script
+> `db02909d…bd54` opened `/dev/tty` with text-mode `"r+"`, which a terminal
+> refuses. See the [attempt-1 incident record](slice-15b2b-b1b3e-mb3-sign-attempt1-incident.md). That script pin is
+> **superseded and must not be used**; the fixed script (pre-merge
+> `b58b9321…ecc7`) needs post-merge re-finalization. The attempt-1 candidate
+> `b7e24530…0e53` is `HISTORICAL_ABANDONED_UNSIGNED_CANDIDATE` (not burned,
+> not reusable). No replacement sequence, PREPARE, SIGN go or phone cleanup is
+> authorized, and FRESHNESS is UNKNOWN.
