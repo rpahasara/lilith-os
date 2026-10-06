@@ -267,3 +267,12 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO RUNTIME, SEQUENCER, KEYGEN, INSTALLER, WORKFLOW OR INFRASTRUCTURE CHANGE
 ```
+
+> **Later current state (2026-10-06, pointer only; the text above is
+> preserved as written).** The owner defined M-B3 signing continuity:
+> [M-B3 signing continuity owner decision](slice-15b2b-b1b3e-mb3-signing-continuity-owner-decision.md)
+> (`MB3_SIGNING_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_ATTEMPT_OFFHOST`), and the reviewed
+> [M-B3 registry ceremony package](slice-15b2b-b1b3e-mb3-registry-ceremony-package.md) is ready for review. That
+> authorizes nothing: M-B3 / `SIGN_REGISTRY_V1`, M-B4/M-B5, registry
+> effectiveness, genesis, record 1, First Memory and PROD remain NOT
+> AUTHORIZED, and FRESHNESS is UNKNOWN.
