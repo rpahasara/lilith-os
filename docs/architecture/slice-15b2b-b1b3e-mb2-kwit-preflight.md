@@ -125,3 +125,13 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED
 ```
+
+> **Later current state (2026-10-06, pointer only; the classification above
+> is preserved as written).** The owner authorized one M-B2 sequence and,
+> after its fresh PR-2 PASS and final gates, a separate one-attempt go. The
+> single keygen invocation succeeded and the owner accepted
+> **M-B2 / `GENERATE_K_WIT` COMPLETED / ACCEPTED**
+> ([completion record](slice-15b2b-b1b3e-mb2-kwit-completion.md); K-WIT
+> `publicKeySha256=5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf`;
+> `K_WIT_CUSTODIED`). M-B3, registry / genesis, record 1, First Memory and
+> PROD remain NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
