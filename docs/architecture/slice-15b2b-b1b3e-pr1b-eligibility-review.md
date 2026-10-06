@@ -288,3 +288,10 @@ REAL FRESHNESS REMAINS UNKNOWN
 PR-1B EXECUTION NOT AUTHORIZED
 FIRST MEMORY NOT AUTHORIZED
 ```
+
+> **Later current state (2026-10-05, pointer only; this 2026-09-29
+> classification is preserved as written and was true at its date).** The
+> blockers were later closed, and the canonical evaluator returned
+> `PR1B_ELIGIBLE` in
+> [eligibility sequence 3](slice-15b2b-b1b3e-pr1b-eligibility-sequence3.md).
+> PR-1B execution (M-B1 onward) and First Memory remain NOT AUTHORIZED.
