@@ -446,3 +446,15 @@ NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT PRIVATE MATERIAL ACCESSED
 > the runbook, pins and go templates. Nothing is installed. The preparation
 > sequence, M-B4, M-B5, genesis, record 1, First Memory and PROD remain NOT
 > AUTHORIZED, and FRESHNESS is UNKNOWN.
+
+> **Later current state (2026-10-07, pointer only; the text above is
+> preserved as written).** M-B4/M-B5 `INSTALL_TRUST_AND_REGISTRY` completed in
+> preparation Sequence 2 (control `82b89a3`) and was owner-accepted
+> ([completion record](slice-15b2b-b1b3e-mb4-mb5-install-trust-registry-completion.md)).
+> Exactly one `install-anchors` ran: P1B-4 PASS, and W3 was confirmed after one
+> read-only re-classification of a local-client POST anomaly. Exactly one
+> `install-registry` ran: P1B-5 PASS, `W5_INSTALLED_CONTENT_VERIFIED`, denial
+> proof P1B-5 PASS. The trust anchors and Registry V1 are installed (technical,
+> owner-accepted); the registry is not effective and no authority is active.
+> The K-WIT burn/regenerate option is closed. M-B6, genesis, record 1, First
+> Memory and PROD remain NOT AUTHORIZED, and FRESHNESS is UNKNOWN.
