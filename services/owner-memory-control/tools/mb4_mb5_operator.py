@@ -40,6 +40,7 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -195,6 +196,33 @@ def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(bytes(data)).hexdigest()
 
 
+DERIVATION_MODULE = "mb4_mb5_installable_inputs_operator"
+
+
+def load_derivation(repo: Path):
+    """Load the pinned derivation module from `<repo>`: a fresh module on every call, fail closed.
+
+    The module is registered in `sys.modules` BEFORE `exec_module`: its
+    dataclasses use postponed annotations, and `dataclasses` resolves them
+    through `sys.modules[cls.__module__]` while the module executes (the
+    `verify_mb3_registry._load` pattern). Any earlier entry under the name is
+    replaced, never reused. On a load failure the half-executed module is
+    removed again and the operator STOPs; nothing has been written yet."""
+    path = Path(repo) / DERIVATION
+    _need(sha256_hex(path.read_bytes()) == TOOL_PINS[DERIVATION], "TOOL_PIN_MISMATCH:" + DERIVATION)
+    spec = importlib.util.spec_from_file_location(DERIVATION_MODULE, path)
+    _need(spec is not None and spec.loader is not None, "DERIVATION_LOAD_FAILED")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[DERIVATION_MODULE] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        if sys.modules.get(DERIVATION_MODULE) is module:
+            del sys.modules[DERIVATION_MODULE]
+        raise Stop("DERIVATION_LOAD_FAILED") from exc
+    return module
+
+
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[bytes]"]
 
 
@@ -285,15 +313,13 @@ class Operator:
             _need(sha256_hex((Path(repo) / path).read_bytes()) == TOOL_PINS[path], "TOOL_PIN_MISMATCH:" + path)
         _need(sha256_hex(Path(export).read_bytes()) == EXPORT_SHA256, "EXPORT_SHA256_MISMATCH")
         if derivation is None:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("mb4_mb5_installable_inputs_operator", Path(repo) / DERIVATION)
-            derivation = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(derivation)
+            derivation = load_derivation(Path(repo))   # before any write: a load failure leaves no output
+        sources = derivation.ACCEPTED_SOURCES
         before = sha256_hex(Path(export).read_bytes())
-        first = derivation.derive_from_members(derivation.read_export(Path(export)))
-        second = derivation.derive_from_members(derivation.read_export(Path(export)))
+        first = derivation.derive_from_members(derivation.read_export(Path(export), sources), sources)
+        second = derivation.derive_from_members(derivation.read_export(Path(export), sources), sources)
         _need(dict(first.files) == dict(second.files), "DERIVATION_NOT_DETERMINISTIC")
-        derivation.check_pins(first)
+        derivation.check_pins(first, DERIVED)
         out = self._new_dir(Path(workdir) / "derived")
         derivation._write_outputs(out / "files", first)
         rehash = {name: sha256_hex((out / "files" / name).read_bytes()) for name in DERIVED}   # independent re-read

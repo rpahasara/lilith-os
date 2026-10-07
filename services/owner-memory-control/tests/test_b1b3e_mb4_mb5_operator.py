@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import gzip
 import hashlib
 import importlib.util
@@ -22,16 +23,22 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / "services/owner-memory-control/tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb4_mb5_operator as O  # noqa: E402
+
+HAVE_CRYPTO = all(importlib.util.find_spec(m) is not None for m in ("cryptography", "rfc8785", "fido2"))
 
 CONTROL = "c" * 40
 MUTATING = re.compile(r"\b(rm|rmdir|mkdir|mv|cp|chmod|chown|tee|dd|truncate|ln|install-anchors|install-registry|"
@@ -234,18 +241,22 @@ class StagingTests(unittest.TestCase):
 
     def test_derive_writes_new_files_and_never_changes_the_export(self):
         class FakeDerivation:
+            ACCEPTED_SOURCES = object()
+
             def __init__(self):
                 self.calls = 0
 
-            def read_export(self, path):
+            def read_export(self, path, pins):
+                assert pins is self.ACCEPTED_SOURCES
                 return {"x": Path(path).read_bytes()}
 
-            def derive_from_members(self, members):
+            def derive_from_members(self, members, pins):
+                assert pins is self.ACCEPTED_SOURCES
                 self.calls += 1
                 return type("D", (), {"files": {name: name.encode() for name in O.DERIVED}})()
 
-            def check_pins(self, derivation):
-                return None
+            def check_pins(self, derivation, expected):
+                assert expected is O.DERIVED
 
             def _write_outputs(self, out, derivation):
                 out.mkdir(mode=0o700)
@@ -394,6 +405,196 @@ class OneAttemptTests(unittest.TestCase):
                 os.environ.pop("LILITH_MB4_MB5_GCLOUD", None)
             else:
                 os.environ["LILITH_MB4_MB5_GCLOUD"] = old
+
+
+@unittest.skipUnless(HAVE_CRYPTO, "cryptography, rfc8785 and fido2 are required")
+class RealDerivationLoadTests(unittest.TestCase):
+    """The defect that escaped the fake-derivation test: the REAL derivation module, loaded by the operator itself.
+
+    The first preparation sequence stopped at E-21 because `derive` executed
+    `mb4_mb5_installable_inputs.py` without registering it in `sys.modules`
+    (dataclass AttributeError). These tests run the real loader and the real
+    derivation on a synthetic TEST world (the M-B3 package test keys, a
+    synthetic export tar). The only substitution is the source / export /
+    derived pins, set on the freshly loaded real module. The accepted export
+    is never read here."""
+
+    @classmethod
+    def setUpClass(cls):
+        import test_b1b3e_mb4_mb5_installable_inputs as T
+        cls.T = T
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        (base / "world").mkdir()
+        cls.src = T.TestSources(base / "world")
+        cls.export = cls._export(base / "synthetic-export.tar", cls.src.members)
+        cls.export_sha = sha(cls.export.read_bytes())
+        cls.source_pins = dataclasses.replace(cls.src.pins, export_sha256=cls.export_sha)
+        independent = T.D.derive_from_members(cls.src.members, cls.src.pins)   # the test's own import of the module
+        cls.expected_files = dict(independent.files)
+        cls.expected = {name: sha(independent.files[name]) for name in O.DERIVED}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.addCleanup(sys.modules.pop, O.DERIVATION_MODULE, None)
+
+    @classmethod
+    def _export(cls, path: Path, members: dict) -> Path:
+        """A synthetic export tar holding the five members the derivation reads."""
+        with tarfile.open(path, "w") as archive:
+            for key, name in cls.T.D.EXPORT_MEMBERS.items():
+                data = members[key]
+                info = tarfile.TarInfo(name)
+                info.size, info.mode, info.mtime = len(data), 0o644, 0
+                archive.addfile(info, io.BytesIO(data))
+        return path
+
+    @contextlib.contextmanager
+    def synthetic(self, loaded: list, source_pins=None):
+        """The REAL loader runs; then the TEST source pins replace the accepted ones on the fresh module."""
+        real = O.load_derivation
+        pins = source_pins or self.source_pins
+
+        def load(repo):
+            module = real(repo)
+            loaded.append(module)
+            values = {f.name: getattr(pins, f.name) for f in dataclasses.fields(pins)}
+            module.ACCEPTED_SOURCES = module.SourcePinsV1(**values)
+            return module
+
+        with mock.patch.object(O, "load_derivation", load), \
+                mock.patch.object(O, "EXPORT_SHA256", pins.export_sha256), \
+                mock.patch.dict(O.DERIVED, self.expected, clear=True):
+            yield
+
+    def test_old_unregistered_pattern_is_the_escaped_defect(self):
+        name = "mb4_mb5_installable_inputs_unregistered_probe"
+        spec = importlib.util.spec_from_file_location(name, TOOLS / "mb4_mb5_installable_inputs.py")
+        module = importlib.util.module_from_spec(spec)
+        with self.assertRaises(AttributeError):
+            spec.loader.exec_module(module)                      # the E-21 failure, reproduced
+        self.assertNotIn(name, sys.modules)
+
+    def test_real_module_is_registered_before_exec_and_its_dataclasses_initialize(self):
+        seen = []
+        real_spec = importlib.util.spec_from_file_location
+
+        def spy(name, location, *args, **kwargs):                # observes; the real loader still executes
+            spec = real_spec(name, location, *args, **kwargs)
+            if name == O.DERIVATION_MODULE:
+                real_exec = spec.loader.exec_module
+
+                def exec_module(module):
+                    seen.append(("before", sys.modules.get(name) is module))
+                    real_exec(module)
+                    seen.append(("after", sys.modules.get(name) is module))
+                spec.loader.exec_module = exec_module
+            return spec
+
+        with mock.patch.object(importlib.util, "spec_from_file_location", spy):
+            module = O.load_derivation(ROOT)
+        self.assertEqual(seen, [("before", True), ("after", True)])
+        self.assertIs(sys.modules[O.DERIVATION_MODULE], module)
+        self.assertEqual(Path(module.__file__).resolve(), (TOOLS / "mb4_mb5_installable_inputs.py").resolve())
+        self.assertIsNot(module, self.T.D)
+        for cls in (module.SourcePinsV1, module.DerivationV1):
+            self.assertTrue(dataclasses.is_dataclass(cls))
+            self.assertEqual(cls.__module__, O.DERIVATION_MODULE)
+        self.assertIsInstance(module.ACCEPTED_SOURCES, module.SourcePinsV1)
+        self.assertEqual(module.ACCEPTED_SOURCES.export_sha256, O.EXPORT_SHA256)
+        self.assertEqual(module.DERIVED_SHA256, O.DERIVED)       # the accepted pins, unchanged
+
+    def test_real_derive_end_to_end_through_the_cli(self):
+        loaded = []
+        with tempfile.TemporaryDirectory() as directory, self.synthetic(loaded):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(O.main(["derive", str(ROOT), str(self.export), directory]), 0)
+            result = json.loads(out.getvalue())
+            self.assertEqual(result["result"], "MB4_MB5_DERIVED_PINNED")
+            self.assertEqual(result["derived"], self.expected)
+            self.assertTrue(result["exportUnchanged"])
+            self.assertEqual([m.__name__ for m in loaded], [O.DERIVATION_MODULE])
+            files = Path(directory) / "derived/files"
+            self.assertEqual(sorted(os.listdir(files)), sorted(list(self.expected) + ["SHA256SUMS"]))
+            for name, data in self.expected_files.items():
+                self.assertEqual((files / name).read_bytes(), data)
+            self.assertEqual((files / "SHA256SUMS").read_bytes().decode("ascii").splitlines(),
+                             [f"{self.expected[n]}  {n}" for n in self.expected])
+        # the representation rules held: registry = transport minus exactly one LF; no output ends in a newline
+        self.assertEqual(self.expected_files["authority-registry.v1.json"] + b"\n", self.src.transport)
+        self.assertFalse(any(data.endswith(b"\n") for data in self.expected_files.values()))
+        self.assertEqual(sha(self.export.read_bytes()), self.export_sha)
+
+    def test_real_derivation_logic_refuses_and_writes_nothing(self):
+        members = dict(self.src.members, kwit=self.src.members["kwit"] + b" ")      # not the pinned K-WIT bytes
+        with tempfile.TemporaryDirectory() as directory:
+            export = self._export(Path(directory) / "tampered.tar", members)
+            pins = dataclasses.replace(self.source_pins, export_sha256=sha(export.read_bytes()))
+            work = Path(directory) / "work"
+            work.mkdir()
+            loaded = []
+            with self.synthetic(loaded, pins), self.assertRaises(Exception) as caught:
+                O.Operator().derive(ROOT, export, work)
+            self.assertEqual(type(caught.exception).__name__, "DerivationRefusal")      # the real module's refusal
+            self.assertEqual(type(caught.exception).__module__, O.DERIVATION_MODULE)
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(os.listdir(work), [])
+
+    def test_repeated_invocation_loads_fresh_modules_and_replaces_stale_state(self):
+        stale = types.ModuleType(O.DERIVATION_MODULE)
+        stale.ACCEPTED_SOURCES = "stale"
+        sys.modules[O.DERIVATION_MODULE] = stale
+        first = O.load_derivation(ROOT)
+        second = O.load_derivation(ROOT)
+        self.assertIsNot(first, stale)
+        self.assertIsNot(second, first)
+        self.assertIsNot(second.SourcePinsV1, first.SourcePinsV1)
+        self.assertIs(sys.modules[O.DERIVATION_MODULE], second)
+        loaded = []
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, self.synthetic(loaded):
+            one = O.Operator().derive(ROOT, self.export, Path(a))
+            two = O.Operator().derive(ROOT, self.export, Path(b))
+            self.assertEqual(one["derived"], self.expected)
+            self.assertEqual(two["derived"], self.expected)
+            for name, data in self.expected_files.items():
+                self.assertEqual((Path(a) / "derived/files" / name).read_bytes(),
+                                 (Path(b) / "derived/files" / name).read_bytes())
+        self.assertEqual(len(loaded), 2)
+        self.assertIsNot(loaded[0], loaded[1])
+
+    def test_load_failure_is_fail_closed_with_no_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            loaded = []
+            with self.synthetic(loaded), mock.patch.dict(sys.modules, {"mb3_registry_ceremony": None}):
+                sys.modules.pop(O.DERIVATION_MODULE, None)
+                with self.assertRaises(O.Stop) as caught:     # a real exec failure: the module's own import fails
+                    O.Operator().derive(ROOT, self.export, Path(directory))
+                self.assertEqual(caught.exception.code, "DERIVATION_LOAD_FAILED")
+                self.assertIsInstance(caught.exception.__cause__, ImportError)
+                self.assertNotIn(O.DERIVATION_MODULE, sys.modules)   # no half-executed module left behind
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    self.assertEqual(O.main(["derive", str(ROOT), str(self.export), directory]), 1)
+                self.assertEqual(out.getvalue(), "")
+                self.assertIn("STOP DERIVATION_LOAD_FAILED", err.getvalue())
+            self.assertEqual(loaded, [])
+            self.assertEqual(os.listdir(directory), [])
+        self.assertEqual(sha(self.export.read_bytes()), self.export_sha)
+
+    def test_unpinned_derivation_bytes_are_never_executed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / O.DERIVATION
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"raise SystemExit('must never run')\n")
+            sys.modules.pop(O.DERIVATION_MODULE, None)
+            with self.assertRaises(O.Stop) as caught:
+                O.load_derivation(Path(directory))
+            self.assertEqual(caught.exception.code, "TOOL_PIN_MISMATCH:" + O.DERIVATION)
+            self.assertNotIn(O.DERIVATION_MODULE, sys.modules)
 
 
 if __name__ == "__main__":
