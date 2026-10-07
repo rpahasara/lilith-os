@@ -14,7 +14,7 @@ DEV. Forms:
 | `pins <repo>` | local, read-only: clean checkout; control = `HEAD`; every pinned tool hashes to its pin |
 | `expected <repo> <authority-registry.v1.json> <registry-root.json> <workdir>` | local: the owner-computed expected ledger head (computed twice), written once to a NEW `<workdir>/expected` |
 | `cloud <evidence-dir> <since>` | read-only GCP: the 11 JSON captures + bucket list + Admin Activity since `<since>` |
-| `host <repo> <workdir> <evidence-dir> <PRE\\|POST>` | read-only DEV: identity, custody, release readiness (18 modules), installer `status` (P1B-5 / P1B-6), broker preservation, observer, W5 verifier, M-B6 verifier |
+| `host <repo> <workdir> <evidence-dir> <PRE\\|POST>` | read-only DEV: identity, custody, release readiness (38 modules incl. the `provision` CLI path, and the CLI wrapper), installer `status` (P1B-5 / P1B-6), broker preservation, observer, W5 verifier, M-B6 verifier |
 | `denial <repo> <evidence-dir>` | read-only DEV: the root denial proof, existing phase `P1B-5` (unchanged tool) |
 | `ledger-denial <repo> <evidence-dir>` | read-only DEV: the separate M-B6 ledger denial proof, phase `P1B-6` (after a verified `LEDGER_COMMITTED_EXACT`) |
 | `mb6 <repo> <workdir> <go-file>` | **mutation, one attempt**: a read-only pre-state check, the `O_EXCL` marker, then exactly ONE `lilith-authority-ledger-dev provision 1` |
@@ -85,6 +85,7 @@ TOOL_PINS = {
     "scripts/authority_custody_denial_proof.py":
         "f4e39c81c24a01be5702f6a65a581fcd08f97e1c5ad4a07326883b605fef1455",
     "services/owner-memory-control/tools/mb6_ledger_denial_proof.py": "470cb27231a0acc3cc5e0ffedb691c1e0a72c313ae80205aa928cff248b9f3c0",
+    "services/owner-memory-control/tools/mb6_dr5_target.py": "9978e3a791a829d6beace81ca0e4c6db9b1c154fbc56091f6312385d02632656",
 }
 INSTALLER = "services/authority-dev/ceremony/install_authority_dev.py"
 W5_VERIFIER = "services/owner-memory-control/tools/mb4_mb5_trust_install_verifier.py"
@@ -95,6 +96,8 @@ OBSERVER = "services/authority-dev/ceremony/observe_authority_dev_host.py"
 BROKER = "scripts/verify_broker_dev_current_incarnation.py"
 DENIAL = "scripts/authority_custody_denial_proof.py"
 LEDGER_DENIAL = "services/owner-memory-control/tools/mb6_ledger_denial_proof.py"
+DR5_TARGET = "services/owner-memory-control/tools/mb6_dr5_target.py"
+OPERATOR = "services/owner-memory-control/tools/mb6_operator.py"
 
 REGISTRY_DIGEST = "fa66272131a3ef076036616b07766a377de4fdc1e4fef4cb8a054726f05c14fc"
 
@@ -120,17 +123,47 @@ RELEASE_MODULES = {
     "lilith_owner_memory/rotation_contracts.py": "8f9df8dcd3e8a1b0cd8f03169bf7a51d4b6726cbb708cadfb3025586211996b0",
     "lilith_owner_memory/witness_readiness.py": "129d4479a7c86a6ef33acfb27da4f5cd6c6a6947b89184863a50117091fe3cbd",
 }
+# The further release modules the ONE mutation command loads: `lilith-authority-ledger-dev` imports
+# `lilith_authority_root.cli`, and that import loads exactly these (ceremony package §2.2). aee323e SHA-256,
+# unchanged at control. The readiness probe imports the CLI module (definitions only; `main` is not called).
+PROVISION_MODULES = {
+    "lilith_authority_dev/protocol.py": "4cd1154b4d36b4ff29083e597b77a50ecfd653bc1cc4519fb7dcc6b09353a25a",
+    "lilith_authority_root/__init__.py": "b17f2c9dd955128b5028225c5444301548fd3e86fdcacb28d38c053dc5d0a33d",
+    "lilith_authority_root/cli.py": "7175577c0bdbf52b7ad6fd56d8e5818a144d955c386ac452b768b4e5000cf10a",
+    "lilith_authority_root/clients.py": "f6840254b0ef4abc7150077ab58612e8652472fac9caa71e778eecde3e4c328f",
+    "lilith_authority_root/genesis.py": "fa2affd9017f275f62b6b2d9aa8eb8e17d9558d389188f09f0d778f8e4489823",
+    "lilith_authority_root/hold_store.py": "8e62b92dd85f84df2b5e0c289260a81a0a20bb52e142e421e359c2b39e5d46ce",
+    "lilith_authority_root/ledger_tool.py": "86b21c233012a1d03ca252b1d9a92b0cc0d60c5bc59296be55943e45e75c6fcd",
+    "lilith_authority_root/observers.py": "5447eb67b96b5bb93f750fa6a71e63f246266e8d9bbaf6bd3ce9cdab34a349ed",
+    "lilith_authority_root/verifier.py": "b60bf348f0e8fec9c76fc2ee2f9cde28e3033f8227acacd294ab51995740ba80",
+    "lilith_owner_memory/pr1_acceptance.py": "e0928854e1fcf4107458939ba9ebf1903cf7a4d0ab6808f7e89108db1444bbff",
+    "lilith_owner_memory/pr1_bootstrap.py": "9a09a4726bb473067e84e7664dca49d51b90ced1e012564526bae07656d3d5fd",
+    "lilith_owner_memory/successor_custody.py": "29e99a7b179d58dd4f8e9cd576ed544f207145f25f89c92e97ca0e6efa65cb72",
+    "lilith_owner_memory/successor_readiness.py": "842176d06954607aed39d8988764fc253fa8bd4c41ca49fcd5e2a4532c5ecc16",
+    "lilith_recovery_witness/__init__.py": "8c7a3dc1d15115616323a9ee652afde6b4a5f14afc2371dfd92ff3f845b6b3e1",
+    "lilith_recovery_witness/core.py": "e4dcbc4bf0bae588fb1486e28ce37047faeb2755c46383ee04ed9ce9c9d5a3fd",
+    "lilith_recovery_witness/credential.py": "7a394b561df072f5ec5ed933ab04deca450cfd84bf23f3fcf166b0c068916c18",
+    "lilith_recovery_witness/profile.py": "7c28c05f82d399cf460bfd47b35d03985f71d8b1b423c7f6ff12f2e1874bea1d",
+    "lilith_recovery_witness/protocol.py": "1b3f54c5a6c9298e5da08be6a8453b11e25002e396af2453f58f9ac07ed5f2e5",
+    "lilith_recovery_witness/storage.py": "26ff45042fd90edc80c62402d39b68e2251b0725ee6579633ee2cee54f2b7898",
+    "lilith_recovery_witness/writer.py": "ea9b619b4c867a2519f83a2c6c341a8e15d105ad5198dc38ec0609b1ae69bdca",
+}
+# The installed fixed wrapper `/usr/local/sbin/lilith-authority-ledger-dev` (release member
+# `cli/lilith-authority-ledger-dev` = `services/authority-dev/bin/lilith-authority-ledger-dev`).
+LEDGER_CLI_SHA256 = "fda779cd0dcecdc26e371082078306978f97e4f7097acae780fa6f38180fc45b"
 READINESS_PROBE = (
     "import hashlib,json,sys;R='/opt/lilith-authority-dev/current';sys.path.insert(0,R);"
     "import lilith_authority_host.inputs,lilith_authority_host.paths,lilith_authority_host.store_observer;"
     "import lilith_authority_dev.ledger,lilith_owner_memory.authority_ledger_journal;"
     "import lilith_owner_memory.authority_contracts,lilith_owner_memory.authority_verifier;"
     "import lilith_owner_memory.rotation_contracts,lilith_owner_memory.recovery_contracts;"
-    "import lilith_owner_memory.witness_readiness,rfc8785,cryptography,sqlite3;"
+    "import lilith_owner_memory.witness_readiness,lilith_authority_root.cli,rfc8785,cryptography,sqlite3;"
     "m={n:getattr(sys.modules[n],'__file__',None) for n in sorted(sys.modules) "
-    "if n.split('.')[0] in ('lilith_authority_host','lilith_owner_memory','lilith_memory','lilith_authority_dev')};"
+    "if n.split('.')[0] in ('lilith_authority_host','lilith_owner_memory','lilith_memory','lilith_authority_dev',"
+    "'lilith_authority_root','lilith_recovery_witness')};"
     "print(json.dumps({'interpreter':sys.executable,'release':R,'modules':{n:[f[len(R)+1:] if f and f.startswith(R+'/') "
     "else f,hashlib.sha256(open(f,'rb').read()).hexdigest() if f else None] for n,f in m.items()},"
+    f"'ledgerCli':hashlib.sha256(open('{LEDGER_CLI}','rb').read()).hexdigest(),"
     "'deserialize':hasattr(sqlite3.Connection,'deserialize'),'sqlite':sqlite3.sqlite_version,"
     "'rfc8785':getattr(rfc8785,'__version__',None),'cryptography':cryptography.__version__},sort_keys=True))"
 )
@@ -158,8 +191,8 @@ W5_PHASE = {"PRE": "W5_INSTALLED_CONTENT_VERIFIED", "POST": "OUT_OF_SCOPE_POST_L
 MB6_PHASE = {"PRE": "W6_0_NO_MB6_MUTATION", "POST": "LEDGER_COMMITTED_EXACT"}
 PRE_STATES = {"W6_0_NO_MB6_MUTATION": "CREATED", "W6_2_STATE_DIRECTORY_EXACT_EMPTY": "ADOPTED_NO_MUTATION"}
 
-# The binding lines of the M-B6 go template for the owner-ACCEPTED continuity (record §8, decision R-1).
-# `{control}`, `{head}`, `{pre}` are bound.
+# The binding lines of the M-B6 go template for the owner-ACCEPTED continuity (record §8, decision R-1;
+# ceremony package §8). `{control}`, `{operator}`, `{head}`, `{pre}` are bound; the tool pins are static.
 MB6_GO_LINES = (
     "I authorize M-B6 / PROVISION_LEDGER now for exactly one attempt within this current DEV_SYNTHETIC M-B6 "
     "sequence.",
@@ -167,6 +200,10 @@ MB6_GO_LINES = (
     "The deploy freeze holds from the start of this live preparation sequence through technical POST and owner "
     "acceptance or sequence termination.",
     "Control commit: {control}.",
+    "Operator: " + OPERATOR + " SHA-256 {operator}.",
+    "Verifier: " + VERIFIER + " SHA-256 " + TOOL_PINS[VERIFIER] + ".",
+    "Recovery: " + RECOVERY + " SHA-256 " + TOOL_PINS[RECOVERY] + ".",
+    "Ledger denial proof: " + LEDGER_DENIAL + " SHA-256 " + TOOL_PINS[LEDGER_DENIAL] + ".",
     f"Release: {RELEASE_SHA}.",
     f"Command: {LEDGER_CLI} provision 1, exactly one invocation.",
     "Pre-state: {pre}.",
@@ -178,6 +215,7 @@ MB6_GO_LINES = (
     "Memory or PROD.",
     "Any REFUSED, FAILED, traceback, timeout, SSH loss, unexpected output, or other STOP after the attempt marker "
     "consumes this go and ends the sequence. There is no automatic retry.",
+    "A partial state enters only the reviewed W6 classifier and the separately authorized recovery or adoption path.",
 )
 RECOVERY_LINES = (
     "I authorize the bounded M-B6 ledger recovery for exactly one invocation.",
@@ -429,8 +467,8 @@ class Operator:
         except ValueError:
             return False
         modules = {file: digest for file, digest in probe.get("modules", {}).values()}
-        return (modules == RELEASE_MODULES and probe.get("release") == "/opt/lilith-authority-dev/current"
-                and probe.get("deserialize") is True)
+        return (modules == {**RELEASE_MODULES, **PROVISION_MODULES} and probe.get("ledgerCli") == LEDGER_CLI_SHA256
+                and probe.get("release") == "/opt/lilith-authority-dev/current" and probe.get("deserialize") is True)
 
     def denial(self, repo: Path, evidence: Path) -> dict:
         out = self._new_dir(Path(evidence))
@@ -483,7 +521,9 @@ class Operator:
         text = raw.decode("utf-8")
         pre = next((state for state in PRE_STATES if f"Pre-state: {state}." in " ".join(text.split())), None)
         _need(pre is not None, "GO_PRE_STATE_MISSING")
-        self.check_go(text, MB6_GO_LINES, control=control, head=head, pre=pre)
+        operator = sha256_hex(self._git(repo, "show", f"HEAD:{OPERATOR}"))
+        _need(operator == sha256_hex(Path(__file__).read_bytes()), "OPERATOR_NOT_AT_CONTROL")
+        self.check_go(text, MB6_GO_LINES, control=control, operator=operator, head=head, pre=pre)
         _need(not (Path(workdir) / ATTEMPT_DIR / f"{MB6_ATTEMPT}.json").exists(), "ATTEMPT_ALREADY_CONSUMED:mb6")
         verifier = load_tool(Path(repo), VERIFIER, "mb6_ledger_verifier_operator_classify")   # before any write
         code, report, _ = self._verifier(repo, f"expect {pre} {head}")      # read-only, before the marker

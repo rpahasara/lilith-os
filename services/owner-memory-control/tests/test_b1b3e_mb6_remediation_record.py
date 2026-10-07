@@ -143,7 +143,7 @@ class Mb6RemediationRecordTests(unittest.TestCase):
         ledger = (ARCH / "current-architecture-acceptance-ledger-v0.1.md").read_text(encoding="utf-8")
         self.assertIn("### 13.1ae Current-state reconciliation (M-B6 PROVISION_LEDGER repository remediation / design", ledger)
         self.assertIn("### 13.1af Current-state reconciliation (M-B6 owner governance decisions, 2026-10-07)", ledger)
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1af) | UNASSIGNED |", ledger)
+        self.assertIn("the runtime timeout fix is deferred (§13.1af)", ledger)               # the AUTH-02 cell
         self.assertLess(ledger.index("### 13.1ae"), ledger.index("### 13.1af"))
         self.assertLess(ledger.index("### 13.1af"), ledger.index("### 13.2 Checks"))
 
@@ -207,7 +207,8 @@ class OwnerDecisionTests(unittest.TestCase):
         (root / "expected" / "expected-ledger.json").write_text(json.dumps({
             "derivation": "OWNER_COMPUTED_FROM_REGISTRY_V1", "ledgerSequence": 1, "ledgerHead": PIN_DERIVED_HEAD,
             "independentLedgerHead": PIN_DERIVED_HEAD, "pinDerivedLedgerHead": PIN_DERIVED_HEAD}), encoding="utf-8")
-        lines = [line.format(control="a" * 40, head=PIN_DERIVED_HEAD, pre=V.W6_0) for line in O.MB6_GO_LINES]
+        lines = [line.format(control="a" * 40, operator=sha(TOOLS / "mb6_operator.py"), head=PIN_DERIVED_HEAD, pre=V.W6_0)
+                 for line in O.MB6_GO_LINES]
         if drop is not None:
             del lines[drop]
         (root / "go.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
