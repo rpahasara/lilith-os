@@ -37,7 +37,7 @@ exact file bytes, so they do not change on merge.
 
 | Tool (repository path) | Where it runs | SHA-256 |
 | --- | --- | --- |
-| `services/owner-memory-control/tools/mb4_mb5_operator.py` | owner laptop (the operator; it builds every remote command) | `2d9835edb18361df231c58d914c8859240438c7ed7dd39de547bee4756acfbbf` |
+| `services/owner-memory-control/tools/mb4_mb5_operator.py` | owner laptop (the operator; it builds every remote command) | `e380ab1852ba72fe511c650446867c8d229d95776af3c1d4266fa949c0a9de1a` |
 | `services/owner-memory-control/tools/mb4_mb5_installable_inputs.py` | owner laptop, WSL (pinned wheels) | `dbe94a2d3a38fa838d4fd7eeb9016274c85c684221ddb770e8e993cc15b18d61` |
 | `services/owner-memory-control/tools/mb3_registry_ceremony.py` (library of the derivation) | owner laptop, WSL | `c77b651ca2ae9d5f6c5526f958469a01c0d42e6ebdf189fc206ac2132af61320` |
 | `services/owner-memory-control/tools/verify_mb3_registry.py` | owner laptop, WSL (export re-verification) | `e710cfa623d494e243ab4a1fbaefe28e8d079e58398368f9dcabd645e06b5507` |
@@ -640,3 +640,16 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT PRIVATE MATERIAL ACCESSED
 ```
+
+> **Later current state (2026-10-07, pointer only; the text above is
+> preserved as written except the operator pin in the §1 table, which must
+> equal the code).** The first preparation sequence (control `ffa9575`)
+> stopped at E-21: the operator `2d9835ed…` loaded the derivation module
+> without registering it in `sys.modules`, and the module's dataclasses failed
+> to initialize. Nothing was derived, staged or installed; no go was consumed;
+> no burn. See the [sequence-1 incident record](slice-15b2b-b1b3e-mb4-mb5-prep-seq1-operator-loader-incident.md).
+> The operator pin `2d9835ed…` is **superseded and must not be used**; the
+> fixed operator (pre-merge `e380ab18…`) is pinned in §1. Sequence-1 evidence is
+> historical and non-reusable. A new preparation sequence needs its own owner
+> authorization after the fix is merged and deployed, and its DR-5 comparison
+> must include that deploy. FRESHNESS is UNKNOWN.
