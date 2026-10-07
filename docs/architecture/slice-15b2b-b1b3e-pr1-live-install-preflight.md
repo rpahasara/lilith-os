@@ -122,6 +122,11 @@ differ, this record says so (§2).
 | PC-6 | B1b-3d §7 keys the DR-5 existence rule on an `INSTALLED` marker written at L4. The accepted deployer boundary derives maturity from root-owned ladder objects instead, and introduces no marker | PR-1 writes **no** `INSTALLED` marker. The ladder derivation is extended instead (§9). The broker verifier's `…/INSTALLED` entry stays `NOT_YET_PRESENT` |
 | PC-7 | The signer runs as `lilith-authority-dev` with `InaccessiblePaths=/etc/credstore.encrypted`. It therefore cannot observe the credential inventory (B6) that `FULL_READINESS` requires | `FULL_READINESS` can be reproduced only by a root observer, never by the signer about itself. The signer reports a partial self-view (§19, §33) |
 
+> **Erratum (2026-10-07, M-B6 remediation D-5; the table above is unchanged).** A naming hazard missing from this
+> list: the ledger-journal `GENESIS` op (M-B6, a journal row at sequence 1) ≠ the witness genesis candidate
+> (M-B7, unsigned bytes) ≠ `OwnerGenesisPinV1` (M-B8, the owner's pin of the candidate digest) ≠ the committed
+> witness genesis (M-B9b, `chain/1.json`). See the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §11.
+
 ## 3. Invariants
 
 Inherited without change: every invariant of the gate §3, Source Prep A §15,
@@ -644,6 +649,12 @@ exists (PF-13). The accepted path is
 | first signer start | journals nothing. The genesis op already binds the registry v1 view, so the head stays at the genesis position and both HELD and RELEASED can bind the genesis entry (SOURCE DETAIL; S-10) |
 | C-4 use | `ADVANCE_EPOCH`, `VOID_CHALLENGE`, `QUARANTINE_USE` exist in the op set, reachable only through the gated recovery handler (§15). Never exercised live in PR-1 |
 
+> **Erratum (2026-10-07, M-B6 remediation D-3; the table above is unchanged).** The provisioning code does not
+> refuse every existing directory: `ledger_tool.prepare_state_directory` adopts an exact, empty, signer-owned
+> `0700` `/var/lib/lilith-authority-dev` unchanged (`ADOPTED_NO_MUTATION`) and refuses only an unsafe directory
+> (`LEDGER_TOOL_STATE_DIRECTORY_UNSAFE`) or any existing ledger file or `-wal` / `-shm` / `-journal` sidecar
+> (`LEDGER_TOOL_ALREADY_PROVISIONED`). See the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §11.
+
 ## 15. Narrow C-4 gate wiring
 
 PR-1 must wire `evaluate_recovery_gate` into the runtime (Source Prep B §12).
@@ -1019,6 +1030,12 @@ One logical transition per row. PRE always includes: the preservation set
 > `authority-registry.v<N>.json` (its listing check refuses any other name), and the runtime reader states
 > "registry storage != accepted registry head (the witness decides the head)". See the
 > [M-B4/M-B5 remediation record](slice-15b2b-b1b3e-mb4-mb5-trust-install-remediation.md) §7.
+
+> **Erratum (2026-10-07, M-B6 remediation D-2 and D-4; the table above is unchanged).** D-2: the M-B6 row's
+> rollback boundary is **before M-B9b** (as §29, F-5 and sequencing C-7 state), not "before M-B9". D-4: the M-B8
+> row names only the pin; the installer stage `install-owner-inputs` (P1B-8) installs **both** the on-host
+> genesis-pin copy and the authorization-register copy, and requires `status P1B-6`. See the
+> [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §11.
 
 ## 28. Future phases
 

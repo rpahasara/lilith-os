@@ -199,6 +199,14 @@ DR-5 comparison (for example on the merge of PR #145) was not checked: no
 GitHub contact was authorized. Any such deployment needs a fresh DR-5
 comparison before eligibility (Condition 3 trigger (f)).
 
+> **Governance clarification (2026-10-07, owner decision R-2B, M-B6 remediation; the text above is unchanged).**
+> `B5_SECTION_9_POST_MB1_STATUS = HISTORICAL_AFTER_MB1_EXERCISED`. The
+> "VOID (controlling record: decision packet §9)" paragraph above applied before M-B1. After M-B1 was exercised
+> and accepted, decision packet §9 is historical evidence, not a standing invalidator for later bootstrap phases;
+> those phases use their own accepted phase-specific evidence, continuity and DR-5 rules (for M-B6:
+> `MB6_CONTINUITY` and `PHASE_BOUND_DR5_BASELINE_WITH_DERIVED_DELTA`). The grant's history, M-B1 … M-B5 and
+> their evidence are not altered. See the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §12.3.
+
 ## 8. Owner risk state (unchanged by this grant)
 
 The packet-review dispositions are preserved. None is reopened or altered.

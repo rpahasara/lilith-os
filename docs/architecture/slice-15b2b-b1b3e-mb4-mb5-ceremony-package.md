@@ -103,6 +103,14 @@ bytecode is written.
   terminator, the sequence is unusable until the owner records a
   determination.
 
+> **Governance clarification (2026-10-07, owner decision R-2B, M-B6 remediation; the text above is unchanged).**
+> `B5_SECTION_9_POST_MB1_STATUS = HISTORICAL_AFTER_MB1_EXERCISED`. T-11,
+> E-15, §13 and §14.1 of this package imported B-5 §9 as a live terminator for the M-B4/M-B5 sequences. That
+> application stands as history for those completed sequences and is not rewritten. It does not carry forward:
+> after M-B1, B-5 §9 is historical, and later bootstrap phases (from M-B6) use their own accepted phase-specific
+> evidence, continuity and DR-5 rules instead of a B-5 §9 terminator. This package's pins and tools are unchanged.
+> See the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §12.3.
+
 ## 4. Fresh preparation and re-proof (one owner-authorized sequence)
 
 The preparation sequence needs a **separate explicit owner authorization**
