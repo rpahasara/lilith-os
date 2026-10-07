@@ -149,9 +149,14 @@ class RemediationTests(unittest.TestCase):
         self.assertIn("**Status: PROPOSED ONLY. A separate explicit owner decision is required.**", proposal)
         self.assertIn("neither executes nor activates it", proposal)
         self.assertIn("K-WIT burn/regenerate option closes at M-B4", proposal)
-        for text in (self.text, DECISION.read_text(encoding="utf-8"), LEDGER.read_text(encoding="utf-8"),
-                     INDEX.read_text(encoding="utf-8")):
+        # This record proposed it. Acceptance lives only in the separate continuity owner decision;
+        # a later pointer appended to this record may name it.
+        original = self.text.split("> **Later current state", 1)[0]
+        for text in (original, DECISION.read_text(encoding="utf-8")):
             self.assertNotRegex(text, r"MB4_MB5_CONTINUITY[^\n]{0,80}\b(ACCEPTED|ADOPTED)\b(?<!NOT ACCEPTED)")
+        accepted = ARCH / "slice-15b2b-b1b3e-mb4-mb5-continuity-owner-decision.md"
+        if accepted.exists():
+            self.assertIn(f"{CONTINUITY} (ACCEPTED)", accepted.read_text(encoding="utf-8"))
 
     def test_gap_status(self):
         gaps = section(self.text, "## 2. Gap status", "## 3.")
@@ -200,7 +205,9 @@ class ErratumAndIndexTests(unittest.TestCase):
         block = section(ledger, "### 13.1aa", "### 13.2 Checks")
         self.assertIn("M-B4 / M-B5 / `INSTALL_TRUST_AND_REGISTRY` NOT AUTHORIZED", block)
         self.assertIn("FRESHNESS=UNKNOWN", block)
-        self.assertIn("(§13.1aa) | UNASSIGNED |", ledger)
+        auth02 = next(line for line in ledger.splitlines() if line.startswith("| AUTH-02 |"))
+        self.assertIn("(§13.1aa)", auth02)                      # later passes append after it (§13.1ab …)
+        self.assertTrue(auth02.endswith("| UNASSIGNED |"))
         for text in (index, ledger):
             self.assertNotRegex(text, re.escape("M-B4/M-B5") + r"[^\n]{0,40}= AUTHORIZED")
 

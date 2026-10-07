@@ -3,7 +3,10 @@
 
 Run only by the owner, as root, on `lilith-dev-01`, streamed from the reviewed
 CONTROL_SHA, inside a separately authorized PR-1A (P1A-10) or PR-1B (P1B-12)
-evidence step. Control tooling only: never release payload, never run by the
+evidence step. B1b-3e M-B4/M-B5 adds the closed phase `P1B-5`: after M-B5, the
+three public install files (the two trust anchors and Registry V1) must be
+unwritable by every outsider, the signer and the witness
+(docs/architecture/slice-15b2b-b1b3e-mb4-mb5-ceremony-package.md). Control tooling only: never release payload, never run by the
 routine deployer or GitHub Actions.
 
     sudo /usr/bin/python3 -I -B - <phase> < authority_custody_denial_proof.py
@@ -43,7 +46,7 @@ RUNUSER = "/usr/sbin/runuser"
 NSENTER = "/usr/bin/nsenter"
 SYSTEMCTL = "/usr/bin/systemctl"
 
-PHASES = ("P1A-10", "P1B-12")
+PHASES = ("P1A-10", "P1B-5", "P1B-12")
 
 CURRENT = "/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred"
 CREDSTORE = "/etc/credstore.encrypted"
@@ -53,6 +56,9 @@ HOLD_STORE = HOLD_PARENT + "/holds"
 WITNESS_CREDENTIAL_PARENT = "/etc/lilith-recovery-witness"
 WITNESS_BLOB = WITNESS_CREDENTIAL_PARENT + "/credentials/lilith-recovery-witness.witness.cred"
 AUTHORITY_CONFIG = "/etc/lilith-authority-dev"
+REGISTRY_ROOT_ANCHOR = AUTHORITY_CONFIG + "/trust/registry-root.json"
+WITNESS_ANCHOR = AUTHORITY_CONFIG + "/trust/witness-anchor.json"
+REGISTRY_V1 = AUTHORITY_CONFIG + "/registry/authority-registry.v1.json"
 AUTHORITY_STATE = "/var/lib/lilith-authority-dev"
 LEDGER = AUTHORITY_STATE + "/authority_ledger.db"
 WITNESS_STATE = "/var/lib/lilith-recovery-witness"
@@ -86,6 +92,9 @@ ROWS: tuple[tuple[str, tuple[str, ...], str, str], ...] = (
     ("P1A-10", OUTSIDERS + (SIGNER, WITNESS), "-w", AUTHORITY_CONFIG + "/registry"),
     ("P1A-10", OUTSIDERS + (SIGNER, WITNESS), "-w", AUTHORITY_CONFIG + "/owner"),
     ("P1A-10", (SIGNER,), "-r", BROKER_STATE),
+    ("P1B-5", OUTSIDERS + (SIGNER, WITNESS), "-w", REGISTRY_ROOT_ANCHOR),
+    ("P1B-5", OUTSIDERS + (SIGNER, WITNESS), "-w", WITNESS_ANCHOR),
+    ("P1B-5", OUTSIDERS + (SIGNER, WITNESS), "-w", REGISTRY_V1),
     ("P1B-12", OUTSIDERS + (WITNESS,), "-r", AUTHORITY_STATE),
     ("P1B-12", OUTSIDERS + (WITNESS,), "-x", AUTHORITY_STATE),
     ("P1B-12", OUTSIDERS + (WITNESS,), "-w", AUTHORITY_STATE),
