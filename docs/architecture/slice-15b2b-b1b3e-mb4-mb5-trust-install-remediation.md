@@ -436,3 +436,13 @@ PROD = NOT AUTHORIZED
 FRESHNESS=UNKNOWN
 NO LIVE SYSTEM CONTACTED; NO K-ROOT OR K-WIT PRIVATE MATERIAL ACCESSED
 ```
+
+> **Later current state (2026-10-07, pointer only; the text above is
+> preserved as written).** The owner accepted the continuity model proposed
+> in §8 as `MB4_MB5_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_SEQUENCE_TWO_GO`
+> ([continuity owner decision](slice-15b2b-b1b3e-mb4-mb5-continuity-owner-decision.md)),
+> closing G-5 in governance. The reviewed
+> [ceremony package](slice-15b2b-b1b3e-mb4-mb5-ceremony-package.md) carries
+> the runbook, pins and go templates. Nothing is installed. The preparation
+> sequence, M-B4, M-B5, genesis, record 1, First Memory and PROD remain NOT
+> AUTHORIZED, and FRESHNESS is UNKNOWN.
