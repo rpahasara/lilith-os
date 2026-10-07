@@ -375,6 +375,14 @@ Every refusal in steps 1–5 happens before the marker, so it consumes nothing.
 - It **never continues to M-B7**. Owner acceptance of `LEDGER_PROVISIONED` is separate.
 - The owner-acceptance evidence after W6-6 includes `denial` (P1B-5) PASS and `ledger-denial` (P1B-6) PASS
   (§13).
+
+> **Note (2026-10-07, M-B6 ceremony package; the text above is unchanged).** The
+> [ceremony package](slice-15b2b-b1b3e-mb6-ceremony-package.md) extends the operator. The readiness probe also
+> imports `lilith_authority_root.cli` and pins all 38 release modules of the `provision` path plus the installed
+> CLI wrapper (§2.2 there); the merged probe covered only the 18 verifier-bundle modules. The go lines also bind
+> the operator, verifier, recovery and P1B-6 proof SHA-256, and `mb6` refuses `OPERATOR_NOT_AT_CONTROL` unless
+> the running operator equals its bytes at `HEAD`. The verifier, recovery, expected-head and P1B-6 tools are
+> unchanged.
 - A partial outcome goes to `classify`, then `recovery-plan`, then (separately authorized) `recovery`.
 
 ## 8. M-B6 continuity (owner decision R-1, ACCEPTED 2026-10-07)

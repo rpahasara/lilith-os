@@ -755,8 +755,9 @@ class FakeRun:
         if command.endswith(O.PROVISION):
             return self.provision()
         if "readlink /opt/lilith-authority-dev/current" in command:
-            probe = {"release": "/opt/lilith-authority-dev/current", "deserialize": True,
-                     "modules": {path: [path, digest] for path, digest in O.RELEASE_MODULES.items()}}
+            probe = {"release": "/opt/lilith-authority-dev/current", "deserialize": True, "ledgerCli": O.LEDGER_CLI_SHA256,
+                     "modules": {path: [path, digest] for path, digest
+                                 in {**O.RELEASE_MODULES, **O.PROVISION_MODULES}.items()}}
             return subprocess.CompletedProcess(argv, 0, (f"releases/{O.RELEASE_SHA}\nRELEASE_PYTHON=executable\n"
                                                          + json.dumps(probe) + "\n").encode(), b"")
         if "mb6_ledger_verifier" in command:
@@ -779,7 +780,8 @@ class OperatorTests(Redacted, unittest.TestCase):
             "independentLedgerHead": self.head, "pinDerivedLedgerHead": self.head}), encoding="utf-8")
 
     def go(self, pre=V.W6_0, drop=None) -> Path:
-        lines = [line.format(control="a" * 40, head=self.head, pre=pre) for line in O.MB6_GO_LINES]
+        lines = [line.format(control="a" * 40, operator=sha((TOOLS / "mb6_operator.py").read_bytes()), head=self.head,
+                             pre=pre) for line in O.MB6_GO_LINES]
         if drop is not None:
             del lines[drop]
         path = self.work / "go.txt"
@@ -888,9 +890,12 @@ class OperatorTests(Redacted, unittest.TestCase):
         self.assertEqual(source.count("self.ssh(PROVISION)"), 1)                 # one invocation path only
         import re
         self.assertEqual(len(re.findall(r"\bPROVISION\b", source)), 2)            # the definition and that one call
+        # Module-pin lines name release files (e.g. `pr1_bootstrap.py`); they are hashes, never commands.
+        code = re.sub(r'^ {4}"lilith_[a-z_]+/[a-z0-9_]+\.py": "[0-9a-f]{64}",\n', "", source, flags=re.MULTILINE)
+        self.assertEqual(source.count("pr1_bootstrap"), 1)
         for forbidden in ("provision-as-signer", "genesis-candidate", "install-owner-inputs", "bootstrap",
                           "create-initial-held", "systemctl start", "systemctl enable", "daemon-reload"):
-            self.assertNotIn(forbidden, source, forbidden)
+            self.assertNotIn(forbidden, code, forbidden)
 
     @unittest.skipUnless(POSIX, "the bundle runs only on DEV (Linux); the pinned W5 verifier needs os.geteuid at import")
     def test_bundle_loader_is_hash_gated_and_runs_in_memory(self):
