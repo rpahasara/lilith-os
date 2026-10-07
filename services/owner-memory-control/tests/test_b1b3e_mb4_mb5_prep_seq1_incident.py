@@ -117,7 +117,8 @@ class PrepSequence1IncidentTests(unittest.TestCase):
         ledger = LEDGER.read_text(encoding="utf-8")
         self.assertIn("### 13.1ac Current-state reconciliation (M-B4/M-B5 preparation sequence 1 stopped at E-21", ledger)
         auth02 = next(line for line in ledger.splitlines() if line.startswith("| AUTH-02 |"))
-        self.assertTrue(auth02.endswith("FRESHNESS=UNKNOWN (§13.1ac) | UNASSIGNED |"))
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1ac)", auth02)        # later passes append after it (§13.1ad …)
+        self.assertTrue(auth02.endswith("| UNASSIGNED |"))
         readme = (ARCH / "README.md").read_text(encoding="utf-8")
         self.assertIn("(slice-15b2b-b1b3e-mb4-mb5-prep-seq1-operator-loader-incident.md)", readme)
 
