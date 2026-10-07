@@ -244,6 +244,14 @@ re-decide.
 - any unreviewed change to the M-B1 package, or a bundle that does not
   come from a merged SHA.
 
+> **Governance clarification (2026-10-07, owner decision R-2B, M-B6 remediation; the text above is unchanged).**
+> `B5_SECTION_9_POST_MB1_STATUS = HISTORICAL_AFTER_MB1_EXERCISED`. The §9
+> voiding clause was scoped to the pre-M-B1 decision context. Once M-B1 was successfully exercised and accepted,
+> it no longer acts as a standing global invalidator for later bootstrap phases. It remains historical evidence
+> of the conditions under which B-5 was originally granted. Later bootstrap phases use their own accepted
+> phase-specific evidence, continuity and DR-5 rules. This does not retroactively alter M-B1 … M-B5 and does not
+> replay historical PASS evidence as current evidence. See the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §12.3.
+
 ## 10. Remaining risks
 
 - The §8 debt, unchanged.

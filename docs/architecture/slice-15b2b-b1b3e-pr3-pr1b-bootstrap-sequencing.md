@@ -254,6 +254,12 @@ op, the DB is never adopted (crash C-7).
 ledger storage exists != GENESIS row exists != authority state accepted
 ```
 
+> **Erratum (2026-10-07, M-B6 remediation D-1; the text above is unchanged).** Provisioning is not one
+> transaction: the root half creates the directory (`mkdir`, `chown`, `chmod`, fsync of `/var/lib`), the signer
+> half creates the database file `O_EXCL` (empty), and only then one transaction writes the schema and the
+> `GENESIS` row. Storage without a GENESIS row can therefore exist (W6-1, W6-2, W6-3). The reviewed classifier
+> and the bounded pre-M-B9b recovery are in the [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §4, §6.
+
 ### 4.5 Witness genesis sequence and immutability
 
 | Point | What becomes immutable |

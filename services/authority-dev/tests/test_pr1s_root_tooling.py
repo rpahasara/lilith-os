@@ -338,12 +338,18 @@ class LedgerAndGenesisToolTests(unittest.TestCase):
             calls = []
 
             def as_signer(version):
+                # The real signer half (M-B6 remediation T-1): it re-verifies the installed registry and
+                # provisions the ledger as the signer uid. The signer half refuses euid 0 by design, so a
+                # root test run provisions through the same durable ledger call directly instead.
                 calls.append(version)
-                LT.provision_as_signer(environment=X.ENV, registry_version=version, root=host.root, owner_uid=X.UID,
-                                       euid=4242, signer_uid=4242) if False else None
-                from lilith_authority_dev.ledger import DurableAuthorityLedgerV1
-                DurableAuthorityLedgerV1.provision(host.path(P.AUTHORITY_LEDGER), environment=X.ENV,
-                                                   genesis=J.genesis_op(host.registry), expected_uid=X.UID)
+                if X.UID != 0:
+                    observed = LT.provision_as_signer(environment=X.ENV, registry_version=version, root=host.root,
+                                                      owner_uid=X.UID, euid=X.UID, signer_uid=X.UID)
+                    self.assertEqual((observed.sequence, observed.head), J.initial_position(host.registry))
+                else:
+                    from lilith_authority_dev.ledger import DurableAuthorityLedgerV1
+                    DurableAuthorityLedgerV1.provision(host.path(P.AUTHORITY_LEDGER), environment=X.ENV,
+                                                       genesis=J.genesis_op(host.registry), expected_uid=X.UID)
                 return 0
             with self.assertRaises(LT.LedgerToolError) as caught:
                 LT.provision(environment=X.ENV, registry_version=1, euid=1000, signer_uid=X.UID, signer_gid=X.GID,
