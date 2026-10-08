@@ -11,6 +11,11 @@ Status:
   the signer, authority activation, First Memory and PROD remain **NOT AUTHORIZED**. `FRESHNESS=UNKNOWN`.
 - Predecessor: [Package A completion](slice-15b2b-b1b3e-mb7-mb8-package-a-completion.md) (`GENESIS_PINNED`,
   `OWNER_INPUTS_INSTALLED_EXACT`). E-A18 is still pending and must complete before Package B opens (§13).
+- **Later current state (2026-10-08, pointer only; the text above is preserved as written).** E-A18 completed and
+  was owner-recorded. Package B sequence 1 opened on control `5ce067c` and was stopped by the owner during opening
+  evidence: the W9 verifier bundle did not fit a Windows command line (`WinError 206`) before any W9 DEV contact; no
+  B2, no marker, no witness mutation ([sequence 1 stop and remediation R-B1](slice-15b2b-b1b3e-mb9-seq1-w9-transport-stop.md)).
+  R-B1 moves the verifier bundles to stdin (§8.1) and adds the owner pre-M-B9a stop (§10.8, §14).
 
 ```text
 M-B9a technical PASS != WITNESS_STARTED accepted (B3) != M-B9b authorized (B4)
@@ -202,13 +207,34 @@ exactly one start of the two sockets and the service. It never stops or restarts
 
 ## 8. Operator (`mb9_operator.py`) forms
 
-`pins`, `cloud`, `open-sequence` (B1, local), `host <PRE|POST9A|POST9B>`, `denial` (P1B-5), `ledger-denial` (P1B-6),
+`pins`, `cloud`, `open-sequence` (B1, local), `stop-sequence` (the pre-M-B9a stop, local; §10.8),
+`host <PRE|POST9A|POST9B>`, `denial` (P1B-5), `ledger-denial` (P1B-6),
 `owner-denial` (P1B-8), `witness-denial <P1B-9a|P1B-9b>`, `classify`, `mb9a`, `post9a`, `accept-9a` (B3, local),
 `mb9b`, `post9b`, `chain-export`, `health`, `dr5`, `removal-plan`, `removal`, `restart-plan`, `restart`. Every form
 is closed. Every mutating form binds the control commit, the tool pins, the candidate and pin, the sequence state,
 the owner text (verbatim lines) and its hash in the marker, the pre-state and one-attempt semantics. It never runs
 `enable`, `daemon-reload`, `stop`, `restart`, a signer start, a ledger / hold / head-advance / epoch-advance /
 record / activation form or any First Memory path (tested).
+
+### 8.1 Verifier transport (remediation R-B1)
+
+The three verifier bundles (W5 + M-B6, W8, W9) are sent over the remote command's **stdin**. The command line
+carries only the hostname guard, the SHA-256 of the payload, the per-module pins, the entry module and the
+arguments; its length does not grow with the verifier sources. The payload is unchanged: the same base64 of the
+gzip'd JSON `{module: source}` that the pinned M-B6 loader has always read from stdin.
+
+- The remote shell reads the payload once (`B=$(cat)`) and exits `96` unless it hashes to the digest in the
+  command; only then does it decode it for the loader.
+- The unchanged M-B6 loader still exits `96` unless the module set and every module's SHA-256 equal the pins.
+- The client argv, capture, 900 s timeout and hostname guard are those of the pinned `ssh`; a timeout, an SSH
+  failure, a non-zero exit or unparseable output is still `VERIFIER_FAILED` / UNKNOWN, never success or absence.
+- Only the read-only verifier bundles use stdin. Every mutation path (`witness-state`, the two starts, `bootstrap`,
+  the bounded removal) keeps its reviewed command exactly; no form becomes reachable through the transport change.
+- Every argv the operator builds stays below the Windows command-line limit (32767 characters; tested). Sequence 1
+  stopped because the W9 bundle (43688 characters) was the one command above it.
+
+The verifier sources and pins are unchanged. Only `mb9_operator.py` changed; its SHA-256 is bound into each owner
+text at runtime and recorded in the [R-B1 record](slice-15b2b-b1b3e-mb9-seq1-w9-transport-stop.md).
 
 ## 9. Owner offline verification (OD-B11)
 
@@ -312,6 +338,25 @@ owner's explicit adoption of the observed committed genesis.
 > Classified W9 phase: <phase>.
 > I acknowledge: this start is not a retry of M-B9a or M-B9b; any earlier WITNESS_STARTED acceptance is stale and a fresh POST is required before anything else.
 
+### 10.8 Owner pre-M-B9a stop (remediation R-B1)
+
+Available only while B1 is recorded and the attempt directory holds no marker or other file: no B2 has been
+consumed and no M-B9a or M-B9b invocation exists. Opening evidence may be incomplete, FAILED or UNKNOWN. The stop
+ends the sequence, releases its freeze, consumes its control and authorizes nothing. Once any marker exists the
+operator refuses it (`STOP_REFUSED_ATTEMPT_MARKER_PRESENT`): the W9 classifier, removal, restart and recovery
+routes govern instead, and the stop is never a way around them. After the stop, `mb9a` and `mb9b` refuse
+(`SEQUENCE_STOPPED`) and the sequence cannot be reopened in place. Placeholders: `<control>`, `<b1>` (the SHA-256 of
+`B1_SEQUENCE_AUTHORIZATION.json`), `<operator>`.
+
+> I stop this Package B sequence now, before M-B9a, for this current DEV_SYNTHETIC sequence only.
+> Control commit: <control>. B1 record SHA-256: <b1>.
+> Operator: services/owner-memory-control/tools/mb9_operator.py SHA-256 <operator>.
+> No B2 was issued, no M-B9a or M-B9b attempt marker exists, and no witness mutation was made by this sequence.
+> This sequence is OPENED THEN STOPPED BEFORE M-B9a / HISTORICAL / NON-REUSABLE; its evidence is preserved and must not be replayed into a later sequence.
+> The Package B deployment freeze of this sequence is RELEASED by this stop; the release authorizes no deployment, merge or DEV change.
+> The selected Package B live control <control> is CONSUMED by this sequence and is not reusable.
+> This stop authorizes nothing further. A new sequence needs a new merged control, a fresh preservation deploy, a new owner control selection and a new canonical B1.
+
 ## 11. Denial proofs
 
 - **P1B-5** (`scripts/authority_custody_denial_proof.py`, unchanged) stays applicable while the witness runs: it has
@@ -377,7 +422,8 @@ M-B9a technical PASS never implies M-B9b authority; M-B9b needs a fresh explicit
 sequence may stop after an accepted M-B9a without committing lineage.
 
 The Package B freeze begins with B1 and holds through M-B9a, B3, M-B9b, POST, the owner offline verification and
-B5; B5 ends it. No deploy, merge-triggered deploy, manual DEV change, package upgrade, reboot (a global
+B5; B5 ends it. Before any attempt marker exists, an owner pre-M-B9a stop (§10.8) ends the sequence and releases
+its freeze instead (R-B1). No deploy, merge-triggered deploy, manual DEV change, package upgrade, reboot (a global
 invalidator), unit action outside the two reviewed starts, or signer action inside the sequence.
 
 ## 15. Fresh evidence

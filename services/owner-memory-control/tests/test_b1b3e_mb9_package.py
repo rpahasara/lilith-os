@@ -636,20 +636,22 @@ class WitnessDenialProofTests(Redacted, unittest.TestCase):
 # ------------------------------------------------------------------------- the operator (fake transport) ---
 
 class FakeRun:
-    """git reads the worktree; ssh answers by command shape. Records every argv."""
+    """git reads the worktree; ssh answers by command shape. Records every argv and every stdin payload."""
 
     def __init__(self, *, w9=("W9_0_PRE_WITNESS", "W9_1_STATE_DIR_ONLY", "W9_2_STARTED_UNINITIALIZED"),
                  stage=(0, p1b9a_report(), b""), start=(0, b"", b""), health=None, boot=None,
                  invocation=INVOCATION, mainpid=MAINPID):
         self.calls: list[list[str]] = []
+        self.inputs: list[bytes | None] = []
         self.w9 = list(w9)
         self.stage, self.start, self.health = stage, start, health or (0, health_reply(), b"")
         self.boot = boot or (0, bootstrap_ok(), b"")
         self.invocation, self.mainpid = invocation, mainpid
 
-    def __call__(self, argv):
+    def __call__(self, argv, input=None):                     # noqa: A002 (the subprocess keyword)
         argv = list(argv)
         self.calls.append(argv)
+        self.inputs.append(input)
         done = lambda rc=0, out=b"", err=b"": subprocess.CompletedProcess(argv, rc, out, err)  # noqa: E731
         if argv[:1] == ["git"]:
             if argv[3:5] == ["rev-parse", "HEAD"]:
@@ -1558,11 +1560,11 @@ class RecordTests(Redacted, unittest.TestCase):
 
     def test_owner_texts_are_reproduced_verbatim(self):
         for lines in (O.SEQUENCE_LINES, O.MB9A_GO_LINES, O.WITNESS_STARTED_LINES, O.MB9B_GO_LINES,
-                      O.PACKAGE_B_ACCEPTANCE_LINES, O.REMOVAL_LINES, O.RESTART_LINES):
+                      O.PACKAGE_B_ACCEPTANCE_LINES, O.REMOVAL_LINES, O.RESTART_LINES, O.STOP_LINES):
             for line in lines:
                 literal = line.replace("{updated_at}", "<updatedAt>")
                 for key in ("control", "operator", "candidate", "pin", "register", "record", "invocation", "mainpid",
-                            "post9a", "post9b", "genesis", "plan", "phase"):
+                            "post9a", "post9b", "genesis", "plan", "phase", "b1"):
                     literal = literal.replace("{" + key + "}", f"<{key}>")
                 self.assertIn("> " + literal, self.text, literal[:60])
 
