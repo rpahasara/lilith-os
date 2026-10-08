@@ -399,6 +399,12 @@ PASS`.
 28-line transcript of the remediation record §13, including `ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT`. The
 operator records its SHA-256.
 
+> **Erratum (2026-10-07, M-B6 completion; owner determination `P1B6_LINE_COUNT_DISCREPANCY = DOCUMENTATION_ERRATUM_ONLY`; the text above is unchanged).**
+> The P1B-6 PASS transcript has **27** lines, not 28: 2 state + 2 unit + 1 `GRANT_ABSENT` + 20 `DENIED` probes + 1 scope + 1 PASS.
+> The live M-B6 transcript (`f8722cb7…2e2b`) is byte-equal to the 27-line PASS transcript bound by the merged tests. This is a documentation count error only.
+> It does not alter P1B-6 PASS, M-B6 technical success, W6-6, the owner acceptance, the ledger sequence, head, op or schema, the denial semantics, the deployment-freeze history, or any previous evidence result.
+> See the [M-B6 completion record](slice-15b2b-b1b3e-mb6-provision-ledger-completion.md) §7.
+
 **Observer after M-B6.** The observer digest changes by design: the state directory and the ledger are now
 present. The owner compares the facts: only the state directory, the ledger and the clock differ from E-15.
 

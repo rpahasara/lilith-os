@@ -417,7 +417,7 @@ class PackageTests(unittest.TestCase):
         ledger = (ARCH / "current-architecture-acceptance-ledger-v0.1.md").read_text(encoding="utf-8")
         self.assertIn("### 13.1ag Current-state reconciliation (M-B6 owner head acceptance, DR-5 target and ceremony "
                       "package", ledger)
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1ag) | UNASSIGNED |", ledger)
+        self.assertIn("record 1, First Memory and PROD remain NOT AUTHORIZED (§13.1ag)", ledger)   # the AUTH-02 cell
         self.assertLess(ledger.index("### 13.1af"), ledger.index("### 13.1ag"))
         self.assertLess(ledger.index("### 13.1ag"), ledger.index("### 13.2 Checks"))
 
