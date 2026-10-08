@@ -16,6 +16,11 @@ Status:
   evidence: the W9 verifier bundle did not fit a Windows command line (`WinError 206`) before any W9 DEV contact; no
   B2, no marker, no witness mutation ([sequence 1 stop and remediation R-B1](slice-15b2b-b1b3e-mb9-seq1-w9-transport-stop.md)).
   R-B1 moves the verifier bundles to stdin (§8.1) and adds the owner pre-M-B9a stop (§10.8, §14).
+- **Later current state (2026-10-09, pointer only).** Package B sequence 2 opened on control `103efe5` and was
+  stopped with the canonical §10.8 stop: the first live stdin use returned exit 96 for every verifier bundle; no B2,
+  no marker, no witness mutation. Diagnostics showed that `gcloud compute ssh` on Windows hands its client `y\n`
+  instead of the caller's stdin ([sequence 2 stop, R-B2 … R-B5](slice-15b2b-b1b3e-mb9-seq2-stdin-stop-direct-plink.md)).
+  R-B5 moves the read-only verifier client to a directly launched, pinned plink (§8.2).
 
 ```text
 M-B9a technical PASS != WITNESS_STARTED accepted (B3) != M-B9b authorized (B4)
@@ -235,6 +240,32 @@ gzip'd JSON `{module: source}` that the pinned M-B6 loader has always read from 
 
 The verifier sources and pins are unchanged. Only `mb9_operator.py` changed; its SHA-256 is bound into each owner
 text at runtime and recorded in the [R-B1 record](slice-15b2b-b1b3e-mb9-seq1-w9-transport-stop.md).
+
+### 8.2 Verifier client (remediation R-B5)
+
+On the owner's Windows workstation `gcloud compute ssh` replaces its SSH client's stdin with `y\n`
+(`ssh/putty_force_connect`, Cloud SDK 581.0.0), so the §8.1 payload never reached DEV in sequence 2. The three
+read-only verifier bundles therefore ride the stdin of PuTTY `plink`, launched directly by the operator over the
+same IAP tunnel. Everything in §8.1 about the payload, the digest gate (exit 96), the module pins, the 900 s
+timeout and failure-as-UNKNOWN is unchanged.
+
+- Client: the path in `LILITH_MB9_PLINK`, which must hash to the pinned Cloud SDK `plink.exe` (PuTTY 0.83,
+  `7308e9d356f14aa1f08cab1af363f71a077bf35dcb49e50b363418044758cd1e`).
+- Arguments: `-ssh -T -batch -noagent -hostkey SHA256:XfNINpbMvAzlla6rma0q+whKd6UT12C4Fhc0mpOrEXU -i
+  ~/.ssh/google_compute_engine.ppk -proxycmd <IAP> ravindupahasara2_gmail_com@compute.7687007163730582258 <guarded
+  command>`. The key's public blob must hash to `e830598a20880490d8b1644d48a448e600503367d3ab130d051e67d2a6e1a12e`.
+  `-legacy-stdio-prompts` is never passed; under `-batch` a host-key, authentication or other prompt fails instead
+  of reading stdin, and no key or host key is ever created, imported or cached.
+- `<IAP>`: the operator's gcloud prefix + `compute start-iap-tunnel lilith-dev-01 %port --listen-on-stdin
+  --project=… --zone=… --verbosity=warning`, escaped as the SDK escapes it. gcloud only carries the tunnel; the
+  bundle never passes through it.
+- A pin, key or tunnel-command doubt is a STOP before launch. A clean exit with stderr is reported as exit 95. There
+  is no fallback to `gcloud compute ssh` stdin, a command-line bundle, a remote file or another key.
+- Only the M-B6, W8 and W9 verifier reads use plink. The W5 verifier, the other reads, the denial proofs and every
+  mutation keep their reviewed `gcloud compute ssh` command byte for byte.
+
+R-B4 proved this route byte-exact for raw stdin only; the verifier wrapper over it is first exercised live in a
+future fresh opening sequence.
 
 ## 9. Owner offline verification (OD-B11)
 

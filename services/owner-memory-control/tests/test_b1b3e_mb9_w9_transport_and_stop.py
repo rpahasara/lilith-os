@@ -10,6 +10,10 @@ loader) including a synthetic payload far beyond the limit, prove transport fail
 boundary of the new pre-M-B9a stop: available after B1 and before any attempt marker, never after.
 
 Nothing touches DEV, the S25 or any real key. The end-to-end shell cases need a POSIX bash with base64 / sha256sum.
+
+R-B5 moved the channel under these bundles from `gcloud compute ssh` stdin to a directly launched plink (that suite:
+test_b1b3e_mb9_direct_plink_transport.py). The R-B1 properties checked here (the digest gate, the per-module pins,
+the command length, read-only use only, the stop) are unchanged and now hold on that channel.
 """
 
 from __future__ import annotations
@@ -105,8 +109,9 @@ class TransportTests(_Work):
                 op.remote_bundle(ROOT, paths, "observe x")
                 (argv,), (data,) = run.calls[-1:], run.inputs[-1:]
                 self.assertIsNotNone(data)
-                command = argv[-1]
-                self.assertTrue(command.startswith(f'--command=test "$(hostname)" = {M6.DEV} || exit 97; B=$(cat); '))
+                command = argv[-1]                                               # R-B5: plink's command
+                self.assertIn("-proxycmd", argv)
+                self.assertTrue(command.startswith(f'test "$(hostname)" = {M6.DEV} || exit 97; B=$(cat); '))
                 self.assertIn(f"grep -qx '{P.sha(data.strip())}' || exit 96", command)
                 self.assertLess(len(subprocess.list2cmdline(argv)), O.COMMAND_LINE_LIMIT)
                 sources = decode(data)
@@ -124,7 +129,7 @@ class TransportTests(_Work):
         for path in (O.INSTALLER, O.BROKER, O.OBSERVER, O.W5_VERIFIER, O.DENIAL, O.LEDGER_DENIAL, O.OWNER_DENIAL,
                      O.WITNESS_DENIAL, O.REMOVAL):
             op.ssh(op.streamed(ROOT, path, O.SYSTEM_PYTHON, "P1B-9b witness-state remove " + "0" * 64))
-        remote = [argv for argv in run.calls if argv[-1].startswith("--command=")]
+        remote = [argv for argv in run.calls if argv[-1].startswith("--command=") or "-proxycmd" in argv]
         self.assertGreaterEqual(len(remote), 39)
         for argv in remote:
             self.assertLess(len(subprocess.list2cmdline(argv)), O.COMMAND_LINE_LIMIT, argv[-1][:80])
@@ -134,11 +139,11 @@ class TransportTests(_Work):
         self.assertIs(op.run, M6._default_run)
         with mock.patch.object(O.subprocess, "run",
                                return_value=subprocess.CompletedProcess([], 0, b"", b"")) as fake:
-            op.ssh_stdin("true", b"PAYLOAD\n")
+            op.plink_stdin("true", b"PAYLOAD\n")                               # R-B5: the client is plink
         (argv,), kwargs = fake.call_args
         self.assertEqual(kwargs, {"input": b"PAYLOAD\n", "capture_output": True, "timeout": 900, "check": False})
-        self.assertEqual(argv[:4], ["gcloud", "compute", "ssh", M6.DEV])
-        self.assertEqual(argv[-2:], ["--tunnel-through-iap", f'--command=test "$(hostname)" = {M6.DEV} || exit 97; true'])
+        self.assertEqual(argv[0], os.environ[O.PLINK_ENV])
+        self.assertEqual(argv[-2:], [f"{O.OSLOGIN_USER}@{O.HOST_ALIAS}", f'test "$(hostname)" = {M6.DEV} || exit 97; true'])
 
     def test_transport_failures_still_stop(self):
         def timeout(argv, input=None):                                         # noqa: A002
@@ -162,7 +167,7 @@ class TransportTests(_Work):
 
     def test_stdin_carries_only_read_only_verifier_bundles(self):
         source = Path(O.__file__).read_text(encoding="utf-8")
-        self.assertEqual(source.count("self.ssh_stdin("), 1)                      # only inside remote_bundle
+        self.assertEqual(source.count("self.plink_stdin("), 1)                    # only inside remote_bundle (R-B5)
         calls = [line.split("remote_bundle(", 1)[1] for line in source.splitlines() if "self.remote_bundle(" in line]
         self.assertEqual(len(calls), 4)
         following = source.split("self.remote_bundle(")[1:]
@@ -174,6 +179,7 @@ class TransportTests(_Work):
         self.assertEqual(op.mb9a(ROOT, self.work, self.text(O.MB9A_GO_LINES, **self.values()))["result"],
                          "MB9A_STARTED")
         stdin_commands = [argv[-1] for argv, data in zip(run.calls, run.inputs) if data is not None]
+        self.assertTrue(all("-proxycmd" in argv for argv, data in zip(run.calls, run.inputs) if data is not None))
         self.assertTrue(stdin_commands)
         for command in stdin_commands:
             self.assertIn(" mb9_witness_verifier ", command)
@@ -355,10 +361,13 @@ class RecordTests(P.Redacted, unittest.TestCase):
                        "is CONSUMED by Package B sequence 1.", "NEW CANONICAL PRE-M-B9a STOP RULE"):
             self.assertIn(needed, block)
 
+    RB1_OPERATOR = "1a91bb2b0258cbec0028346ceede9c6e43135d556756fffe4f8696da66abbc29"   # superseded by R-B5
+
     def test_the_operator_pins_are_current_and_the_old_one_superseded(self):
         current = P.sha(Path(O.__file__).read_bytes())
         self.assertNotEqual(current, self.OLD_OPERATOR)
-        self.assertIn(f"| `mb9_operator.py` after R-B1 | `{current}` |", self.text)
+        self.assertNotEqual(current, self.RB1_OPERATOR)                          # the R-B5 record pins the current one
+        self.assertIn(f"| `mb9_operator.py` after R-B1 | `{self.RB1_OPERATOR}` |", self.text)
         self.assertIn(f"`mb9_operator.py` SHA-256 `{self.OLD_OPERATOR}`", self.text)
         self.assertIn("OPERATOR_7f630ed3 = SUPERSEDED (MUST NOT BE USED)", self.state)
         package = P.PACKAGE.read_text(encoding="utf-8")
@@ -401,7 +410,7 @@ class RecordTests(P.Redacted, unittest.TestCase):
         ledger = (P.ARCH / "current-architecture-acceptance-ledger-v0.1.md").read_text(encoding="utf-8")
         self.assertLess(ledger.index("### 13.1am"), ledger.index("### 13.1an"))
         self.assertLess(ledger.index("### 13.1an"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1an) | UNASSIGNED |", ledger)
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1an)", ledger)   # the AUTH-02 cell (§13.1ao follows)
         an = ledger.split("### 13.1an", 1)[1].split("### 13.2 Checks", 1)[0]
         for needed in ("`PACKAGE_B_SEQUENCE_1 = OPENED THEN STOPPED DURING OPENING EVIDENCE", "CONSUMED",
                        "None is authorized.", "This pass contacted no live system."):
