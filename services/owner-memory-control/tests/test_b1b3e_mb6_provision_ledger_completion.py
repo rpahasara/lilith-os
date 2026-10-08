@@ -166,7 +166,7 @@ class Mb6CompletionRecordTests(unittest.TestCase):
         self.assertIn("(slice-15b2b-b1b3e-mb6-provision-ledger-completion.md)", readme)
         ledger = LEDGER.read_text(encoding="utf-8")
         self.assertIn("### 13.1ah Current-state reconciliation (M-B6 PROVISION_LEDGER completion and owner acceptance", ledger)
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1ah) | UNASSIGNED |", ledger)
+        self.assertIn("record 1, First Memory and PROD NOT AUTHORIZED (§13.1ah)", ledger)   # the AUTH-02 cell
         self.assertIn("[`M-B6 = COMPLETED / OWNER-ACCEPTED`](slice-15b2b-b1b3e-mb6-provision-ledger-completion.md)", ledger)
         self.assertLess(ledger.index("### 13.1ag"), ledger.index("### 13.1ah"))
         self.assertLess(ledger.index("### 13.1ah"), ledger.index("### 13.2 Checks"))
