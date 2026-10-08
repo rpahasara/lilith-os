@@ -70,6 +70,41 @@ KWIT = "5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf"
 CONTROL = "29c2b824cae187037e4434a1ad7f9466f4eb2ab6"
 UPDATED_AT = "2026-10-08T00:00:00Z"
 INVOCATION, MAINPID = "0123456789abcdef0123456789abcdef", "4242"
+
+# R-B5: the read-only verifier bundles ride a directly launched plink whose client and key are hash-pinned. These
+# suites never run a real plink: a stand-in client file and a synthetic PuTTY key are bound here for the whole
+# process, and the real repository pins are kept in REAL_DIRECT_PLINK for the tests that check them.
+REAL_DIRECT_PLINK = {name: getattr(O, name) for name in ("PLINK_SHA256", "PPK_PATH", "PPK_PUBLIC_KEY_SHA256")}
+SYNTHETIC_PUBLIC_BLOB = b"\x00\x00\x00\x07ssh-rsa" + bytes(range(256))
+
+
+def synthetic_ppk(blob: bytes = SYNTHETIC_PUBLIC_BLOB) -> bytes:
+    import base64 as _b64
+
+    encoded = _b64.b64encode(blob).decode("ascii")
+    lines = [encoded[i:i + 64] for i in range(0, len(encoded), 64)]
+    return ("PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: synthetic-test-only\n"
+            f"Public-Lines: {len(lines)}\n" + "\n".join(lines) + "\nPrivate-Lines: 1\nAAAA\n"
+            "Private-MAC: 00\n").encode("ascii")
+
+
+def _bind_synthetic_direct_plink() -> Path:
+    import atexit
+    import shutil as _shutil
+
+    home = Path(tempfile.mkdtemp(prefix="mb9-direct-plink-"))
+    atexit.register(_shutil.rmtree, home, True)
+    client, key = home / "plink.exe", home / "google_compute_engine.ppk"
+    client.write_bytes(b"synthetic plink stand-in (never executed)\n")
+    key.write_bytes(synthetic_ppk())
+    os.environ[O.PLINK_ENV] = str(client)
+    O.PLINK_SHA256 = hashlib.sha256(client.read_bytes()).hexdigest()
+    O.PPK_PATH = key
+    O.PPK_PUBLIC_KEY_SHA256 = hashlib.sha256(SYNTHETIC_PUBLIC_BLOB).hexdigest()
+    return home
+
+
+SYNTHETIC_PLINK_HOME = _bind_synthetic_direct_plink()
 PACKAGE_A_TOOL_PINS = {   # the accepted Package A pins (handoff + Package A completion record): unchanged here
     "services/owner-memory-control/tools/mb7_mb8_operator.py":
         "9f13411f363dc956795ce4832d1948e7e6a9a7f7c8d1057291de852e9e2a20cd",
@@ -660,7 +695,8 @@ class FakeRun:
                 return done()
             if argv[3] == "show" and argv[4].startswith("HEAD:"):
                 return done(out=(ROOT / argv[4][5:]).read_bytes())
-        command = argv[-1] if argv and argv[-1].startswith("--command=") else ""
+        plink = "-proxycmd" in argv                             # R-B5: the read-only verifier bundles
+        command = argv[-1] if argv and (plink or argv[-1].startswith("--command=")) else ""
         if "mb9_witness_verifier" in command:
             phase = self.w9.pop(0) if len(self.w9) > 1 else self.w9[0]
             report = {"phase": phase, "witnessInvocationId": self.invocation, "witnessMainPid": self.mainpid,
@@ -681,7 +717,7 @@ class FakeRun:
         return done()
 
     def remote(self) -> list[str]:
-        return [c[-1] for c in self.calls if c[-1].startswith("--command=")]
+        return [c[-1] for c in self.calls if c[-1].startswith("--command=") or "-proxycmd" in c]
 
 
 class OperatorTests(Redacted, unittest.TestCase):

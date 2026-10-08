@@ -42,7 +42,10 @@ sequence: it releases that sequence's freeze, consumes its control and authorize
 Verifier bundles (W5 + M-B6, W8, W9) travel over stdin (record §8.1): the command line carries only the bundle
 digest, the per-module pins and the arguments, so its length does not grow with the verifier sources. The remote
 shell refuses (exit 96) unless the received bytes hash to that digest, and the unchanged M-B6 loader refuses
-(exit 96) unless every module hashes to its pin.
+(exit 96) unless every module hashes to its pin. That stdin is the stdin of PuTTY `plink`, launched directly over
+the existing IAP tunnel with a pinned client, key, OS Login user and host key (remediation R-B5): `gcloud compute
+ssh` on Windows replaces the caller's stdin with "y\n". Only these read-only bundles use plink; every other form,
+and every mutation, keeps the reviewed `gcloud compute ssh` command.
 
 The `O_EXCL` marker is written BEFORE each remote mutation; whatever happens after it, that stage is consumed: no
 automatic retry and no second invocation path.
@@ -276,6 +279,25 @@ STOP_LINES = (
 # Windows CreateProcess caps the whole command line at 32767 characters; every argv the operator builds must stay
 # below this margin (record §8.1). Only the verifier bundles exceeded it, and they now travel over stdin.
 COMMAND_LINE_LIMIT = 32767
+# Record §8.1 (remediation R-B5): the read-only verifier bundles ride the stdin of PuTTY `plink`, launched directly.
+# `gcloud compute ssh` on Windows writes "y\n" to plink's stdin when ssh/putty_force_connect is set (Cloud SDK
+# 581.0.0, `SSHCommand.Run`), so the caller's bytes never arrive (R-B2, R-B3). The route below is the one R-B4
+# proved byte-exact for raw stdin: the same client, key, OS Login user, host alias and IAP tunnel, no prompt.
+PLINK_ENV = "LILITH_MB9_PLINK"
+# Cloud SDK 581.0.0 `bin/sdk/plink.exe` (PuTTY release 0.83), the client R-B4 used.
+PLINK_SHA256 = "7308e9d356f14aa1f08cab1af363f71a077bf35dcb49e50b363418044758cd1e"
+PPK_PATH = Path.home() / ".ssh" / "google_compute_engine.ppk"
+# SHA-256 of the PPK's public key blob (= `google_compute_engine.pub`), already in the OS Login profile (R-B4).
+PPK_PUBLIC_KEY_SHA256 = "e830598a20880490d8b1644d48a448e600503367d3ab130d051e67d2a6e1a12e"
+OSLOGIN_USER = "ravindupahasara2_gmail_com"
+HOST_ALIAS = "compute.7687007163730582258"
+HOST_KEY = "SHA256:XfNINpbMvAzlla6rma0q+whKd6UT12C4Fhc0mpOrEXU"
+# No terminal, no prompt (a host-key or authentication question fails instead of reading stdin), no agent.
+# `-legacy-stdio-prompts` is never passed: with it, plink reads prompt answers from the verifier's stdin.
+PLINK_FLAGS = ("-ssh", "-T", "-batch", "-noagent")
+IAP_VERBOSITY = "--verbosity=warning"
+# plink exited 0 but wrote to stderr: never a PASS (record §8.1).
+TRANSPORT_STDERR_EXIT = 95
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -296,6 +318,50 @@ def load_tool(repo: Path, path: str, name: str):
             del sys.modules[name]
         raise Stop("TOOL_LOAD_FAILED:" + path) from exc
     return module
+
+
+def _escape_windows_argv(text: str) -> str:
+    """The Cloud SDK's Windows argv escape (`ssh._EscapeWindowsArgvElement`): always quoted."""
+    result, following_quote = [], True
+    for char in text[::-1]:
+        if char == '"':
+            result.append('"\\')
+            following_quote = True
+        elif char == "\\":
+            result.append("\\\\" if following_quote else "\\")
+        else:
+            result.append(char)
+            following_quote = False
+    return '"' + "".join(result)[::-1] + '"'
+
+
+def _proxy_arg(text: str) -> str:
+    """The Cloud SDK's PuTTY ProxyCommand escape (`ssh._EscapeProxyCommandArg`): printable ASCII only."""
+    _need(bool(text) and all(0x20 <= ord(char) < 0x7F for char in text), "PROXYCMD_BAD_CHARACTER")
+    return _escape_windows_argv(text).replace("\\", "\\\\").replace("%", "%%")
+
+
+def iap_proxy_command(gcloud: Sequence[str]) -> str:
+    """The IAP tunnel exactly as `gcloud compute ssh --tunnel-through-iap` builds it for plink (Cloud SDK 581.0.0
+    `ssh._BuildIapTunnelProxyCommandArgs`), from the operator's own gcloud prefix."""
+    return " ".join([*(_proxy_arg(part) for part in gcloud), "compute", "start-iap-tunnel", _proxy_arg(DEV), "%port",
+                     "--listen-on-stdin", _proxy_arg(f"--project={M6.PROJECT}"), _proxy_arg(f"--zone={M6.ZONE}"),
+                     _proxy_arg(IAP_VERBOSITY)])
+
+
+def ppk_public_key_sha256(path: Path) -> str:
+    """SHA-256 of a PuTTY key file's public blob (`Public-Lines`); the private lines are never decoded."""
+    try:
+        text = Path(path).read_bytes().decode("ascii").replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise Stop("PPK_UNAVAILABLE") from exc
+    match = re.search(r"^Public-Lines: (\d+)\n", text, re.MULTILINE)
+    _need(match is not None, "PPK_MALFORMED")
+    lines = text[match.end():].split("\n")[:int(match.group(1))]
+    try:
+        return sha256_hex(base64.b64decode("".join(lines), validate=True))
+    except ValueError as exc:
+        raise Stop("PPK_MALFORMED") from exc
 
 
 def _verifier_module(repo: Path):
@@ -334,17 +400,35 @@ class Operator(M6.Operator):
                    f"{pins} {Path(paths[-1]).stem} {args}")
         return command, payload + b"\n"
 
-    def ssh_stdin(self, command: str, data: bytes) -> "subprocess.CompletedProcess[bytes]":
-        """`ssh` with `data` on the remote command's stdin: the same guard, argv shape, capture and 900 s timeout."""
+    def plink_argv(self, command: str) -> list[str]:
+        """The direct plink route (record §8.1, R-B5). Every binding is checked before launch; any doubt is a STOP,
+        never a fallback to `gcloud compute ssh` stdin."""
+        plink = os.environ.get(PLINK_ENV, "")
+        _need(bool(plink), "PLINK_UNSET")
+        try:
+            client = Path(plink).read_bytes()
+        except OSError as exc:
+            raise Stop("PLINK_UNAVAILABLE") from exc
+        _need(sha256_hex(client) == PLINK_SHA256, "PLINK_PIN_MISMATCH")
+        _need(ppk_public_key_sha256(PPK_PATH) == PPK_PUBLIC_KEY_SHA256, "PPK_KEY_MISMATCH")
         guarded = f'test "$(hostname)" = {DEV} || exit 97; {command}'
-        argv = [*self.gcloud, "compute", "ssh", DEV, f"--zone={M6.ZONE}", f"--project={M6.PROJECT}",
-                "--tunnel-through-iap", f"--command={guarded}"]
+        return [plink, *PLINK_FLAGS, "-hostkey", HOST_KEY, "-i", str(PPK_PATH), "-proxycmd",
+                iap_proxy_command(self.gcloud), f"{OSLOGIN_USER}@{HOST_ALIAS}", guarded]
+
+    def plink_stdin(self, command: str, data: bytes) -> "subprocess.CompletedProcess[bytes]":
+        """`data` on plink's stdin and nothing else, with the capture and 900 s timeout of the pinned `ssh`. A clean
+        exit with anything on stderr is reported as TRANSPORT_STDERR_EXIT, never as success."""
+        argv = self.plink_argv(command)
         if self.run is M6._default_run:
-            return subprocess.run(argv, input=data, capture_output=True, timeout=900, check=False)
-        return self.run(argv, input=data)
+            result = subprocess.run(argv, input=data, capture_output=True, timeout=900, check=False)
+        else:
+            result = self.run(argv, input=data)
+        if result.returncode == 0 and result.stderr:
+            return subprocess.CompletedProcess(result.args, TRANSPORT_STDERR_EXIT, result.stdout, result.stderr)
+        return result
 
     def remote_bundle(self, repo: Path, paths: Sequence[str], args: str) -> "subprocess.CompletedProcess[bytes]":
-        return self.ssh_stdin(*self.bundled(repo, paths, args))
+        return self.plink_stdin(*self.bundled(repo, paths, args))
 
     # ---------------------------------------------------------------- helpers ---
 
