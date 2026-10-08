@@ -673,6 +673,12 @@ Exit 1 is `DENIED`; exit 0 is `FAIL: ALLOWED(unexpected)`, never acceptable; any
 Counts: `DENIED` 20, `ALLOWED` 0, `FAIL` 0, probes 20. The output carries no time, pid, inode or size, so it is
 deterministic; the operator records the transcript SHA-256 for ceremony-package pinning.
 
+> **Erratum (2026-10-07, M-B6 completion; owner determination `P1B6_LINE_COUNT_DISCREPANCY = DOCUMENTATION_ERRATUM_ONLY`; the text above is unchanged).**
+> The P1B-6 PASS transcript has **27** lines, not 28: 2 state + 2 unit + 1 `GRANT_ABSENT` + 20 `DENIED` probes + 1 scope + 1 PASS.
+> The live M-B6 transcript (`f8722cb7…2e2b`) is byte-equal to the 27-line PASS transcript bound by the merged tests. This is a documentation count error only.
+> It does not alter P1B-6 PASS, M-B6 technical success, W6-6, the owner acceptance, the ledger sequence, head, op or schema, the denial semantics, the deployment-freeze history, or any previous evidence result.
+> See the [M-B6 completion record](slice-15b2b-b1b3e-mb6-provision-ledger-completion.md) §7.
+
 **What it does not imply.** It does not imply that Registry V1 is effective, that authority is active, or that a
 signer or witness started. `GRANT_ABSENT` is required, not changed. The signer mount-namespace probes stay at
 P1B-12 in the existing tool.
