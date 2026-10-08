@@ -649,8 +649,8 @@ class RecordTests(Redacted, unittest.TestCase):
         self.assertIn("### 13.1aj Current-state reconciliation (Package A: M-B7 + M-B8 design and tooling", ledger)
         self.assertLess(ledger.index("### 13.1ai"), ledger.index("### 13.1aj"))
         self.assertLess(ledger.index("### 13.1aj"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1aj) | UNASSIGNED |", ledger)
-        aj = ledger.split("### 13.1aj", 1)[1].split("### 13.2 Checks", 1)[0]
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1aj)", ledger)                   # AUTH-02 (later passes append)
+        aj = ledger.split("### 13.1aj", 1)[1].split("\n### 13.", 1)[0]       # §13.1aj only, up to the next section
         for claim in FORBIDDEN_CLAIMS:
             self.assertNotIn(claim, aj)
         self.assertIn("owner decisions OD-1 … OD-5", aj)
