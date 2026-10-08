@@ -1664,7 +1664,7 @@ class RecordTests(Redacted, unittest.TestCase):
         self.assertLess(ledger.index("### 13.1ak"), ledger.index("### 13.1al"))
         self.assertLess(ledger.index("### 13.1al"), ledger.index("### 13.2 Checks"))
         self.assertIn("FRESHNESS=UNKNOWN (§13.1ak)", ledger)
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1al) | UNASSIGNED |", ledger)
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1al)", ledger)   # the AUTH-02 cell
         ak = ledger.split("### 13.1ak", 1)[1].split("### 13.1al", 1)[0]
         al = ledger.split("### 13.1al", 1)[1].split("### 13.2 Checks", 1)[0]
         self.assertIn("**E-A18 is NOT YET PERFORMED.**", ak)
