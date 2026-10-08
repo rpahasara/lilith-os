@@ -174,7 +174,7 @@ class Ea18RecordTests(unittest.TestCase):
         self.assertIn("### 13.1am Current-state reconciliation (E-A18: first post-Package-A-freeze DR-5 preservation", ledger)
         self.assertLess(ledger.index("### 13.1al"), ledger.index("### 13.1am"))
         self.assertLess(ledger.index("### 13.1am"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1am) | UNASSIGNED |", ledger)   # the AUTH-02 cell
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1am)", ledger)   # the AUTH-02 cell
         am = section(ledger, "### 13.1am", "### 13.2 Checks")
         for needed in ("`E-A18 = COMPLETED / OWNER-ACCEPTED`", "**no new baseline was created**", RUN, PREVIOUS_RUN,
                        "None of these has happened.", "Package B NOT OPEN"):

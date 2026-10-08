@@ -15,6 +15,7 @@ command or principal argument reaches DEV.
 | `pins <repo>` | local, read-only: clean checkout; control = `HEAD`; every pinned tool hashes to its pin |
 | `cloud <evidence-dir> <since>` | read-only GCP: the 11 JSON captures + bucket list + Admin Activity since `<since>` |
 | `open-sequence <repo> <workdir> <statement>` | local: records the owner's verbatim B1 (sequence opening + freeze; read-only only) |
+| `stop-sequence <repo> <workdir> <statement>` | local: records the owner's verbatim pre-M-B9a stop (record §10.8); refused once any attempt marker exists |
 | `host <repo> <workdir> <evidence-dir> <PRE\\|POST9A\\|POST9B>` | read-only DEV: identity, custody (+ witness state facts), release readiness (+ the owner witness CLI), installer `status` (P1B-8 / P1B-9a / P1B-9b), broker preservation, observer, W5, M-B6, W8 and W9 verifiers |
 | `denial` / `ledger-denial` / `owner-denial` `<repo> <evidence-dir>` | read-only DEV: the P1B-5, P1B-6 and P1B-8 proofs (P1B-6 / P1B-8 only while the witness is inactive) |
 | `witness-denial <repo> <evidence-dir> <P1B-9a\\|P1B-9b>` | read-only DEV: the Package B witness denial proof |
@@ -35,8 +36,16 @@ command or principal argument reaches DEV.
 Five owner acts, each its own text and none implied by another (record §10): B1 opens the sequence (read-only
 only); B2 authorizes M-B9a (one go, two markers); B3 accepts WITNESS_STARTED (authorizes nothing); B4 authorizes
 the one M-B9b `BOOTSTRAP` and acknowledges the lineage point of no return; B5 accepts Package B (ends the freeze;
-authorizes nothing). The `O_EXCL` marker is written BEFORE each remote mutation; whatever happens after it, that
-stage is consumed: no automatic retry and no second invocation path.
+authorizes nothing). Before any attempt marker exists, an owner pre-M-B9a stop (record §10.8) may instead end the
+sequence: it releases that sequence's freeze, consumes its control and authorizes nothing.
+
+Verifier bundles (W5 + M-B6, W8, W9) travel over stdin (record §8.1): the command line carries only the bundle
+digest, the per-module pins and the arguments, so its length does not grow with the verifier sources. The remote
+shell refuses (exit 96) unless the received bytes hash to that digest, and the unchanged M-B6 loader refuses
+(exit 96) unless every module hashes to its pin.
+
+The `O_EXCL` marker is written BEFORE each remote mutation; whatever happens after it, that stage is consumed: no
+automatic retry and no second invocation path.
 
     tool / pin / marker / go-file check != authorization
     MB9A technical PASS != WITNESS_STARTED accepted != M-B9b go;  B4 = exactly one `bootstrap`
@@ -250,6 +259,23 @@ RESTART_LINES = (
     "I acknowledge: this start is not a retry of M-B9a or M-B9b; any earlier WITNESS_STARTED acceptance is stale and "
     "a fresh POST is required before anything else.",
 )
+# Record §10.8: the owner pre-M-B9a stop. `{control}`, `{b1}` (the B1 record SHA-256) and `{operator}` are bound.
+STOP_LINES = (
+    "I stop this Package B sequence now, before M-B9a, for this current DEV_SYNTHETIC sequence only.",
+    "Control commit: {control}. B1 record SHA-256: {b1}.",
+    "Operator: " + OPERATOR + " SHA-256 {operator}.",
+    "No B2 was issued, no M-B9a or M-B9b attempt marker exists, and no witness mutation was made by this sequence.",
+    "This sequence is OPENED THEN STOPPED BEFORE M-B9a / HISTORICAL / NON-REUSABLE; its evidence is preserved and "
+    "must not be replayed into a later sequence.",
+    "The Package B deployment freeze of this sequence is RELEASED by this stop; the release authorizes no deployment, "
+    "merge or DEV change.",
+    "The selected Package B live control {control} is CONSUMED by this sequence and is not reusable.",
+    "This stop authorizes nothing further. A new sequence needs a new merged control, a fresh preservation deploy, a "
+    "new owner control selection and a new canonical B1.",
+)
+# Windows CreateProcess caps the whole command line at 32767 characters; every argv the operator builds must stay
+# below this margin (record §8.1). Only the verifier bundles exceeded it, and they now travel over stdin.
+COMMAND_LINE_LIMIT = 32767
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -293,16 +319,32 @@ class Operator(M6.Operator):
                 f"'{TOOL_PINS[path]}' || exit 96; printf %s \"$B\" | base64 -d | gunzip | sudo -n {interpreter} "
                 f"-I -B - {args}")
 
-    def bundled(self, repo: Path, paths: Sequence[str], args: str) -> str:
+    def bundled(self, repo: Path, paths: Sequence[str], args: str) -> tuple[str, bytes]:
+        """The verifier bundle as (command, stdin payload). The payload is the same base64 gzip'd JSON the M-B6
+        loader has always read; only the channel changed (record §8.1). The command carries its SHA-256."""
         import gzip
 
         sources = {Path(path).stem: self.tool_bytes(repo, path).decode("utf-8") for path in paths}
-        blob = base64.b64encode(gzip.compress(json.dumps(sources).encode("utf-8"), mtime=0)).decode("ascii")
+        payload = base64.b64encode(gzip.compress(json.dumps(sources).encode("utf-8"), mtime=0))
         pins = ",".join(f"{Path(path).stem}={TOOL_PINS[path]}" for path in paths)
         boot = base64.b64encode(M6.BOOT.encode("ascii")).decode("ascii")
         loader = f"import base64;exec(base64.b64decode('{boot}'))"
-        return (f"B={blob}; printf %s \"$B\" | base64 -d | sudo -n {RELEASE_PYTHON} -I -B -c \"{loader}\" "
-                f"{pins} {Path(paths[-1]).stem} {args}")
+        command = (f"B=$(cat); printf %s \"$B\" | sha256sum | cut -c1-64 | grep -qx '{sha256_hex(payload)}' || exit 96; "
+                   f"printf %s \"$B\" | base64 -d | sudo -n {RELEASE_PYTHON} -I -B -c \"{loader}\" "
+                   f"{pins} {Path(paths[-1]).stem} {args}")
+        return command, payload + b"\n"
+
+    def ssh_stdin(self, command: str, data: bytes) -> "subprocess.CompletedProcess[bytes]":
+        """`ssh` with `data` on the remote command's stdin: the same guard, argv shape, capture and 900 s timeout."""
+        guarded = f'test "$(hostname)" = {DEV} || exit 97; {command}'
+        argv = [*self.gcloud, "compute", "ssh", DEV, f"--zone={M6.ZONE}", f"--project={M6.PROJECT}",
+                "--tunnel-through-iap", f"--command={guarded}"]
+        if self.run is M6._default_run:
+            return subprocess.run(argv, input=data, capture_output=True, timeout=900, check=False)
+        return self.run(argv, input=data)
+
+    def remote_bundle(self, repo: Path, paths: Sequence[str], args: str) -> "subprocess.CompletedProcess[bytes]":
+        return self.ssh_stdin(*self.bundled(repo, paths, args))
 
     # ---------------------------------------------------------------- helpers ---
 
@@ -325,7 +367,7 @@ class Operator(M6.Operator):
         return f"{LEDGER_HEAD} {c['candidate']} {c['updated_at']}"
 
     def _w9(self, repo: Path, args: str) -> tuple[int | None, dict | None, "subprocess.CompletedProcess[bytes]"]:
-        result = self.ssh(self.bundled(repo, VERIFIER_BUNDLE, args))
+        result = self.remote_bundle(repo, VERIFIER_BUNDLE, args)
         try:
             report = json.loads((result.stdout or b"").decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -377,6 +419,7 @@ class Operator(M6.Operator):
     def _sequence_opened(self, workdir: Path) -> dict:
         path = Path(workdir) / "sequence" / "B1_SEQUENCE_AUTHORIZATION.json"
         _need(path.is_file(), "SEQUENCE_NOT_OPENED")
+        _need(not (Path(workdir) / "sequence" / "B1_SEQUENCE_STOPPED.json").exists(), "SEQUENCE_STOPPED")
         return json.loads(path.read_text(encoding="ascii"))
 
     @staticmethod
@@ -434,6 +477,28 @@ class Operator(M6.Operator):
             raise Stop("SEQUENCE_ALREADY_OPENED") from exc
         return {"control": control, "result": "PACKAGE_B_SEQUENCE_OPENED_READ_ONLY",
                 "next": "fresh evidence and the closing gate, then the separate B2; nothing is authorized by this"}
+
+    def stop_sequence(self, repo: Path, workdir: Path, statement: Path) -> dict:
+        """Record §10.8: the owner pre-M-B9a stop. Only while B1 is recorded and the attempt directory is absent or
+        empty; once any marker exists the W9 classifier, removal, restart and recovery routes govern instead."""
+        control = self.pins(repo)["control"]
+        operator = self._operator_at_control(repo)
+        opened = self._sequence_opened(workdir)
+        _need(opened.get("control") == control, "CONTROL_NOT_THE_SEQUENCE_CONTROL")
+        attempts = Path(workdir) / ATTEMPT_DIR
+        _need(not attempts.exists() or not any(attempts.iterdir()), "STOP_REFUSED_ATTEMPT_MARKER_PRESENT")
+        b1 = sha256_hex((Path(workdir) / "sequence" / "B1_SEQUENCE_AUTHORIZATION.json").read_bytes())
+        raw = Path(statement).read_bytes()
+        self.check_go(raw.decode("utf-8"), STOP_LINES, control=control, b1=b1, operator=operator)
+        try:
+            self._record(Path(workdir) / "sequence" / "B1_SEQUENCE_STOPPED.json", {
+                "control": control, "operatorSha256": operator, "b1RecordSha256": b1, "statementSha256": sha256_hex(raw),
+                "classification": "OPENED_THEN_STOPPED_BEFORE_MB9A", "freeze": "RELEASED", "controlSelection": "CONSUMED"})
+        except FileExistsError as exc:
+            raise Stop("SEQUENCE_ALREADY_STOPPED") from exc
+        return {"control": control, "result": "PACKAGE_B_SEQUENCE_STOPPED_BEFORE_MB9A",
+                "next": "nothing is authorized; a new sequence needs a new control, a preservation deploy, a new owner "
+                        "control selection and a new canonical B1"}
 
     def accept_9a(self, workdir: Path, statement: Path) -> dict:
         raw = Path(statement).read_bytes()
@@ -516,12 +581,12 @@ class Operator(M6.Operator):
             "observer": self._save(out, "observer", self.ssh(self.streamed(repo, OBSERVER, SYSTEM_PYTHON, "observe"))),
             "w5verifier": self._save(out, "w5verifier", self.ssh(self.streamed(
                 repo, W5_VERIFIER, RELEASE_PYTHON, f"expect {W5_PHASE[phase]}"))),
-            "mb6verifier": self._save(out, "mb6verifier", self.ssh(self.bundled(
-                repo, MB6_VERIFIER_BUNDLE, f"expect {MB6_PHASE[phase]} {LEDGER_HEAD}"))),
-            "w8verifier": self._save(out, "w8verifier", self.ssh(self.bundled(
-                repo, W8_BUNDLE, f"expect {W8_PHASE[phase]} {args}"))),
-            "w9verifier": self._save(out, "w9verifier", self.ssh(self.bundled(
-                repo, VERIFIER_BUNDLE, f"expect {W9_PHASE[phase]} {args}"))),
+            "mb6verifier": self._save(out, "mb6verifier", self.remote_bundle(
+                repo, MB6_VERIFIER_BUNDLE, f"expect {MB6_PHASE[phase]} {LEDGER_HEAD}")),
+            "w8verifier": self._save(out, "w8verifier", self.remote_bundle(
+                repo, W8_BUNDLE, f"expect {W8_PHASE[phase]} {args}")),
+            "w9verifier": self._save(out, "w9verifier", self.remote_bundle(
+                repo, VERIFIER_BUNDLE, f"expect {W9_PHASE[phase]} {args}")),
         }
 
     @staticmethod
@@ -907,6 +972,7 @@ def main(argv: list[str], operator: Operator | None = None) -> int:
         ("pins", 1): lambda a: operator.pins(Path(a[0])),
         ("cloud", 2): lambda a: operator.cloud(Path(a[0]), a[1]),
         ("open-sequence", 3): lambda a: operator.open_sequence(Path(a[0]), Path(a[1]), Path(a[2])),
+        ("stop-sequence", 3): lambda a: operator.stop_sequence(Path(a[0]), Path(a[1]), Path(a[2])),
         ("host", 4): lambda a: operator.host(Path(a[0]), Path(a[1]), Path(a[2]), a[3]),
         ("denial", 2): lambda a: operator.denial(Path(a[0]), Path(a[1])),
         ("ledger-denial", 2): lambda a: operator.ledger_denial(Path(a[0]), Path(a[1])),
