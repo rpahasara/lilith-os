@@ -145,7 +145,7 @@ class PostMb6Dr5AcceptanceTests(unittest.TestCase):
         self.assertIn("### 13.1ai Current-state reconciliation (post-M-B6 DR-5 baseline owner acceptance and preservation", ledger)
         self.assertLess(ledger.index("### 13.1ah"), ledger.index("### 13.1ai"))
         self.assertLess(ledger.index("### 13.1ai"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1ai) | UNASSIGNED |", ledger)
+        self.assertIn("M-B7 and later, First Memory and PROD NOT AUTHORIZED; FRESHNESS=UNKNOWN (§13.1ai)", ledger)   # AUTH-02
         ah = section(ledger, "### 13.1ah", "### 13.1ai")
         self.assertIn("`POST_MB6_DR5_TARGET_ACCEPTED = NO`", ah)                       # history unchanged
         readme = (ARCH / "README.md").read_text(encoding="utf-8")
