@@ -540,7 +540,7 @@ binding gaps that the existing tools cannot:
 3. provenance-bound non-custody peer views (§5).
 
 Everything else is sequencing discipline: gates, the C4B eligibility read, markers, derived go values and the
-transcription check. Forms: `pins`, `open`, `acquire`, `bind`, `gate`, `peer-view`, `transfer`, `s25-bundle`,
+transcription check. Forms: `pins`, `open`, `acquire`, `acquire-windows` (§12.2), `bind`, `gate`, `peer-view`, `transfer`, `s25-bundle`,
 `s25-expect`, `s25-check`, `c4b-eligibility`, `arm`, `record`.
 
 - **It writes no owner record.** It never calls `append`, `append-envelope`, `init-acceptance-store` or any replica
@@ -563,7 +563,7 @@ transcription check. Forms: `pins`, `open`, `acquire`, `bind`, `gate`, `peer-vie
 
 ### 12.1 Runbook (laptop; WSL; outside every Git tree and every replica or store root)
 
-1. **C1** (owner text). `pkgc_operator.py pins <repo>`, then `open <repo> <workdir> <C1.txt> <facts.json>`. Read-only
+1. **C1** (owner text). `pkgc_operator.py pins <repo>`, then `open <repo> <workdir> <C1.txt> <facts.json>`. Every `acquire` in steps 1 to 6 runs on Windows as `acquire-windows` (§12.2). Read-only
    evidence: cloud captures (the `PR2_REVALIDATION` digest) and `gh run list`. Then `acquire <repo> <workdir>
    <mb9-workdir>`, `bind <workdir> … <workdir>/exports/<01-…> <replica-a> <pr2> <p33>`, `s25-bundle`, and T1 (MTP). On
    the phone: `pkgc_c1`. On the laptop: `s25-check <workdir> C1 …`. Replica A is verified empty, so the register is
@@ -585,6 +585,49 @@ transcription check. Forms: `pins`, `open`, `acquire`, `bind`, `gate`, `peer-vie
 
 Before C2 only, the owner may instead stop the sequence (§6.7, `record … STOP`). The operator refuses the stop once
 any attempt marker exists.
+
+### 12.2 Two-environment procedure (C1 environment fix)
+
+On the owner laptop the two halves of every acquisition live in different environments:
+
+- `pkgc_operator` and the canonical tool need the pinned `rfc8785`, `fido2` and `cryptography` packages. Those are
+  installed only in WSL (`/root/l1deps`).
+- The pinned read-only `mb9_operator.py` forms need the reviewed Windows DEV transport: the Windows Cloud SDK, the
+  pinned direct-plink client (R-B4 / R-B5) and the owner key. WSL has none of them and is not given any.
+
+So the procedure is split, without changing any Package C semantics:
+
+| Where | Forms |
+| --- | --- |
+| **WSL** (`PYTHONPATH=/root/l1deps`) | `pins`, `open`, `bind`, `gate`, `peer-view`, `transfer`, `s25-bundle`, `s25-expect`, `s25-check`, `c4b-eligibility`, `arm`, `record`, and every canonical-tool command |
+| **Windows** (standard library only) | `acquire-windows <repo> <wsl-distro> <wsl-workdir> <sequence-id> <mb9-workdir>`, with the reviewed `LILITH_MB6_GCLOUD` / `LILITH_MB9_PLINK` environment |
+
+**What changed in `pkgc_operator.py`:**
+
+- The four `lilith_owner_memory` modules are imported **on first use** (`_OnDemand`). Every other form imports
+  them, and through them the pinned packages, exactly as before.
+- `_read` and `_json` use the standard library: the same 8 MiB limit (`MAX_INPUT_BYTES` = the tool's) and the same
+  strict parser (UTF-8, duplicate keys refused) as `witness_readiness._json`. Their equality is tested.
+- `acquire-windows` validates the path and the sequence, then calls the **unchanged** `acquire`. The same two
+  pinned read-only forms run, into the same `exports/` and `acquisitions/` entries, with the same receipt. The WSL
+  side verifies it with the unchanged `verify_acquisition`, `check_export` and `bind`.
+
+**Path contract (deterministic, validated before anything is written):**
+
+- `<wsl-workdir>` is the absolute WSL path given to `open`, for example `/root/lilith-pkgc-seq1`. Only plain
+  components are accepted: no `.`, `..`, empty component, trailing `/` or `/mnt`.
+- The Windows path is exactly `\\wsl$\<wsl-distro>` followed by that path with `\` separators, for example
+  `\\wsl$\Ubuntu-24.04\root\lilith-pkgc-seq1`. No other spelling is derived or accepted.
+- It must be an existing directory (`WSL_WORKDIR_NOT_FOUND`) holding the C1 opening (`SEQUENCE_NOT_OPENED`). Its
+  `sequenceId` must equal `<sequence-id>`, the value `open` printed (`SEQUENCE_MISMATCH`). The form never opens or
+  creates a sequence or work directory.
+- The Windows clock must not be behind the WSL opening time (`CLOCK_BEFORE_OPENING`). Otherwise the receipt's
+  timestamp rule would refuse the read after the fact. This check runs before any DEV contact.
+- `<repo>` is a clean Windows checkout at the control. `pins` exactness is checked as in `acquire`.
+
+**Not changed:** the receipt schema; the freshness rule (§3.1); the single use of each acquisition; the two pinned
+forms; `TOOL_PINS` (the `mb9_operator.py` pin and transport are unchanged); every gate, template and refusal; and
+the fact that the operator writes no owner record.
 
 ## 13. Tests
 
@@ -679,4 +722,5 @@ FRESHNESS=UNKNOWN
 | Version | Commit | Change |
 | --- | --- | --- |
 | v1 | `d84eecb` | initial design (C1 → C2 → C3 → C4 → C5) |
-| v2 | this revision | owner review of PR #176: C4 split into C4A / C4B, with the C4B eligibility read (§2.1); OD-C6 tightened to the per-read acquisition receipt (§3.1); peer-view invariants made explicit and tested (§5); the freeze clarified (§7); state machine, templates, runbook and tests updated |
+| v2 | `013c9cf` | owner review of PR #176: C4 split into C4A / C4B, with the C4B eligibility read (§2.1); OD-C6 tightened to the per-read acquisition receipt (§3.1); peer-view invariants made explicit and tested (§5); the freeze clarified (§7); state machine, templates, runbook and tests updated |
+| v3 | this revision | C1 environment fix: the acquisition runs on Windows with the standard library only (`acquire-windows`, on-demand imports, stdlib `_read` / `_json`); everything else stays in WSL (§12.2) |

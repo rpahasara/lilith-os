@@ -80,20 +80,6 @@ ACCEPTED_CURRENT_BOOT_ID = "eea461c3-60f0-4b10-8ee9-556dcef19711"
                                              LEDGER_DENIAL)},
 """),
     ]),
-    P.OPERATOR: (PKGC_AFTER, PKGC_BEFORE, [
-        ("read-only tools Package C relies on.\n", "read-only tools Package C relies on. Unchanged here.\n"),
-        ("""    # Re-pinned for the post-reboot broker verifier (record slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md).
-    MB9_OPERATOR: "2312e26a9cc8c2076539ae8bdde98cc5d79c2bbeb5138d66d07863ec3303c928",
-""", """    MB9_OPERATOR: "066fc8213b40c392e3e2bfd609da4a7f2a4e0b6f05da011daee9add3caf13973",
-"""),
-        ("""    # The owner-accepted post-reboot witness incarnation (2026-10-09, NRestarts 0); the Package B incarnation
-    # 5136ea7af2544450b9370fa412786c98 / 143946 is historical (record slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md).
-    witness_invocation_id="8af12bd64d024d0eba56bbcedbc534a6",
-    witness_main_pid="1580",
-""", """    witness_invocation_id="5136ea7af2544450b9370fa412786c98",
-    witness_main_pid="143946",
-"""),
-    ]),
 }
 
 
@@ -120,7 +106,10 @@ class CascadeTests(unittest.TestCase):
         self.assertEqual(P.TOOL_PINS[P.MB9_OPERATOR], RP.CURRENT_MB9_OPERATOR_PIN)
         for path, pin in {**O.TOOL_PINS, **P.TOOL_PINS}.items():
             self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
-        self.assertEqual(sha((ROOT / P.OPERATOR).read_bytes()), PKGC_AFTER)
+        # `pkgc_operator.py` moved on with the C1 environment fix (record slice-15b2b-b1b3e-pkgc-record1-envelope-
+        # package.md §12.2); PKGC_AFTER is its re-pin value, kept in the re-pin record. Its re-pinned values stay.
+        self.assertNotEqual(sha((ROOT / P.OPERATOR).read_bytes()), PKGC_AFTER)
+        self.assertEqual((P.ACCEPTED_PINS.witness_invocation_id, P.ACCEPTED_PINS.witness_main_pid), NEW_WITNESS)
 
     def test_completed_ceremony_operators_are_byte_unchanged_and_fail_closed(self):
         self.assertEqual(sha(Path(M6.__file__).read_bytes()), MB6_OPERATOR_PIN)
