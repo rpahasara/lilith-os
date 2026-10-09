@@ -5,16 +5,20 @@
 # directory, then run exactly ONE stage function per owner act:
 #
 #   . ./pkgc_s25_phone.sh
-#   pkgc_c1    # C1: read-only gate (no write except the staging evidence directory)
-#   pkgc_c3    # C3 go only: APPEND_RECORD_1_REPLICA_B (owner record write)
-#   pkgc_c4    # C4 go only, after copy A: init store B + APPEND_ENVELOPE_1_COPY_B (owner record write)
+#   pkgc_c1        # C1: read-only gate (no write except the staging evidence directory)
+#   pkgc_c3        # C3 go only: APPEND_RECORD_1_REPLICA_B (owner record write)
+#   pkgc_c4b_pre   # after the C4B gate: read-only proof that copy B is absent (no write)
+#   pkgc_c4b       # C4B go only: init store B + APPEND_ENVELOPE_1_COPY_B (owner record write)
+#
+# The A view and the store A view are NON-CUSTODY, read-only comparison inputs. They live only under
+# $HOME/lilith-pkgc/views, never at or under a replica or acceptance-store root, and are never written.
 #
 # Before a stage, the owner TYPES BY HAND the values the laptop showed (never pasted from a message):
 #   PKGC_BUNDLE_SHA256        every stage
-#   PKGC_AVIEW_TAR_SHA256     C3, C4   (the T2 Replica A view tar)
-#   PKGC_RECORD_DIGEST        C3, C4   (repeated to the canonical tool as --confirm-digest)
-#   PKGC_STORE_TAR_SHA256     C4       (the T3 store A view + package tar)
-#   PKGC_ENVELOPE_DIGEST      C4       (repeated to the canonical tool as --confirm-digest)
+#   PKGC_AVIEW_TAR_SHA256     C3, C4B_PRE, C4B   (the T2 Replica A view tar)
+#   PKGC_RECORD_DIGEST        C3, C4B_PRE, C4B   (C3: repeated to the canonical tool as --confirm-digest)
+#   PKGC_STORE_TAR_SHA256     C4B                (the T3 store A view + package tar)
+#   PKGC_ENVELOPE_DIGEST      C4B                (repeated to the canonical tool as --confirm-digest)
 #
 # Every "STOP" ends the function before any later step. A STOP is never retried by deleting anything. Each owner
 # record write is behind a noclobber one-attempt marker: a second run of the same stage refuses.
@@ -137,9 +141,22 @@ pkgc_c3() {
   pkgc_finish C3
 }
 
-# ---- C4 (copy B): init store B + APPEND_ENVELOPE_1_COPY_B (only under the C4 go, after copy A is PARTIAL) ----
-pkgc_c4() {
-  pkgc_common C4 || return 1
+# ---- C4B_PRE: read-only proof after the C4B gate (copy B absent; Replica B = record 1; CURRENT) ----
+pkgc_c4b_pre() {
+  pkgc_common C4B_PRE || return 1
+  pkgc_aview || return 1
+  T verify-replica --replica "$PKGC_RB" > "$PKGC_E/verify-replica-b.json" || { pkgc_stop "Replica B does not verify"; return 1; }
+  T classify --replica "$PKGC_RB" --replica "$PKGC_AV" "${PKGC_WORLD[@]}" > "$PKGC_E/classify.json"
+  PKGC_LINES+=("REPLICA_B_RECORDS=$(pkgc_json "$PKGC_E/verify-replica-b.json" 'd.get("records")')"
+               "REPLICA_B_HEAD=$(pkgc_json "$PKGC_E/verify-replica-b.json" 'd.get("headDigest")')"
+               "FRESHNESS=$(pkgc_json "$PKGC_E/classify.json" 'd.get("authenticity") + ":" + d.get("freshness")')"
+               "ACCEPTANCE_STORE_B=$([ -e "$PKGC_SB" ] && echo PRESENT || echo ABSENT)")
+  pkgc_finish C4B_PRE
+}
+
+# ---- C4B: init store B + APPEND_ENVELOPE_1_COPY_B (only under the C4B go) ----
+pkgc_c4b() {
+  pkgc_common C4B || return 1
   pkgc_aview || return 1
   [ -n "$PKGC_STORE_TAR_SHA256" ] && [ -n "$PKGC_ENVELOPE_DIGEST" ] || { pkgc_stop "values not typed"; return 1; }
   if [ ! -d "$PKGC_W/views/s" ]; then
@@ -155,7 +172,7 @@ pkgc_c4() {
   [ "$(pkgc_json "$PKGC_E/classify.json" 'd.get("authenticity") + ":" + d.get("freshness")')" = "AUTHENTIC:CURRENT" ] \
     || { pkgc_stop "freshness is not AUTHENTIC + CURRENT"; return 1; }
   [ ! -e "$PKGC_SB" ] || { pkgc_stop "store B already exists"; return 1; }
-  ( set -C; : > "$PKGC_W/attempt-C4-B" ) 2>/dev/null || { pkgc_stop "C4 copy B attempt already consumed"; return 1; }
+  ( set -C; : > "$PKGC_W/attempt-C4B" ) 2>/dev/null || { pkgc_stop "C4B attempt already consumed"; return 1; }
   T init-acceptance-store --store "$PKGC_SB" --custody-copy-id "$PKGC_RB_ID" --environment "$PKGC_ENV" \
     --profile "$PKGC_PROFILE" > "$PKGC_E/init-store.json" || { pkgc_stop "init-acceptance-store refused"; return 1; }
   T propose-envelope --replica "$PKGC_RB" --replica "$PKGC_AV" --store "$PKGC_SB" --store "$PKGC_SV" \
@@ -179,5 +196,5 @@ pkgc_c4() {
                "REPLICATION=$(pkgc_json "$PKGC_E/append-envelope.json" 'd.get("replication")')"
                "ENVELOPE_DIGEST=$(pkgc_json "$PKGC_E/append-envelope.json" 'd.get("envelopeDigest")')"
                "ACCEPTANCE=$(pkgc_json "$PKGC_E/classify-acceptance.json" 'd.get("state")')")
-  pkgc_finish C4
+  pkgc_finish C4B
 }
