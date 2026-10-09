@@ -226,8 +226,8 @@ class PackageBCompletionRecordTests(unittest.TestCase):
                       "completed, 2026-10-09)", ledger)
         self.assertLess(ledger.index("### 13.1ao"), ledger.index("### 13.1ap"))
         self.assertLess(ledger.index("### 13.1ap"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1ap) | UNASSIGNED |", ledger)   # the AUTH-02 cell
-        ap = section(ledger, "### 13.1ap", "### 13.2 Checks")
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1ap)", ledger)   # the AUTH-02 cell (§13.1aq follows)
+        ap = section(ledger, "### 13.1ap", "### 13.1aq")   # §13.1aq (first post-freeze deploy) follows
         for needed in ("`PACKAGE_B = COMPLETED / OWNER-ACCEPTED`", CONTROL, INVOCATION, CANDIDATE, CHAIN_1,
                        "**The lineage is irreversible; no second witness genesis is permitted.**", "None has happened.",
                        "This pass contacted no live system.", "193 rows"):
