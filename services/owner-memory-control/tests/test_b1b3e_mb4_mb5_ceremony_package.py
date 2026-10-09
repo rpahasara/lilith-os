@@ -27,10 +27,12 @@ ARCH = ROOT / "docs/architecture"
 DECISION = ARCH / "slice-15b2b-b1b3e-mb4-mb5-continuity-owner-decision.md"
 PACKAGE = ARCH / "slice-15b2b-b1b3e-mb4-mb5-ceremony-package.md"
 TOOLS = ROOT / "services/owner-memory-control/tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb4_mb5_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 CONTROL = "b0299f3966de051042b7c906b89559a179ed998d"
 CONTINUITY = "MB4_MB5_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_SEQUENCE_TWO_GO"
@@ -108,7 +110,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn(f"`services/owner-memory-control/tools/mb4_mb5_operator.py` | owner laptop", table)
         self.assertIn(operator_sha, table)
         for path, pin in O.TOOL_PINS.items():
-            self.assertEqual(sha(ROOT / path), pin, path)
+            self.assertEqual(sha(ROOT / path), RP.tree_pin(path, pin), path)
             row = next(line for line in table.splitlines() if line.startswith(f"| `{path}`"))
             self.assertIn(pin, row)
         for extra in ("services/owner-memory-control/lilith_owner_memory/owner_freshness_tool.py",

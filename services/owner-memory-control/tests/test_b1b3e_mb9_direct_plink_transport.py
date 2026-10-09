@@ -421,7 +421,9 @@ class RecordTests(P.Redacted, unittest.TestCase):
     def test_the_operator_pin_is_current_and_r_b1_superseded(self):
         current = P.sha(Path(O.__file__).read_bytes())
         self.assertNotEqual(current, RB1_OPERATOR)
-        self.assertIn(f"| `mb9_operator.py` after R-B5 | `{current}` |", self.text)
+        # The R-B5 operator, historical since the post-reboot re-pin of its broker verifier pin.
+        self.assertEqual(current, P.RP.CURRENT_MB9_OPERATOR_PIN)
+        self.assertIn(f"| `mb9_operator.py` after R-B5 | `{P.RP.HISTORICAL_MB9_OPERATOR_PIN}` |", self.text)
         self.assertIn(f"`mb9_operator.py` SHA-256 `{RB1_OPERATOR}`", self.text)
         self.assertIn("OPERATOR_1a91bb2b = SUPERSEDED (MUST NOT BE USED)", self.state)
         self.assertNotIn(RB1_OPERATOR, P.PACKAGE.read_text(encoding="utf-8"))

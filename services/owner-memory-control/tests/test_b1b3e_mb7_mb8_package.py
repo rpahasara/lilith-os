@@ -55,6 +55,7 @@ import mb7_mb8_operator as O  # noqa: E402
 import mb8_owner_input_denial_proof as DP  # noqa: E402
 import mb8_owner_input_removal as RM  # noqa: E402
 import mb8_owner_input_verifier as W  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 HEAD = "19bf9091a96cdc2378a68508feb0c119721f7fcef7b9c3a480a6cd6b72fa1630"
 REGISTRY_DIGEST = "fa66272131a3ef076036616b07766a377de4fdc1e4fef4cb8a054726f05c14fc"
@@ -105,7 +106,7 @@ def synthetic_derivation(updated_at: str = UPDATED_AT, pins: C.CandidatePinsV1 =
 class PinTests(Redacted, unittest.TestCase):
     def test_every_tool_hashes_to_its_pin_and_m6_pins_are_reused_unchanged(self):
         for path, pin in O.TOOL_PINS.items():
-            self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, pin), path)
         for path in (O.INSTALLER, O.W5_VERIFIER, O.MB6_VERIFIER, O.OBSERVER, O.BROKER, O.DENIAL, O.LEDGER_DENIAL,
                      O.DR5_TARGET):
             self.assertEqual(O.TOOL_PINS[path], M6.TOOL_PINS[path], path)
@@ -380,6 +381,7 @@ class FakeRun:
 
 class OperatorTests(Redacted, unittest.TestCase):
     def setUp(self):
+        self.enterContext(RP.current_tree(O))
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name) / "work"

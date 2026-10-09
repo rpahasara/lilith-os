@@ -94,21 +94,21 @@ ACCEPTED_BROKER_PID = 96650
 ACCEPTED_BROKER_START_TICKS = 91036598
 ACCEPTED_BROKER_BOOT_ID = "24d1771d-e1b5-4e5f-816d-da08ad8b367a"
 
-# Owner-accepted broker continuity baseline, accepted after the controlled
-# broker restart of 2026-10-02 (docs/architecture/slice-15b2b-b1b3e-broker-restart-recovery.md
-# §6; pinned by docs/architecture/slice-15b2b-b1b3e-broker-restart-repin.md).
+# Owner-accepted broker continuity baseline, accepted after the M-R1 reboot of
+# 2026-10-09 and the one M-R2 broker start (docs/architecture/slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md
+# §2, which records the owner acceptance verbatim and pins it).
 # Required by `preservation`; the supersession reference of `rebaseline`;
 # `baseline` keeps reporting its own new candidate.
-ACCEPTED_CURRENT_INCARNATION = "c4b9cb38d7a041dc91db0d8ada7e8d04"
-ACCEPTED_CURRENT_BASELINE_SHA256 = "a30bd7d6e26a75e4eba863c08622aebbbaf72928bc9dc7737fc1f7aa6473069d"
+ACCEPTED_CURRENT_INCARNATION = "ed35e343bc9f4ec687f753ed7b3a53b2"
+ACCEPTED_CURRENT_BASELINE_SHA256 = "ff3a432d9d8e5c23718be41898be9568dd8914f0e2e28bb4c27f8e0bccaa3ef1"
 PRESERVATION_SCHEMA = "BrokerDevPreservationV1"
 # The boot on which the accepted incarnation was observed; `rebaseline`
-# requires a different one. The 2026-10-02 restart kept the 2026-09-29 boot.
-ACCEPTED_CURRENT_BOOT_ID = "eea461c3-60f0-4b10-8ee9-556dcef19711"
+# requires a different one.
+ACCEPTED_CURRENT_BOOT_ID = "cb0d71da-32a7-402b-b85e-5748da012bff"
 # The accepted process identity, pinned explicitly as well as through the
 # candidate digest so a mismatch names the field.
 ACCEPTED_CURRENT_IDENTITY = {
-    "bootId": ACCEPTED_CURRENT_BOOT_ID, "pid": 35622, "startTicks": 26369693, "nRestarts": "0",
+    "bootId": ACCEPTED_CURRENT_BOOT_ID, "pid": 3411, "startTicks": 125335, "nRestarts": "0",
     "releaseSha": "817a83e44cec8965479fd97fc30b7a0b3ae49ab2",
     "manifestSha256": "7a46ac83001411a29b1bc4be7e0f91f09c5879967386c452b2620e23d16e4614",
     "sharedLibrariesSha256": "818994544397da37d5a97e3799afff314608a7aa00cad50c968a90b86f41ce60",
@@ -124,6 +124,10 @@ RETIRED_BROKER_BASELINES = (
     {"runtimeIncarnation": "84798e5b74494e1ea362ce90f1cf04ad", "bootId": "eea461c3-60f0-4b10-8ee9-556dcef19711",
      "baselineCandidateSha256": "5000374513f38144c90bd75aefdabb4d000f644e024107bf275da9f80af7dbe2",
      "record": "docs/architecture/slice-15b2b-b1b3e-pre-pr1b-reboot-rebaseline-acceptance.md"},
+    # Ended by the M-R1 reboot on 2026-10-09 (kernel 7.0.0-1014-gcp).
+    {"runtimeIncarnation": "c4b9cb38d7a041dc91db0d8ada7e8d04", "bootId": "eea461c3-60f0-4b10-8ee9-556dcef19711",
+     "baselineCandidateSha256": "a30bd7d6e26a75e4eba863c08622aebbbaf72928bc9dc7737fc1f7aa6473069d",
+     "record": "docs/architecture/slice-15b2b-b1b3e-broker-restart-recovery.md"},
 )
 REBASELINE_SCHEMA = "BrokerDevPostRebootRebaselineCandidateV1"
 AUTHORITY_CUSTODY_OWNERS = {

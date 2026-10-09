@@ -52,6 +52,7 @@ NON_ROOT = POSIX and UID != 0
 
 import mb6_ledger_verifier as V  # noqa: E402  (stdlib only at import)
 import mb6_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 if HAVE_CRYPTO and POSIX:
     import install_authority_dev as I
@@ -773,6 +774,7 @@ class OperatorTests(Redacted, unittest.TestCase):
     head = REAL_PIN_DERIVED_HEAD
 
     def setUp(self):
+        self.enterContext(RP.current_tree(O))
         self.work = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.work / "expected").mkdir()
         (self.work / "expected" / "expected-ledger.json").write_text(json.dumps({
@@ -790,7 +792,7 @@ class OperatorTests(Redacted, unittest.TestCase):
 
     def test_tool_pins_are_the_tree(self):
         for path, pin in O.TOOL_PINS.items():
-            self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, pin), path)
         self.assertEqual(O.Operator(gcloud=("gcloud",), run=FakeRun()).pins(ROOT)["result"], "MB6_TOOL_PINS_EXACT")
 
     def test_one_attempt_exactly_one_provision(self):

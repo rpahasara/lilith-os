@@ -18,11 +18,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / "services/owner-memory-control/tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb6_ledger_denial_proof as D  # noqa: E402
 import mb6_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 UID, GID = 991, 981
 P1B5_PROOF = "scripts/authority_custody_denial_proof.py"
@@ -266,7 +268,7 @@ class SeparationTests(unittest.TestCase):
             del sys.modules[spec.name]
         self.assertEqual(module.TOOL_PINS, MB4_MB5_TOOL_PINS)
         for path, pin in MB4_MB5_TOOL_PINS.items():
-            self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, pin), path)
         self.assertNotIn("mb6_ledger_denial_proof", operator.read_text(encoding="utf-8"))
 
     def test_the_new_proof_has_its_own_pin_in_the_mb6_operator(self):

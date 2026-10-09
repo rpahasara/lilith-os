@@ -125,8 +125,11 @@ OWNER_VERIFY = "services/owner-memory-control/tools/mb9_owner_genesis_verify.py"
 OPERATOR = "services/owner-memory-control/tools/mb9_operator.py"
 
 TOOL_PINS = {
-    **{path: M6.TOOL_PINS[path] for path in (INSTALLER, W5_VERIFIER, MB6_VERIFIER, OBSERVER, BROKER, DENIAL,
-                                             LEDGER_DENIAL)},
+    **{path: M6.TOOL_PINS[path] for path in (INSTALLER, W5_VERIFIER, MB6_VERIFIER, OBSERVER, DENIAL, LEDGER_DENIAL)},
+    # The broker verifier re-pinned to the owner-accepted post-reboot broker baseline (2026-10-09; record
+    # docs/architecture/slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md). The pinned M-B6 and Package A
+    # operators stay byte-unchanged and keep their historical pin of it.
+    BROKER: "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf",
     **{path: A.TOOL_PINS[path] for path in (MB6_OPERATOR, CANDIDATE, MB8_VERIFIER, OWNER_DENIAL)},
     MB7_MB8_OPERATOR: "9f13411f363dc956795ce4832d1948e7e6a9a7f7c8d1057291de852e9e2a20cd",
     VERIFIER: "e4aca11dcc925e8ebdb280c2d4a7da1cf4f9a8fcc4e2abb080e22d6917080e78",

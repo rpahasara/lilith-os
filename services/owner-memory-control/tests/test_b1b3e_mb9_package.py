@@ -60,6 +60,7 @@ import mb9_owner_genesis_verify as OV  # noqa: E402
 import mb9_witness_denial_proof as DP  # noqa: E402
 import mb9_witness_state_removal as RM  # noqa: E402
 import mb9_witness_verifier as W  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 HEAD = "19bf9091a96cdc2378a68508feb0c119721f7fcef7b9c3a480a6cd6b72fa1630"
 REGISTRY_DIGEST = "fa66272131a3ef076036616b07766a377de4fdc1e4fef4cb8a054726f05c14fc"
@@ -164,8 +165,11 @@ class PinTests(Redacted, unittest.TestCase):
     def test_every_tool_hashes_to_its_pin_and_reused_pins_are_unchanged(self):
         for path, pin in O.TOOL_PINS.items():
             self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
-        for path in (O.INSTALLER, O.W5_VERIFIER, O.MB6_VERIFIER, O.OBSERVER, O.BROKER, O.DENIAL, O.LEDGER_DENIAL):
+        for path in (O.INSTALLER, O.W5_VERIFIER, O.MB6_VERIFIER, O.OBSERVER, O.DENIAL, O.LEDGER_DENIAL):
             self.assertEqual(O.TOOL_PINS[path], M6.TOOL_PINS[path], path)
+        # The post-reboot re-pin: only this package pins the current broker verifier; M-B6 keeps its historical pin.
+        self.assertEqual((O.TOOL_PINS[O.BROKER], M6.TOOL_PINS[O.BROKER]),
+                         (RP.CURRENT_BROKER_PIN, RP.HISTORICAL_BROKER_PIN))
         for path in (O.MB6_OPERATOR, O.CANDIDATE, O.MB8_VERIFIER, O.OWNER_DENIAL):
             self.assertEqual(O.TOOL_PINS[path], A.TOOL_PINS[path], path)
         self.assertNotIn(O.OPERATOR, O.TOOL_PINS)                       # bound into each owner text at runtime
@@ -1585,7 +1589,7 @@ class RecordTests(Redacted, unittest.TestCase):
     def test_tool_pins_in_the_record_equal_the_code(self):
         table = self.section("## 16. Tool pins", "## 17.")
         for path, pin in O.TOOL_PINS.items():
-            self.assertIn(f"| `{path}` | `{pin}` |", table, path)
+            self.assertIn(f"| `{path}` | `{RP.record_pin(path, pin)}` |", table, path)
         self.assertEqual(len(re.findall(r"^\| `[^`]+` \| `[0-9a-f]{64}` \|$", table, re.M)), len(O.TOOL_PINS))
         for path in NEW_TOOLS:                                            # no provisional pin left anywhere
             name = re.escape(Path(path).name)
