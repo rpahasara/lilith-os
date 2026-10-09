@@ -466,7 +466,7 @@ class RecordTests(P.Redacted, unittest.TestCase):
         ledger = (P.ARCH / "current-architecture-acceptance-ledger-v0.1.md").read_text(encoding="utf-8")
         self.assertLess(ledger.index("### 13.1an"), ledger.index("### 13.1ao"))
         self.assertLess(ledger.index("### 13.1ao"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1ao) | UNASSIGNED |", ledger)
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1ao)", ledger)   # the AUTH-02 cell (§13.1ap follows)
         ao = ledger.split("### 13.1ao", 1)[1].split("### 13.2 Checks", 1)[0]
         for needed in ("`PACKAGE_B_SEQUENCE_2 = OPENED THEN STOPPED BEFORE M-B9a", "CONSUMED", "None is authorized.",
                        "This pass contacted no live system."):
