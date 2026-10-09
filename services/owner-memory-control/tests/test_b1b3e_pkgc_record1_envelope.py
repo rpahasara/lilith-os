@@ -1114,7 +1114,8 @@ class BoundaryTests(unittest.TestCase):
             self.assertNotIn(forbidden, code, forbidden)
         main_src = source[source.index("def main("):]
         names = set(re.findall(r'argv\[0\] == "([a-z0-9-]+)"', main_src)) | {"arm", "record"}
-        self.assertEqual(names, {"pins", "open", "acquire", "arm", "record", "bind", "gate", "peer-view",
+        self.assertEqual(names, {"pins", "open", "acquire", "acquire-windows", "arm", "record", "bind", "gate",
+                                 "peer-view",
                                  "c4b-eligibility", "s25-expect", "s25-check", "transfer", "s25-bundle"})
         acquire_src = source[source.index("def acquire("):source.index("def verify_acquisition(")]
         self.assertEqual(re.findall(r'\["([a-z-]+)", str\(repo\)', acquire_src), ["host", "chain-export"])

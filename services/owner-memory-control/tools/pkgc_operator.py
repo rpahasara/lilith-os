@@ -17,6 +17,7 @@ only the deterministic glue:
 | `pins <repo>` | local, read-only: clean checkout; control = `HEAD`; every pinned tool exact |
 | `open <repo> <workdir> <statement> <facts.json>` | local: the owner's verbatim C1 in a NEW work directory; a fresh sequence id |
 | `acquire <repo> <workdir> <mb9-workdir>` | ONE fresh read of the presented DEV world through the pinned read-only `mb9_operator.py` forms `host … POST9B` and `chain-export`, with a per-read acquisition receipt (record §3.1) |
+| `acquire-windows <repo> <wsl-distro> <wsl-workdir> <sequence-id> <mb9-workdir>` | the same `acquire`, run on the Windows owner laptop against the already-open WSL work directory (record §12.2) |
 | `bind <workdir> <installables-dir> <pin-dir> <export> <replica-a> <pr2-sha256> <p33-sha256>` | local, read-only over owner-held inputs and ONE verified acquisition: writes the NEW `<workdir>/binding/` |
 | `gate <workdir> <stage> <export> <facts.json>` | local: the continuity gate before C2 / C3 / C4A / C4B / C5 over a NEW, never-consumed acquisition |
 | `peer-view <workdir> <kind> [<source>]` | local: one read-only, provenance-bound, NON-CUSTODY peer view at `<workdir>/views/<kind>` (record §5) |
@@ -39,6 +40,7 @@ First Memory form.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -55,10 +57,24 @@ for _path in (ROOT / "services/core-api", ROOT / "services/owner-memory-control"
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from lilith_owner_memory import owner_acceptance as OA  # noqa: E402
-from lilith_owner_memory import owner_freshness as OF  # noqa: E402
-from lilith_owner_memory import owner_freshness_tool as T  # noqa: E402
-from lilith_owner_memory import witness_readiness as WR  # noqa: E402
+
+
+class _OnDemand:
+    """A module imported at its first attribute use (record §12.2). Every form except the acquisition uses these
+    modules, and through them the pinned third-party packages; the acquisition path uses none of them, so it runs
+    with the Python standard library only."""
+
+    def __init__(self, name: str):
+        self._name = name
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(importlib.import_module(self._name), attr)
+
+
+OA = _OnDemand("lilith_owner_memory.owner_acceptance")
+OF = _OnDemand("lilith_owner_memory.owner_freshness")
+T = _OnDemand("lilith_owner_memory.owner_freshness_tool")
+WR = _OnDemand("lilith_owner_memory.witness_readiness")
 
 RESULT_TYPE = "LILITH_PKGC_OPERATOR"
 CONTINUITY = ("PACKAGE_C_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_SEQUENCE_"
@@ -506,17 +522,33 @@ class PackageCSequenceV1:
 
 # ---------------------------------------------------------------- helpers ---
 
+# = owner_freshness_tool.MAX_INPUT_BYTES; `_json` = witness_readiness._json (strict UTF-8, duplicate keys refused).
+# Both are standard-library so the acquisition path imports nothing else; their equality is tested.
+MAX_INPUT_BYTES = 8 << 20
+
+
 def _read(path: Path, reason: str) -> bytes:
     path = Path(path)
     _need(path.is_file() and not path.is_symlink(), reason + ":" + path.name)
     data = path.read_bytes()
-    _need(len(data) <= T.MAX_INPUT_BYTES, reason + ":" + path.name)
+    _need(len(data) <= MAX_INPUT_BYTES, reason + ":" + path.name)
     return data
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
 
 
 def _json(data: bytes, reason: str) -> Any:
     try:
-        return WR._json(data)
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            raise ValueError("empty document")
+        return json.loads(bytes(data).decode("utf-8"), object_pairs_hook=_no_duplicate_keys)
     except Exception as exc:  # noqa: BLE001 - any parse failure is a STOP
         raise Stop(reason) from exc
 
@@ -663,6 +695,44 @@ def acquire(repo: Path, workdir: Path, mb9_workdir: Path, *, runner: Runner | No
                                                        "receiptSha256": sha256_hex(raw)}))
     return {"result": "PKGC_ACQUIRED", "acquisition": name, "receiptSha256": sha256_hex(raw),
             "facts": receipt["facts"]}
+
+
+# Record §12.2. The two-environment C1 procedure: every form runs in WSL except the acquisition, which needs the
+# reviewed Windows DEV transport and the owner key, both on Windows. It reaches the SAME work directory through the
+# Windows view of the WSL filesystem, then runs the unchanged `acquire`: same files, receipt and log entries.
+WSL_UNC_PREFIX = "\\\\wsl$\\"
+_WSL_DISTRO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+_WSL_COMPONENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
+_SEQUENCE_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+
+def wsl_windows_path(distro: str, wsl_workdir: str) -> str:
+    """Deterministic: the UNC share `wsl$` of <distro>, then the absolute, normalized WSL path with each `/` as a
+    backslash. Only plain path components: never `.`, `..`, an empty component, a trailing `/` or /mnt."""
+    _need(isinstance(distro, str) and _WSL_DISTRO.fullmatch(distro) is not None, "WSL_DISTRO_INVALID")
+    parts = wsl_workdir.split("/") if isinstance(wsl_workdir, str) else []
+    _need(len(parts) >= 2 and parts[0] == "" and parts[1] != "mnt"
+          and all(_WSL_COMPONENT.fullmatch(part) is not None for part in parts[1:]), "WSL_WORKDIR_INVALID")
+    return WSL_UNC_PREFIX + distro + "\\" + "\\".join(parts[1:])
+
+
+def acquire_windows(repo: Path, distro: str, wsl_workdir: str, sequence_id: str, mb9_workdir: Path, *,
+                    root: Path | None = None, runner: Runner | None = None, now: Callable[[], str] | None = None,
+                    pinned: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """`acquire` from Windows against the already-open WSL work directory. It never opens or creates a sequence:
+    the derived path must be a directory holding this sequence's C1 opening, with the sequence id the owner read
+    from `open`. `root` is a TEST seam standing in for the UNC share `wsl$` of <distro>."""
+    path = wsl_windows_path(distro, wsl_workdir)
+    _need(isinstance(sequence_id, str) and _SEQUENCE_ID.fullmatch(sequence_id) is not None, "SEQUENCE_ID_INVALID")
+    workdir = Path(path) if root is None else Path(root, *wsl_workdir.split("/")[1:])
+    _need(workdir.is_dir() and not workdir.is_symlink(), "WSL_WORKDIR_NOT_FOUND")
+    opening = _opening(workdir)
+    _need(opening.get("sequenceId") == sequence_id, "SEQUENCE_MISMATCH")
+    now = now or _utc_now
+    # A Windows clock behind the WSL opening would fail the receipt's timestamp rule after the read: refuse first.
+    _need(now() >= opening["openedAt"], "CLOCK_BEFORE_OPENING")
+    result = acquire(repo, workdir, mb9_workdir, runner=runner, now=now, pinned=pinned)
+    return {**result, "workdir": path, "wslWorkdir": wsl_workdir, "sequenceId": sequence_id}
 
 
 def verify_acquisition(workdir: Path, export: Path) -> dict[str, Any]:
@@ -1529,6 +1599,8 @@ def main(argv: Sequence[str]) -> int:
                                    freshness_tool=pinned["freshnessTool"], facts=facts)
         elif len(argv) == 4 and argv[0] == "acquire":
             result = acquire(Path(argv[1]), Path(argv[2]), Path(argv[3]))
+        elif len(argv) == 6 and argv[0] == "acquire-windows":
+            result = acquire_windows(Path(argv[1]), argv[2], argv[3], argv[4], Path(argv[5]))
         elif len(argv) == 5 and argv[0] in ("arm", "record"):
             text = _read(Path(argv[3]), "STATEMENT_ABSENT").decode("utf-8")
             paths = _json(_read(Path(argv[4]), "PATHS_ABSENT"), "PATHS_INVALID")
@@ -1558,7 +1630,11 @@ def main(argv: Sequence[str]) -> int:
     except Stop as exc:
         print(f"pkgc_operator: STOP {exc.reason}", file=sys.stderr)
         return 2
-    except T.ToolRefusal as exc:
+    except Exception as exc:
+        # The canonical tool's refusal. Only a form that imported the tool can raise it (record §12.2).
+        tool = sys.modules.get("lilith_owner_memory.owner_freshness_tool")
+        if tool is None or not isinstance(exc, tool.ToolRefusal):
+            raise
         print(f"pkgc_operator: STOP {exc.reason}", file=sys.stderr)
         return 2
     sys.stdout.write(json.dumps(result, sort_keys=True, indent=1) + "\n")
