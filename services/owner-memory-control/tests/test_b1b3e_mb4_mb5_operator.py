@@ -37,6 +37,7 @@ for _p in (TOOLS, Path(__file__).resolve().parent):
         sys.path.insert(0, str(_p))
 
 import mb4_mb5_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 HAVE_CRYPTO = all(importlib.util.find_spec(m) is not None for m in ("cryptography", "rfc8785", "fido2"))
 
@@ -84,7 +85,11 @@ def go_text(lines, **values) -> str:
 class PinTests(unittest.TestCase):
     def test_tool_pins_equal_the_reviewed_files(self):
         for path, pin in O.TOOL_PINS.items():
-            self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, pin), path)
+        # Completed ceremony: its historical broker verifier pin refuses the re-pinned tree.
+        with self.assertRaises(O.Stop) as caught:
+            O.Operator(gcloud=("gcloud",), run=FakeRunner()).pins(ROOT)
+        self.assertEqual(caught.exception.code, "TOOL_PIN_MISMATCH:" + RP.BROKER)
 
     def test_release_module_pins_equal_the_aee323e_sources(self):
         mapping = {"lilith_authority_host/": "services/authority-dev/lilith_authority_host/",
@@ -113,6 +118,7 @@ class PinTests(unittest.TestCase):
 
 class StreamAndShapeTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(RP.current_tree(O))
         self.runner = FakeRunner()
         self.op = O.Operator(gcloud=("gcloud",), run=self.runner)
 
@@ -287,6 +293,7 @@ class StagingTests(unittest.TestCase):
 
 class OneAttemptTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(RP.current_tree(O))
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)

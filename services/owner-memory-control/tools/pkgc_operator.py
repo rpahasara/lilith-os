@@ -68,10 +68,11 @@ FRESHNESS_TOOL = "services/owner-memory-control/lilith_owner_memory/owner_freshn
 MB9_OPERATOR = "services/owner-memory-control/tools/mb9_operator.py"
 W9_VERIFIER = "services/owner-memory-control/tools/mb9_witness_verifier.py"
 OWNER_VERIFY = "services/owner-memory-control/tools/mb9_owner_genesis_verify.py"
-# The canonical owner-record tool and the pinned Package B read-only tools Package C relies on. Unchanged here.
+# The canonical owner-record tool and the pinned Package B read-only tools Package C relies on.
 TOOL_PINS = {
     FRESHNESS_TOOL: "fd7abe2aa5e5efae41b87553efe8fe8058b437748accf866c2fa5ee71c8a7c27",
-    MB9_OPERATOR: "066fc8213b40c392e3e2bfd609da4a7f2a4e0b6f05da011daee9add3caf13973",
+    # Re-pinned for the post-reboot broker verifier (record slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md).
+    MB9_OPERATOR: "2312e26a9cc8c2076539ae8bdde98cc5d79c2bbeb5138d66d07863ec3303c928",
     W9_VERIFIER: "e4aca11dcc925e8ebdb280c2d4a7da1cf4f9a8fcc4e2abb080e22d6917080e78",
     OWNER_VERIFY: "30b66fd2be9f29e820041840a75dc87f7623eff44551c025a0141790e7c89a5a",
 }
@@ -140,8 +141,10 @@ ACCEPTED_PINS = PackageCPinsV1(
     replica_a_id="owner-primary-dev-synthetic-01",
     replica_b_id="owner-offline-dev-synthetic-01",
     replica_b_manifest_sha256="c068e5331ccd7fa0f69f2b38d25849497b86edea843598784235874080c107c4",
-    witness_invocation_id="5136ea7af2544450b9370fa412786c98",
-    witness_main_pid="143946",
+    # The owner-accepted post-reboot witness incarnation (2026-10-09, NRestarts 0); the Package B incarnation
+    # 5136ea7af2544450b9370fa412786c98 / 143946 is historical (record slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md).
+    witness_invocation_id="8af12bd64d024d0eba56bbcedbc534a6",
+    witness_main_pid="1580",
 )
 
 INSTALLABLES = {"registry": "authority-registry.v1.json", "root": "registry-root.json",

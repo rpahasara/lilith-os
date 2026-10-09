@@ -21,12 +21,14 @@ ARCH = ROOT / "docs/architecture"
 RECORD = ARCH / "slice-15b2b-b1b3e-mb6-ledger-remediation.md"
 PREFLIGHT = ARCH / "slice-15b2b-b1b3e-pr1-live-install-preflight.md"
 SEQUENCING = ARCH / "slice-15b2b-b1b3e-pr3-pr1b-bootstrap-sequencing.md"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb6_ledger_recovery as R  # noqa: E402
 import mb6_ledger_verifier as V  # noqa: E402
 import mb6_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 PIN_DERIVED_HEAD = "19bf9091a96cdc2378a68508feb0c119721f7fcef7b9c3a480a6cd6b72fa1630"
 CONTINUITY = "OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_SEQUENCE_ONE_GO"
@@ -152,6 +154,7 @@ class OwnerDecisionTests(unittest.TestCase):
     """The owner decisions of 2026-10-07 (R-1, R-2A, R-2B, R-3, R-6, timeout, owner head)."""
 
     def setUp(self):
+        self.enterContext(RP.current_tree(O))
         self.text = RECORD.read_text(encoding="utf-8")
         self.flat = flat(self.text)
         self.state = self.text.split("## 17. State", 1)[1]

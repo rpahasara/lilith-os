@@ -25,10 +25,12 @@ RECORD = ARCH / "slice-15b2b-b1b3e-mb9-package-b-completion.md"
 PACKAGE_B = ARCH / "slice-15b2b-b1b3e-mb9-witness-genesis-package.md"
 LEDGER = ARCH / "current-architecture-acceptance-ledger-v0.1.md"
 TOOLS = ROOT / "services/owner-memory-control/tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb9_dr5_target as T  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 CONTROL = "050e7c5c4c6238eee09eb67b094348127d2953c6"
 PRESERVATION_RUN = "37829794035"
@@ -86,7 +88,10 @@ class PackageBCompletionRecordTests(unittest.TestCase):
     def test_the_operator_pin_is_the_one_at_this_control(self):
         import mb9_operator as O
 
-        self.assertEqual(hashlib.sha256(Path(O.__file__).read_bytes()).hexdigest(), OPERATOR)
+        # Package B's operator is historical since the post-reboot re-pin of its broker verifier pin.
+        self.assertEqual(RP.HISTORICAL_MB9_OPERATOR_PIN, OPERATOR)
+        self.assertIn(OPERATOR, self.text)
+        self.assertEqual(hashlib.sha256(Path(O.__file__).read_bytes()).hexdigest(), RP.CURRENT_MB9_OPERATOR_PIN)
         self.assertEqual(O.TOOL_PINS[O.VERIFIER], "e4aca11dcc925e8ebdb280c2d4a7da1cf4f9a8fcc4e2abb080e22d6917080e78")
 
     def test_b3_accepted_the_exact_incarnation_and_post9a(self):

@@ -47,7 +47,7 @@ ENV, PROFILE = F.ENV, "TEST_ONLY"
 A_ID, B_ID = "vault-a", "offline-b"
 EVIDENCE = {"PR2_REVALIDATION": hashlib.sha256(b"pr2 revalidation (fresh, C1)").hexdigest(),
             "P3_3_INDEPENDENCE": hashlib.sha256(b"p3-3 independence acceptance").hexdigest()}
-INVOCATION, MAIN_PID = "5136ea7af2544450b9370fa412786c98", "143946"
+INVOCATION, MAIN_PID = "8af12bd64d024d0eba56bbcedbc534a6", "1580"
 
 
 def sha(data: bytes) -> str:
@@ -1150,8 +1150,17 @@ class BoundaryTests(unittest.TestCase):
         record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-mb9-package-b-completion.md").read_text(encoding="utf-8")
         for value in (P.ACCEPTED_PINS.genesis_digest, P.ACCEPTED_PINS.chain_1_sha256, P.ACCEPTED_PINS.pin_sha256,
                       P.ACCEPTED_PINS.register_sha256, P.ACCEPTED_PINS.pin_record_sha256,
-                      P.ACCEPTED_PINS.witness_invocation_id, P.ACCEPTED_PINS.replica_b_manifest_sha256):
+                      P.ACCEPTED_PINS.replica_b_manifest_sha256):
             self.assertIn(value, record)
+        # The witness incarnation is the owner-accepted post-reboot one; Package B's is historical.
+        repin = (ROOT / "docs/architecture/slice-15b2b-b1b3e-post-reboot-witness-broker-repin.md").read_text(
+            encoding="utf-8")
+        self.assertEqual((P.ACCEPTED_PINS.witness_invocation_id, P.ACCEPTED_PINS.witness_main_pid),
+                         ("8af12bd64d024d0eba56bbcedbc534a6", "1580"))
+        for value in (P.ACCEPTED_PINS.witness_invocation_id, P.ACCEPTED_PINS.witness_main_pid,
+                      P.ACCEPTED_PINS.genesis_digest, P.ACCEPTED_PINS.chain_1_sha256):
+            self.assertIn(value, repin)
+        self.assertIn("5136ea7af2544450b9370fa412786c98", record)
         import mb7_genesis_candidate as C
         self.assertEqual((P.ACCEPTED_PINS.registry_sha256, P.ACCEPTED_PINS.root_anchor_sha256,
                           P.ACCEPTED_PINS.witness_anchor_sha256),

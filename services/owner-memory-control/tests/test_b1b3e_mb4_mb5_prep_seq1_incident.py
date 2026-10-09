@@ -22,10 +22,12 @@ RECORD = ARCH / "slice-15b2b-b1b3e-mb4-mb5-prep-seq1-operator-loader-incident.md
 PACKAGE = ARCH / "slice-15b2b-b1b3e-mb4-mb5-ceremony-package.md"
 LEDGER = ARCH / "current-architecture-acceptance-ledger-v0.1.md"
 TOOLS = ROOT / "services/owner-memory-control/tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb4_mb5_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 SUPERSEDED = "2d9835edb18361df231c58d914c8859240438c7ed7dd39de547bee4756acfbbf"
 CONTROL = "ffa9575f13e60ae8f87dfb0c7b9afc9e5d4f566d"
@@ -87,7 +89,7 @@ class PrepSequence1IncidentTests(unittest.TestCase):
 
     def test_every_other_pin_unchanged(self):
         for path, pin in UNCHANGED.items():
-            self.assertEqual(sha(ROOT / path), pin, path)
+            self.assertEqual(sha(ROOT / path), RP.tree_pin(path, pin), path)
         for path, pin in O.TOOL_PINS.items():
             self.assertEqual(UNCHANGED[path], pin, path)
         self.assertEqual(dict(O.DERIVED), REPRESENTATION)

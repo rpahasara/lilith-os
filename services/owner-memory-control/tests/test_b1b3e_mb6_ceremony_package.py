@@ -24,12 +24,14 @@ TOOLS = ROOT / "services/owner-memory-control/tools"
 ARCH = ROOT / "docs/architecture"
 PACKAGE = ARCH / "slice-15b2b-b1b3e-mb6-ceremony-package.md"
 HEAD_RECORD = ARCH / "slice-15b2b-b1b3e-mb6-owner-ledger-head-acceptance.md"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+for _p in (TOOLS, Path(__file__).resolve().parent):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import mb6_dr5_target as T  # noqa: E402
 import mb6_ledger_verifier as V  # noqa: E402
 import mb6_operator as O  # noqa: E402
+import post_reboot_repin as RP  # noqa: E402
 
 CONTROL = "78683b2a36dd5bd2674e9664712b13702d1aa404"
 HEAD = "19bf9091a96cdc2378a68508feb0c119721f7fcef7b9c3a480a6cd6b72fa1630"
@@ -279,9 +281,9 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(rows[O.OPERATOR], sha((ROOT / O.OPERATOR).read_bytes()))
         for path, pin in O.TOOL_PINS.items():
             self.assertEqual(rows.get(path), pin, path)
-            self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, pin), path)
         for path, digest in rows.items():
-            self.assertEqual(sha((ROOT / path).read_bytes()), digest, path)
+            self.assertEqual(sha((ROOT / path).read_bytes()), RP.tree_pin(path, digest), path)
         self.assertEqual(rows["scripts/deployer_authority_boundary_proof.sh"],
                          "9b569f9bee8f07f0bf13ec1d20e2607d9e01c601a2e94a2988320e5bc4160f43")
         self.assertEqual(rows["scripts/authority_custody_denial_proof.py"],
@@ -346,7 +348,7 @@ class PackageTests(unittest.TestCase):
                 "derivation": "OWNER_COMPUTED_FROM_REGISTRY_V1", "ledgerSequence": 1, "ledgerHead": HEAD,
                 "independentLedgerHead": HEAD, "pinDerivedLedgerHead": HEAD}), encoding="utf-8")
             (work / "go.txt").write_text("Pre-state: W6_0_NO_MB6_MUTATION.\n", encoding="utf-8")
-            with self.assertRaises(O.Stop) as caught:
+            with RP.current_tree(O), self.assertRaises(O.Stop) as caught:
                 O.Operator(gcloud=("gcloud",), run=run).mb6(ROOT, work, work / "go.txt")
             self.assertEqual(caught.exception.code, "OPERATOR_NOT_AT_CONTROL")
             self.assertFalse((work / "attempts").exists())
