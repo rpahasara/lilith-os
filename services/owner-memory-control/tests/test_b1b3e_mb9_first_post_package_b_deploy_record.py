@@ -188,8 +188,8 @@ class FirstPostPackageBDeployRecordTests(unittest.TestCase):
                       "comparison, 2026-10-09)", ledger)
         self.assertLess(ledger.index("### 13.1ap"), ledger.index("### 13.1aq"))
         self.assertLess(ledger.index("### 13.1aq"), ledger.index("### 13.2 Checks"))
-        self.assertIn("FRESHNESS=UNKNOWN (§13.1aq) | UNASSIGNED |", ledger)   # the AUTH-02 cell
-        aq = section(ledger, "### 13.1aq", "### 13.2 Checks")
+        self.assertIn("FRESHNESS=UNKNOWN (§13.1aq)", ledger)   # the AUTH-02 cell (§13.1ar follows)
+        aq = section(ledger, "### 13.1aq", "### 13.1ar")   # §13.1ar (Package C completion) follows
         for needed in (RUN, CONTROL, VALIDATION, ACCEPTANCE, PHASE, "**it is not a new global baseline**",
                        "None has happened.", "This pass contacted no live system.", "193 rows"):
             self.assertIn(needed, aq)
