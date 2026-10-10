@@ -3,7 +3,8 @@
 
 Record: docs/architecture/slice-15b2b-b1b3e-mb10-held-package.md.
 DESIGN / SOURCE ONLY: no form below is authorized by this repository. Each live use needs its own explicit owner act
-(record §8). The continuity wording in the templates is the PROPOSED one (record §10, OD-M10-1); it is not accepted.
+(record §8). The templates bind the owner-ACCEPTED decisions OD-M10-1 … OD-M10-8 (2026-10-10, record §10):
+`MB10_CONTINUITY = OWNER_ATTENDED_EVENT_BOUNDED_SINGLE_SEQUENCE_ONE_HOLD_BOUNDARY`.
 
 It reuses the pinned Package B operator (`mb9_operator.Operator`: the reviewed `gcloud compute ssh` mutation
 transport, the direct-plink verifier bundles, the one-attempt marker, the go check), unchanged, and adds only the
@@ -12,30 +13,36 @@ M-B10 forms. Every form is closed: no free path, command or principal argument r
 | Form | Effect |
 | --- | --- |
 | `pins <repo>` | local, read-only: clean checkout; control = `HEAD`; every pinned tool exact |
-| `render <repo> <workdir> <D1\\|D2\\|D3\\|STOP> [<facts.json>]` | local: the exact canonical owner text with every value inserted (D1 needs the facts) |
-| `open <repo> <workdir> <statement> <facts.json>` | local: the owner's verbatim D1 (read-only opening; the freeze per the accepted continuity) in a NEW work directory |
+| `render <repo> <workdir> <D1\\|D2\\|D3\\|STOP\\|RELEASE\\|SCRATCH\\|S25> [<file>]` | local: the exact canonical owner text (or the S25 phone commands) with every value inserted; D1 takes the facts file, SCRATCH the plan directory name |
+| `open <repo> <workdir> <statement> <facts.json>` | local: the owner's verbatim D1 in a NEW work directory; the freeze begins, or continues from a predecessor |
 | `export <repo> <workdir>` | read-only DEV: one fresh chain export (`chain/1.json`, `witness.json`) with a receipt bound to this sequence |
+| `s25-record <repo> <workdir> <transcription>` | local: records the owner's fresh S25 `mb10_s25_pre` transcription, after D1 (OD-M10-5) |
 | `host <repo> <workdir> <PRE\\|POST>` | read-only DEV: the Package B host reads with the M-B10 expectations, plus the W10 verifier |
-| `gate <repo> <workdir> <host-dir> <eligibility.json> <facts.json>` | local: the M-B10 gate over a fresh, never-consumed host PRE read and a fresh owner eligibility record |
+| `gate <repo> <workdir> <host-dir> <eligibility.json> <facts.json>` | local: the M-B10 gate; ordinary staleness is REVALIDATE, a material substrate change ENDS the sequence (OD-M10-3) |
 | `mb10 <repo> <workdir> <go-file>` | **mutation, one D2 go, one marker**: a fresh W10_0 read; marker `mb10`; ONE `lilith-authority-hold-dev create-initial-held`; an independent W10 read-back |
 | `post <repo> <workdir>` | read-only DEV: POST10 (host POST, the P1B-10, P1B-9b and P1B-5 proofs, health, hold observe, HELD bytes, chain); on exact, `POST10_VERIFIED` |
-| `classify <repo> <workdir> <evidence-dir>` | read-only DEV: the W10 verifier combined with this sequence's records into one sequence phase |
-| `accept <repo> <workdir> <statement>` | local: records the owner's verbatim D3 (M-B10 acceptance; authorizes nothing) |
-| `stop <repo> <workdir> <statement>` | local: the owner's verbatim pre-marker stop; refused once the marker exists |
+| `classify <repo> <workdir>` | read-only DEV: the W10 verifier combined with this sequence's records into one recorded sequence phase |
+| `accept <repo> <workdir> <statement>` | local: records the owner's verbatim D3 (M-B10 acceptance; ends the freeze; authorizes nothing) |
+| `stop <repo> <workdir> <statement>` | local: the owner's verbatim pre-marker STOP (ends the sequence and its freeze); refused once the marker exists |
+| `release-freeze <repo> <workdir> <statement>` | local: the owner's explicit freeze release after a post-marker NOT-WRITTEN classification (OD-M10-2) |
+| `scratch-plan <repo> <workdir>` | read-only DEV: the bounded MB10_SCRATCH_RECOVERY plan, only after an `S10_SCRATCH_RESIDUE_NOT_WRITTEN` classification |
+| `scratch-recover <repo> <workdir> <plan-dir> <authorization>` | **mutation, its own owner authorization and marker**: removes exactly the planned writer scratch (OD-M10-6) |
 | `dr5 <repo> <verified-w10-phase> <deploy-log>` | local: the post-HELD phase-bound DR-5 comparison (`mb10_dr5_target.py`) |
 
-Four owner acts, each its own text and none implied by another: D1 opens the sequence (read-only only); D2
-authorizes the ONE HELD write and acknowledges its point of no return; D3 accepts M-B10 (authorizes nothing); a
-pre-marker STOP may instead end the sequence. The `O_EXCL` marker is written BEFORE the remote write; whatever
-happens after it, the go is consumed: no automatic retry and no second invocation path. The writer itself refuses a
-second HELD (`HOLD_STORE_NOT_EMPTY`), but that is defence in depth, never the reason it is not retried.
+Owner acts, each its own text and none implied by another: D1 opens the sequence (read-only only); D2 authorizes
+the ONE HELD write and acknowledges its point of no return; D3 accepts M-B10 (ends the freeze; authorizes nothing);
+a pre-marker STOP ends the sequence and its freeze; a post-marker freeze RELEASE ends only the freeze; a SCRATCH
+recovery authorization permits only the bounded removal. The `O_EXCL` marker is written BEFORE the remote write;
+whatever happens after it, the go is consumed: no automatic retry and no second invocation path. The writer itself
+refuses a second HELD (`HOLD_STORE_NOT_EMPTY`), but that is defence in depth, never the reason it is not retried.
 
-    gate / pin / marker / go check != authorization;  W10_1 technical PASS != owner acceptance
+    gate / pin / marker / go check != authorization;  W10_1_HELD_EXACT technical PASS != owner acceptance
     HELD = restrictive custody state only;  HELD != issuance != signer (M-B11) != activation != First Memory
 
 It never opens, loads, decrypts or copies a key, never starts, stops, enables or reloads a unit, never starts the
-signer, never runs a release, head-advance, epoch-advance, recovery, activation, record or First Memory form, and
-runs the hold CLI's `create-initial-held` only inside `mb10`, once.
+signer, never runs a release, head-advance, epoch-advance, recovery, activation, record or First Memory form, never
+writes to the S25, runs the hold CLI's `create-initial-held` only inside `mb10`, once, and removes residue only inside
+`scratch-recover`, once per authorized plan.
 """
 
 from __future__ import annotations
@@ -69,15 +76,19 @@ MB10_VERIFIER = "services/owner-memory-control/tools/mb10_held_verifier.py"
 MB10_DENIAL = "services/owner-memory-control/tools/mb10_hold_denial_proof.py"
 MB10_DR5 = "services/owner-memory-control/tools/mb10_dr5_target.py"
 MB10_ELIGIBILITY = "services/owner-memory-control/tools/mb10_owner_eligibility.py"
+MB10_SCRATCH = "services/owner-memory-control/tools/mb10_scratch_recovery.py"
+MB10_PHONE = "services/owner-memory-control/tools/mb10_s25_phone.sh"
 TOOL_PINS = {
     **M9.TOOL_PINS,
     MB9_OPERATOR: "2312e26a9cc8c2076539ae8bdde98cc5d79c2bbeb5138d66d07863ec3303c928",
     PKGC_OPERATOR: "c5e5a5cc265f48721715e43b4bec40ccbaf865c4149d095c86c853331c2767c0",
     DR5_SCRIPT: "9b569f9bee8f07f0bf13ec1d20e2607d9e01c601a2e94a2988320e5bc4160f43",
-    MB10_VERIFIER: "35b2cb19a2a6e4673f2425d0a13432b6af736cfc0eeaeab81a48121b1de66cf5",
+    MB10_VERIFIER: "73a8fe9aec48fab7fb628a3427bc690876b55a4ae1ead55f1b7e00032075b8e3",
     MB10_DENIAL: "3685472f865113357e3010003c3bb24ff47e66b528f114f5fca23d9d7a664b7b",
     MB10_DR5: "29c359617605f67e812732c4bb6a9ca1b9439bfffcf22285e44d9f6c1999ccf0",
-    MB10_ELIGIBILITY: "8d9edfd4110529efb047e5e45eff9e48233ee3ddfe2f8d2bbd7b2015b6c51ea7",
+    MB10_ELIGIBILITY: "3b2d6557ef5887e7f562db4686da456e1e51fe48d10bd50edee1ebfe731f93f9",
+    MB10_SCRATCH: "c5197f74e210ca32408ee96b8ac5799c5cf15c70a406c2917f23cf17d5bdcbd9",
+    MB10_PHONE: "e6616a29605b2fba2d7bd16823380be25c80e5ad3c70d66a49edeb0dbd71fd4b",
 }
 W10_BUNDLE = (M9.W5_VERIFIER, M9.MB6_VERIFIER, M9.MB8_VERIFIER, M9.VERIFIER, MB10_VERIFIER)
 
@@ -91,15 +102,25 @@ GENESIS = "ac892dc2b14ca7db108400258abfcf2320ff498f2a674058058e16a8a6fb65e4"
 CHAIN_1_SHA256 = "252c32204bebf3fa1ca0981d8791115e2abb6cd8ddb0925285c64213317cfb99"
 RECORD_1 = "77752db11d80eef50eaeaa8b931d65a489bb919f9e864584fbf8d00746e2cec6"
 ENVELOPE_1 = "95da36cd6edd49c2bae244611cc429a174dee72ec2454c4f73c57a83bfcb0f0c"
+S25_BUNDLE_SHA256 = "77eeb7d57c7e2e67365fc61207e99c0e817cf2bc685ea18f2f226799faa06610"
 # The owner-accepted post-reboot witness incarnation and boot (post-reboot re-pin record; preserved EQUAL since).
 ACCEPTED_WITNESS = ("8af12bd64d024d0eba56bbcedbc534a6", "1580")
 ACCEPTED_BOOT_ID = "cb0d71da-32a7-402b-b85e-5748da012bff"
 MARKER = "mb10"
-SEQUENCE_DIR, HOST_DIR, EXPORT_DIR, GATE_DIR, POST_DIR, ACCEPT_DIR = (
-    "sequence", "host", "exports", "gates", "post10", "acceptance")
-OPENING_FILE, STOP_FILE, ACCEPT_FILE = "D1_OPENING.json", "STOPPED.json", "D3_ACCEPTANCE.json"
+SEQUENCE_DIR, HOST_DIR, EXPORT_DIR, S25_DIR, GATE_DIR, POST_DIR, ACCEPT_DIR, CLASS_DIR, SCRATCH_DIR = (
+    "sequence", "host", "exports", "s25", "gates", "post10", "acceptance", "classifications", "scratch")
+OPENING_FILE, STOP_FILE, ENDED_FILE, RELEASE_FILE, ACCEPT_FILE = (
+    "D1_OPENING.json", "STOPPED.json", "ENDED.json", "FREEZE_RELEASED.json", "D3_ACCEPTANCE.json")
 OPEN_FACTS = ("lastDeployRunId", "workflowQueueEmpty", "predecessorWorkdir")
 GATE_FACTS = ("lastDeployRunId", "workflowQueueEmpty")
+# OD-M10-3: a material substrate identity change (or a freeze violation) ENDS the sequence before the marker;
+# everything else is ordinary staleness, revalidated with fresh evidence, a new gate and a re-rendered D2.
+MATERIAL_EVENTS = frozenset({"BOOT_CHANGED", "WITNESS_INCARNATION_CHANGED", "BROKER_PRESERVATION_NOT_PASS",
+                             "REBOOT_REQUIRED_PRESENT_OR_UNKNOWN", "DEPLOY_SINCE_OPENING", "HOST_NOT_W10_0",
+                             "W9_NOT_EXACT"})
+# Post-marker NOT-WRITTEN outcomes (the store proven empty): the sequence ends; the freeze stays in force.
+NOT_WRITTEN = ("S10_R_CONSUMED_NOT_WRITTEN", "S10_R_HOST_DRIFT_NOT_WRITTEN", "S10_SCRATCH_RESIDUE_NOT_WRITTEN")
+SUCCESSOR_AFTER = ("S10_R_CONSUMED_NOT_WRITTEN", "S10_R_HOST_DRIFT_NOT_WRITTEN")
 _RUN_ID = re.compile(r"[1-9][0-9]{0,19}\Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -107,6 +128,8 @@ PONR_ACKNOWLEDGEMENT = ("I understand that INITIAL_CUSTODY HELD is forward only:
                         "recreated or re-bound, and no automatic retry is authorized after the attempt marker.")
 ADOPTION_LINE = ("I adopt this HELD record although the writer's response was not received exactly: the independent "
                  "read-back is exact.")
+FREEZE_RULES = ("no intentional merge, deploy, reboot, witness restart, broker restart, package or OS upgrade, signer "
+                "action, Registry effectiveness or authority activation is permitted")
 
 # ------------------------------------------------------------ owner texts ---
 # Record §8. `{...}` placeholders are bound from the files; tool pins are static.
@@ -114,13 +137,13 @@ OPEN_LINES = (
     "I authorize opening the M-B10 / WRITE_HELD live sequence now, read-only only, for this current DEV_SYNTHETIC "
     "sequence.",
     "Continuity: " + CONTINUITY + ".",
-    "The M-B10 freeze begins with this opening and holds through M-B10, POST10 and D3: no intentional merge, deploy, "
-    "reboot, witness restart, broker restart or signer action is permitted inside this sequence.",
+    "Freeze: {freeze}. While it is in force " + FREEZE_RULES + ". Its normal end is the accepted D3; a pre-marker STOP "
+    "or my explicit freeze release may end it earlier.",
     "Control commit: {control}. Operator: " + OPERATOR + " SHA-256 {operator}. Last deploy: {deploy}.",
     "Predecessor sequence: {predecessor}.",
     "Expected HELD record: {held_name}, SHA-256 {held_sha}, bound to witness genesis " + GENESIS + ".",
-    "This authorizes opening the sequence and read-only evidence only. It does not authorize M-B10, HELD, the signer, "
-    "authority activation, First Memory or PROD.",
+    "This authorizes opening the sequence and read-only evidence only, including one fresh read-only S25 observation. "
+    "It does not authorize M-B10, HELD, any S25 write, the signer, authority activation, First Memory or PROD.",
 )
 GO_LINES = (
     "I authorize M-B10 / WRITE_HELD now for exactly one attempt within this current M-B10 sequence {sequence}.",
@@ -128,7 +151,9 @@ GO_LINES = (
     "Control commit: {control}. Operator: " + OPERATOR + " SHA-256 {operator}.",
     "W10 verifier: " + MB10_VERIFIER + " SHA-256 " + TOOL_PINS[MB10_VERIFIER] + ".",
     "Hold denial proof: " + MB10_DENIAL + " SHA-256 " + TOOL_PINS[MB10_DENIAL] + ".",
-    "Gate SHA-256: {gate}. Owner eligibility SHA-256: {eligibility}.",
+    "Gate SHA-256: {gate}. This go supersedes every earlier D2 of this sequence; superseded gates: {superseded}.",
+    "Owner eligibility SHA-256: {eligibility}. Fresh S25 observation SHA-256: {s25}. Chain export receipt SHA-256: "
+    "{receipt}.",
     "Pre-state: W10_0_PRE_HELD_EXACT (hold store empty; W9_5_GENESIS_COMMITTED_EXACT; witness InvocationID "
     "{invocation}, MainPID {mainpid}; boot {boot}).",
     "Record 1 digest: " + RECORD_1 + ". Envelope 1 digest: " + ENVELOPE_1 + ". Freshness: AUTHENTIC + CURRENT. "
@@ -139,7 +164,7 @@ GO_LINES = (
     "HELD is restrictive custody state only and grants no issuance or other authority. This go does not authorize "
     "the signer (M-B11), authority activation, Registry V1 effectiveness, First Memory or PROD.",
     "Any REFUSED, FAILED, traceback, timeout, SSH loss, unexpected output or other STOP after the attempt marker "
-    "consumes this go. The host classification decides; there is no automatic retry.",
+    "consumes this go. The host classification decides; there is no automatic retry, and the freeze stays in force.",
 )
 ACCEPT_LINES = (
     "I accept M-B10 / WRITE_HELD for sequence {sequence}: INITIAL_CUSTODY HELD is COMPLETED.",
@@ -155,7 +180,23 @@ STOP_LINES = (
     "I stop M-B10 sequence {sequence} now, before the attempt marker, for this current DEV_SYNTHETIC sequence only.",
     "Control commit: {control}. D1 record SHA-256: {opening}.",
     "No M-B10 attempt marker exists and no HELD was written by this sequence.",
-    "This sequence is STOPPED / HISTORICAL / NON-REUSABLE. Its freeze is released; the release authorizes nothing.",
+    "This sequence is STOPPED / HISTORICAL / NON-REUSABLE. This stop explicitly ends its M-B10 freeze; the release "
+    "authorizes nothing.",
+)
+RELEASE_LINES = (
+    "I release the M-B10 freeze of sequence {sequence} now.",
+    "Its attempt marker was consumed and the reviewed classification is {phase} (classification SHA-256 "
+    "{classification}): the hold store is proven empty and no HELD was written.",
+    "This release ends the freeze only. It authorizes no retry, no M-B10, no merge or deploy by itself, no signer "
+    "action, no authority activation, no First Memory and no PROD.",
+)
+SCRATCH_LINES = (
+    "I authorize MB10_SCRATCH_RECOVERY for sequence {sequence} for exactly one invocation.",
+    "Plan digest: {plan}. Classified sequence phase: S10_SCRATCH_RESIDUE_NOT_WRITTEN.",
+    "The plan proves the canonical HELD absent, the hold store empty, and exactly one writer scratch "
+    "{scratch} that is a prefix of the expected HELD bytes.",
+    "I acknowledge: this removal is not a retry of M-B10 and writes no HELD; a linked successor needs its own D1, "
+    "fresh evidence, a new gate and a new D2, and the freeze stays in force.",
 )
 
 
@@ -188,6 +229,10 @@ def _json_file(path: Path, reason: str) -> Any:
         return json.loads(Path(path).read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         raise Stop(reason) from exc
+
+
+def _runs(directory: Path) -> list[Path]:
+    return sorted(directory.iterdir()) if directory.is_dir() else []
 
 
 class Operator(M9.Operator):
@@ -261,21 +306,21 @@ class Operator(M9.Operator):
     def _opening(workdir: Path) -> tuple[dict, str]:
         path = Path(workdir) / SEQUENCE_DIR / OPENING_FILE
         _need(path.is_file(), "SEQUENCE_NOT_OPENED")
-        raw = path.read_bytes()
-        return _json_file(path, "OPENING_INVALID"), sha256_hex(raw)
+        return _json_file(path, "OPENING_INVALID"), sha256_hex(path.read_bytes())
 
-    def _live_opening(self, repo: Path, workdir: Path) -> tuple[dict, str, str]:
+    def _live_opening(self, repo: Path, workdir: Path, *, allow_ended: bool = False) -> tuple[dict, str, str]:
         control = self.pins(repo)["control"]
         opening, opening_sha = self._opening(workdir)
-        _need(not (Path(workdir) / SEQUENCE_DIR / STOP_FILE).exists(), "SEQUENCE_STOPPED")
+        sequence = Path(workdir) / SEQUENCE_DIR
+        _need(not (sequence / STOP_FILE).exists(), "SEQUENCE_STOPPED")
+        _need(allow_ended or not (sequence / ENDED_FILE).exists(), "SEQUENCE_ENDED")
         _need(opening.get("control") == control, "CONTROL_NOT_THE_SEQUENCE_CONTROL")
         return opening, opening_sha, control
 
     @staticmethod
     def _numbered(directory: Path, suffix: str) -> Path:
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        index = len([p for p in directory.iterdir()]) + 1
-        return directory / f"{index:02d}-{suffix}"
+        return directory / f"{len(list(directory.iterdir())) + 1:02d}-{suffix}"
 
     @staticmethod
     def _marker(workdir: Path) -> Path:
@@ -283,22 +328,38 @@ class Operator(M9.Operator):
 
     @staticmethod
     def _gates(workdir: Path) -> list[Path]:
-        directory = Path(workdir) / GATE_DIR
-        return sorted(directory.iterdir()) if directory.is_dir() else []
+        return _runs(Path(workdir) / GATE_DIR)
 
-    def _last_gate(self, workdir: Path) -> tuple[dict, str]:
+    def _last_gate(self, workdir: Path) -> tuple[dict, str, list[str]]:
         gates = self._gates(workdir)
         _need(bool(gates), "FRESH_GATE_REQUIRED")
-        raw = gates[-1].read_bytes()
         record = _json_file(gates[-1], "GATE_INVALID")
         _need(record.get("exact") is True, "FRESH_GATE_REQUIRED")
-        return record, sha256_hex(raw)
+        return record, sha256_hex(gates[-1].read_bytes()), [sha256_hex(g.read_bytes()) for g in gates[:-1]]
 
     def _posts(self, workdir: Path) -> tuple[list[Path], list[Path]]:
-        directory = Path(workdir) / POST_DIR
-        runs = sorted(directory.iterdir()) if directory.is_dir() else []
-        verified = [run / "POST10_VERIFIED.json" for run in runs if (run / "POST10_VERIFIED.json").is_file()]
-        return runs, verified
+        runs = _runs(Path(workdir) / POST_DIR)
+        return runs, [run / "POST10_VERIFIED.json" for run in runs if (run / "POST10_VERIFIED.json").is_file()]
+
+    @staticmethod
+    def _latest_classification(workdir: Path) -> tuple[dict | None, str | None]:
+        runs = [run for run in _runs(Path(workdir) / CLASS_DIR) if (run / "CLASSIFICATION.json").is_file()]
+        if not runs:
+            return None, None
+        path = runs[-1] / "CLASSIFICATION.json"
+        return _json_file(path, "CLASSIFICATION_INVALID"), sha256_hex(path.read_bytes())
+
+    def freeze_state(self, workdir: Path) -> str:
+        """OD-M10-2: IN_FORCE from the successful D1 until D3, a pre-marker STOP or an explicit release. A post-marker
+        NOT-WRITTEN outcome or a pre-marker material END does not end it."""
+        workdir = Path(workdir)
+        if (workdir / ACCEPT_DIR / ACCEPT_FILE).is_file():
+            return "ENDED_BY_D3"
+        if (workdir / SEQUENCE_DIR / STOP_FILE).is_file():
+            return "RELEASED_BY_STOP"
+        if (workdir / SEQUENCE_DIR / RELEASE_FILE).is_file():
+            return "RELEASED_BY_OWNER"
+        return "IN_FORCE" if (workdir / SEQUENCE_DIR / OPENING_FILE).is_file() else "NOT_OPENED"
 
     def _sequence_records(self, workdir: Path, verifier) -> dict:
         marker = self._marker(workdir).is_file()
@@ -311,6 +372,21 @@ class Operator(M9.Operator):
 
     # ------------------------------------------------------------- owner texts ---
 
+    def _predecessor(self, repo: Path, previous: Path) -> tuple[str, dict]:
+        """OD-M10-3 / OD-M10-4: a linked successor may follow only a predecessor that ended without a HELD write."""
+        opening, opening_sha = self._opening(previous)
+        _need(not (previous / ACCEPT_DIR / ACCEPT_FILE).exists() and not self._posts(previous)[1],
+              "PREDECESSOR_WROTE_HELD")
+        sequence = previous / SEQUENCE_DIR
+        if self._marker(previous).is_file():
+            latest, _ = self._latest_classification(previous)
+            _need(latest is not None and latest.get("sequencePhase") in SUCCESSOR_AFTER,
+                  "PREDECESSOR_NOT_ENDED_WITHOUT_WRITE")
+        else:
+            _need((sequence / STOP_FILE).is_file() or (sequence / ENDED_FILE).is_file(),
+                  "PREDECESSOR_NOT_ENDED_WITHOUT_WRITE")
+        return opening_sha, {"freeze": self.freeze_state(previous), "opening": opening}
+
     def _open_values(self, repo: Path, workdir: Path, facts: dict) -> dict:
         control = self.pins(repo)["control"]
         operator = self._operator_at_control(repo)
@@ -318,58 +394,90 @@ class Operator(M9.Operator):
         _need(isinstance(facts["lastDeployRunId"], str) and _RUN_ID.fullmatch(facts["lastDeployRunId"]) is not None,
               "LAST_DEPLOY_INVALID")
         _need(facts["workflowQueueEmpty"] is True, "WORKFLOW_QUEUE_NOT_EMPTY")
-        predecessor = "none"
+        predecessor, freeze, origin = "none", "BEGINS_AT_THIS_OPENING", None
         if facts["predecessorWorkdir"] is not None:
-            predecessor = self._predecessor(repo, Path(facts["predecessorWorkdir"]))
+            predecessor, info = self._predecessor(repo, Path(facts["predecessorWorkdir"]))
+            if info["freeze"] == "IN_FORCE":                       # OD-M10-2: carried, never restarted
+                _need(facts["lastDeployRunId"] == info["opening"]["lastDeployRunId"], "DEPLOY_DURING_CONTINUOUS_FREEZE")
+                origin = info["opening"].get("freezeOrigin") or predecessor
+                freeze = "CONTINUES_UNBROKEN_FROM " + origin
         e = self.expected(repo)
         return {"control": control, "operator": operator, "deploy": facts["lastDeployRunId"],
-                "predecessor": predecessor, "held_name": e["held_name"], "held_sha": e["held_sha"]}
-
-    def _predecessor(self, repo: Path, previous: Path) -> str:
-        """A linked successor may follow only a predecessor that ended without a HELD write (record §6.3)."""
-        opening, opening_sha = self._opening(previous)
-        _need(opening.get("operatorSha256") is not None, "PREDECESSOR_INVALID")
-        _need(not (previous / ACCEPT_DIR / ACCEPT_FILE).exists() and not self._posts(previous)[1],
-              "PREDECESSOR_WROTE_HELD")
-        stopped = (previous / SEQUENCE_DIR / STOP_FILE).is_file()
-        verifier = _verifier_module(repo)
-        transcript = self._read_class(previous / M9.ATTEMPT_DIR, MARKER, verifier)
-        _need(stopped or (self._marker(previous).is_file()
-                          and transcript not in (verifier.HELD_RETURNED_EXACT, verifier.HELD_RETURNED_NOT_EXACT)),
-              "PREDECESSOR_NOT_ENDED_WITHOUT_WRITE")
-        return opening_sha
+                "predecessor": predecessor, "freeze": freeze, "freeze_origin": origin, "held_name": e["held_name"],
+                "held_sha": e["held_sha"]}
 
     def _go_values(self, repo: Path, workdir: Path) -> dict:
         opening, _sha, control = self._live_opening(repo, workdir)
-        gate, gate_sha = self._last_gate(workdir)
+        gate, gate_sha, superseded = self._last_gate(workdir)
         e = self.expected(repo)
         return {"sequence": opening["sequenceId"], "control": control, "operator": self._operator_at_control(repo),
-                "gate": gate_sha, "eligibility": gate["eligibilitySha256"], "invocation": gate["witness"][0],
-                "mainpid": gate["witness"][1], "boot": gate["bootId"], "held_name": e["held_name"],
-                "held_sha": e["held_sha"]}
+                "gate": gate_sha, "superseded": ", ".join(superseded) or "none",
+                "eligibility": gate["eligibilitySha256"], "s25": gate["s25TranscriptionSha256"],
+                "receipt": gate["exportReceiptSha256"], "invocation": gate["witness"][0], "mainpid": gate["witness"][1],
+                "boot": gate["bootId"], "held_name": e["held_name"], "held_sha": e["held_sha"]}
 
     def _accept_values(self, repo: Path, workdir: Path) -> tuple[dict, bool]:
         opening, _sha, _control = self._live_opening(repo, workdir)
-        _runs, verified = self._posts(workdir)
+        _runs_, verified = self._posts(workdir)
         _need(len(verified) == 1, "POST10_NOT_VERIFIED")
         record = _json_file(verified[0], "POST10_INVALID")
         e = self.expected(repo)
         return ({"sequence": opening["sequenceId"], "held_name": e["held_name"], "held_sha": e["held_sha"],
                  "post10": sha256_hex(verified[0].read_bytes())}, record.get("adoptionRequired") is True)
 
-    def render(self, repo: Path, workdir: Path, act: str, facts: Path | None = None) -> dict:
+    def _release_values(self, repo: Path, workdir: Path) -> dict:
+        opening, _sha, _control = self._live_opening(repo, workdir, allow_ended=True)
+        _need(self._marker(workdir).is_file(), "RELEASE_ONLY_AFTER_THE_MARKER_USE_STOP")
+        _need(self.freeze_state(workdir) == "IN_FORCE", "FREEZE_NOT_IN_FORCE")
+        latest, latest_sha = self._latest_classification(workdir)
+        _need(latest is not None and latest.get("sequencePhase") in NOT_WRITTEN, "NOT_A_CLASSIFIED_NOT_WRITTEN_OUTCOME")
+        return {"sequence": opening["sequenceId"], "phase": latest["sequencePhase"], "classification": latest_sha}
+
+    def _scratch_values(self, repo: Path, workdir: Path, plan_dir: str) -> dict:
+        opening, _sha, _control = self._live_opening(repo, workdir, allow_ended=True)
+        latest, _ = self._latest_classification(workdir)
+        _need(latest is not None and latest.get("sequencePhase") == "S10_SCRATCH_RESIDUE_NOT_WRITTEN",
+              "NOT_CLASSIFIED_SCRATCH")
+        planned = _json_file(Path(workdir) / SCRATCH_DIR / plan_dir / "scratch-plan.out", "PLAN_INVALID")
+        _need(isinstance(planned.get("planDigest"), str) and _HEX64.fullmatch(planned["planDigest"]) is not None,
+              "PLAN_NOT_ACTIONABLE")
+        return {"sequence": opening["sequenceId"], "plan": planned["planDigest"], "scratch": planned["scratch"]}
+
+    def _s25_instructions(self, repo: Path, workdir: Path) -> dict:
+        opening, _sha, _control = self._live_opening(repo, workdir)
+        script = sha256_hex(self.tool_bytes(repo, MB10_PHONE))
+        text = ("# S25 (Termux), by hand, read-only. First transfer mb10_s25_phone.sh (MTP) to "
+                "$HOME/storage/downloads, then:\n"
+                "cd $HOME/storage/downloads\n"
+                f"echo '{script}  mb10_s25_phone.sh' | sha256sum -c -\n"
+                f"MB10_SEQUENCE={opening['sequenceId']}\n"
+                f"PKGC_BUNDLE_SHA256={S25_BUNDLE_SHA256}\n"
+                ". ./mb10_s25_phone.sh\n"
+                "mb10_s25_pre\n")
+        return {"act": "S25", "text": text, "textSha256": sha256_hex(text.encode("utf-8")),
+                "values": {"sequence": opening["sequenceId"], "script": script}}
+
+    def render(self, repo: Path, workdir: Path, act: str, extra: Path | None = None) -> dict:
+        if act == "S25":
+            return self._s25_instructions(repo, workdir)
         if act == "D1":
-            _need(facts is not None, "FACTS_REQUIRED")
-            values, lines = self._open_values(repo, workdir, _json_file(facts, "FACTS_INVALID")), OPEN_LINES
+            _need(extra is not None, "FACTS_REQUIRED")
+            values, lines = self._open_values(repo, workdir, _json_file(extra, "FACTS_INVALID")), OPEN_LINES
         elif act == "D2":
-            values, lines = self._go_values(repo, workdir), GO_LINES
             _need(not self._marker(workdir).exists(), "ATTEMPT_ALREADY_CONSUMED:" + MARKER)
+            values, lines = self._go_values(repo, workdir), GO_LINES
         elif act == "D3":
             values, adoption = self._accept_values(repo, workdir)
             lines = ACCEPT_LINES + ((ADOPTION_LINE,) if adoption else ())
         elif act == "STOP":
-            opening, opening_sha, control = self._live_opening(repo, workdir)
+            _need(not (Path(workdir) / M9.ATTEMPT_DIR).exists(), "STOP_REFUSED_ATTEMPT_MARKER_PRESENT")
+            opening, opening_sha, control = self._live_opening(repo, workdir, allow_ended=True)
             values, lines = {"sequence": opening["sequenceId"], "control": control, "opening": opening_sha}, STOP_LINES
+        elif act == "RELEASE":
+            values, lines = self._release_values(repo, workdir), RELEASE_LINES
+        elif act == "SCRATCH":
+            _need(extra is not None, "PLAN_DIR_REQUIRED")
+            values, lines = self._scratch_values(repo, workdir, Path(extra).name), SCRATCH_LINES
         else:
             raise Stop("ACT_INVALID")
         text = "\n".join(line.format(**values) for line in lines) + "\n"
@@ -390,15 +498,27 @@ class Operator(M9.Operator):
         self._record(workdir / SEQUENCE_DIR / OPENING_FILE, {
             "act": "D1", "sequenceId": sequence, "openedAt": self._now(), "control": values["control"],
             "operatorSha256": values["operator"], "lastDeployRunId": values["deploy"],
-            "predecessor": values["predecessor"], "expectedHeld": {"name": values["held_name"],
-                                                                  "sha256": values["held_sha"]},
+            "predecessor": values["predecessor"], "freeze": values["freeze"], "freezeOrigin": values["freeze_origin"],
+            "expectedHeld": {"name": values["held_name"], "sha256": values["held_sha"]},
             "statementSha256": sha256_hex(raw)})
-        return {"sequenceId": sequence, "result": "MB10_SEQUENCE_OPENED_READ_ONLY",
-                "next": "fresh export, host PRE, owner eligibility, gate; then the separate D2"}
+        return {"sequenceId": sequence, "freeze": values["freeze"], "result": "MB10_SEQUENCE_OPENED_READ_ONLY",
+                "next": "export, the fresh S25 observation (`render S25`), host PRE, owner eligibility, gate; then D2"}
+
+    def s25_record(self, repo: Path, workdir: Path, transcription: Path) -> dict:
+        opening, _sha, _control = self._live_opening(repo, workdir)
+        _need(not self._marker(workdir).exists(), "ATTEMPT_ALREADY_CONSUMED:" + MARKER)
+        raw = Path(transcription).read_bytes()
+        _need(f"MB10_SEQUENCE={opening['sequenceId']}".encode("ascii") in raw, "TRANSCRIPTION_NOT_OF_THIS_SEQUENCE")
+        out = self._numbered(Path(workdir) / S25_DIR, "MB10_PRE")
+        out.mkdir(mode=0o700)
+        (out / "TRANSCRIPTION.txt").write_bytes(raw)
+        data = self._record(out / "RECORD.json", {"sequenceId": opening["sequenceId"], "recordedAt": self._now(),
+                                                  "transcriptionSha256": sha256_hex(raw),
+                                                  "evidenceClass": "OWNER_SCREEN_TRANSCRIPTION"})
+        return {"s25": out.name, "recordSha256": sha256_hex(data), "result": "MB10_S25_RECORDED",
+                "next": "the WSL owner eligibility compares it; nothing is judged here"}
 
     def stop(self, repo: Path, workdir: Path, statement: Path) -> dict:
-        _need(not self._marker(workdir).exists() and not (Path(workdir) / M9.ATTEMPT_DIR).exists(),
-              "STOP_REFUSED_ATTEMPT_MARKER_PRESENT")
         values = self.render(repo, workdir, "STOP")["values"]
         raw = Path(statement).read_bytes()
         self.check_go(raw.decode("utf-8"), STOP_LINES, **values)
@@ -408,7 +528,20 @@ class Operator(M9.Operator):
                 "classification": "STOPPED_BEFORE_MARKER"})
         except FileExistsError as exc:
             raise Stop("SEQUENCE_ALREADY_STOPPED") from exc
-        return {"result": "MB10_SEQUENCE_STOPPED_BEFORE_MARKER", "next": "nothing is authorized"}
+        return {"result": "MB10_SEQUENCE_STOPPED_BEFORE_MARKER", "freeze": "RELEASED_BY_STOP",
+                "next": "nothing is authorized"}
+
+    def release_freeze(self, repo: Path, workdir: Path, statement: Path) -> dict:
+        values = self._release_values(repo, workdir)
+        raw = Path(statement).read_bytes()
+        self.check_go(raw.decode("utf-8"), RELEASE_LINES, **values)
+        try:
+            self._record(Path(workdir) / SEQUENCE_DIR / RELEASE_FILE, {
+                "act": "FREEZE_RELEASE", "statementSha256": sha256_hex(raw), "classificationSha256":
+                values["classification"], "sequencePhase": values["phase"]})
+        except FileExistsError as exc:
+            raise Stop("FREEZE_ALREADY_RELEASED") from exc
+        return {"result": "MB10_FREEZE_RELEASED", "freeze": "RELEASED_BY_OWNER", "next": "nothing is authorized"}
 
     def accept(self, repo: Path, workdir: Path, statement: Path) -> dict:
         values, adoption = self._accept_values(repo, workdir)
@@ -422,7 +555,7 @@ class Operator(M9.Operator):
                                                    "post10Sha256": values["post10"], "adoption": adoption})
         except FileExistsError as exc:
             raise Stop("ACCEPTANCE_ALREADY_RECORDED") from exc
-        return {"result": "MB10_ACCEPTED", "authorityGranted": False,
+        return {"result": "MB10_ACCEPTED", "freeze": "ENDED_BY_D3", "authorityGranted": False,
                 "next": "nothing is authorized; the first deploy after the freeze must compare EQUAL (`dr5`)"}
 
     def dr5(self, repo: Path, phase: str, log: Path) -> dict:
@@ -436,7 +569,7 @@ class Operator(M9.Operator):
 
     def export(self, repo: Path, workdir: Path) -> dict:
         opening, _sha, control = self._live_opening(repo, workdir)
-        out = self._numbered(Path(workdir) / EXPORT_DIR, os.urandom(8).hex())
+        out = self._numbered(Path(workdir) / EXPORT_DIR, os.urandom(4).hex())
         out.mkdir(mode=0o700)
         started = self._now()
         result = M9.Operator.chain_export(self, repo, workdir, out / "export")
@@ -455,7 +588,6 @@ class Operator(M9.Operator):
                            "POST": ("P1B-10", "W9_LATER_STATE", "W10_1_HELD_EXACT")}[phase]
         args = self._w9_args(workdir)
         codes = {}
-        # The Package B reads for the POST9B phase, except the two whose expectation M-B10 changes.
         for name, command in self._package_b_commands(repo, args).items():
             codes[name] = self._save(out, name, command())
         codes["status"] = self._save(out, "status", self.ssh(self.streamed(
@@ -499,7 +631,7 @@ class Operator(M9.Operator):
 
     def host(self, repo: Path, workdir: Path, phase: str) -> dict:
         _need(phase in ("PRE", "POST"), "PHASE_INVALID")
-        opening, _sha, _control = self._live_opening(repo, workdir)
+        opening, _sha, _control = self._live_opening(repo, workdir, allow_ended=phase == "POST")
         out = self._numbered(Path(workdir) / HOST_DIR, phase)
         out.mkdir(mode=0o700)
         codes = self._reads(repo, out, phase, workdir)
@@ -514,11 +646,18 @@ class Operator(M9.Operator):
 
     @staticmethod
     def _identity(out: Path) -> dict:
-        lines = (out / "identity.out").read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = (out / "identity.out").read_text(encoding="utf-8", errors="replace").splitlines() \
+            if (out / "identity.out").is_file() else []
         return {"bootId": lines[3] if len(lines) > 3 else None,
                 "rebootRequired": "absent" if "REBOOT_REQUIRED=absent" in lines else "present_or_unknown"}
 
     # --------------------------------------------------------------------- gate ---
+
+    def _evidence(self, workdir: Path, directory: str, name: Any, file: str) -> tuple[dict | None, str | None]:
+        path = Path(workdir) / directory / str(name) / file
+        if not isinstance(name, str) or re.fullmatch(r"[0-9]{2}-[0-9A-Za-z_]+", name) is None or not path.is_file():
+            return None, None
+        return _json_file(path, "EVIDENCE_INVALID"), sha256_hex(path.read_bytes())
 
     def gate(self, repo: Path, workdir: Path, host_dir: str, eligibility: Path, facts_path: Path) -> dict:
         opening, opening_sha, control = self._live_opening(repo, workdir)
@@ -526,12 +665,14 @@ class Operator(M9.Operator):
         workdir = Path(workdir)
         events: list[str] = []
         consumed = [_json_file(g, "GATE_INVALID") for g in self._gates(workdir)]
-        # the host PRE read: this sequence's, never used by an earlier gate, PASS, W10_0 exact
+        # the host PRE read: this sequence's, never used by an earlier gate
         out = workdir / HOST_DIR / host_dir
         _need(re.fullmatch(r"[0-9]{2}-PRE", host_dir) is not None and out.is_dir(), "HOST_READ_NOT_A_PRE_READ")
         _need(host_dir not in [g.get("hostDir") for g in consumed], "HOST_READ_REUSED")
         host = _json_file(out / "HOST_RESULT.json", "HOST_RESULT_INVALID")
         _need(host.get("sequenceId") == opening["sequenceId"], "HOST_READ_NOT_IN_SEQUENCE")
+        if (host.get("codes") or {}).get("preservation") != 0:
+            events.append("BROKER_PRESERVATION_NOT_PASS")
         if host.get("result") != "MB10_HOST_PRE_PASS":
             events.append("HOST_PRE_NOT_PASS")
         report = _json_file(out / "w10verifier.out", "W10_REPORT_INVALID") if (out / "w10verifier.out").is_file() else {}
@@ -547,26 +688,32 @@ class Operator(M9.Operator):
             events.append("BOOT_CHANGED")
         if identity["rebootRequired"] != "absent":
             events.append("REBOOT_REQUIRED_PRESENT_OR_UNKNOWN")
-        # the owner eligibility: fresh, ELIGIBLE, bound to a never-consumed export receipt of this sequence
+        # the owner eligibility: fresh, ELIGIBLE, bound to a never-consumed export and S25 record of this sequence
         raw = Path(eligibility).read_bytes()
         record = _json_file(eligibility, "ELIGIBILITY_INVALID")
-        receipts = {}
-        for run in sorted((workdir / EXPORT_DIR).iterdir()) if (workdir / EXPORT_DIR).is_dir() else []:
-            if (run / "RECEIPT.json").is_file():
-                receipts[sha256_hex((run / "RECEIPT.json").read_bytes())] = _json_file(run / "RECEIPT.json",
-                                                                                       "RECEIPT_INVALID")
-        receipt = receipts.get(record.get("exportReceiptSha256"))
-        if receipt is None or receipt.get("sequenceId") != opening["sequenceId"]:
-            events.append("ELIGIBILITY_NOT_BOUND_TO_THIS_SEQUENCE")
-        elif record.get("exportReceiptSha256") in [g.get("exportReceiptSha256") for g in consumed]:
+        observed = str(record.get("observedAt"))
+        receipt, receipt_sha = self._evidence(workdir, EXPORT_DIR, record.get("exportName"), "RECEIPT.json")
+        s25, s25_sha = self._evidence(workdir, S25_DIR, record.get("s25Name"), "RECORD.json")
+        if record.get("sequenceId") != opening["sequenceId"]:
+            events.append("ELIGIBILITY_NOT_OF_THIS_SEQUENCE")
+        if receipt is None or receipt_sha != record.get("exportReceiptSha256") \
+                or receipt.get("sequenceId") != opening["sequenceId"]:
+            events.append("EXPORT_NOT_BOUND_TO_THIS_SEQUENCE")
+        elif record.get("exportName") in [g.get("exportName") for g in consumed]:
             events.append("EXPORT_REUSED")
         elif receipt.get("files") != {"chain-1.json": CHAIN_1_SHA256, "witness.json": CHAIN_1_SHA256}:
             events.append("EXPORT_NOT_GENESIS")
-        elif not (receipt["completedAt"] <= str(record.get("observedAt")) and opening["openedAt"] <= receipt["startedAt"]):
+        elif not (opening["openedAt"] <= receipt["startedAt"] and receipt["completedAt"] <= observed):
             events.append("ELIGIBILITY_NOT_AFTER_EXPORT")
+        if s25 is None or s25_sha != record.get("s25RecordSha256") or s25.get("sequenceId") != opening["sequenceId"]:
+            events.append("S25_NOT_BOUND_TO_THIS_SEQUENCE")
+        elif record.get("s25Name") in [g.get("s25Name") for g in consumed]:
+            events.append("S25_REUSED")
+        elif not (opening["openedAt"] <= s25["recordedAt"] <= observed):
+            events.append("S25_NOT_AFTER_D1_OR_NOT_BEFORE_ELIGIBILITY")
         if record.get("result") != "MB10_OWNER_ELIGIBLE" or record.get("reasons") != []:
             events.append("OWNER_NOT_ELIGIBLE")
-        # the freeze facts: unchanged since the opening
+        # the freeze facts: unchanged since the opening (a deploy during the freeze is a material event)
         facts = _json_file(facts_path, "FACTS_INVALID")
         if not isinstance(facts, dict) or set(facts) != set(GATE_FACTS):
             events.append("EVIDENCE_UNKNOWN")
@@ -576,17 +723,25 @@ class Operator(M9.Operator):
             if facts["workflowQueueEmpty"] is not True:
                 events.append("WORKFLOW_QUEUE_NOT_EMPTY")
         events = sorted(set(events))
+        material = sorted(set(events) & MATERIAL_EVENTS)
+        route = "SEQUENCE_ENDED" if material else ("REVALIDATE" if events else "CONTINUE")
         gate = {"stage": "MB10", "sequenceId": opening["sequenceId"], "openingSha256": opening_sha, "control": control,
                 "hostDir": host_dir, "hostResultSha256": sha256_hex((out / "HOST_RESULT.json").read_bytes()),
-                "w10ReportSha256": sha256_hex((out / "w10verifier.out").read_bytes()) if (out / "w10verifier.out")
-                .is_file() else None, "eligibilitySha256": sha256_hex(raw),
-                "exportReceiptSha256": record.get("exportReceiptSha256"), "witness": list(witness),
-                "bootId": identity["bootId"], "events": events, "exact": not events,
-                "route": "CONTINUE" if not events else "REVALIDATE"}
+                "eligibilitySha256": sha256_hex(raw), "exportName": record.get("exportName"),
+                "exportReceiptSha256": receipt_sha, "s25Name": record.get("s25Name"), "s25RecordSha256": s25_sha,
+                "s25TranscriptionSha256": (s25 or {}).get("transcriptionSha256"), "witness": list(witness),
+                "bootId": identity["bootId"], "events": events, "materialEvents": material, "exact": not events,
+                "route": route}
         path = self._numbered(workdir / GATE_DIR, "MB10.json")
         data = self._record(path, gate)
-        return {"gate": path.name, "gateSha256": sha256_hex(data), "events": events,
-                "result": "MB10_GATE_PASS" if not events else "MB10_GATE_REVALIDATE"}
+        if material:                                                   # OD-M10-3: ends the sequence; the freeze holds
+            self._record(workdir / SEQUENCE_DIR / ENDED_FILE, {
+                "ended": "PRE_MARKER_MATERIAL_SUBSTRATE_CHANGE", "events": material, "gate": path.name,
+                "freeze": "IN_FORCE_UNTIL_STOP_OR_RELEASE",
+                "next": "the applicable accepted revalidation / re-pin path, then a linked successor"})
+        return {"gate": path.name, "gateSha256": sha256_hex(data), "events": events, "materialEvents": material,
+                "result": {"CONTINUE": "MB10_GATE_PASS", "REVALIDATE": "MB10_GATE_REVALIDATE",
+                           "SEQUENCE_ENDED": "MB10_SEQUENCE_ENDED_MATERIAL_CHANGE"}[route]}
 
     # ------------------------------------------------------------------- M-B10 ---
 
@@ -595,8 +750,11 @@ class Operator(M9.Operator):
         _need(not self._marker(workdir).exists(), "ATTEMPT_ALREADY_CONSUMED:" + MARKER)
         values = self._go_values(repo, workdir)
         raw = Path(go_file).read_bytes()
-        self.check_go(raw.decode("utf-8"), GO_LINES, **values)
-        _need(PONR_ACKNOWLEDGEMENT in " ".join(raw.decode("utf-8").replace(">", " ").split()), "PONR_NOT_ACKNOWLEDGED")
+        text = raw.decode("utf-8")
+        superseded = [sha for sha in values["superseded"].split(", ") if sha != "none"]
+        _need(values["gate"] in text or not any(sha in text for sha in superseded), "GO_BOUND_TO_SUPERSEDED_GATE")
+        self.check_go(text, GO_LINES, **values)
+        _need(PONR_ACKNOWLEDGEMENT in " ".join(text.replace(">", " ").split()), "PONR_NOT_ACKNOWLEDGED")
         verifier = _verifier_module(repo)                                             # before any write
         expected = verifier.pinned_expected_held(GENESIS)
         args = self._w9_args(workdir)
@@ -622,11 +780,11 @@ class Operator(M9.Operator):
                                               hold_class=hold_class or verifier.HS_UNREADABLE, marker=True,
                                               transcript=transcript)
         return {"code": hold.returncode, "attempt": "CONSUMED", "transcript": transcript, "detail": detail,
-                "hostPhase": phase, "holdClass": hold_class, "sequencePhase": sequence,
+                "hostPhase": phase, "holdClass": hold_class, "sequencePhase": sequence, "freeze": "IN_FORCE",
                 "routing": verifier.SEQUENCE_TABLE[sequence][0],
                 "result": "MB10_HELD" if phase == verifier.W10_1 and transcript == verifier.HELD_RETURNED_EXACT
                 else "MB10_STOP",
-                "next": verifier.SEQUENCE_TABLE[sequence][1]}
+                "next": verifier.SEQUENCE_TABLE[sequence][1] + "; record it with `classify`"}
 
     def post(self, repo: Path, workdir: Path) -> dict:
         workdir = Path(workdir)
@@ -674,9 +832,12 @@ class Operator(M9.Operator):
             observed = json.loads((observe.stdout or b"").decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             w10, observed = {}, {}
+        # OD-M10-8: the installer P1B-10 stage is shape only; the W10 verifier's byte, digest, binding and set
+        # judgement and the operator's own byte fetch decide.
         checks = {
             "codesZero": all(c == 0 for c in codes.values()), "readinessExact": readiness_ok, "tmpResidueEmpty":
-            residue == [], "w10Phase": w10.get("phase") == verifier.W10_1, "w9DirectLaterState":
+            residue == [], "w10Phase": w10.get("phase") == verifier.W10_1, "w10HoldClassExact":
+            w10.get("holdClass") == verifier.HS_HELD_EXACT, "w9DirectLaterState":
             w10.get("w9PhaseDirect") == "W9_LATER_STATE", "w9WitnessSideExact":
             w10.get("w9PhaseHoldJudgedSeparately") == "W9_5_GENESIS_COMMITTED_EXACT",
             "heldBytesExact": fetched.get("held.json") == expected["bytes"],
@@ -703,8 +864,11 @@ class Operator(M9.Operator):
         return {"codes": codes, "checks": checks, "result": "MB10_POST_NOT_VERIFIED",
                 "next": "STOP: `classify`, then owner review; HELD is forward only and is never re-written"}
 
-    def classify(self, repo: Path, workdir: Path, evidence: Path) -> dict:
-        out = self._new_dir(Path(evidence))
+    def classify(self, repo: Path, workdir: Path) -> dict:
+        workdir = Path(workdir)
+        self._live_opening(repo, workdir, allow_ended=True)
+        out = self._numbered(workdir / CLASS_DIR, "CLASSIFY")
+        out.mkdir(mode=0o700)
         code, report, result = self._w10(repo, f"observe {self._w9_args(workdir)}")
         self._save(out, "w10verifier", result)
         _need(code == 0 and report is not None, "VERIFIER_FAILED")
@@ -712,8 +876,47 @@ class Operator(M9.Operator):
         records = self._sequence_records(workdir, verifier)
         phase = verifier.classify_sequence(host_phase=report["phase"], hold_class=report["holdClass"], **records)
         disposition, action = verifier.SEQUENCE_TABLE[phase]
-        return {"hostPhase": report["phase"], "holdClass": report["holdClass"], "sequencePhase": phase,
-                "disposition": disposition, "action": action, "records": records, "result": "MB10_CLASSIFIED"}
+        value = {"hostPhase": report["phase"], "holdClass": report["holdClass"], "sequencePhase": phase,
+                 "disposition": disposition, "action": action, "records": records,
+                 "freeze": self.freeze_state(workdir), "classifiedAt": self._now()}
+        data = self._record(out / "CLASSIFICATION.json", value)
+        return dict(value, classificationSha256=sha256_hex(data), result="MB10_CLASSIFIED")
+
+    # ---------------------------------------------------------- scratch recovery ---
+
+    def scratch_plan(self, repo: Path, workdir: Path) -> dict:
+        workdir = Path(workdir)
+        opening, _sha, _control = self._live_opening(repo, workdir, allow_ended=True)
+        latest, _ = self._latest_classification(workdir)
+        _need(latest is not None and latest.get("sequencePhase") == "S10_SCRATCH_RESIDUE_NOT_WRITTEN",
+              "NOT_CLASSIFIED_SCRATCH")
+        out = self._numbered(workdir / SCRATCH_DIR, "PLAN")
+        out.mkdir(mode=0o700)
+        code = self._save(out, "scratch-plan", self.ssh(self.streamed(repo, MB10_SCRATCH, M9.SYSTEM_PYTHON, "plan")))
+        planned = {}
+        if code == 0:
+            planned = _json_file(out / "scratch-plan.out", "PLAN_INVALID")
+        return {"planDir": out.name, "code": code, "planDigest": planned.get("planDigest"),
+                "result": "MB10_SCRATCH_PLAN_RECORDED" if code == 0 else "MB10_SCRATCH_PLAN_REFUSED",
+                "next": "HARD STOP: the owner's own scratch recovery authorization (`render SCRATCH <plan-dir>`)"}
+
+    def scratch_recover(self, repo: Path, workdir: Path, plan_dir: str, authorization: Path) -> dict:
+        workdir = Path(workdir)
+        values = self._scratch_values(repo, workdir, plan_dir)
+        raw = Path(authorization).read_bytes()
+        self.check_go(raw.decode("utf-8"), SCRATCH_LINES, **values)
+        digest = values["plan"]
+        directory = self._one_attempt(workdir, "scratch-recovery-" + digest[:16], raw)
+        result = self._invoke(self.streamed(repo, MB10_SCRATCH, M9.SYSTEM_PYTHON, f"recover {digest}"))
+        code = self._save(directory, "scratch-recovery-" + digest[:16], result)
+        after_code, after, raw_after = self._w10(repo, f"observe {self._w9_args(workdir)}")
+        self._save(directory, "scratch-recovery-" + digest[:16] + "-w10", raw_after)
+        restored = code == 0 and (after or {}).get("phase") == "W10_0_PRE_HELD_EXACT"
+        return {"code": code, "planDigest": digest, "hostPhase": (after or {}).get("phase"), "freeze": "IN_FORCE",
+                "result": "MB10_SCRATCH_RECOVERED" if restored else "MB10_SCRATCH_RECOVERY_STOP",
+                "authorityGranted": False,
+                "next": "`classify` (expected S10_R_CONSUMED_NOT_WRITTEN), then a linked successor under the "
+                        "continuous freeze; nothing is authorized by this"}
 
 
 USAGE = __doc__.split("| Form |", 1)[1].split("\n\n", 1)[0]
@@ -727,13 +930,17 @@ def main(argv: list[str], operator: Operator | None = None) -> int:
         ("render", 4): lambda a: operator.render(Path(a[0]), Path(a[1]), a[2], Path(a[3])),
         ("open", 4): lambda a: operator.open(Path(a[0]), Path(a[1]), Path(a[2]), Path(a[3])),
         ("export", 2): lambda a: operator.export(Path(a[0]), Path(a[1])),
+        ("s25-record", 3): lambda a: operator.s25_record(Path(a[0]), Path(a[1]), Path(a[2])),
         ("host", 3): lambda a: operator.host(Path(a[0]), Path(a[1]), a[2]),
         ("gate", 5): lambda a: operator.gate(Path(a[0]), Path(a[1]), a[2], Path(a[3]), Path(a[4])),
         ("mb10", 3): lambda a: operator.mb10(Path(a[0]), Path(a[1]), Path(a[2])),
         ("post", 2): lambda a: operator.post(Path(a[0]), Path(a[1])),
-        ("classify", 3): lambda a: operator.classify(Path(a[0]), Path(a[1]), Path(a[2])),
+        ("classify", 2): lambda a: operator.classify(Path(a[0]), Path(a[1])),
         ("accept", 3): lambda a: operator.accept(Path(a[0]), Path(a[1]), Path(a[2])),
         ("stop", 3): lambda a: operator.stop(Path(a[0]), Path(a[1]), Path(a[2])),
+        ("release-freeze", 3): lambda a: operator.release_freeze(Path(a[0]), Path(a[1]), Path(a[2])),
+        ("scratch-plan", 2): lambda a: operator.scratch_plan(Path(a[0]), Path(a[1])),
+        ("scratch-recover", 4): lambda a: operator.scratch_recover(Path(a[0]), Path(a[1]), a[2], Path(a[3])),
         ("dr5", 3): lambda a: operator.dr5(Path(a[0]), a[1], Path(a[2])),
     }
     form = forms.get((argv[0], len(argv) - 1)) if argv else None

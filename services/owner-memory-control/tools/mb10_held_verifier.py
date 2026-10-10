@@ -112,7 +112,8 @@ PHASE_TABLE = {
     W10_1: (SAFE_ADOPT, "forward only: read-only POST10, then the owner acceptance; never a second write"),
     W10_1S: (SAFE_RESTART, "forward only: a separately authorized witness restart, then a fresh POST10"),
     W10_SCRATCH: (STOP_OWNER_ADJUDICATION, "HELD was not written (the store is empty) but the scratch blocks every "
-                                           "writer: a separately reviewed bounded scratch removal is required first"),
+                                           "writer: STOP; only MB10_SCRATCH_RECOVERY under its own owner "
+                                           "authorization may remove it (OD-M10-6); never automatic"),
     W10_MALFORMED: (HALT, "RR-40: no deletion, repair, rewrite or retry by any tool"),
     W10_MISBOUND: (HALT, "RR-40: never re-bound; no tool acts on it"),
     W10_UNEXPECTED: (HALT, "duplicate, released or foreign ceremony: outside M-B10; no tool acts on it"),
@@ -508,9 +509,11 @@ S10_UNCLASSIFIED = "S10_UNCLASSIFIED_STOP"
 SEQUENCE_TABLE = {
     S10_0: (CONTINUE, "no marker; W10_0: the gate and the separate go may proceed"),
     S10_R: (ENDS_LINKED_SUCCESSOR, "go consumed; the host proves the store empty and the witness exact: the "
-                                   "sequence ends; only a linked successor (new opening, gate and go) may write"),
-    S10_R_DRIFT: (ENDS_REVALIDATE, "go consumed; the store is empty but the host drifted: the sequence ends; a "
-                                   "reviewed revalidation must reach W10_0 before any linked successor"),
+                                   "sequence ends; the freeze stays in force unless the owner releases it; only a "
+                                   "linked successor (new opening, fresh gate and fresh go) may write"),
+    S10_R_DRIFT: (ENDS_REVALIDATE, "go consumed; the store is empty but the host drifted: the sequence ends; the "
+                                   "freeze stays in force; the accepted revalidation / re-pin path must reach W10_0 "
+                                   "before any linked successor"),
     S10_POST_PENDING: (CONTINUE, "HELD exact and acknowledged: run the read-only POST10"),
     S10_UNACKNOWLEDGED: (CONTINUE, "HELD exact by read-back but the response was not exact or was lost: POST10, "
                                    "then the owner acceptance with the explicit adoption sentence; never a retry"),
@@ -523,8 +526,9 @@ SEQUENCE_TABLE = {
     S10_WITNESS_STOPPED: (STOP_ADJUDICATION, "HELD exact, witness stopped: a separately authorized restart, then a "
                                              "fresh POST10"),
     S10_HELD_DRIFT: (STOP_ADJUDICATION, "HELD bytes exact but the host drifted: no POST until W10_1 is re-established"),
-    S10_SCRATCH: (STOP_ADJUDICATION, "HELD not written; the writer's scratch blocks every writer: a separately reviewed "
-                                     "bounded scratch removal, then a linked successor"),
+    S10_SCRATCH: (STOP_ADJUDICATION, "HELD not written; the writer's scratch blocks every writer: STOP; only "
+                                     "MB10_SCRATCH_RECOVERY under its own owner authorization, then a linked "
+                                     "successor; the freeze stays in force"),
     S10_HALT: (HALT_PERMANENT, "malformed, misbound, unexpected or foreign hold content: RR-40, no tool acts"),
     S10_UNEXPLAINED: (HALT_PERMANENT, "hold content that this sequence did not attempt: no tool acts"),
     S10_UNCLASSIFIED: (READ_BACK, "an inconsistent or unknown combination: a fresh read-only classification; "

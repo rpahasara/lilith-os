@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -40,6 +41,7 @@ import mb10_hold_denial_proof as DP  # noqa: E402
 import mb10_held_verifier as V  # noqa: E402
 import mb10_operator as O  # noqa: E402
 import mb10_owner_eligibility as E  # noqa: E402
+import mb10_scratch_recovery as SR  # noqa: E402
 import mb9_dr5_target as T9  # noqa: E402
 import mb9_operator as M9  # noqa: E402
 import mb9_witness_verifier as W9  # noqa: E402
@@ -49,7 +51,7 @@ HAVE_CRYPTO = P9.HAVE_CRYPTO
 UID, GID = P9.UID, P9.GID
 GENESIS = "ac892dc2b14ca7db108400258abfcf2320ff498f2a674058058e16a8a6fb65e4"
 CONTROL = P9.CONTROL
-NEW_TOOLS = (O.MB10_VERIFIER, O.MB10_DENIAL, O.MB10_DR5, O.MB10_ELIGIBILITY)
+NEW_TOOLS = (O.MB10_VERIFIER, O.MB10_DENIAL, O.MB10_DR5, O.MB10_ELIGIBILITY, O.MB10_SCRATCH)
 NOW = datetime(2026, 10, 10, 9, 0, 0, tzinfo=timezone.utc)
 
 
@@ -505,16 +507,31 @@ class HoldDenialProofTests(P9.Redacted, unittest.TestCase):
 
 # ------------------------------------------------------------------------------ owner eligibility ---
 
+SEQ = "f" * 32
+
+
 def eligible_facts(**changes):
-    facts = {"sequenceId": E.SEQUENCE, "c5AcceptanceSha256": E.C5_ACCEPTANCE_SHA256, "stopPresent": False,
+    facts = {"mb10Sequence": SEQ, "mb10OpenedAt": "2026-10-10T09:00:00Z",
+             "exportReceipt": {"sequenceId": SEQ}, "exportReceiptSha256": "a" * 64,
+             "s25Record": {"sequenceId": SEQ, "recordedAt": "2026-10-10T09:02:00Z", "transcriptionSha256": "b" * 64},
+             "s25RecordSha256": "c" * 64, "s25": {"exact": True, "transcriptionSha256": "b" * 64},
+             "sequenceId": E.SEQUENCE, "c5AcceptanceSha256": E.C5_ACCEPTANCE_SHA256, "stopPresent": False,
              "bindingSha256": E.BINDING_SHA256, "replicaADigests": [E.RECORD_1], "replicaAId": E.REPLICA_A_ID,
-             "storeADigests": [E.ENVELOPE_1], "storeACustody": E.REPLICA_A_ID, "views": dict(E.VIEWS),
-             "storeBViewDigests": [E.ENVELOPE_1], "storeBViewCustody": E.REPLICA_B_ID, "envelopeBytesIdentical": True,
+             "storeADigests": [E.ENVELOPE_1], "storeACustody": E.REPLICA_A_ID,
              "freshness": ["AUTHENTIC", "CURRENT"], "acceptance": "ACCEPTANCE_COMPLETE", "pendingFiles": 0,
              "freshChainSha256": E.CHAIN_1_SHA256, "freshPointerSha256": E.CHAIN_1_SHA256,
              "freshChainEqualsBinding": True}
     facts.update(changes)
     return facts
+
+
+def s25_lines(sequence=SEQ):
+    return E.s25_expected(sequence, a_tree="1" * 64, store_tree="2" * 64, record_file_sha256="3" * 64,
+                          envelope_file_sha256="4" * 64)
+
+
+def transcription(lines) -> str:
+    return "\n".join(lines) + "\nRESULT_BLOCK_SHA256=" + E.result_block_sha256(lines) + "\n"
 
 
 class OwnerEligibilityTests(P9.Redacted, unittest.TestCase):
@@ -530,12 +547,35 @@ class OwnerEligibilityTests(P9.Redacted, unittest.TestCase):
             "pendingFiles": (1, "PENDING_FILES"),
             "c5AcceptanceSha256": ("0" * 64, "C5_NOT_THE_ACCEPTED_RECORD"),
             "stopPresent": (True, "PACKAGE_C_STOPPED"),
-            "views": ({"replica-b-1": "0" * 64, "store-b-1": E.VIEWS["store-b-1"]}, "PEER_VIEW_NOT_THE_PROVEN_VIEW"),
             "bindingSha256": ("0" * 64, "BINDING_CHANGED"),
+            "exportReceipt": ({"sequenceId": "e" * 32}, "EXPORT_NOT_OF_THIS_SEQUENCE"),
+            "s25": ({"exact": False, "transcriptionSha256": "b" * 64}, "S25_OBSERVATION_NOT_EXACT"),
         }
         for name, (value, reason) in drift.items():
             self.assertEqual(E.judge(eligible_facts(**{name: value})), {"result": E.REVALIDATE, "reasons": [reason]},
                              name)
+
+    def test_the_fresh_s25_observation_is_bound_to_this_sequence_after_d1(self):
+        record = {"sequenceId": SEQ, "recordedAt": "2026-10-10T08:59:59Z", "transcriptionSha256": "b" * 64}
+        self.assertEqual(E.judge(eligible_facts(s25Record=record))["reasons"], ["S25_NOT_AFTER_D1"])
+        self.assertEqual(E.judge(eligible_facts(s25Record=dict(record, sequenceId="e" * 32)))["reasons"],
+                         ["S25_NOT_OF_THIS_SEQUENCE"])
+        self.assertEqual(E.judge(eligible_facts(s25={"exact": True, "transcriptionSha256": "d" * 64}))["reasons"],
+                         ["S25_TRANSCRIPTION_NOT_THE_RECORDED_ONE"])
+        self.assertIn("UNKNOWN:s25", E.judge(eligible_facts(s25=None))["reasons"])
+
+    def test_the_s25_expectation_and_comparison(self):
+        lines = s25_lines()
+        self.assertEqual(lines[:2], ["MB10_S25_STAGE=MB10_PRE", f"MB10_SEQUENCE={SEQ}"])
+        for needed in (f"REPLICA_B_HEAD={E.RECORD_1}", "REPLICA_B_RECORDS=1", f"STORE_B_FILE=000001-{E.ENVELOPE_1}.json",
+                       "STORE_B_ENVELOPES=1", "PENDING=0", "FRESHNESS=AUTHENTIC:CURRENT", "ACCEPTANCE=ACCEPTANCE_COMPLETE",
+                       f"BUNDLE_SHA256={O.S25_BUNDLE_SHA256}", f"CHAIN_GENESIS={GENESIS}"):
+            self.assertIn(needed, lines)
+        self.assertTrue(E.s25_check(lines, transcription(lines))["exact"])
+        for bad in (transcription(lines).replace("PENDING=0", "PENDING=1"),
+                    transcription(lines).replace("FRESHNESS=AUTHENTIC:CURRENT", "FRESHNESS=AUTHENTIC:FRESHNESS_UNKNOWN"),
+                    transcription(s25_lines("e" * 32)), "\n".join(lines) + "\n"):
+            self.assertFalse(E.s25_check(lines, bad)["exact"])
 
     def test_unknown_is_revalidate_never_eligibility(self):
         facts = eligible_facts()
@@ -550,24 +590,25 @@ class OwnerEligibilityTests(P9.Redacted, unittest.TestCase):
                 raise OSError(name)
 
         with tempfile.TemporaryDirectory() as tmp:
-            facts = E.gather(Path(tmp), Path(tmp), Path(tmp), Path(tmp), pkgc=Broken())
+            facts = E.gather(Path(tmp), "01-x", "01-MB10_PRE", Path(tmp), Path(tmp), Path(tmp), pkgc=Broken())
         self.assertTrue(facts["unknown"])
         self.assertEqual(E.judge(facts)["result"], E.REVALIDATE)
 
     def test_evaluate_writes_one_new_record(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "eligibility.json"
+            args = (Path(tmp), "01-aa", "01-MB10_PRE", Path(tmp), Path(tmp), Path(tmp))
             with mock.patch.object(E, "gather", lambda *a, **k: eligible_facts()):
-                result = E.evaluate(Path(tmp), Path(tmp), Path(tmp), Path(tmp), "a" * 64, out, now=lambda: NOW)
+                result = E.evaluate(*args, out, now=lambda: NOW)
                 self.assertEqual(result["result"], E.ELIGIBLE)
                 record = json.loads(out.read_text())
-                self.assertEqual((record["exportReceiptSha256"], record["observedAt"], record["authorityGranted"]),
-                                 ("a" * 64, "2026-10-10T09:00:00Z", False))
+                self.assertEqual((record["exportName"], record["s25Name"], record["sequenceId"], record["observedAt"],
+                                  record["authorityGranted"]), ("01-aa", "01-MB10_PRE", SEQ, "2026-10-10T09:00:00Z", False))
                 with self.assertRaises(E.Refused) as caught:
-                    E.evaluate(Path(tmp), Path(tmp), Path(tmp), Path(tmp), "a" * 64, out)
+                    E.evaluate(*args, out)
                 self.assertEqual(caught.exception.reason, "OUTPUT_EXISTS")
             with self.assertRaises(E.Refused):
-                E.evaluate(Path(tmp), Path(tmp), Path(tmp), Path(tmp), "bad", Path(tmp) / "x.json")
+                E.evaluate(Path(tmp), "../x", "01-MB10_PRE", Path(tmp), Path(tmp), Path(tmp), Path(tmp) / "y.json")
 
     def test_the_pkgc_operator_is_hash_gated(self):
         self.assertEqual(sha((TOOLS / "pkgc_operator.py").read_bytes()), E.PKGC_OPERATOR_SHA256)
@@ -576,18 +617,137 @@ class OwnerEligibilityTests(P9.Redacted, unittest.TestCase):
                 E.load_pkgc()
 
 
+# ---------------------------------------------------------------------------------- S25 phone stage ---
+
+PHONE = (ROOT / O.MB10_PHONE).read_text(encoding="utf-8")
+
+
+class PhoneStageTests(P9.Redacted, unittest.TestCase):
+    def test_the_phone_stage_is_read_only(self):
+        self.assertNotIn("\r", PHONE)
+        body = "\n".join(line for line in PHONE.splitlines() if not line.lstrip().startswith("#"))
+        for forbidden in ("T append", "append-envelope", "init-acceptance-store", "init-replica", "propose-", " rm ",
+                          "rm -", "rmdir", " mv ", "set -C", "> \"$MB10_RB", "> \"$MB10_SB", "> \"$MB10_PB"):
+            self.assertNotIn(forbidden, body, forbidden)
+        for read_only in ("T verify-replica --replica \"$MB10_RB\"", "T verify-acceptance-store --store \"$MB10_SB\"",
+                          "T classify --replica", "T classify-acceptance --replica"):
+            self.assertIn(read_only, body)
+        self.assertIn('mkdir -m 700 "$e" || { mb10_stop "this sequence\'s observation already ran"', body)
+
+    def test_the_phone_emits_the_expected_lines_in_order(self):
+        block = PHONE.split("lines+=(", 1)[1].split("printf '%s", 1)[0]
+        emitted = re.findall(r'"([A-Z][A-Z0-9_]*)(?:=|")', block)
+        expected = [line.split("=", 1)[0] for line in s25_lines()]
+        self.assertEqual(emitted, expected)
+
+    def test_render_gives_copy_paste_ready_phone_commands(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        P9.C.write_emitted(P9.synthetic_derivation(), work / "genesis")
+        op = O.Operator(gcloud=("gcloud",), run=FakeRun10(), now=lambda: NOW)
+        facts = work / "facts.json"
+        facts.write_text(json.dumps({"lastDeployRunId": "1", "workflowQueueEmpty": True, "predecessorWorkdir": None}))
+        statement = work / "d1.txt"
+        statement.write_text(op.render(ROOT, work, "D1", facts)["text"])
+        sequence = op.open(ROOT, work, statement, facts)["sequenceId"]
+        text = op.render(ROOT, work, "S25")["text"]
+        self.assertIn(f"MB10_SEQUENCE={sequence}\n", text)
+        self.assertIn(f"PKGC_BUNDLE_SHA256={O.S25_BUNDLE_SHA256}\n", text)
+        self.assertIn(O.TOOL_PINS[O.MB10_PHONE], text)
+        self.assertNotIn("<", text)
+        with self.assertRaises(O.Stop) as caught:
+            bad = work / "t.txt"
+            bad.write_text("\n".join(s25_lines("e" * 32)))
+            op.s25_record(ROOT, work, bad)
+        self.assertEqual(caught.exception.code, "TRANSCRIPTION_NOT_OF_THIS_SEQUENCE")
+
+
+# --------------------------------------------------------------------------------- scratch recovery ---
+
+@unittest.skipUnless(POSIX, "POSIX owner / mode semantics")
+class ScratchRecoveryTests(P9.Redacted, unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.parent = self.root / SR.HOLD_PARENT.lstrip("/")
+        (self.parent / "holds").mkdir(parents=True)
+        os.chmod(self.parent, 0o700)
+        os.chmod(self.parent / "holds", 0o700)
+        self.owner = (UID, GID)
+
+    def scratch(self, data=None, mode=0o600) -> Path:
+        path = self.parent / SR.SCRATCH_NAME
+        path.write_bytes(SR.expected_bytes()[:200] if data is None else data)
+        os.chmod(path, mode)
+        return path
+
+    def test_the_expected_bytes_are_the_verifier_s(self):
+        self.assertEqual(SR.expected_bytes(), V.pinned_expected_held(GENESIS)["bytes"])
+        self.assertEqual(SR.SCRATCH_NAME, V.scratch_name(V.pinned_expected_held(GENESIS)))
+
+    def test_plan_then_recover_exactly_the_writer_scratch(self):
+        self.scratch()
+        planned = SR.plan(root=self.root, owner=self.owner)
+        self.assertEqual((planned["size"], planned["holdStore"], planned["canonicalHeld"], planned["complete"]),
+                         (200, "EMPTY", "ABSENT", False))
+        with self.assertRaises(SR.Refused) as caught:
+            SR.recover("0" * 64, root=self.root, owner=self.owner)
+        self.assertEqual(caught.exception.reason, "PLAN_CHANGED")
+        self.assertTrue((self.parent / SR.SCRATCH_NAME).exists())
+        result = SR.recover(planned["planDigest"], root=self.root, owner=self.owner)
+        self.assertEqual((result["result"], result["heldWritten"]), ("MB10_SCRATCH_RECOVERED", False))
+        self.assertEqual(sorted(os.listdir(self.parent)), ["holds"])
+        with self.assertRaises(SR.Refused):                                         # nothing left to recover
+            SR.recover(planned["planDigest"], root=self.root, owner=self.owner)
+
+    def test_anything_else_is_refused_and_untouched(self):
+        cases = []
+        self.scratch(data=b"{\"not\":\"the record\"}")
+        cases.append("SCRATCH_BYTES_NOT_A_PREFIX_OF_THE_EXPECTED_HELD")
+        for reason in cases:
+            with self.assertRaises(SR.Refused) as caught:
+                SR.plan(root=self.root, owner=self.owner)
+            self.assertEqual(caught.exception.reason, reason)
+        self.scratch(mode=0o644)
+        with self.assertRaises(SR.Refused) as caught:
+            SR.plan(root=self.root, owner=self.owner)
+        self.assertEqual(caught.exception.reason, "SCRATCH_METADATA_NOT_THE_WRITER_FORM")
+        self.scratch(data=SR.expected_bytes() + b"x")
+        with self.assertRaises(SR.Refused):
+            SR.plan(root=self.root, owner=self.owner)
+        self.scratch()
+        held = self.parent / "holds" / SR.EXPECTED_HELD_NAME
+        held.write_bytes(SR.expected_bytes())
+        os.chmod(held, 0o600)
+        with self.assertRaises(SR.Refused) as caught:                              # the canonical HELD exists
+            SR.plan(root=self.root, owner=self.owner)
+        self.assertEqual(caught.exception.reason, "HOLD_STORE_NOT_EMPTY")
+        held.unlink()
+        (self.parent / "other").write_bytes(b"")
+        with self.assertRaises(SR.Refused) as caught:
+            SR.plan(root=self.root, owner=self.owner)
+        self.assertEqual(caught.exception.reason, "PARENT_NOT_EXACTLY_HOLDS_AND_THE_SCRATCH")
+        self.assertTrue((self.parent / SR.SCRATCH_NAME).exists())
+
+
 # ---------------------------------------------------------------------------------------- operator ---
 
 HELD = V.pinned_expected_held(GENESIS)
 
 
 def w10_report(phase="W10_0_PRE_HELD_EXACT", hold=None, witness=O.ACCEPTED_WITNESS, held_sha=None):
-    hold = hold or {"W10_0_PRE_HELD_EXACT": "EMPTY", "W10_1_HELD_EXACT": "HELD_EXACT"}.get(phase, "EMPTY")
+    hold = hold or {"W10_0_PRE_HELD_EXACT": "EMPTY", "W10_1_HELD_EXACT": "HELD_EXACT",
+                    "W10_P_SCRATCH_RESIDUE_NOT_HELD": "SCRATCH_ONLY"}.get(phase, "EMPTY")
     return {"phase": phase, "holdClass": hold, "witnessInvocationId": witness[0], "witnessMainPid": witness[1],
             "witnessNRestarts": "0", "routing": V.PHASE_TABLE[phase][0],
             "w9PhaseDirect": "W9_LATER_STATE" if hold == "HELD_EXACT" else "W9_5_GENESIS_COMMITTED_EXACT",
             "w9PhaseHoldJudgedSeparately": "W9_5_GENESIS_COMMITTED_EXACT",
             "observedHeldSha256": held_sha if held_sha is not None else (HELD["sha256"] if hold == "HELD_EXACT" else None)}
+
+
+PLAN = {"planDigest": "9" * 64, "scratch": SR.SCRATCH_NAME, "holdStore": "EMPTY", "canonicalHeld": "ABSENT"}
 
 
 class FakeRun10:
@@ -620,6 +780,10 @@ class FakeRun10:
             if self.on_hold:
                 self.on_hold()
             return done(*self.hold)
+        if command.endswith(" - plan"):
+            return done(0, json.dumps(PLAN).encode())
+        if " - recover " in command:
+            return done(0, json.dumps({"result": "MB10_SCRATCH_RECOVERED"}).encode())
         return done()
 
     def remote(self) -> list[str]:
@@ -630,11 +794,14 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.work = Path(self.tmp.name) / "work"
-        self.work.mkdir()
-        P9.C.write_emitted(P9.synthetic_derivation(), self.work / "genesis")
+        self.work = self.new_work()
         self.facts = self.file({"lastDeployRunId": "38038318626", "workflowQueueEmpty": True,
                                 "predecessorWorkdir": None})
+
+    def new_work(self) -> Path:
+        work = Path(tempfile.mkdtemp(dir=self.tmp.name))
+        P9.C.write_emitted(P9.synthetic_derivation(), work / "genesis")
+        return work
 
     def file(self, value, name=None) -> Path:
         path = Path(self.tmp.name) / (name or f"f-{len(os.listdir(self.tmp.name))}.json")
@@ -646,85 +813,127 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def op(self, run=None):
-        return O.Operator(gcloud=("gcloud",), run=run or FakeRun10(), now=lambda: NOW)
+    def op(self, run=None, now=NOW):
+        return O.Operator(gcloud=("gcloud",), run=run or FakeRun10(), now=lambda: now)
 
-    def opened(self, op):
-        rendered = op.render(ROOT, self.work, "D1", self.facts)
-        op.open(ROOT, self.work, self.text(rendered["text"]), self.facts)
-        return json.loads((self.work / "sequence" / "D1_OPENING.json").read_text())
+    def opened(self, op, work=None, facts=None):
+        work = work or self.work
+        rendered = op.render(ROOT, work, "D1", facts or self.facts)
+        op.open(ROOT, work, self.text(rendered["text"]), facts or self.facts)
+        return json.loads((work / "sequence" / "D1_OPENING.json").read_text())
 
-    def host_pre(self, opening, *, name="01-PRE", report=None, boot=O.ACCEPTED_BOOT_ID, result="MB10_HOST_PRE_PASS"):
-        out = self.work / "host" / name
+    def host_pre(self, opening, *, report=None, boot=O.ACCEPTED_BOOT_ID, result="MB10_HOST_PRE_PASS",
+                 preservation=0):
+        hosts = self.work / "host"
+        name = f"{len(list(hosts.iterdir())) + 1 if hosts.is_dir() else 1:02d}-PRE"
+        out = hosts / name
         out.mkdir(parents=True)
-        (out / "HOST_RESULT.json").write_text(json.dumps({"sequenceId": opening["sequenceId"], "result": result}))
+        (out / "HOST_RESULT.json").write_text(json.dumps({"sequenceId": opening["sequenceId"], "result": result,
+                                                          "codes": {"preservation": preservation}}))
         (out / "w10verifier.out").write_text(json.dumps(report or w10_report()))
         (out / "identity.out").write_text(f"2026-10-10T09:01:00Z\nlilith-dev-01\nm\n{boot}\nk\nREBOOT_REQUIRED=absent\n")
         return name
 
-    def export(self, opening, *, name=None, files=None, started="2026-10-10T09:02:00Z") -> str:
+    def export(self, opening, *, files=None, started="2026-10-10T09:02:00Z", sequence=None) -> tuple[str, str]:
         exports = self.work / "exports"
-        name = name or f"{len(list(exports.iterdir())) + 1 if exports.is_dir() else 1:02d}-{os.urandom(4).hex()}"
+        name = f"{len(list(exports.iterdir())) + 1 if exports.is_dir() else 1:02d}-{os.urandom(4).hex()}"
         out = exports / name
         out.mkdir(parents=True)
-        receipt = {"sequenceId": opening["sequenceId"], "startedAt": started, "completedAt": "2026-10-10T09:03:00Z",
+        receipt = {"sequenceId": sequence or opening["sequenceId"], "startedAt": started,
+                   "completedAt": "2026-10-10T09:03:00Z",
                    "files": files or {"chain-1.json": O.CHAIN_1_SHA256, "witness.json": O.CHAIN_1_SHA256}}
         (out / "RECEIPT.json").write_bytes(json.dumps(receipt).encode())
-        return sha((out / "RECEIPT.json").read_bytes())
+        return name, sha((out / "RECEIPT.json").read_bytes())
 
-    def eligibility(self, receipt, **changes) -> Path:
-        value = {"result": E.ELIGIBLE, "reasons": [], "exportReceiptSha256": receipt,
+    def s25(self, op, opening, *, recorded=None) -> tuple[str, str]:
+        path = self.text(transcription(s25_lines(opening["sequenceId"])))
+        result = O.Operator(gcloud=("gcloud",), run=FakeRun10(),
+                            now=lambda: recorded or datetime(2026, 10, 10, 9, 2, 30, tzinfo=timezone.utc)
+                            ).s25_record(ROOT, self.work, path)
+        return result["s25"], result["recordSha256"]
+
+    def eligibility(self, opening, export, s25, **changes) -> Path:
+        value = {"sequenceId": opening["sequenceId"], "result": E.ELIGIBLE, "reasons": [], "exportName": export[0],
+                 "exportReceiptSha256": export[1], "s25Name": s25[0], "s25RecordSha256": s25[1],
                  "observedAt": "2026-10-10T09:04:00Z"}
         value.update(changes)
         return self.file(value)
 
-    def gate(self, op, opening, **kw):
-        host = self.host_pre(opening, **kw.pop("host", {}))
-        receipt = self.export(opening, **kw.pop("export", {}))
-        facts = self.file(kw.pop("facts", {"lastDeployRunId": "38038318626", "workflowQueueEmpty": True}))
-        return op.gate(ROOT, self.work, host, self.eligibility(receipt, **kw), facts)
+    def gate(self, op, opening, *, host=None, export=None, s25=None, facts=None, **changes):
+        host_dir = self.host_pre(opening, **(host or {}))
+        export = self.export(opening, **(export or {}))
+        s25 = self.s25(op, opening, **(s25 or {}))
+        facts = self.file(facts or {"lastDeployRunId": "38038318626", "workflowQueueEmpty": True})
+        return op.gate(ROOT, self.work, host_dir, self.eligibility(opening, export, s25, **changes), facts)
 
-    def test_opening_is_read_only_and_bound_to_the_rendered_text(self):
+    def test_opening_is_read_only_and_starts_the_freeze(self):
         run = FakeRun10()
         op = self.op(run)
         rendered = op.render(ROOT, self.work, "D1", self.facts)
-        self.assertIn("Predecessor sequence: none.", rendered["text"])
-        self.assertIn(V.EXPECTED_HELD_SHA256, rendered["text"])
+        for needed in ("Predecessor sequence: none.", V.EXPECTED_HELD_SHA256, "Freeze: BEGINS_AT_THIS_OPENING.",
+                       "package or OS upgrade", "one fresh read-only S25 observation", "any S25 write"):
+            self.assertIn(needed, rendered["text"])
         with self.assertRaises(O.Stop) as caught:
             op.open(ROOT, self.work, self.text(rendered["text"].replace("38038318626", "1")), self.facts)
         self.assertEqual(caught.exception.code, "GO_LINE_MISSING")
         self.assertFalse((self.work / "sequence").exists())
         opening = self.opened(op)
-        self.assertEqual((opening["lastDeployRunId"], opening["predecessor"]), ("38038318626", "none"))
+        self.assertEqual((opening["lastDeployRunId"], opening["predecessor"], opening["freeze"]),
+                         ("38038318626", "none", "BEGINS_AT_THIS_OPENING"))
+        self.assertEqual(op.freeze_state(self.work), "IN_FORCE")
         with self.assertRaises(O.Stop):
             op.open(ROOT, self.work, self.text(rendered["text"]), self.facts)
         self.assertEqual(run.remote(), [])
 
-    def test_gate_passes_only_on_fresh_exact_bound_evidence(self):
+    def test_ordinary_staleness_revalidates(self):
         op = self.op()
         opening = self.opened(op)
         self.assertEqual(self.gate(op, opening)["result"], "MB10_GATE_PASS")
-        drifts = [
-            ({"host": {"name": "02-PRE", "boot": "x"}}, "BOOT_CHANGED"),
-            ({"host": {"name": "03-PRE", "report": w10_report(witness=("b" * 32, "9"))}}, "WITNESS_INCARNATION_CHANGED"),
-            ({"host": {"name": "04-PRE", "report": w10_report("W10_1_HELD_EXACT")}}, "HOST_NOT_W10_0"),
-            ({"host": {"name": "05-PRE", "result": "MB10_HOST_PRE_NOT_PASS"}}, "HOST_PRE_NOT_PASS"),
-            ({"host": {"name": "06-PRE"}, "facts": {"lastDeployRunId": "1", "workflowQueueEmpty": True}},
-             "DEPLOY_SINCE_OPENING"),
-            ({"host": {"name": "07-PRE"}, "result": E.REVALIDATE}, "OWNER_NOT_ELIGIBLE"),
-            ({"host": {"name": "08-PRE"}, "export": {"files": {"chain-1.json": "0" * 64}}},
-             "EXPORT_NOT_GENESIS"),
-            ({"host": {"name": "09-PRE"}, "export": {"started": "2026-10-10T08:00:00Z"}},
-             "ELIGIBILITY_NOT_AFTER_EXPORT"),
-            ({"host": {"name": "10-PRE"}, "facts": {"lastDeployRunId": "38038318626"}}, "EVIDENCE_UNKNOWN"),
+        ordinary = [
+            ({"host": {"result": "MB10_HOST_PRE_NOT_PASS"}}, "HOST_PRE_NOT_PASS"),
+            ({"result": E.REVALIDATE}, "OWNER_NOT_ELIGIBLE"),
+            ({"export": {"files": {"chain-1.json": "0" * 64}}}, "EXPORT_NOT_GENESIS"),
+            ({"export": {"started": "2026-10-10T08:00:00Z"}}, "ELIGIBILITY_NOT_AFTER_EXPORT"),
+            ({"export": {"sequence": "e" * 32}}, "EXPORT_NOT_BOUND_TO_THIS_SEQUENCE"),
+            ({"s25": {"recorded": datetime(2026, 10, 10, 9, 5, tzinfo=timezone.utc)}},
+             "S25_NOT_AFTER_D1_OR_NOT_BEFORE_ELIGIBILITY"),
+            ({"facts": {"lastDeployRunId": "38038318626"}}, "EVIDENCE_UNKNOWN"),
+            ({"facts": {"lastDeployRunId": "38038318626", "workflowQueueEmpty": False}}, "WORKFLOW_QUEUE_NOT_EMPTY"),
         ]
-        for kw, event in drifts:
+        for kw, event in ordinary:
             result = self.gate(op, opening, **kw)
-            self.assertEqual(result["result"], "MB10_GATE_REVALIDATE", event)
+            self.assertEqual((result["result"], result["materialEvents"]), ("MB10_GATE_REVALIDATE", []), event)
             self.assertIn(event, result["events"])
+        self.assertFalse((self.work / "sequence" / "ENDED.json").exists())
         with self.assertRaises(O.Stop) as caught:
-            op.gate(ROOT, self.work, "01-PRE", self.eligibility("0" * 64), self.facts)
+            op.gate(ROOT, self.work, "01-PRE", self.file({}), self.facts)
         self.assertEqual(caught.exception.code, "HOST_READ_REUSED")
+
+    def test_material_substrate_change_ends_the_sequence_and_keeps_the_freeze(self):
+        material = [({"host": {"boot": "x"}}, "BOOT_CHANGED"),
+                    ({"host": {"report": w10_report(witness=("b" * 32, "9"))}}, "WITNESS_INCARNATION_CHANGED"),
+                    ({"host": {"preservation": 1, "result": "MB10_HOST_PRE_NOT_PASS"}}, "BROKER_PRESERVATION_NOT_PASS"),
+                    ({"host": {"report": w10_report("W10_1_HELD_EXACT")}}, "HOST_NOT_W10_0"),
+                    ({"facts": {"lastDeployRunId": "1", "workflowQueueEmpty": True}}, "DEPLOY_SINCE_OPENING")]
+        for kw, event in material:
+            with self.subTest(event=event):
+                self.work = self.new_work()
+                op = self.op()
+                opening = self.opened(op)
+                result = self.gate(op, opening, **kw)
+                self.assertEqual(result["result"], "MB10_SEQUENCE_ENDED_MATERIAL_CHANGE")
+                self.assertIn(event, result["materialEvents"])
+                ended = json.loads((self.work / "sequence" / "ENDED.json").read_text())
+                self.assertEqual(ended["freeze"], "IN_FORCE_UNTIL_STOP_OR_RELEASE")
+                self.assertEqual(op.freeze_state(self.work), "IN_FORCE")
+                for form in (lambda: op.render(ROOT, self.work, "D2"), lambda: self.gate(op, opening),
+                             lambda: op.export(ROOT, self.work)):
+                    with self.assertRaises(O.Stop) as caught:
+                        form()
+                    self.assertEqual(caught.exception.code, "SEQUENCE_ENDED")
+                stop = op.render(ROOT, self.work, "STOP")["text"]           # only an explicit STOP releases it
+                op.stop(ROOT, self.work, self.text(stop))
+                self.assertEqual(op.freeze_state(self.work), "RELEASED_BY_STOP")
 
     def ready(self, run):
         op = self.op(run)
@@ -735,14 +944,29 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
     def holds(self, run):
         return [c for c in run.remote() if "create-initial-held" in c]
 
+    def test_an_old_d2_bound_to_a_superseded_gate_is_refused(self):
+        run = FakeRun10()
+        op, old = self.ready(run)
+        opening = json.loads((self.work / "sequence" / "D1_OPENING.json").read_text())
+        first = sha(sorted((self.work / "gates").iterdir())[0].read_bytes())
+        self.assertIn("superseded gates: none.", old.read_text())
+        self.assertEqual(self.gate(op, opening)["result"], "MB10_GATE_PASS")
+        with self.assertRaises(O.Stop) as caught:
+            op.mb10(ROOT, self.work, old)
+        self.assertEqual(caught.exception.code, "GO_BOUND_TO_SUPERSEDED_GATE")
+        new = op.render(ROOT, self.work, "D2")["text"]
+        self.assertIn(f"superseded gates: {first}.", new)
+        self.assertEqual(self.holds(run), [])
+        self.assertEqual(op.mb10(ROOT, self.work, self.text(new))["result"], "MB10_HELD")
+
     def test_mb10_one_marker_before_one_write_then_read_back(self):
         run = FakeRun10()
         op, go = self.ready(run)
         marker = self.work / "attempts" / "mb10.json"
         run.on_hold = lambda: self.assertTrue(marker.is_file())                 # the marker precedes the write
         result = op.mb10(ROOT, self.work, go)
-        self.assertEqual((result["result"], result["transcript"], result["sequencePhase"]),
-                         ("MB10_HELD", V.HELD_RETURNED_EXACT, V.S10_POST_PENDING))
+        self.assertEqual((result["result"], result["transcript"], result["sequencePhase"], result["freeze"]),
+                         ("MB10_HELD", V.HELD_RETURNED_EXACT, V.S10_POST_PENDING, "IN_FORCE"))
         self.assertEqual(len(self.holds(run)), 1)
         self.assertIn(O.HOLD_COMMAND, self.holds(run)[0])
         self.assertEqual(json.loads(marker.read_text())["invocationsPermitted"], 1)
@@ -750,9 +974,9 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
             op.mb10(ROOT, self.work, go)
         self.assertEqual(caught.exception.code, "ATTEMPT_ALREADY_CONSUMED:mb10")
         self.assertEqual(len(self.holds(run)), 1)
-        with self.assertRaises(O.Stop) as caught:
-            op.stop(ROOT, self.work, self.text("x"))
-        self.assertEqual(caught.exception.code, "STOP_REFUSED_ATTEMPT_MARKER_PRESENT")
+        for act in ("STOP", "D2"):
+            with self.assertRaises(O.Stop):
+                op.render(ROOT, self.work, act)
 
     def test_mb10_refuses_before_any_marker(self):
         run = FakeRun10()
@@ -778,53 +1002,75 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
         self.assertFalse((self.work / "attempts").exists())                     # nothing consumed
         self.assertEqual(self.holds(run), [])
 
-    def test_mb10_failures_after_the_marker_are_classified_never_retried(self):
-        cases = [((2, b"", b"lilith-authority-hold-dev: REFUSED HOLD_STORE_NOT_EMPTY\n"), ("W10_0_PRE_HELD_EXACT",),
-                  V.S10_R),
-                 ((None, b"", b""), ("W10_0_PRE_HELD_EXACT", "W10_1_HELD_EXACT"), V.S10_UNACKNOWLEDGED),
-                 ((255, b"", b""), ("W10_0_PRE_HELD_EXACT", "W10_P_SCRATCH_RESIDUE_NOT_HELD"), V.S10_SCRATCH)]
-        for hold, w10, phase in cases:
-            with self.subTest(phase=phase):
-                self.work = Path(tempfile.mkdtemp(dir=self.tmp.name))
-                P9.C.write_emitted(P9.synthetic_derivation(), self.work / "genesis")
-                run = FakeRun10(w10=w10, hold=hold)
-                op, go = self.ready(run)
-                result = op.mb10(ROOT, self.work, go)
-                self.assertEqual((result["result"], result["sequencePhase"]), ("MB10_STOP", phase))
-                self.assertEqual(len(self.holds(run)), 1)
-
-    def test_stop_only_before_the_marker(self):
-        op = self.op()
-        self.opened(op)
-        rendered = op.render(ROOT, self.work, "STOP")
-        self.assertEqual(op.stop(ROOT, self.work, self.text(rendered["text"]))["result"],
-                         "MB10_SEQUENCE_STOPPED_BEFORE_MARKER")
-        with self.assertRaises(O.Stop) as caught:
-            op.render(ROOT, self.work, "D2")
-        self.assertEqual(caught.exception.code, "SEQUENCE_STOPPED")
-
-    def test_linked_successor_only_after_an_ended_predecessor_without_held(self):
-        op = self.op()
-        self.opened(op)
-        successor = Path(self.tmp.name) / "successor"
-        successor.mkdir()
-        P9.C.write_emitted(P9.synthetic_derivation(), successor / "genesis")
+    def test_post_marker_not_written_keeps_the_freeze_into_a_linked_successor(self):
+        run = FakeRun10(w10=("W10_0_PRE_HELD_EXACT",),
+                        hold=(2, b"", b"lilith-authority-hold-dev: REFUSED HOLD_WITNESS_NOT_CONSISTENT\n"))
+        op, go = self.ready(run)
+        result = op.mb10(ROOT, self.work, go)
+        self.assertEqual((result["result"], result["sequencePhase"], result["freeze"]),
+                         ("MB10_STOP", V.S10_R, "IN_FORCE"))
+        self.assertEqual(len(self.holds(run)), 1)
+        with self.assertRaises(O.Stop) as caught:                                 # never a STOP after the marker
+            op.render(ROOT, self.work, "STOP")
+        self.assertEqual(caught.exception.code, "STOP_REFUSED_ATTEMPT_MARKER_PRESENT")
+        successor = self.new_work()
         facts = self.file({"lastDeployRunId": "38038318626", "workflowQueueEmpty": True,
                            "predecessorWorkdir": str(self.work)})
-        with self.assertRaises(O.Stop) as caught:                                # not ended yet
+        with self.assertRaises(O.Stop) as caught:                                 # not classified yet
             op.render(ROOT, successor, "D1", facts)
         self.assertEqual(caught.exception.code, "PREDECESSOR_NOT_ENDED_WITHOUT_WRITE")
-        op.stop(ROOT, self.work, self.text(op.render(ROOT, self.work, "STOP")["text"]))
-        rendered = op.render(ROOT, successor, "D1", facts)
-        opening_sha = sha((self.work / "sequence" / "D1_OPENING.json").read_bytes())
-        self.assertIn(f"Predecessor sequence: {opening_sha}.", rendered["text"])
-        (self.work / "post10" / "01-POST10").mkdir(parents=True)
-        (self.work / "post10" / "01-POST10" / "POST10_VERIFIED.json").write_text("{}")
+        classified = op.classify(ROOT, self.work)
+        self.assertEqual((classified["sequencePhase"], classified["freeze"]), (V.S10_R, "IN_FORCE"))
+        predecessor = sha((self.work / "sequence" / "D1_OPENING.json").read_bytes())
+        rendered = op.render(ROOT, successor, "D1", facts)["text"]
+        self.assertIn(f"Freeze: CONTINUES_UNBROKEN_FROM {predecessor}.", rendered)
+        self.assertIn(f"Predecessor sequence: {predecessor}.", rendered)
+        moved = self.file({"lastDeployRunId": "2", "workflowQueueEmpty": True, "predecessorWorkdir": str(self.work)})
         with self.assertRaises(O.Stop) as caught:
-            op.render(ROOT, successor, "D1", facts)
-        self.assertEqual(caught.exception.code, "PREDECESSOR_WROTE_HELD")
+            op.render(ROOT, successor, "D1", moved)
+        self.assertEqual(caught.exception.code, "DEPLOY_DURING_CONTINUOUS_FREEZE")
+        # only the owner's explicit release ends the freeze after a consumed marker
+        release = op.render(ROOT, self.work, "RELEASE")["text"]
+        self.assertIn(V.S10_R, release)
+        self.assertEqual(op.release_freeze(ROOT, self.work, self.text(release))["freeze"], "RELEASED_BY_OWNER")
+        self.assertIn("Freeze: BEGINS_AT_THIS_OPENING.", op.render(ROOT, successor, "D1", moved)["text"])
 
-    def test_post_verifies_bytes_proofs_and_witness_then_acceptance(self):
+    def test_held_without_exact_reply_is_adopted_only_through_post_and_d3(self):
+        run = FakeRun10(w10=("W10_0_PRE_HELD_EXACT", "W10_1_HELD_EXACT"), hold=(None, b"", b""))
+        op, go = self.ready(run)
+        result = op.mb10(ROOT, self.work, go)
+        self.assertEqual(result["sequencePhase"], V.S10_UNACKNOWLEDGED)
+        classified = op.classify(ROOT, self.work)
+        self.assertEqual(classified["records"]["adoption_required"], True)
+        with self.assertRaises(O.Stop) as caught:                                 # never a release of HELD's freeze
+            op.render(ROOT, self.work, "RELEASE")
+        self.assertEqual(caught.exception.code, "NOT_A_CLASSIFIED_NOT_WRITTEN_OUTCOME")
+
+    def test_scratch_residue_stops_and_only_the_authorized_recovery_removes_it(self):
+        run = FakeRun10(w10=("W10_0_PRE_HELD_EXACT", "W10_P_SCRATCH_RESIDUE_NOT_HELD",
+                             "W10_P_SCRATCH_RESIDUE_NOT_HELD", "W10_0_PRE_HELD_EXACT"), hold=(255, b"", b""))
+        op, go = self.ready(run)
+        self.assertEqual(op.mb10(ROOT, self.work, go)["sequencePhase"], V.S10_SCRATCH)
+        with self.assertRaises(O.Stop) as caught:                                 # not classified yet
+            op.scratch_plan(ROOT, self.work)
+        self.assertEqual(caught.exception.code, "NOT_CLASSIFIED_SCRATCH")
+        self.assertEqual(op.classify(ROOT, self.work)["sequencePhase"], V.S10_SCRATCH)
+        planned = op.scratch_plan(ROOT, self.work)
+        self.assertEqual((planned["result"], planned["planDigest"]), ("MB10_SCRATCH_PLAN_RECORDED", "9" * 64))
+        text = op.render(ROOT, self.work, "SCRATCH", Path(planned["planDir"]))["text"]
+        self.assertIn("9" * 64, text)
+        self.assertFalse([c for c in run.remote() if " - recover " in c])          # nothing removed without the act
+        with self.assertRaises(O.Stop):
+            op.scratch_recover(ROOT, self.work, planned["planDir"], self.text(text.replace("9" * 64, "8" * 64)))
+        result = op.scratch_recover(ROOT, self.work, planned["planDir"], self.text(text))
+        self.assertEqual((result["result"], result["freeze"]), ("MB10_SCRATCH_RECOVERED", "IN_FORCE"))
+        self.assertEqual(len([c for c in run.remote() if " - recover " in c]), 1)
+        with self.assertRaises(O.Stop) as caught:
+            op.scratch_recover(ROOT, self.work, planned["planDir"], self.text(text))
+        self.assertTrue(caught.exception.code.startswith("ATTEMPT_ALREADY_CONSUMED:scratch-recovery-"))
+        self.assertEqual(len(self.holds(run)), 1)                                 # never a second write
+
+    def test_post_verifies_bytes_proofs_and_witness_then_acceptance_ends_the_freeze(self):
         chain = b'{"synthetic":"genesis"}'
         probe = {"modules": {str(i): [f, d] for i, (f, d) in enumerate({**M9.M6.RELEASE_MODULES,
                                                                          **M9.M6.PROVISION_MODULES}.items())},
@@ -874,7 +1120,9 @@ class OperatorTests(P9.Redacted, unittest.TestCase):
         rendered = op.render(ROOT, self.work, "D3")
         self.assertNotIn(O.ADOPTION_LINE, rendered["text"])
         self.assertIn("The M-B10 freeze ends now", rendered["text"])
+        self.assertEqual(op.freeze_state(self.work), "IN_FORCE")
         self.assertEqual(op.accept(ROOT, self.work, self.text(rendered["text"]))["result"], "MB10_ACCEPTED")
+        self.assertEqual(op.freeze_state(self.work), "ENDED_BY_D3")
 
     def test_dr5_form_uses_the_post_held_target_only(self):
         op = self.op()
@@ -902,41 +1150,51 @@ class BoundaryTests(P9.Redacted, unittest.TestCase):
         return [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
                 and isinstance(node.value, str) and id(node) not in docstrings]
 
-    def test_exactly_one_write_path_and_no_later_milestone(self):
+    def test_exactly_two_mutation_paths_and_no_later_milestone(self):
         source = self.SOURCES[O.OPERATOR]
         tree = ast.parse(source)
         invokes = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "_invoke"]
-        self.assertEqual(len(invokes), 1)
+        self.assertEqual(len(invokes), 2)
         self.assertEqual(source.count("self._invoke(HOLD_COMMAND)"), 1)
+        self.assertEqual(source.count('self._invoke(self.streamed(repo, MB10_SCRATCH, M9.SYSTEM_PYTHON, f"recover '
+                                      '{digest}"))'), 1)
         strings = self.code_strings(source)
         self.assertEqual(sorted(s for s in strings if "create-initial-held" in s),
                          [" create-initial-held", " create-initial-held, exactly one invocation."])
         for forbidden in ("release-initial", "create-successor-held", "create-maintenance-held",
                           "create-custody-debt-held", "release-ceremony", "systemctl start", "systemctl enable",
                           "systemctl restart", "execute-head-advance", "execute-epoch-advance", "advance-epoch",
-                          "keygen", "systemd-creds", "bootstrap 1"):
+                          "keygen", "systemd-creds", "bootstrap 1", "append-envelope", "init-acceptance-store"):
             self.assertFalse([s for s in strings if forbidden in s], forbidden)
         for path in NEW_TOOLS:
             strings = self.code_strings(self.SOURCES[path])
             self.assertFalse([s for s in strings if "create-initial-held" in s], path)   # only the operator writes
             self.assertFalse([s for s in strings if "systemctl start" in s or "release-initial" in s], path)
 
-    def test_templates_bind_the_boundaries(self):
+    def test_templates_bind_the_boundaries_and_the_accepted_decisions(self):
         go = flat(" ".join(O.GO_LINES))
-        self.assertIn(O.PONR_ACKNOWLEDGEMENT, go)
-        self.assertIn("exactly one invocation", go)
-        self.assertIn("grants no issuance or other authority", go)
-        self.assertIn("does not authorize the signer (M-B11), authority activation, Registry V1 effectiveness, First "
-                      "Memory or PROD", go)
-        self.assertIn("there is no automatic retry", go)
-        self.assertIn("It does not authorize M-B10, HELD, the signer, authority activation, First Memory or PROD",
-                      flat(" ".join(O.OPEN_LINES)))
+        for needed in (O.PONR_ACKNOWLEDGEMENT, "exactly one invocation", "grants no issuance or other authority",
+                       "does not authorize the signer (M-B11), authority activation, Registry V1 effectiveness, First "
+                       "Memory or PROD", "there is no automatic retry, and the freeze stays in force",
+                       "This go supersedes every earlier D2 of this sequence", "Fresh S25 observation SHA-256"):
+            self.assertIn(needed, go)
+        opening = flat(" ".join(O.OPEN_LINES))
+        self.assertIn(O.FREEZE_RULES, opening)
+        self.assertIn("Its normal end is the accepted D3; a pre-marker STOP or my explicit freeze release may end it "
+                      "earlier.", opening)
+        self.assertIn("It does not authorize M-B10, HELD, any S25 write, the signer, authority activation, First "
+                      "Memory or PROD", opening)
+        for word in ("merge", "deploy", "reboot", "witness restart", "broker restart", "package or OS upgrade",
+                     "signer action", "Registry effectiveness", "authority activation"):
+            self.assertIn(word, O.FREEZE_RULES)
         accept = flat(" ".join(O.ACCEPT_LINES))
         self.assertIn("authorizes nothing further: not the signer (M-B11), authority activation, First Memory or PROD",
                       accept)
         self.assertIn("REGISTRY_EFFECTIVE remains NO. AUTHORITY_ACTIVE remains NO. authorityGranted remains false.",
                       accept)
-        for lines in (O.OPEN_LINES, O.GO_LINES, O.ACCEPT_LINES, O.STOP_LINES):
+        self.assertIn("It authorizes no retry", flat(" ".join(O.RELEASE_LINES)))
+        self.assertIn("this removal is not a retry of M-B10 and writes no HELD", flat(" ".join(O.SCRATCH_LINES)))
+        for lines in (O.OPEN_LINES, O.GO_LINES, O.ACCEPT_LINES, O.STOP_LINES, O.RELEASE_LINES, O.SCRATCH_LINES):
             text = flat(" ".join(lines))
             self.assertNotIn("FIRST_MEMORY_READY", text)
             self.assertNotIn("authorize First Memory", text.replace("not authorize", ""))
@@ -1011,6 +1269,17 @@ class HeldHostTests(P9.WitnessHostTests):
         with self.assertRaises(HS.HoldStoreError) as caught:                    # the scratch blocks every writer
             self.write_held()
         self.assertEqual(caught.exception.reason, "HOLD_PARENT_UNEXPECTED_ENTRY")
+        # MB10_SCRATCH_RECOVERY (OD-M10-6) recognizes exactly this writer scratch and removes only it
+        synthetic = V.expected_held(self.digest)
+        with mock.patch.object(SR, "GENESIS", self.digest), \
+                mock.patch.object(SR, "EXPECTED_HELD_SHA256", synthetic["sha256"]):
+            planned = SR.plan(root=self.root, owner=(UID, GID))
+            self.assertTrue(planned["complete"])
+            self.assertEqual(SR.recover(planned["planDigest"], root=self.root, owner=(UID, GID))["result"],
+                             "MB10_SCRATCH_RECOVERED")
+        self.assertEqual(self.w10()["phase"], V.W10_0)
+        self.write_held()                                                       # a linked successor's one write
+        self.assertEqual(self.w10()["phase"], V.W10_1)
 
     def test_tampered_or_rebound_held_halts(self):
         self.committed()
@@ -1032,26 +1301,49 @@ for _name in [n for n in dir(HoldStoreObservationTests) if n.startswith("test")]
 # --------------------------------------------------------------------------------------- record ---
 
 class RecordTests(P9.Redacted, unittest.TestCase):
+    DECISIONS = "b76d9cf2e28c1f82af4b7b3c4302f7a90ce85774959d1e1aea4cc7d9ef33a641"
+
     def setUp(self):
         self.text = RECORD.read_text(encoding="utf-8")
+        self.verbatim = self.text.split("### 10.1 Verbatim", 1)[1].split("```text\n", 1)[1].split("\n```", 1)[0] + "\n"
+        self.canonical = self.text.replace(self.verbatim, "")
+
+    def test_the_owner_decisions_are_preserved_verbatim(self):
+        self.assertEqual(sha(self.verbatim.encode("utf-8")), self.DECISIONS)
+        self.assertIn(f"`{self.DECISIONS}`", self.text)
+        for od in range(1, 9):
+            self.assertIn(f"OD-M10-{od} — ", self.verbatim)
+            self.assertIn(f"| OD-M10-{od} |", self.text.split("### 10.2", 1)[1])
 
     def test_the_record_pins_the_tools_and_the_expected_held(self):
-        for path in NEW_TOOLS:
+        for path in (*NEW_TOOLS, O.MB10_PHONE):
             self.assertIn(f"`{path}`", self.text)
             self.assertIn(O.TOOL_PINS[path], self.text)
         for value in (V.EXPECTED_HELD_NAME, V.EXPECTED_HELD_SHA256, GENESIS, O.CONTINUITY.split(" = ")[1]):
             self.assertIn(value, self.text)
 
+    def test_only_canonical_phase_names_outside_the_verbatim_text(self):
+        self.assertEqual(re.findall(r"(?<![A-Z0-9_])W10_[01]S?(?![A-Z0-9_])", self.canonical), [])
+        self.assertEqual(re.findall(r"(?<![A-Z0-9_])W9_5S?(?![A-Z0-9_])", self.canonical), [])
+        self.assertNotIn("…_", self.canonical)
+        self.assertNotIn("_…", self.canonical)
+        for phase in (*V.HOST_PHASES, *V.SEQUENCE_TABLE):
+            if phase != V.UNCLASSIFIED:
+                self.assertIn(f"`{phase}`", self.canonical, phase)
+
     def test_the_record_keeps_every_boundary(self):
         state = self.text.split("## 15. State", 1)[1]
-        for line in ("MB10 = DESIGN / REPOSITORY ONLY; NOT RUN", "MB10_CONTINUITY = PROPOSED (OD-M10-1); NOT ACCEPTED",
+        for line in ("MB10 = DESIGN / REPOSITORY ONLY; NOT RUN", "MB10_CONTINUITY = OWNER-ACCEPTED (OD-M10-1, 2026-10-10)",
+                     "OWNER_DECISIONS OD-M10-1..OD-M10-8 = OWNER-ACCEPTED (2026-10-10; semantics only)",
+                     "MB10_SCRATCH_RECOVERY = DEFINED AND TESTED; NOT AUTHORIZED",
+                     "FRESH_S25_OBSERVATION = REQUIRED PER SEQUENCE; NOT RUN",
                      "HELD = ABSENT", "REGISTRY_EFFECTIVE = NO", "AUTHORITY_ACTIVE = NO", "authorityGranted = false",
                      "SIGNER = INACTIVE", "M-B10 = NOT AUTHORIZED", "M-B11 = NOT AUTHORIZED",
                      "FIRST_MEMORY = NOT AUTHORIZED", "FIRST_MEMORY_READY = NOT REACHED", "PROD = NOT AUTHORIZED"):
             self.assertIn(line, state.splitlines())
         for claim in ("HELD = PRESENT", "HELD = WRITTEN", "M-B10 = AUTHORIZED", "FIRST_MEMORY = AUTHORIZED",
                       "FIRST_MEMORY_READY = REACHED", "REGISTRY_EFFECTIVE = YES", "AUTHORITY_ACTIVE = YES",
-                      "MB10_CONTINUITY = ACCEPTED"):
+                      "MB10_SCRATCH_RECOVERY = AUTHORIZED"):
             self.assertNotIn(claim, self.text)
 
 
