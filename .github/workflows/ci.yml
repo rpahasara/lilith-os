@@ -18,7 +18,7 @@ jobs:
   repository-contracts:
     name: Repository contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -91,6 +91,17 @@ jobs:
 
       - name: Prove Linux trusted snapshot read/write confinement
         run: sudo -n /usr/bin/python3 -B -m unittest scripts/test_trusted_broker_snapshot_linux.py
+
+      - name: Probe the candidate M-B11 signer restart boundary with synthetic units on this disposable runner
+        shell: bash
+        run: |
+          # Synthetic units only (never a LILITH unit); a throwaway credential under this runner's own host key.
+          set +e
+          sudo -n /usr/bin/python3 -I -B scripts/probe_signer_restart_boundary.py run --disposable-runner --out "${RUNNER_TEMP}/mb11-restart-boundary.json"
+          status=$?
+          set -e
+          sudo -n cat "${RUNNER_TEMP}/mb11-restart-boundary.json" || true
+          exit "${status}"
 
       - name: Validate trusted broker lifecycle and production absence gates
         run: python -m unittest scripts/test_broker_dev_lifecycle.py
