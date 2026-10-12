@@ -108,7 +108,8 @@ class E19JudgeTests(unittest.TestCase):
                 current_first_preflight=None, current_now=None, pinned_current_sha256=None, unit_states=(),
                 witness_publication=None, witness_anchor=None, proofs={},
                 activation=PA.ActivationObservationV1(line, unchanged))
-            return PA.evaluate_pr1_acceptance(inputs, mode=SR.HOLD_RELEASE_ELIGIBILITY).package["evidence"]["activation"]
+            result = PA.evaluate_pr1_acceptance(inputs, mode=SR.HOLD_RELEASE_ELIGIBILITY)
+            return result.package["evidence"]["activation"]
 
         wrong = REAL_HOST_LINE.replace("false", "true")
         self.assertEqual(evidence(wrong), {"line": wrong, "b1cUnchanged": True})
@@ -226,6 +227,18 @@ class ReleasePinTests(unittest.TestCase):
 
 # ------------------------------------------------------------ the upgrade contract ---
 
+BOOT_HEX = E.BOOT_ID.replace("-", "")
+SEQNUM_ID = H32("journal seqnum id")
+
+
+def cursor(i: str, *, seqnum=SEQNUM_ID, boot=BOOT_HEX) -> str:
+    return f"s={seqnum};i={i};b={boot};m=1a2b;t=5f1e2d3c4b5a6;x=9c8d7e6f"
+
+
+CURSOR0 = cursor("1f4a")            # the U0 baseline cursor
+LATER = cursor("2b01")              # any later observation
+
+
 def service(state: str, identity=E.ENDING_INCARNATION, n_restarts="0"):
     if state == "RUNNING":
         return {"ActiveState": "active", "SubState": "running", "MainPID": identity[1], "InvocationID": identity[0],
@@ -245,24 +258,26 @@ def preserved():
 
 
 def observation(*, entries=(OLD,), target=OLD, witness="RUNNING", identity=E.ENDING_INCARNATION, cwd=OLD,
-                loads=(), opt=("current", "releases"), trees=None, sockets=None, n_restarts="0"):
+                loads=(), opt=("current", "releases"), trees=None, sockets=None, n_restarts="0", at=LATER,
+                after=CURSOR0, health="default"):
     sockets = sockets or (("active", "active") if witness == "RUNNING" else ("inactive", "inactive"))
     shas = [e for e in entries if re.fullmatch(r"[0-9a-f]{40}", e)]
+    if health == "default":
+        health = dict(E.HEALTH_EXACT) if witness == "RUNNING" else None
     return {
         "observationType": E.OBSERVATION_TYPE, "schemaVersion": 1, "mode": E.MODE, "oldRelease": OLD,
-        "newRelease": NEW, "bootId": E.BOOT_ID, "optEntries": list(opt), "releaseEntries": list(entries),
-        "currentTarget": f"releases/{target}", "treeVerified": trees if trees is not None else {s: True for s in shas},
+        "newRelease": NEW, "bootId": E.BOOT_ID, "journalCursor": at, "optEntries": list(opt),
+        "releaseEntries": list(entries), "currentTarget": f"releases/{target}",
+        "treeVerified": trees if trees is not None else {s: True for s in shas},
         "witness": {"service": service(witness, identity, n_restarts), "ownerSocket": {"ActiveState": sockets[0]},
                     "signerSocket": {"ActiveState": sockets[1]},
-                    "cwd": None if cwd is None else f"{E.OPT}/releases/{cwd}", "invocationsSinceBaseline": list(loads),
-                    "health": "CONSISTENT" if witness == "RUNNING" else None,
-                    "kWitPublicKeySha256": E.KWIT_PUBLIC_KEY_SHA256 if witness == "RUNNING" else None},
+                    "cwd": None if cwd is None else f"{E.OPT}/releases/{cwd}",
+                    "invocations": {"afterCursor": after, "ids": list(loads)}, "health": health,
+                    "restartBoundary": copy.deepcopy(E.RESTART_BOUNDARY)},
         "signer": copy.deepcopy(E.SIGNER_DARK), "preserved": preserved()}
 
 
-BASELINE = observation()
-ACCEPTED = {REPLACEMENT[0]: REPLACEMENT[1]}
-# The proposed path, one exact observation per phase.
+BASE_OBS = observation(at=CURSOR0)
 PATH = {
     E.U0: observation(),
     E.U1: observation(entries=(OLD, NEW)),
@@ -273,8 +288,48 @@ PATH = {
 }
 
 
-def judge(doc, baseline=BASELINE, accepted=ACCEPTED):
-    return E.classify(doc, baseline, new_release=NEW, accepted_replacements=accepted)
+def u0_acceptance(obs=None):
+    """What the operator would hold after the owner issues the canonical U0 statement verbatim (B3 / D3 pattern)."""
+    obs = BASE_OBS if obs is None else obs
+    statement = E.render_u0_statement(obs, new_release=NEW)
+    record = E.acceptance_record(E.U0_RECORD_TYPE, obs, statement, new_release=NEW, invocation=E.ENDING_INCARNATION,
+                                 cursor=obs["journalCursor"])
+    return {"observation": copy.deepcopy(obs), "statement": statement.decode("ascii"), "record": record}
+
+
+U0_ACCEPT = u0_acceptance()
+
+
+def post9a_evidence(obs=None, *, baseline_obs=None, **overrides):
+    obs = PATH[E.U4] if obs is None else obs
+    ident = {"InvocationID": obs["witness"]["service"]["InvocationID"], "MainPID": obs["witness"]["service"]["MainPID"]}
+    evidence = {"evidenceType": E.POST9A_R_TYPE, "schemaVersion": 1, "mode": E.MODE,
+                "baselineSubjectSha256": E.document_sha256(BASE_OBS if baseline_obs is None else baseline_obs),
+                "observation": copy.deepcopy(obs), "w9PhaseDirect": "W9_LATER_STATE",
+                "w9PhaseSeamed": "W9_5_GENESIS_COMMITTED_EXACT", "w10Phase": "W10_1_HELD_EXACT",
+                "w10OutputSha256": sha(b"synthetic w10 verifier output"),
+                "healthCapture": {"before": dict(ident), "after": dict(ident), "health": dict(E.HEALTH_EXACT)},
+                "denials": dict(E.POST9A_R_DENIALS)}
+    evidence.update(overrides)
+    return evidence
+
+
+def replacement_acceptance(evidence=None, baseline=None):
+    evidence = post9a_evidence() if evidence is None else evidence
+    baseline = U0_ACCEPT if baseline is None else baseline
+    statement = E.render_replacement_statement(evidence, baseline, new_release=NEW)
+    report = E.post9a_r(evidence, baseline, new_release=NEW)
+    record = E.acceptance_record(E.REPLACEMENT_RECORD_TYPE, evidence, statement, new_release=NEW,
+                                 invocation=(report["invocationId"], report["mainPid"]),
+                                 cursor=baseline["observation"]["journalCursor"])
+    return {"evidence": evidence, "statement": statement.decode("ascii"), "record": record}
+
+
+REPL_ACCEPT = replacement_acceptance()
+
+
+def judge(doc, baseline=U0_ACCEPT, replacement=REPL_ACCEPT):
+    return E.classify(doc, baseline, replacement, new_release=NEW)
 
 
 class TransitionPhaseTests(unittest.TestCase):
@@ -287,29 +342,44 @@ class TransitionPhaseTests(unittest.TestCase):
                 self.assertIs(verdict["packageReadyAdmissible"], False)
                 self.assertEqual(verdict["twoReleaseException"], phase in (E.U1, E.U2, E.U3, E.U4))
                 self.assertEqual(verdict["next"], E.ROUTES[phase][0])
+        self.assertEqual(E.classify(BASE_OBS, new_release=NEW)["phase"], E.U0)       # the U0 candidate alone
 
     def test_routes_follow_the_order_and_name_a_separate_owner_act(self):
         steps = [E.ROUTES[p][0] for p in E.EXACT_PHASES]
         self.assertEqual(steps, ["STAGE_NEW_RELEASE", "STOP_WITNESS_SERVICE_AND_SOCKETS", "SELECT_NEW_RELEASE",
-                                 "START_REPLACEMENT_WITNESS", "POST9A_R_THEN_OWNER_ACCEPTANCE_THEN_RETIRE_OLD",
+                                 "START_REPLACEMENT_WITNESS",
+                                 "POST9A_R_THEN_LOCAL_REPLACEMENT_ACCEPTANCE_THEN_RETIRE_OLD",
                                  "FINAL_POST_AND_FIRST_DEPLOY_DR5_THEN_OWNER_COMPLETION"])
         self.assertIn("8af12bd6", E.ROUTES[E.U1][1])
-        self.assertIn("one K-WIT load", E.ROUTES[E.U3][1])
+        self.assertIn("STOP_COMMAND", E.ROUTES[E.U1][1])
+        self.assertIn("exactly one K-WIT load", E.ROUTES[E.U3][1])
+        self.assertIn("local digest-bound replacement acceptance", E.ROUTES[E.U4][1])
+        self.assertIn("completion record", E.ROUTES[E.U5][1])
         self.assertIn("NOT IMPLEMENTED", E.ROUTES[E.U0][1])
 
     def test_the_repository_establishes_no_new_release_and_no_replacement(self):
         self.assertIsNone(E.NEW_RELEASE)
         self.assertIsNone(E.NEW_MANIFEST_SHA256)
-        self.assertEqual(dict(E.ACCEPTED_REPLACEMENT_INCARNATIONS), {})
+        self.assertFalse(hasattr(E, "ACCEPTED_REPLACEMENT_INCARNATIONS"))   # R2: no repository merge during U4
         self.assertEqual(set(E.NEW_DR5_TARGETS.values()), {None})
-        with self.assertRaises(E.Refused) as caught:
-            E.classify(PATH[E.U0])
-        self.assertEqual(caught.exception.reason, "NEW_RELEASE_NOT_ESTABLISHED")
+        for call in (lambda: E.classify(PATH[E.U0]), lambda: E.render_u0_statement(BASE_OBS),
+                     lambda: E.trusted_baseline(U0_ACCEPT), lambda: E.post9a_r(post9a_evidence(), U0_ACCEPT)):
+            with self.assertRaises(E.Refused) as caught:
+                call()
+            self.assertEqual(caught.exception.reason, "NEW_RELEASE_NOT_ESTABLISHED")
         for bad in (OLD, "0" * 39, NEW.upper()):
             with self.subTest(bad=bad), self.assertRaises(E.Refused):
                 E.classify(PATH[E.U0], new_release=bad)
-        # Without a merged acceptance record, the single-NEW-release state is a STOP, never U5.
-        self.assertEqual(judge(PATH[E.U5], accepted={})["phase"], E.STOP_RETIRED_EARLY)
+
+    def test_u5_only_with_the_verified_replacement_acceptance(self):
+        self.assertEqual(judge(PATH[E.U5], replacement=None)["phase"], E.STOP_RETIRED_EARLY)
+        other = observation(entries=(OLD, NEW), target=NEW, identity=(H32("other"), "777"), cwd=NEW,
+                            loads=(H32("other"),))
+        other_accept = replacement_acceptance(post9a_evidence(other))          # valid, but for another identity
+        self.assertEqual(judge(PATH[E.U5], replacement=other_accept)["phase"], E.STOP_RETIRED_EARLY)
+        with self.assertRaises(E.Refused) as caught:
+            E.classify(PATH[E.U5], None, REPL_ACCEPT, new_release=NEW)
+        self.assertEqual(caught.exception.reason, "BASELINE_REQUIRED")
 
     def test_the_ending_and_historical_incarnations(self):
         self.assertEqual(E.ENDING_INCARNATION, ("8af12bd64d024d0eba56bbcedbc534a6", "1580"))
@@ -317,16 +387,275 @@ class TransitionPhaseTests(unittest.TestCase):
         for identity in E.HISTORICAL_INCARNATIONS:
             doc = observation(entries=(OLD, NEW), target=NEW, identity=identity, cwd=NEW, loads=(identity[0],))
             self.assertEqual(judge(doc)["phase"], E.STOP_ORIGINAL_RESTARTED)
-        # A replacement is never the ending incarnation: reusing its InvocationID is not this contract.
         doc = observation(entries=(OLD, NEW), target=NEW, cwd=NEW, loads=(E.ENDING_INCARNATION[0],))
         self.assertEqual(judge(doc)["phase"], E.STOP_ORIGINAL_RESTARTED)
 
-    def test_a_baseline_is_required_after_u0_and_must_be_u0(self):
-        self.assertEqual(E.classify(PATH[E.U0], new_release=NEW)["phase"], E.U0)
+    def test_without_a_baseline_only_the_u0_candidate_is_judged(self):
+        """Without the accepted baseline a later observation is never exact: its invocation list is anchored to a
+        cursor it cannot prove (STOP), and a self-anchored non-U0 shape is refused (BASELINE_REQUIRED)."""
+        for phase in (E.U1, E.U2, E.U3, E.U4, E.U5):
+            with self.subTest(phase=phase):
+                self.assertEqual(E.classify(PATH[phase], new_release=NEW)["phase"], E.STOP_JOURNAL)
+                self_anchored = copy.deepcopy(PATH[phase])
+                self_anchored["witness"]["invocations"]["afterCursor"] = self_anchored["journalCursor"]
+                with self.assertRaises(E.Refused) as caught:
+                    E.classify(self_anchored, new_release=NEW)
+                self.assertEqual(caught.exception.reason, "BASELINE_REQUIRED")
+
+
+class BaselineTrustTests(unittest.TestCase):
+    """R1: the baseline is an owner-accepted, digest-bound, exactly-U0 observation, re-verified on every use."""
+
+    def test_moved_ledger_regression_substituted_u3_baseline_is_refused(self):
+        """Review probe (a): a U3 observation carrying a moved ledger, offered as the baseline, made U4 exact."""
+        moved_u3 = copy.deepcopy(PATH[E.U3])
+        moved_u3["preserved"]["ledgerBytesSha256"] = "MOVED"
+        later = copy.deepcopy(PATH[E.U4])
+        later["preserved"]["ledgerBytesSha256"] = "MOVED"
+        with self.assertRaises(E.Refused) as caught:
+            E.render_u0_statement(moved_u3, new_release=NEW)
+        self.assertEqual(caught.exception.reason, "BASELINE_NOT_U0")
+        forged = {"observation": moved_u3, "statement": U0_ACCEPT["statement"], "record": U0_ACCEPT["record"]}
+        with self.assertRaises(E.Refused) as caught:
+            judge(later, baseline=forged, replacement=None)
+        self.assertEqual(caught.exception.reason, "BASELINE_NOT_U0")
+        # Against the genuine accepted U0 baseline the moved ledger is a proven change: HALT.
+        verdict = judge(later, replacement=None)
+        self.assertEqual((verdict["phase"], verdict["reasons"]), (E.HALT_PRESERVED, ["PRESERVED:ledgerBytesSha256"]))
+
+    def test_no_non_u0_observation_can_be_a_baseline(self):
         for phase in (E.U1, E.U2, E.U3, E.U4, E.U5):
             with self.subTest(phase=phase), self.assertRaises(E.Refused) as caught:
-                E.classify(PATH[phase], new_release=NEW, accepted_replacements=ACCEPTED)
-            self.assertEqual(caught.exception.reason, "BASELINE_REQUIRED")
+                E.render_u0_statement(PATH[phase], new_release=NEW)
+            self.assertEqual(caught.exception.reason, "BASELINE_NOT_U0")
+        service_unit = E.WITNESS_SERVICE
+        for mutate in (lambda d: d["witness"]["restartBoundary"]["units"][service_unit].update(Restart="on-failure"),
+                       lambda d: d["witness"]["invocations"].update(afterCursor=cursor("1")),
+                       lambda d: d["witness"].update(health=None)):
+            doc = copy.deepcopy(BASE_OBS)
+            mutate(doc)
+            with self.subTest(mutate=mutate), self.assertRaises(E.Refused) as caught:
+                E.render_u0_statement(doc, new_release=NEW)
+            self.assertEqual(caught.exception.reason, "BASELINE_NOT_U0")
+
+    def test_the_statement_and_record_bind_this_exact_observation(self):
+        text = U0_ACCEPT["statement"]
+        self.assertIn(E.document_sha256(BASE_OBS), text)
+        self.assertIn(CURSOR0, text)
+        self.assertIn(E.document_sha256(E.RESTART_BOUNDARY), text)
+        self.assertTrue(text.endswith("authorizes nothing further: not staging, not the witness stop, not a K-WIT "
+                                      "load, not a release switch or retirement, not the signer, not authority.\n"))
+        self.assertEqual(E.trusted_baseline(U0_ACCEPT, new_release=NEW)["journalCursor"], CURSOR0)
+
+    def test_caller_made_reworded_or_rebound_acceptances_are_refused(self):
+        def variant(**change):
+            bundle = copy.deepcopy(U0_ACCEPT)
+            for key, value in change.items():
+                bundle[key] = value(bundle) if callable(value) else value
+            return bundle
+
+        record = U0_ACCEPT["record"]
+        other_obs = copy.deepcopy(BASE_OBS)
+        other_obs["preserved"]["hostKeyIdentity"] = H32("another host key identity")
+        cases = {
+            "caller dict": {"accepted": True, "observation": BASE_OBS},
+            "extra key": variant(extra=1),
+            "CRLF": variant(statement=lambda b: b["statement"].replace("\n", "\r\n")),
+            "trailing space": variant(statement=lambda b: b["statement"].replace(".\n", ". \n", 1)),
+            "reworded": variant(statement=lambda b: b["statement"].replace("nothing further", "the stop")),
+            "missing line": variant(statement=lambda b: "".join(b["statement"].splitlines(True)[:-1])),
+            "non-ascii": variant(statement=lambda b: b["statement"] + "é"),
+            "statement as object": variant(statement={"text": "x"}),
+            "observation swapped": variant(observation=other_obs),
+            "record subject": variant(record=dict(record, subjectSha256="0" * 64)),
+            "record statement": variant(record=dict(record, statementSha256="0" * 64)),
+            "record identity": variant(record=dict(record, mainPid="1581")),
+            "record cursor": variant(record=dict(record, journalCursor=LATER)),
+            "record type": variant(record=dict(record, recordType=E.REPLACEMENT_RECORD_TYPE)),
+            "record extra": variant(record=dict(record, accepted=True)),
+        }
+        for name, bundle in cases.items():
+            with self.subTest(name=name), self.assertRaises(E.Refused):
+                E.trusted_baseline(bundle, new_release=NEW)
+            with self.subTest(name=name, via="classify"), self.assertRaises(E.Refused):
+                judge(PATH[E.U1], baseline=bundle, replacement=None)
+
+
+class ReplacementAcceptanceTests(unittest.TestCase):
+    """R2 + R3: POST9A-R is replacement-witness acceptance at U4 under the two-release contract (not package READY);
+    the acceptance is local and digest-bound; no repository merge happens during U4."""
+
+    def test_post9a_r_verifies_at_u4_without_single_release_status_or_e01(self):
+        report = E.post9a_r(post9a_evidence(), U0_ACCEPT, new_release=NEW)
+        self.assertEqual((report["result"], report["reasons"]), ("POST9A_R_VERIFIED", []))
+        self.assertEqual((report["invocationId"], report["mainPid"]), REPLACEMENT)
+        self.assertEqual(report["notRequired"], ["INSTALLER_STATUS_P1B10_RELEASE_SET", "E01_INSTALLED_RELEASE",
+                                                 "PR1_PACKAGE_READY"])
+        self.assertEqual(report["authorizes"], "NOTHING")
+        # The same U4 state is one the single-release judge refuses: there is no acceptance cycle through E-01.
+        entries = tuple(PATH[E.U4]["releaseEntries"])
+        observed = PA.InstalledReleaseObservationV1(f"releases/{NEW}", entries, b"{}", (), None, {})
+        self.assertEqual(PA.verify_installed_release(observed, release_sha=NEW, attested_manifest_sha256="0" * 64,
+                                                     host_targets={}).reason, "RELEASE_SET_UNEXPECTED")
+        self.assertNotIn("status", E.POST9A_R_FIELDS)
+
+    def test_post9a_r_rejects_every_missing_or_wrong_element(self):
+        ident = {"InvocationID": REPLACEMENT[0], "MainPID": REPLACEMENT[1]}
+        moved = {"InvocationID": REPLACEMENT[0], "MainPID": "48212"}
+        cases = {
+            "observation U3": post9a_evidence(PATH[E.U3]),
+            "observation U5": post9a_evidence(PATH[E.U5]),
+            "w9 direct": post9a_evidence(w9PhaseDirect="W9_5_GENESIS_COMMITTED_EXACT"),
+            "w9 seamed": post9a_evidence(w9PhaseSeamed="W9_5S_GENESIS_COMMITTED_STOPPED"),
+            "w10": post9a_evidence(w10Phase="W10_1S_HELD_EXACT_WITNESS_STOPPED"),
+            "w10 digest": post9a_evidence(w10OutputSha256="xyz"),
+            "health before": post9a_evidence(healthCapture={"before": moved, "after": ident,
+                                                            "health": dict(E.HEALTH_EXACT)}),
+            "health after": post9a_evidence(healthCapture={"before": ident, "after": moved,
+                                                           "health": dict(E.HEALTH_EXACT)}),
+            "health class": post9a_evidence(healthCapture={"before": ident, "after": ident, "health": dict(
+                E.HEALTH_EXACT, classification="INCONSISTENT")}),
+            "health key": post9a_evidence(healthCapture={"before": ident, "after": ident, "health": dict(
+                E.HEALTH_EXACT, publicKeySha256="0" * 64)}),
+            "denial": post9a_evidence(denials=dict(E.POST9A_R_DENIALS, **{"P1B-9b": "FAIL"})),
+            "denial missing": post9a_evidence(denials={"P1B-9b": "PASS", "P1B-10": "PASS"}),
+            "baseline": post9a_evidence(baselineSubjectSha256="0" * 64),
+        }
+        for name, evidence in cases.items():
+            with self.subTest(name=name):
+                report = E.post9a_r(evidence, U0_ACCEPT, new_release=NEW)
+                self.assertEqual(report["result"], "POST9A_R_NOT_VERIFIED")
+                with self.assertRaises(E.Refused) as caught:
+                    E.render_replacement_statement(evidence, U0_ACCEPT, new_release=NEW)
+                self.assertEqual(caught.exception.reason, "POST9A_R_NOT_VERIFIED")
+
+    def test_caller_made_or_rebound_replacement_acceptances_are_refused(self):
+        record = REPL_ACCEPT["record"]
+        other_baseline_obs = observation(at=cursor("1f00"), after=cursor("1f00"))
+        other_u0 = u0_acceptance(other_baseline_obs)
+        cases = {
+            "caller dict": {"invocationId": REPLACEMENT[0], "mainPid": REPLACEMENT[1], "accepted": True},
+            "statement reworded": dict(REPL_ACCEPT, statement=REPL_ACCEPT["statement"].replace("historical", "x")),
+            "record pid": dict(REPL_ACCEPT, record=dict(record, mainPid="1")),
+            "record subject": dict(REPL_ACCEPT, record=dict(record, subjectSha256="0" * 64)),
+            "record cursor": dict(REPL_ACCEPT, record=dict(record, journalCursor=LATER)),
+            "evidence not verified": dict(REPL_ACCEPT, evidence=post9a_evidence(denials={})),
+            "evidence edited": dict(REPL_ACCEPT, evidence=post9a_evidence(w10OutputSha256=sha(b"other"))),
+        }
+        for name, bundle in cases.items():
+            with self.subTest(name=name), self.assertRaises(E.Refused):
+                E.trusted_replacement(bundle, U0_ACCEPT, new_release=NEW)
+            with self.subTest(name=name, via="classify"), self.assertRaises(E.Refused):
+                judge(PATH[E.U5], replacement=bundle)
+        # An acceptance issued under one U0 baseline is not valid under another.
+        with self.assertRaises(E.Refused):
+            E.trusted_replacement(REPL_ACCEPT, other_u0, new_release=NEW)
+        self.assertEqual(E.trusted_replacement(REPL_ACCEPT, U0_ACCEPT, new_release=NEW), REPLACEMENT)
+
+    def test_the_replacement_statement_names_its_evidence_and_limits(self):
+        text = REPL_ACCEPT["statement"]
+        self.assertIn(E.document_sha256(REPL_ACCEPT["evidence"]), text)
+        self.assertIn(sha(U0_ACCEPT["statement"].encode("ascii")), text)
+        self.assertIn(f"InvocationID {REPLACEMENT[0]}, MainPID {REPLACEMENT[1]}", text)
+        self.assertIn("not the retirement of releases/" + OLD, text)
+        self.assertIn("not package READY", text)
+
+
+class RestartBoundaryTests(unittest.TestCase):
+    """R4: verified witness restart protection is a prerequisite in EVERY phase, including U0 (the ending
+    incarnation can crash too). Candidate files only; nothing is installed."""
+
+    def test_the_candidate_overlay_files_are_pinned(self):
+        files = {f"{E.UNIT_DIR}/{p.parent.name}/{p.name}": sha(p.read_bytes())
+                 for p in E.DROPIN_SOURCE.rglob("*") if p.is_file()}
+        self.assertEqual(files, E.WITNESS_DROPINS)
+        service_text = (E.DROPIN_SOURCE / f"{E.WITNESS_SERVICE}.d/10-no-implicit-restart.conf").read_text("ascii")
+        self.assertTrue(service_text.endswith("[Service]\nRestart=no\n"))
+        for unit in (E.OWNER_SOCKET, E.SIGNER_SOCKET):
+            text = (E.DROPIN_SOURCE / f"{unit}.d/10-no-reactivation.conf").read_text("ascii")
+            self.assertTrue(text.endswith("[Unit]\nStopWhenUnneeded=yes\nRefuseManualStart=yes\n"))
+        for text in [p.read_text("ascii") for p in E.DROPIN_SOURCE.rglob("*.conf")]:
+            self.assertIn("NOT accepted, NOT installed anywhere.", text)
+
+    def test_the_unit_facts_that_make_the_boundary_necessary(self):
+        deploy = ROOT / "services/recovery-witness/deploy"
+        unit = (deploy / E.WITNESS_SERVICE).read_text(encoding="utf-8")
+        for line in ("Restart=on-failure", "RestartSec=5s", "StartLimitBurst=3", "StartLimitIntervalSec=60",
+                     "Requires=lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket"):
+            self.assertIn(line, unit)
+        for name in (E.OWNER_SOCKET, E.SIGNER_SOCKET):
+            text = (deploy / name).read_text(encoding="utf-8")
+            self.assertIn("Accept=no", text)
+            self.assertIn("Service=lilith-recovery-witness.service", text)
+            self.assertIn("RemoveOnStop=yes", text)
+        for path in deploy.iterdir():                     # static units: nothing starts them at boot
+            self.assertNotIn("[Install]", path.read_text(encoding="utf-8"), path.name)
+
+    def test_stop_is_one_transaction_and_start_is_the_service_only(self):
+        self.assertEqual(E.STOP_COMMAND, "/usr/bin/systemctl stop lilith-recovery-witness.service "
+                                         "lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket")
+        self.assertEqual(E.START_COMMAND, "/usr/bin/systemctl start lilith-recovery-witness.service")
+        self.assertNotIn("socket", E.START_COMMAND)           # a manual socket start is refused by the boundary
+
+    def test_an_inexact_boundary_is_a_stop_in_every_phase(self):
+        mutations = {
+            "restart on-failure": lambda b: b["units"][E.WITNESS_SERVICE].update(Restart="on-failure"),
+            "no service drop-in": lambda b: b["units"][E.WITNESS_SERVICE].update(DropInPaths=""),
+            "reload pending": lambda b: b["units"][E.WITNESS_SERVICE].update(NeedDaemonReload="yes"),
+            "owner socket": lambda b: b["units"][E.OWNER_SOCKET].update(StopWhenUnneeded="no"),
+            "signer socket": lambda b: b["units"][E.SIGNER_SOCKET].update(RefuseManualStart="no"),
+            "drop-in bytes": lambda b: b["dropIns"].update({E.SERVICE_DROPIN: "0" * 64}),
+            "extra drop-in": lambda b: b["dropIns"].update({"/etc/systemd/system/x.conf": "0" * 64}),
+        }
+        for phase, doc in PATH.items():
+            for name, mutate in mutations.items():
+                changed = copy.deepcopy(doc)
+                mutate(changed["witness"]["restartBoundary"])
+                with self.subTest(phase=phase, name=name):
+                    self.assertEqual(judge(changed)["phase"], E.STOP_BOUNDARY)
+
+    def test_no_socket_contact_while_stopped(self):
+        self.assertEqual(E.NO_SOCKET_CONTACT_PHASES, (E.U2, E.U3))
+        for phase in E.NO_SOCKET_CONTACT_PHASES:
+            doc = copy.deepcopy(PATH[phase])
+            doc["witness"]["health"] = dict(E.HEALTH_EXACT)
+            with self.subTest(phase=phase):
+                self.assertEqual(judge(doc)["phase"], E.STOP_SOCKET_CONTACT)
+
+    def test_automatic_restarts_of_the_ending_witness_are_stops(self):
+        one = (H32("auto restart"),)
+        auto = (H32("auto restart"), "2222")
+        # U0 / U1: a restart after a crash ends 8af12bd6 without a go and loads K-WIT from OLD.
+        for entries in ((OLD,), (OLD, NEW)):
+            with self.subTest(entries=entries):
+                self.assertEqual(judge(observation(entries=entries, identity=auto, loads=one))["phase"],
+                                 E.STOP_RESTARTED_ON_OLD)
+                self.assertEqual(judge(observation(entries=entries, n_restarts="1"))["phase"],
+                                 E.STOP_WITNESS_TRANSITIONAL)
+                # With the boundary: the crashed witness stays down, its sockets stop as unneeded.
+                self.assertEqual(judge(observation(entries=entries, witness="failed/failed", cwd=None,
+                                                   sockets=("inactive", "inactive")))["phase"],
+                                 E.STOP_WITNESS_TRANSITIONAL)
+        # U4: a restart of the replacement is a second load.
+        doc = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW,
+                          loads=(REPLACEMENT[0], H32("second")))
+        self.assertEqual(judge(doc)["phase"], E.STOP_LOADS)
+
+
+class JournalBindingTests(unittest.TestCase):
+    def test_invocations_are_counted_after_the_accepted_u0_cursor_only(self):
+        cases = {
+            "another after-cursor": observation(entries=(OLD, NEW), after=cursor("1f49")),
+            "cursor of another boot": observation(entries=(OLD, NEW), at=cursor("2b01", boot=H32("other boot"))),
+            "another journal seqnum id": observation(entries=(OLD, NEW), at=cursor("2b01", seqnum=H32("x"))),
+            "cursor before the baseline": observation(entries=(OLD, NEW), at=cursor("1f49")),
+            "malformed cursor": observation(entries=(OLD, NEW), at="s=1;i=2"),
+            "malformed after-cursor": observation(entries=(OLD, NEW), after="cursor"),
+        }
+        for name, doc in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(judge(doc)["phase"], E.STOP_JOURNAL)
+        self.assertEqual(judge(observation(entries=(OLD, NEW), at=CURSOR0))["phase"], E.U1)   # same cursor is fine
 
 
 class InterruptedAndUnsafeStateTests(unittest.TestCase):
@@ -338,33 +667,27 @@ class InterruptedAndUnsafeStateTests(unittest.TestCase):
         self.assertEqual(verdict["authorizes"], "NOTHING")
         return verdict
 
-    # -- stage
     def test_interrupted_stage(self):
         self.assertPhase(observation(entries=(OLD, f".{NEW}.staging")), E.STOP_STAGING)
         self.assertPhase(observation(entries=(OLD, NEW), trees={OLD: True, NEW: False}), E.STOP_NEW_TREE)
         self.assertPhase(observation(entries=(OLD, NEW), trees={OLD: True, NEW: None}), E.UNKNOWN)
 
-    # -- stop
     def test_interrupted_or_unclean_stop(self):
         for state in ("deactivating/stop-sigterm", "failed/failed", "activating/auto-restart", "activating/start"):
             with self.subTest(state=state):
                 self.assertPhase(observation(entries=(OLD, NEW), witness=state, cwd=None), E.STOP_WITNESS_TRANSITIONAL)
-        # Service stopped but a socket still listening: the next connection would start it and load K-WIT.
         for sockets in (("active", "inactive"), ("inactive", "active"), ("active", "active")):
             with self.subTest(sockets=sockets):
                 self.assertPhase(observation(entries=(OLD, NEW), witness="STOPPED", cwd=None, sockets=sockets),
                                  E.STOP_WITNESS_TRANSITIONAL)
         self.assertPhase(observation(witness="STOPPED", cwd=None), E.STOP_OUT_OF_ORDER)      # stop before stage
 
-    # -- select
     def test_interrupted_or_out_of_order_select(self):
         self.assertPhase(observation(entries=(OLD, NEW), witness="STOPPED", cwd=None,
                                      opt=("current", "releases", ".current.tmp")), E.STOP_SELECTOR)
-        # Select while the ending incarnation still runs: never an endpoint.
         self.assertPhase(observation(entries=(OLD, NEW), target=NEW), E.STOP_MIXED)
         self.assertPhase(observation(entries=(OLD, NEW), target="0" * 40), E.STOP_RELEASE_SET)
 
-    # -- start
     def test_interrupted_or_unsafe_start(self):
         one = (REPLACEMENT[0],)
         two = (REPLACEMENT[0], H32("second"))
@@ -378,39 +701,29 @@ class InterruptedAndUnsafeStateTests(unittest.TestCase):
                          E.STOP_LOADS)
         self.assertPhase(observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=one,
                                      n_restarts="1"), E.STOP_WITNESS_TRANSITIONAL)
-        # A start before the select: a new incarnation (a K-WIT load) on the OLD release.
         self.assertPhase(observation(entries=(OLD, NEW), identity=REPLACEMENT, cwd=OLD, loads=one),
                          E.STOP_RESTARTED_ON_OLD)
-        doc = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=one)
-        doc["witness"]["health"] = "INCONSISTENT"
-        self.assertPhase(doc, E.STOP_UNHEALTHY)
-        doc = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=one)
-        doc["witness"]["kWitPublicKeySha256"] = "0" * 64
-        self.assertPhase(doc, E.STOP_UNHEALTHY)
+        for health in (dict(E.HEALTH_EXACT, classification="INCONSISTENT"),
+                       dict(E.HEALTH_EXACT, publicKeySha256="0" * 64), dict(E.HEALTH_EXACT, witnessKeyId="x")):
+            doc = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=one, health=health)
+            self.assertPhase(doc, E.STOP_UNHEALTHY)
 
-    # -- the ending incarnation
     def test_the_ending_incarnation_must_not_change_before_the_stop(self):
-        self.assertPhase(observation(n_restarts="1"), E.STOP_WITNESS_TRANSITIONAL)
         self.assertPhase(observation(identity=(E.ENDING_INCARNATION[0], "1581")), E.STOP_ORIGINAL_RESTARTED)
         self.assertPhase(observation(entries=(OLD, NEW), loads=(H32("x"),)), E.STOP_ORIGINAL_RESTARTED)
-        doc = observation(entries=(OLD, NEW))
-        doc["witness"]["health"] = "INCONSISTENT"
+        doc = observation(entries=(OLD, NEW), health=dict(E.HEALTH_EXACT, classification="INCONSISTENT"))
         self.assertPhase(doc, E.STOP_ORIGINAL_RESTARTED)
 
-    # -- retire
     def test_interrupted_or_early_retire(self):
         one = (REPLACEMENT[0],)
         partial = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=one,
                               trees={OLD: False, NEW: True})
         self.assertPhase(partial, E.STOP_RETIRE_PARTIAL)
-        self.assertPhase(partial, E.STOP_OLD_TREE, accepted={})            # retire began before acceptance
+        self.assertPhase(partial, E.STOP_OLD_TREE, replacement=None)          # retire began before acceptance
         self.assertPhase(observation(entries=(OLD, NEW), trees={OLD: False, NEW: True}), E.STOP_OLD_TREE)
-        # Retire while the ending incarnation still runs from OLD: a witness on a retired tree.
         self.assertPhase(observation(entries=(NEW,), target=NEW, cwd=OLD), E.STOP_DELETED)
-        # Retire before any replacement started.
         self.assertPhase(observation(entries=(NEW,), target=NEW, witness="STOPPED", cwd=None), E.STOP_OUT_OF_ORDER)
-        self.assertPhase(PATH[E.U5], E.STOP_RETIRED_EARLY, accepted={})
-        self.assertPhase(PATH[E.U5], E.STOP_RETIRED_EARLY, accepted={REPLACEMENT[0]: "1"})
+        self.assertPhase(PATH[E.U5], E.STOP_RETIRED_EARLY, replacement=None)
 
     def test_foreign_release_sets_and_selectors(self):
         third = "1" * 40
@@ -428,21 +741,67 @@ class InterruptedAndUnsafeStateTests(unittest.TestCase):
         doc["bootId"] = "00000000-0000-0000-0000-000000000000"
         self.assertPhase(doc, E.STOP_BOOT)
 
-    def test_unknown_is_never_success(self):
-        for path in (("bootId",), ("optEntries",), ("releaseEntries",), ("treeVerified",), ("signer",),
-                     ("preserved",), ("witness", "service"), ("witness", "ownerSocket"), ("witness", "signerSocket"),
-                     ("witness", "invocationsSinceBaseline")):
+
+class ReviewProbeRegressionTests(unittest.TestCase):
+    """The PR #188 owner-review probes (b) … (h); probe (a) is BaselineTrustTests."""
+
+    def assertUnknown(self, doc, path):
+        verdict = judge(doc)
+        self.assertEqual(verdict["phase"], E.UNKNOWN, verdict["reasons"])
+        self.assertIn("UNOBSERVED:" + path, verdict["reasons"])
+
+    def test_b_unobserved_health_on_a_running_witness_is_unknown(self):
+        for phase in (E.U0, E.U1, E.U4, E.U5):
+            doc = copy.deepcopy(PATH[phase])
+            doc["witness"]["health"] = None
+            with self.subTest(phase=phase):
+                self.assertUnknown(doc, "witness.health")
+
+    def test_c_d_unobserved_preserved_or_signer_facts_are_unknown_not_halt(self):
+        for name in sorted(E.PRESERVED_FIELDS):
+            doc = copy.deepcopy(PATH[E.U2])
+            doc["preserved"][name] = None
+            with self.subTest(name=name):
+                self.assertUnknown(doc, "preserved." + name)
+        for name in sorted(E.SIGNER_FIELDS):
+            doc = copy.deepcopy(PATH[E.U2])
+            doc["signer"][name] = None
+            with self.subTest(name=name):
+                self.assertUnknown(doc, "signer." + name)
+        doc = copy.deepcopy(PATH[E.U2])
+        doc["preserved"]["holdListing"] = [None]
+        self.assertUnknown(doc, "preserved.holdListing[0]")
+
+    def test_e_f_unobserved_cwd_selector_and_other_slots_are_unknown(self):
+        cases = {"witness.cwd": (E.U4, lambda d: d["witness"].update(cwd=None)),
+                 "currentTarget": (E.U1, lambda d: d.update(currentTarget=None)),
+                 "journalCursor": (E.U1, lambda d: d.update(journalCursor=None)),
+                 "witness.invocations.ids": (E.U4, lambda d: d["witness"]["invocations"].update(ids=None)),
+                 "witness.restartBoundary": (E.U3, lambda d: d["witness"].update(restartBoundary=None)),
+                 "witness.service.MainPID": (E.U1, lambda d: d["witness"]["service"].update(MainPID=None)),
+                 "witness.ownerSocket": (E.U2, lambda d: d["witness"].update(ownerSocket=None))}
+        for path, (phase, mutate) in cases.items():
+            doc = copy.deepcopy(PATH[phase])
+            mutate(doc)
             with self.subTest(path=path):
-                doc = copy.deepcopy(PATH[E.U1])
-                target = doc
-                for key in path[:-1]:
-                    target = target[key]
-                target[path[-1]] = None
-                self.assertPhase(doc, E.UNKNOWN)
+                self.assertUnknown(doc, path)
+
+    def test_g_package_readiness_classifies_independently(self):
+        for forged in ({"phase": E.U5}, judge(PATH[E.U5])):
+            ok, reason = E.package_ready_admissible(forged, U0_ACCEPT, REPL_ACCEPT, release_sha=NEW, new_release=NEW)
+            self.assertEqual((ok, reason), (False, "REFUSED:OBSERVATION_FIELDS"))
+        self.assertEqual(E.package_ready_admissible(PATH[E.U5], U0_ACCEPT, REPL_ACCEPT, release_sha=NEW,
+                                                    new_release=NEW), (True, "U5_SINGLE_NEW_RELEASE"))
+
+    def test_h_pid_reuse_with_a_new_invocation_id_is_still_the_replacement(self):
+        """Identity is the InvocationID: a replacement that happens to get PID 1580 is not the ending incarnation."""
+        reuse = (H32("r2"), E.ENDING_INCARNATION[1])
+        doc = observation(entries=(OLD, NEW), target=NEW, identity=reuse, cwd=NEW, loads=(reuse[0],))
+        self.assertEqual(judge(doc)["phase"], E.U4)
 
 
 class HaltTests(unittest.TestCase):
-    def test_every_preserved_fact_is_a_halt_in_every_phase(self):
+    def test_every_proven_preserved_fact_change_is_a_halt_in_every_phase(self):
         for phase, doc in PATH.items():
             for name in sorted(E.PRESERVED_FIELDS):
                 with self.subTest(phase=phase, name=name):
@@ -473,7 +832,7 @@ class HaltTests(unittest.TestCase):
                     changed["signer"][name] = value
                     self.assertEqual(judge(changed)["phase"], E.HALT_SIGNER)
 
-    def test_halt_takes_precedence_over_unknown_and_stop(self):
+    def test_a_proven_halt_takes_precedence_over_unknown_and_stop(self):
         doc = copy.deepcopy(PATH[E.U1])
         doc["bootId"] = None
         doc["witness"]["service"] = None
@@ -485,7 +844,8 @@ class HaltTests(unittest.TestCase):
                        lambda d: d.update(oldRelease=NEW), lambda d: d["witness"].pop("cwd"),
                        lambda d: d["witness"]["service"].update(Extra="1"), lambda d: d["preserved"].pop("ledgerHead"),
                        lambda d: d.update(treeVerified={"x": True}), lambda d: d.update(releaseEntries="x"),
-                       lambda d: d["witness"].update(invocationsSinceBaseline=["NOTHEX"]),
+                       lambda d: d["witness"]["invocations"].update(ids=["NOTHEX"]),
+                       lambda d: d["witness"].update(health={"classification": "CONSISTENT"}),
                        lambda d: d.update(treeVerified={OLD: True, NEW: True})):
             doc = copy.deepcopy(PATH[E.U0])
             mutate(doc)
@@ -496,17 +856,20 @@ class HaltTests(unittest.TestCase):
 class PackageReadyTests(unittest.TestCase):
     def test_package_ready_is_refused_in_every_intermediate_and_old_state(self):
         for phase, doc in PATH.items():
-            verdict = judge(doc)
             for release in (OLD, NEW):
-                ok, reason = E.package_ready_admissible(verdict, release_sha=release, new_release=NEW)
+                ok, reason = E.package_ready_admissible(doc, U0_ACCEPT, REPL_ACCEPT, release_sha=release,
+                                                        new_release=NEW)
                 with self.subTest(phase=phase, release=release):
                     self.assertEqual(ok, phase == E.U5 and release == NEW, reason)
                     if phase in E.TWO_RELEASE_PHASES:
                         self.assertEqual(reason, "TWO_RELEASE_INTERMEDIATE")
-        self.assertEqual(E.package_ready_admissible(judge(PATH[E.U5]), release_sha=NEW),
-                         (False, "RELEASE_NOT_THE_ACCEPTED_NEW_RELEASE"))       # the repository has no NEW
-        self.assertEqual(E.package_ready_admissible({"phase": E.STOP_MIXED}, release_sha=NEW, new_release=NEW),
-                         (False, "NOT_EXACT"))
+        self.assertEqual(E.package_ready_admissible(PATH[E.U5], U0_ACCEPT, None, release_sha=NEW, new_release=NEW),
+                         (False, "NOT_EXACT:" + E.STOP_RETIRED_EARLY))
+        self.assertEqual(E.package_ready_admissible(PATH[E.U5], U0_ACCEPT, REPL_ACCEPT, release_sha=NEW),
+                         (False, "REFUSED:NEW_RELEASE_NOT_ESTABLISHED"))       # the repository has no NEW
+        mixed = observation(entries=(OLD, NEW), target=NEW)
+        self.assertEqual(E.package_ready_admissible(mixed, U0_ACCEPT, REPL_ACCEPT, release_sha=NEW, new_release=NEW),
+                         (False, "NOT_EXACT:" + E.STOP_MIXED))
 
     def test_the_release_judge_itself_refuses_two_installed_releases(self):
         """E-01 (`verify_installed_release`) requires `releases/` to hold exactly the release under judgement."""
@@ -565,7 +928,7 @@ class Dr5Tests(unittest.TestCase):
 class SourceGuardTests(unittest.TestCase):
     def test_the_tool_contacts_nothing_and_writes_nothing(self):
         source = (TOOLS / "e19_p1b10_upgrade.py").read_text(encoding="utf-8")
-        for needle in ("import subprocess", "import socket", "import os", "plink", "gcloud", "systemctl ",
+        for needle in ("import subprocess", "import socket", "import os", "plink", "gcloud", "Popen", "check_call",
                        "os.system", "write_bytes", "write_text", "open(", "urllib", "unlink", "rmtree", ".rename(",
                        "os.replace", "symlink("):
             self.assertNotIn(needle, source)

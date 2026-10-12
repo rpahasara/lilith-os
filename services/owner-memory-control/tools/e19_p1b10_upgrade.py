@@ -21,12 +21,17 @@ witness imports `pr1_acceptance`, the running witness must NEVER run across a se
     U4 replacement running    2 releases, current -> NEW, ONE new incarnation (one K-WIT load) from NEW
     U5 OLD retired            1 release (NEW), the ACCEPTED replacement incarnation running from NEW
 
+Every phase requires the effective witness restart boundary (`Restart=no`; sockets `StopWhenUnneeded` /
+`RefuseManualStart`) and counts witness invocations (K-WIT loads) after the owner-accepted U0 journal cursor.
+
     restart != preservation of the original InvocationID;  one start go != one K-WIT load (counted, never inferred)
     technical phase != owner acceptance;  classification != permission;  STOP != repair;  no rollback
 
 Forms:
 
-    ... classify <observation.json> [<baseline.json>]   the pure judgement of a recorded observation
+    ... classify <observation.json> [<u0-acceptance.json> [<replacement-acceptance.json>]]
+        the pure judgement of a recorded observation, against the owner-accepted U0 baseline bundle (R1) and, for
+        U5, the verified local replacement-incarnation acceptance bundle (R2)
 """
 
 from __future__ import annotations
@@ -85,7 +90,8 @@ E19_EDITS = (
      b'           and activation.b1c_unchanged is True\n'),
     (b'    evidence["activation"] = None if not isinstance(activation, ActivationObservationV1) else {\n'
      b'        "line": activation.line, "b1cUnchanged": activation.b1c_unchanged}\n',
-     b'    # A malformed value FAILs above and is evidenced as null: it never reaches (or crashes) the package digest.\n'
+     b'    # A malformed value FAILs above and is evidenced as null: it never reaches (or crashes)'
+     b' the package digest.\n'
      b'    evidence["activation"] = None if not isinstance(activation, ActivationObservationV1) else {\n'
      b'        "line": _activation_evidence(activation.line),\n'
      b'        "b1cUnchanged": activation.b1c_unchanged if type(activation.b1c_unchanged) is bool else None}\n'),
@@ -151,7 +157,7 @@ PRESERVED_PINS = {
     "brokerPreservation": "PASS",
     "activationLine": ACTIVATION_LINE_E19,                     # the host line; unchanged by any release change
 }
-# Host facts recorded at U0 and required byte-identical afterwards (no repository pin exists for them).
+# Host facts recorded in the owner-accepted U0 baseline and required byte-identical afterwards.
 PRESERVED_HOST_FACTS = ("kActCurrentBlobIdentity", "kWitBlobIdentity", "hostKeyIdentity", "credstoreListing",
                         "custodyListing", "witnessCredentialListing", "ledgerBytesSha256", "ownerInputsSha256",
                         "signerUnitFilesSha256", "witnessUnitFilesSha256", "installedClisSha256")
@@ -163,22 +169,62 @@ BOOT_ID = "cb0d71da-32a7-402b-b85e-5748da012bff"
 ENDING_INCARNATION = ("8af12bd64d024d0eba56bbcedbc534a6", "1580")
 HISTORICAL_INCARNATIONS = (("5136ea7af2544450b9370fa412786c98", "143946"),)
 KWIT_PUBLIC_KEY_SHA256 = "5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf"
-# Replacement incarnations accepted by a merged owner record (InvocationID -> MainPID). EMPTY.
-ACCEPTED_REPLACEMENT_INCARNATIONS: Mapping[str, str] = {}
+KWIT_KEY_ID = "test-only.witness.dev-synthetic.b1b3d.1"
+HEALTH_EXACT = {"classification": "CONSISTENT", "publicKeySha256": KWIT_PUBLIC_KEY_SHA256, "witnessKeyId": KWIT_KEY_ID}
+
+# ------------------------------------------------------ witness restart boundary (R4) ---
+# The unit files have `Restart=on-failure` (RestartSec=5s, StartLimitBurst=3 / 60 s) and two `Accept=no` sockets
+# with `Service=lilith-recovery-witness.service`: a crash of a running witness, or any connection to a listening
+# socket of a stopped one, would exec it again and load K-WIT without a go. The P1B-10R pattern closes both: the
+# service never restarts by itself, and a socket stops when no started witness needs it and refuses a manual start
+# (so it can never be left listening alone). PREREQUISITE of the maintenance transition, effective already at U0
+# (the ending incarnation may crash too). Candidate files only: NOT accepted, NOT installed (E19-D3).
+WITNESS_SERVICE = "lilith-recovery-witness.service"
+OWNER_SOCKET = "lilith-recovery-witness-owner.socket"
+SIGNER_SOCKET = "lilith-recovery-witness-signer.socket"
+WITNESS_UNITS = (WITNESS_SERVICE, OWNER_SOCKET, SIGNER_SOCKET)
+UNIT_DIR = "/etc/systemd/system"
+DROPIN_SOURCE = Path(__file__).resolve().parent / "e19_witness_restart_dropins"
+SERVICE_DROPIN = f"{UNIT_DIR}/{WITNESS_SERVICE}.d/10-no-implicit-restart.conf"
+SOCKET_DROPINS = {unit: f"{UNIT_DIR}/{unit}.d/10-no-reactivation.conf" for unit in (OWNER_SOCKET, SIGNER_SOCKET)}
+WITNESS_DROPINS = {  # installed path -> reviewed candidate bytes SHA-256 (tests: = the files in DROPIN_SOURCE)
+    SERVICE_DROPIN: "661a486dd05a95e0180e245e5e247d3da867c2f75b682e6a2daeb162ee70f3bb",
+    SOCKET_DROPINS[OWNER_SOCKET]: "adef54692069b298387ea870d9b765aaa7601c51b94c9176bda7b9689c98fdf2",
+    SOCKET_DROPINS[SIGNER_SOCKET]: "adef54692069b298387ea870d9b765aaa7601c51b94c9176bda7b9689c98fdf2",
+}
+# The EFFECTIVE configuration (`systemctl show`) plus the installed drop-in bytes, required exactly in every phase.
+RESTART_BOUNDARY = {
+    "units": {
+        WITNESS_SERVICE: {"Restart": "no", "DropInPaths": SERVICE_DROPIN, "NeedDaemonReload": "no"},
+        **{unit: {"StopWhenUnneeded": "yes", "RefuseManualStart": "yes", "DropInPaths": path,
+                  "NeedDaemonReload": "no"} for unit, path in SOCKET_DROPINS.items()},
+    },
+    "dropIns": dict(WITNESS_DROPINS),
+}
+# The only reviewed commands. Stop: the service and both sockets in ONE transaction. Start: the service only; its
+# `Requires=` pulls both sockets (a manual socket start is refused by the boundary).
+STOP_COMMAND = f"/usr/bin/systemctl stop {WITNESS_SERVICE} {OWNER_SOCKET} {SIGNER_SOCKET}"
+START_COMMAND = f"/usr/bin/systemctl start {WITNESS_SERVICE}"
 
 # ------------------------------------------------------------ observation schema ---
 FIELDS = frozenset({"observationType", "schemaVersion", "mode", "oldRelease", "newRelease", "bootId",
-                    "optEntries", "releaseEntries", "currentTarget", "treeVerified", "witness", "signer",
-                    "preserved"})
-WITNESS_FIELDS = frozenset({"service", "ownerSocket", "signerSocket", "cwd", "invocationsSinceBaseline",
-                            "health", "kWitPublicKeySha256"})
+                    "journalCursor", "optEntries", "releaseEntries", "currentTarget", "treeVerified", "witness",
+                    "signer", "preserved"})
+WITNESS_FIELDS = frozenset({"service", "ownerSocket", "signerSocket", "cwd", "invocations", "health",
+                            "restartBoundary"})
 SERVICE_FIELDS = frozenset({"ActiveState", "SubState", "MainPID", "InvocationID", "NRestarts", "Result"})
+SOCKET_FIELDS = frozenset({"ActiveState"})
+INVOCATION_FIELDS = frozenset({"afterCursor", "ids"})
+HEALTH_FIELDS = frozenset(HEALTH_EXACT)
 SIGNER_FIELDS = frozenset({"ActiveState", "SubState", "MainPID", "InvocationID", "NRestarts", "UnitFileState",
                            "DropInPaths", "invocationsEver"})
 SIGNER_DARK = {"ActiveState": "inactive", "SubState": "dead", "MainPID": "0", "InvocationID": "", "NRestarts": "0",
                "UnitFileState": "static", "DropInPaths": "", "invocationsEver": []}
 OPT_EXACT = ["current", "releases"]
 SELECTOR_RESIDUE = ".current.tmp"
+# A systemd journal cursor. `b=` is the boot id; invocations are counted strictly after the baseline cursor.
+_CURSOR = re.compile(r"s=([0-9a-f]{32});i=([0-9a-f]{1,16});b=([0-9a-f]{32});m=[0-9a-f]{1,16};t=[0-9a-f]{1,16};"
+                     r"x=[0-9a-f]{1,16}\Z")
 
 # ---------------------------------------------------------------------- phases ---
 U0 = "U0_P1B10_EXACT"
@@ -189,12 +235,17 @@ U4 = "U4_REPLACEMENT_RUNNING_ON_NEW"
 U5 = "U5_OLD_RETIRED_REPLACEMENT_ACCEPTED"
 EXACT_PHASES = (U0, U1, U2, U3, U4, U5)
 TWO_RELEASE_PHASES = (U1, U2, U3, U4)        # the ONLY scope of the temporary staging exception
-# HALT: a preserved custody fact or the signer is not exact. Never continued by this contract.
+# While the witness is not proven RUNNING (same InvocationID before and after), nothing may contact a witness socket:
+# the owner CLI `health` / `read` are never run (the `mb9_operator.health` WITNESS_NOT_RUNNING_NO_SOCKET_CONTACT rule).
+NO_SOCKET_CONTACT_PHASES = (U2, U3)
+# HALT: a PROVEN (observed, non-null) preserved custody fact or signer fact is not exact. Never continued here.
 HALT_PRESERVED = "UH_PRESERVED_FACT_CHANGED"
 HALT_SIGNER = "UH_SIGNER_NOT_DARK"
 # STOP: owner adjudication; never repaired, retried or rolled back here.
 UNKNOWN = "US_UNKNOWN"
 STOP_BOOT = "US_BOOT_CHANGED"
+STOP_JOURNAL = "US_INVOCATIONS_NOT_BOUND_TO_BASELINE"
+STOP_BOUNDARY = "US_RESTART_BOUNDARY_NOT_EFFECTIVE"
 STOP_STAGING = "US_STAGING_RESIDUE"
 STOP_SELECTOR = "US_SELECTOR_RESIDUE"
 STOP_RELEASE_SET = "US_RELEASE_SET_FOREIGN"
@@ -204,6 +255,7 @@ STOP_RETIRE_PARTIAL = "US_RETIRE_PARTIAL"
 STOP_MIXED = "US_WITNESS_RUNNING_ACROSS_SELECT"
 STOP_DELETED = "US_WITNESS_ON_RETIRED_RELEASE"
 STOP_WITNESS_TRANSITIONAL = "US_WITNESS_TRANSITIONAL"
+STOP_SOCKET_CONTACT = "US_SOCKET_CONTACT_WHILE_STOPPED"
 STOP_ORIGINAL_RESTARTED = "US_ENDING_INCARNATION_CHANGED"
 STOP_LOADS = "US_KWIT_LOADS_NOT_EXACTLY_ONE"
 STOP_START_FAILED = "US_REPLACEMENT_START_FAILED"
@@ -212,55 +264,78 @@ STOP_OUT_OF_ORDER = "US_OUT_OF_ORDER"
 STOP_RETIRED_EARLY = "US_RETIRED_BEFORE_INCARNATION_ACCEPTED"
 STOP_UNHEALTHY = "US_REPLACEMENT_NOT_CONSISTENT"
 HALT_PHASES = (HALT_PRESERVED, HALT_SIGNER)
-STOP_PHASES = (UNKNOWN, STOP_BOOT, STOP_STAGING, STOP_SELECTOR, STOP_RELEASE_SET, STOP_NEW_TREE, STOP_OLD_TREE,
-               STOP_RETIRE_PARTIAL, STOP_MIXED, STOP_DELETED, STOP_WITNESS_TRANSITIONAL, STOP_ORIGINAL_RESTARTED,
-               STOP_LOADS, STOP_START_FAILED, STOP_RESTARTED_ON_OLD, STOP_OUT_OF_ORDER, STOP_RETIRED_EARLY,
-               STOP_UNHEALTHY)
+STOP_PHASES = (UNKNOWN, STOP_BOOT, STOP_JOURNAL, STOP_BOUNDARY, STOP_STAGING, STOP_SELECTOR, STOP_RELEASE_SET,
+               STOP_NEW_TREE, STOP_OLD_TREE, STOP_RETIRE_PARTIAL, STOP_MIXED, STOP_DELETED,
+               STOP_WITNESS_TRANSITIONAL, STOP_SOCKET_CONTACT, STOP_ORIGINAL_RESTARTED, STOP_LOADS, STOP_START_FAILED,
+               STOP_RESTARTED_ON_OLD, STOP_OUT_OF_ORDER, STOP_RETIRED_EARLY, STOP_UNHEALTHY)
 
-# Exact phase -> the next proposed step and the separate owner act it would need. Routing authorizes NOTHING.
+# Exact phase -> (the next proposed step, the separate owner act it needs). Routing authorizes NOTHING.
 ROUTES = {
-    U0: ("STAGE_NEW_RELEASE", "E19-GO-STAGE (installer stage for this mode: NOT IMPLEMENTED)"),
-    U1: ("STOP_WITNESS_SERVICE_AND_SOCKETS", "E19-GO-STOP: ends incarnation 8af12bd6…/1580 (separate authorization)"),
-    U2: ("SELECT_NEW_RELEASE", "E19-GO-SELECT (atomic symlink + rename; witness stays stopped)"),
-    U3: ("START_REPLACEMENT_WITNESS", "E19-GO-START: one start of both sockets and the service; one K-WIT load"),
-    U4: ("POST9A_R_THEN_OWNER_ACCEPTANCE_THEN_RETIRE_OLD",
-         "owner acceptance of the replacement incarnation (merged record), then E19-GO-RETIRE"),
-    U5: ("FINAL_POST_AND_FIRST_DEPLOY_DR5_THEN_OWNER_COMPLETION", "E19 completion acceptance (not package READY)"),
+    U0: ("STAGE_NEW_RELEASE", "E19-GO-STAGE after the owner-accepted U0 baseline (installer stage NOT IMPLEMENTED)"),
+    U1: ("STOP_WITNESS_SERVICE_AND_SOCKETS", "E19-GO-STOP: STOP_COMMAND, one transaction; ends incarnation "
+                                             "8af12bd6…/1580 (separate authorization)"),
+    U2: ("SELECT_NEW_RELEASE", "E19-GO-SELECT (atomic symlink + rename; witness stays stopped; no socket contact)"),
+    U3: ("START_REPLACEMENT_WITNESS", "E19-GO-START: START_COMMAND once; exactly one K-WIT load (no socket contact "
+                                      "before it)"),
+    U4: ("POST9A_R_THEN_LOCAL_REPLACEMENT_ACCEPTANCE_THEN_RETIRE_OLD",
+         "POST9A-R, then the owner's local digest-bound replacement acceptance, then E19-GO-RETIRE"),
+    U5: ("FINAL_POST_AND_FIRST_DEPLOY_DR5_THEN_OWNER_COMPLETION",
+         "E19 completion acceptance; the repository pin of the replacement belongs in that completion record"),
 }
 # Every non-exact class -> its safe STOP and recovery rule. No automatic rollback, cleanup, restart or K-WIT reload.
 RECOVERY = {
     HALT_PRESERVED: "HALT. A custody, HELD, ledger, genesis, trust or broker fact moved. Freeze; owner forensics.",
     HALT_SIGNER: "HALT. The signer is not dark (a K-ACT load or activity). Freeze; owner forensics (M-B11 rules).",
-    UNKNOWN: "STOP. Re-observe read-only; an unobservable fact is never success.",
+    UNKNOWN: "STOP. Re-observe read-only; an unobserved fact is never success and never a proven change.",
     STOP_BOOT: "STOP. A reboot ended the incarnation and the sockets; re-baseline under owner adjudication.",
+    STOP_JOURNAL: "STOP. The invocation count is not bound to the accepted U0 journal cursor; re-observe read-only.",
+    STOP_BOUNDARY: "STOP. The witness restart boundary is not exactly effective; no stop, select or start may run. "
+                   "Installing or repairing it is a separate owner-authorized step.",
     STOP_STAGING: "STOP. Interrupted stage: witness and current untouched; residue removal is one separate owner act.",
     STOP_SELECTOR: "STOP. Interrupted select: current is still one exact target (rename is atomic); witness stays "
                    "stopped; residue removal is one separate owner act.",
-    STOP_RELEASE_SET: "STOP. A release set this contract cannot produce; owner forensics.",
+    STOP_RELEASE_SET: "STOP. A release set or selector this contract cannot produce; owner forensics.",
     STOP_NEW_TREE: "STOP. The NEW tree does not verify; it is never selected or started; owner adjudication.",
-    STOP_OLD_TREE: "STOP. The OLD tree changed before retirement; owner forensics.",
-    STOP_RETIRE_PARTIAL: "STOP. Interrupted retire: the replacement runs from NEW only; completing the removal is "
-                         "one separate owner act.",
+    STOP_OLD_TREE: "STOP. The OLD tree changed before an accepted retirement; owner forensics.",
+    STOP_RETIRE_PARTIAL: "STOP. Interrupted retire: the accepted replacement runs from NEW only; completing the "
+                         "removal is one separate owner act.",
     STOP_MIXED: "STOP. The ending incarnation runs while current -> NEW (lazy imports could load NEW bytes). Never "
-                "an endpoint; the only exit is the separately authorized stop.",
+                "an endpoint; the only exit is the separately authorized STOP_COMMAND.",
     STOP_DELETED: "STOP. A witness runs from a retired tree. Never an endpoint; owner adjudication.",
-    STOP_WITNESS_TRANSITIONAL: "STOP. Activating, deactivating, failed, auto-restart or sockets not matching the "
-                               "service. Never retried automatically.",
+    STOP_WITNESS_TRANSITIONAL: "STOP. Activating, deactivating, failed, restarted, or sockets not matching the "
+                               "service. No socket contact, no retry; owner adjudication.",
+    STOP_SOCKET_CONTACT: "STOP. A witness socket was contacted (health / read) while the witness was not running; "
+                         "the contact may have started it. Owner forensics over the journal.",
     STOP_ORIGINAL_RESTARTED: "STOP. The ending incarnation restarted or changed identity outside this contract.",
     STOP_LOADS: "STOP. The journal shows a number of witness invocations (K-WIT loads) other than exactly one.",
     STOP_START_FAILED: "STOP. A start attempt loaded K-WIT and the witness is not running. No retry without a new "
                        "owner go; every attempt is a counted load.",
     STOP_RESTARTED_ON_OLD: "STOP. A replacement incarnation runs from OLD. Not this contract; owner adjudication.",
     STOP_OUT_OF_ORDER: "STOP. A step ran out of the U0..U5 order; owner adjudication (no reverse path exists).",
-    STOP_RETIRED_EARLY: "STOP. OLD retired before the replacement incarnation was accepted by a merged record.",
+    STOP_RETIRED_EARLY: "STOP. OLD retired before the replacement incarnation's verified local acceptance.",
     STOP_UNHEALTHY: "STOP. The replacement does not report CONSISTENT health with the custodied K-WIT.",
 }
 assert set(RECOVERY) == set(HALT_PHASES) | set(STOP_PHASES) and set(ROUTES) == set(EXACT_PHASES)
 
 
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def document_sha256(document: Any) -> str:
+    """The digest an acceptance binds: SHA-256 of the canonical JSON of the document."""
+    return _sha(_canonical(document))
+
+
 def _exact(value: Any, fields: frozenset[str], name: str) -> Mapping[str, Any]:
     _need(isinstance(value, Mapping) and set(value) == fields, "OBSERVATION_FIELDS", name)
     return value
+
+
+def _maybe(value: Any, fields: frozenset[str], name: str) -> None:
+    """A container may be null (unobserved); when present its field set is closed."""
+    if value is not None:
+        _exact(value, fields, name)
 
 
 def parse_observation(document: Any, *, new_release: str) -> Mapping[str, Any]:
@@ -270,13 +345,18 @@ def parse_observation(document: Any, *, new_release: str) -> Mapping[str, Any]:
           "OBSERVATION_TYPE")
     _need(doc["oldRelease"] == OLD_RELEASE and doc["newRelease"] == new_release, "OBSERVATION_RELEASES")
     witness = _exact(doc["witness"], WITNESS_FIELDS, "witness")
-    for name in ("service", "ownerSocket", "signerSocket"):
-        if witness[name] is not None:
-            _exact(witness[name], SERVICE_FIELDS if name == "service" else frozenset({"ActiveState"}), name)
-    if doc["signer"] is not None:
-        _exact(doc["signer"], SIGNER_FIELDS, "signer")
-    if doc["preserved"] is not None:
-        _exact(doc["preserved"], PRESERVED_FIELDS, "preserved")
+    _maybe(witness["service"], SERVICE_FIELDS, "service")
+    _maybe(witness["ownerSocket"], SOCKET_FIELDS, "ownerSocket")
+    _maybe(witness["signerSocket"], SOCKET_FIELDS, "signerSocket")
+    _maybe(witness["invocations"], INVOCATION_FIELDS, "invocations")
+    _maybe(witness["health"], HEALTH_FIELDS, "health")
+    _maybe(witness["restartBoundary"], frozenset(RESTART_BOUNDARY), "restartBoundary")
+    if witness["invocations"] is not None and witness["invocations"]["ids"] is not None:
+        ids = witness["invocations"]["ids"]
+        _need(isinstance(ids, list) and all(isinstance(x, str) and _HEX32.fullmatch(x) for x in ids),
+              "OBSERVATION_FIELDS", "invocations.ids")
+    _maybe(doc["signer"], SIGNER_FIELDS, "signer")
+    _maybe(doc["preserved"], PRESERVED_FIELDS, "preserved")
     for name in ("optEntries", "releaseEntries"):
         _need(doc[name] is None or (isinstance(doc[name], list) and all(isinstance(x, str) for x in doc[name])),
               "OBSERVATION_FIELDS", name)
@@ -286,19 +366,14 @@ def parse_observation(document: Any, *, new_release: str) -> Mapping[str, Any]:
     return doc
 
 
-def _unknowns(doc: Mapping[str, Any]) -> list[str]:
-    out = [name for name in ("bootId", "optEntries", "releaseEntries", "treeVerified", "signer", "preserved")
-           if doc[name] is None]
-    witness = doc["witness"]
-    out += [f"witness.{name}" for name in ("service", "ownerSocket", "signerSocket", "invocationsSinceBaseline")
-            if witness[name] is None]
-    if doc["treeVerified"] is not None:
-        out += [f"treeVerified.{sha}" for sha, value in sorted(doc["treeVerified"].items()) if value is None]
-    return out
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+def _nulls(value: Any, path: str) -> list[str]:
+    if value is None:
+        return [path]
+    if isinstance(value, Mapping):
+        return [p for key in sorted(value) for p in _nulls(value[key], f"{path}.{key}" if path else key)]
+    if isinstance(value, list):
+        return [p for i, item in enumerate(value) for p in _nulls(item, f"{path}[{i}]")]
+    return []
 
 
 def _service_state(witness: Mapping[str, Any]) -> str:
@@ -315,42 +390,70 @@ def _service_state(witness: Mapping[str, Any]) -> str:
     return "TRANSITIONAL"
 
 
-def classify(document: Any, baseline: Any = None, *, new_release: str | None = NEW_RELEASE,
-             accepted_replacements: Mapping[str, str] = ACCEPTED_REPLACEMENT_INCARNATIONS) -> dict[str, Any]:
-    """One judgement. Precedence: HALT, then UNKNOWN, then STOP classes, then the exact phases."""
-    _need(isinstance(new_release, str) and _SHA40.fullmatch(new_release) is not None and new_release != OLD_RELEASE,
-          "NEW_RELEASE_NOT_ESTABLISHED")
-    doc = parse_observation(document, new_release=new_release)
-    base = None if baseline is None else parse_observation(baseline, new_release=new_release)
+def _cursor(value: str) -> tuple[str, int, str] | None:
+    match = _CURSOR.fullmatch(value) if isinstance(value, str) else None
+    return None if match is None else (match.group(1), int(match.group(2), 16), match.group(3))
+
+
+def _verdict(phase: str, reasons: list[str]) -> dict[str, Any]:
+    exact = phase in EXACT_PHASES
+    return {"mode": MODE, "status": STATUS, "phase": phase, "reasons": list(reasons),
+            "twoReleaseException": phase in TWO_RELEASE_PHASES,
+            "next": ROUTES[phase][0] if exact else "STOP", "ownerAct": ROUTES[phase][1] if exact else None,
+            "recovery": None if exact else RECOVERY[phase], "packageReadyAdmissible": False,
+            "authorizes": "NOTHING"}
+
+
+def _judge(doc: Mapping[str, Any], base: Mapping[str, Any] | None, accepted: tuple[str, str] | None,
+           new_release: str) -> dict[str, Any]:
+    """The judgement of a PARSED observation against an already VERIFIED baseline (or none: the U0 candidate) and an
+    already VERIFIED replacement acceptance identity. Internal: callers go through `classify`."""
     reasons: list[str] = []
 
     def result(phase: str, *more: str) -> dict[str, Any]:
-        exact = phase in EXACT_PHASES
-        return {"mode": MODE, "status": STATUS, "phase": phase, "reasons": reasons + list(more),
-                "twoReleaseException": phase in TWO_RELEASE_PHASES,
-                "next": ROUTES[phase][0] if exact else "STOP", "ownerAct": ROUTES[phase][1] if exact else None,
-                "recovery": None if exact else RECOVERY[phase], "packageReadyAdmissible": False,
-                "authorizes": "NOTHING"}
+        return _verdict(phase, reasons + list(more))
 
-    # ---- HALT (proven facts first, even when other parts are unknown)
+    # ---- HALT on PROVEN facts only (an unobserved value is UNKNOWN, never a change)
     preserved = doc["preserved"]
     if preserved is not None:
-        moved = sorted(name for name, pin in PRESERVED_PINS.items() if preserved[name] != pin)
+        moved = sorted(name for name, pin in PRESERVED_PINS.items()
+                       if preserved[name] is not None and not _nulls(preserved[name], "")
+                       and preserved[name] != pin)
         if base is not None:
-            _need(base["preserved"] is not None, "BASELINE_INCOMPLETE")
             moved += sorted(name for name in PRESERVED_HOST_FACTS
-                            if _canonical(preserved[name]) != _canonical(base["preserved"][name]))
+                            if preserved[name] is not None and not _nulls(preserved[name], "")
+                            and _canonical(preserved[name]) != _canonical(base["preserved"][name]))
         if moved:
             return result(HALT_PRESERVED, *("PRESERVED:" + name for name in moved))
-    if doc["signer"] is not None and any(doc["signer"][k] != v for k, v in SIGNER_DARK.items()):
+    signer = doc["signer"]
+    if signer is not None and any(signer[k] is not None and not _nulls(signer[k], "") and signer[k] != v
+                                  for k, v in SIGNER_DARK.items()):
         return result(HALT_SIGNER)
 
-    # ---- UNKNOWN
-    missing = _unknowns(doc)
+    # ---- UNKNOWN: every null, except the two slots a witness that is not running has no value for
+    witness = doc["witness"]
+    parts = (witness["service"], witness["ownerSocket"], witness["signerSocket"])
+    state = _service_state(witness) if all(p is not None and not _nulls(p, "") for p in parts) else None
+    missing = _nulls(doc, "")
+    if state in ("STOPPED", "TRANSITIONAL"):
+        missing = [p for p in missing if p not in ("witness.cwd", "witness.health")]
     if missing:
-        return result(UNKNOWN, *("UNOBSERVED:" + name for name in missing))
+        return result(UNKNOWN, *("UNOBSERVED:" + p for p in missing))
     if doc["bootId"] != BOOT_ID:
         return result(STOP_BOOT)
+
+    # ---- the journal: invocations counted strictly after the accepted U0 cursor, on this boot
+    cursor, invocations = _cursor(doc["journalCursor"]), witness["invocations"]
+    anchor = doc["journalCursor"] if base is None else base["journalCursor"]
+    anchored = _cursor(anchor)
+    if cursor is None or anchored is None or cursor[2] != BOOT_ID.replace("-", "") \
+            or invocations["afterCursor"] != anchor or cursor[0] != anchored[0] or cursor[1] < anchored[1]:
+        return result(STOP_JOURNAL)
+    loads = invocations["ids"]
+
+    # ---- the restart boundary: a prerequisite in every phase
+    if _canonical(witness["restartBoundary"]) != _canonical(RESTART_BOUNDARY):
+        return result(STOP_BOUNDARY)
 
     # ---- the release set and the selector
     old, new = OLD_RELEASE, new_release
@@ -364,33 +467,31 @@ def classify(document: Any, baseline: Any = None, *, new_release: str | None = N
     if SELECTOR_RESIDUE in doc["optEntries"]:
         return result(STOP_SELECTOR)
     target = doc["currentTarget"]
-    if sorted(doc["optEntries"]) != OPT_EXACT or target not in (f"releases/{old}", f"releases/{new}") \
-            or target.split("/", 1)[1] not in shas:
+    if sorted(doc["optEntries"]) != OPT_EXACT or not isinstance(target, str) \
+            or target not in (f"releases/{old}", f"releases/{new}") or target.split("/", 1)[1] not in shas:
         return result(STOP_RELEASE_SET, f"SELECTOR:{target}")
     _need(set(doc["treeVerified"]) == shas, "OBSERVATION_FIELDS", "treeVerified")
     if new in shas and not doc["treeVerified"][new]:
         return result(STOP_NEW_TREE)
 
     # ---- the witness
-    witness = doc["witness"]
     service = witness["service"]
-    state = _service_state(witness)
-    loads = witness["invocationsSinceBaseline"]
-    _need(isinstance(loads, list) and all(isinstance(x, str) and _HEX32.fullmatch(x) for x in loads),
-          "OBSERVATION_FIELDS", "invocationsSinceBaseline")
     cwd = witness["cwd"]
+    if state == "STOPPED" and witness["health"] is not None:
+        return result(STOP_SOCKET_CONTACT)
     if state == "RUNNING" and cwd not in tuple(f"{OPT}/releases/{sha}" for sha in shas):
         return result(STOP_DELETED, f"CWD:{cwd}")
     if old in shas and not doc["treeVerified"][old]:
         running_new = state == "RUNNING" and cwd == f"{OPT}/releases/{new}" and target == f"releases/{new}"
-        return result(STOP_RETIRE_PARTIAL if running_new and service["InvocationID"] in accepted_replacements
-                      else STOP_OLD_TREE)
+        accepted_here = accepted is not None and (service["InvocationID"], service["MainPID"]) == accepted
+        return result(STOP_RETIRE_PARTIAL if running_new and accepted_here else STOP_OLD_TREE)
     if state == "TRANSITIONAL":
         return result(STOP_WITNESS_TRANSITIONAL, f"SERVICE:{service['ActiveState']}/{service['SubState']}")
     if base is None:
         _need(shas == frozenset({old}) and state == "RUNNING" and loads == [], "BASELINE_REQUIRED")
 
     identity = (service["InvocationID"], service["MainPID"])
+    healthy = dict(witness["health"] or {}) == HEALTH_EXACT
     if state == "RUNNING" and service["InvocationID"] == ENDING_INCARNATION[0]:
         if identity != ENDING_INCARNATION or loads:
             return result(STOP_ORIGINAL_RESTARTED)
@@ -398,7 +499,7 @@ def classify(document: Any, baseline: Any = None, *, new_release: str | None = N
             return result(STOP_MIXED)
         if cwd != f"{OPT}/releases/{old}":
             return result(STOP_ORIGINAL_RESTARTED, f"CWD:{cwd}")
-        if witness["health"] != "CONSISTENT" or witness["kWitPublicKeySha256"] != KWIT_PUBLIC_KEY_SHA256:
+        if not healthy:
             return result(STOP_ORIGINAL_RESTARTED, "HEALTH")
         return result(U0 if shas == frozenset({old}) else U1)
     if state == "STOPPED":
@@ -414,29 +515,217 @@ def classify(document: Any, baseline: Any = None, *, new_release: str | None = N
         return result(STOP_LOADS, f"LOADS:{len(loads)}")
     if cwd != f"{OPT}/releases/{new}" or target != f"releases/{new}":
         return result(STOP_RESTARTED_ON_OLD, f"CWD:{cwd}")
-    if witness["health"] != "CONSISTENT" or witness["kWitPublicKeySha256"] != KWIT_PUBLIC_KEY_SHA256:
+    if not healthy:
         return result(STOP_UNHEALTHY)
     if shas == frozenset({old, new}):
         return result(U4)
-    if accepted_replacements.get(service["InvocationID"]) != service["MainPID"]:
+    if accepted != identity:
         return result(STOP_RETIRED_EARLY)
     return result(U5)
 
 
-def package_ready_admissible(verdict: Mapping[str, Any], *, release_sha: str,
+# ----------------------------------------------------- local owner acceptances (R1, R2) ---
+# The B3 / D3 pattern: the tool renders the ONE canonical statement (LF, ASCII) from evidence it verifies itself;
+# the owner issues it verbatim; the local record binds the subject digest and the statement digest. Every use
+# re-verifies subject, statement and record: a caller-made record, a reworded statement or a substituted subject
+# is refused. Nothing here is a repository pin: the replacement is pinned only by the post-U5 completion record.
+U0_RECORD_TYPE = "LILITH_E19_U0_BASELINE_ACCEPTANCE"
+REPLACEMENT_RECORD_TYPE = "LILITH_E19_REPLACEMENT_INCARNATION_ACCEPTANCE"
+RECORD_FIELDS = frozenset({"recordType", "schemaVersion", "mode", "newRelease", "subjectSha256", "statementSha256",
+                           "invocationId", "mainPid", "journalCursor"})
+BUNDLE_FIELDS = {U0_RECORD_TYPE: frozenset({"observation", "statement", "record"}),
+                 REPLACEMENT_RECORD_TYPE: frozenset({"evidence", "statement", "record"})}
+U0_LINES = (
+    "I accept this exact U0 baseline for UPGRADE_FROM_P1B10_DEV_SYNTHETIC (E-19 release maintenance, DEV_SYNTHETIC).",
+    "U0 observation SHA-256: {subject}.",
+    "Installed release {old}, current releases/{old}; proposed NEW release {new}.",
+    "Ending witness incarnation: InvocationID {invocation}, MainPID {mainpid}, NRestarts 0.",
+    "Journal cursor (invocations are counted after it): {cursor}.",
+    "Witness restart boundary effective: {boundary}.",
+    "This acceptance authorizes nothing further: not staging, not the witness stop, not a K-WIT load, not a release "
+    "switch or retirement, not the signer, not authority.",
+)
+REPLACEMENT_LINES = (
+    "I accept the replacement witness incarnation for UPGRADE_FROM_P1B10_DEV_SYNTHETIC (POST9A-R, DEV_SYNTHETIC).",
+    "POST9A-R evidence SHA-256: {subject}. U0 baseline statement SHA-256: {baseline}.",
+    "Replacement: InvocationID {invocation}, MainPID {mainpid}, NRestarts 0, from releases/{new}; exactly one "
+    "K-WIT load after journal cursor {cursor}.",
+    "W10 {w10} (verifier output {w10out}); health CONSISTENT, K-WIT " + KWIT_PUBLIC_KEY_SHA256 + ".",
+    "The ending incarnation " + ENDING_INCARNATION[0] + " / " + ENDING_INCARNATION[1] + " is historical.",
+    "This acceptance authorizes nothing further: not the retirement of releases/{old} (a separate go), not package "
+    "READY, not the signer, not authority.",
+)
+
+
+def _statement(lines: tuple[str, ...], **values: str) -> bytes:
+    return ("\n".join(line.format(**values) for line in lines) + "\n").encode("ascii")
+
+
+def _statement_bytes(value: Any) -> bytes:
+    if isinstance(value, str):
+        _need(value.isascii(), "STATEMENT_NOT_CANONICAL")
+        value = value.encode("ascii")
+    _need(isinstance(value, bytes), "STATEMENT_NOT_CANONICAL")
+    return value
+
+
+def render_u0_statement(observation: Any, *, new_release: str | None = NEW_RELEASE) -> bytes:
+    """The canonical U0 acceptance statement. Refused unless the observation, judged ALONE, is exactly U0."""
+    _need(isinstance(new_release, str) and _SHA40.fullmatch(new_release) is not None and new_release != OLD_RELEASE,
+          "NEW_RELEASE_NOT_ESTABLISHED")
+    doc = parse_observation(observation, new_release=new_release)
+    try:
+        verdict = _judge(doc, None, None, new_release)
+    except Refused as exc:
+        raise Refused("BASELINE_NOT_U0", exc.reason) from exc
+    _need(verdict["phase"] == U0, "BASELINE_NOT_U0", verdict["phase"])
+    return _statement(U0_LINES, subject=document_sha256(doc), old=OLD_RELEASE, new=new_release,
+                      invocation=ENDING_INCARNATION[0], mainpid=ENDING_INCARNATION[1], cursor=doc["journalCursor"],
+                      boundary=document_sha256(RESTART_BOUNDARY))
+
+
+def acceptance_record(record_type: str, subject: Any, statement: bytes, *, new_release: str,
+                      invocation: tuple[str, str], cursor: str) -> dict[str, Any]:
+    """The local record the operator writes after the owner issues the statement verbatim (pure)."""
+    return {"recordType": record_type, "schemaVersion": 1, "mode": MODE, "newRelease": new_release,
+            "subjectSha256": document_sha256(subject), "statementSha256": _sha(statement),
+            "invocationId": invocation[0], "mainPid": invocation[1], "journalCursor": cursor}
+
+
+def _verify_bundle(bundle: Any, record_type: str, subject_key: str, expected_statement: bytes,
+                   expected_record: Mapping[str, Any]) -> None:
+    item = bundle if isinstance(bundle, Mapping) else None
+    _need(item is not None and set(item) == BUNDLE_FIELDS[record_type], "ACCEPTANCE_FIELDS", record_type)
+    _need(_statement_bytes(item["statement"]) == expected_statement, "STATEMENT_NOT_CANONICAL", record_type)
+    record = item["record"]
+    _need(isinstance(record, Mapping) and set(record) == RECORD_FIELDS, "ACCEPTANCE_RECORD_FIELDS", record_type)
+    _need(_canonical(record) == _canonical(expected_record), "ACCEPTANCE_RECORD_MISMATCH", record_type)
+
+
+def trusted_baseline(acceptance: Any, *, new_release: str | None = NEW_RELEASE) -> Mapping[str, Any]:
+    """R1. The owner-accepted U0 baseline, re-verified on every use: the observation judged ALONE is exact U0 (a
+    substituted U3 or any other observation is refused even when later preserved facts match it), the statement is
+    byte-exactly the canonical U0 statement for it, and the record binds both digests."""
+    _need(isinstance(acceptance, Mapping) and set(acceptance) == BUNDLE_FIELDS[U0_RECORD_TYPE],
+          "ACCEPTANCE_FIELDS", U0_RECORD_TYPE)
+    statement = render_u0_statement(acceptance["observation"], new_release=new_release)
+    doc = parse_observation(acceptance["observation"], new_release=new_release)
+    _verify_bundle(acceptance, U0_RECORD_TYPE, "observation", statement, acceptance_record(
+        U0_RECORD_TYPE, doc, statement, new_release=new_release, invocation=ENDING_INCARNATION,
+        cursor=doc["journalCursor"]))
+    return doc
+
+
+# --------------------------------------------------------------------- POST9A-R (R3) ---
+# POST9A-R is the REPLACEMENT-WITNESS acceptance evidence at U4, judged under the exact U4 TWO-release contract.
+# It is NOT PR-1 package readiness: installer `status --expect P1B-10` (RELEASE_SET), judge E-01 and package READY
+# cannot pass while two releases are installed and are deliberately not required. Package READY stays U5-only.
+POST9A_R_TYPE = "LILITH_E19_POST9A_R_EVIDENCE"
+POST9A_R_FIELDS = frozenset({"evidenceType", "schemaVersion", "mode", "baselineSubjectSha256", "observation",
+                             "w9PhaseDirect", "w9PhaseSeamed", "w10Phase", "w10OutputSha256", "healthCapture",
+                             "denials"})
+HEALTH_CAPTURE_FIELDS = frozenset({"before", "after", "health"})
+IDENTITY_FIELDS = frozenset({"InvocationID", "MainPID"})
+POST9A_R_PHASES = {"w9PhaseDirect": "W9_LATER_STATE", "w9PhaseSeamed": "W9_5_GENESIS_COMMITTED_EXACT",
+                   "w10Phase": "W10_1_HELD_EXACT"}
+# The reviewed read-only denial proofs (POST10 precedent): witness custody, hold store, signer custody.
+POST9A_R_DENIALS = {"P1B-9b": "PASS", "P1B-10": "PASS", "P1B-5": "PASS"}
+POST9A_R_NOT_REQUIRED = ("INSTALLER_STATUS_P1B10_RELEASE_SET", "E01_INSTALLED_RELEASE", "PR1_PACKAGE_READY")
+
+
+def post9a_r(evidence: Any, baseline: Any, *, new_release: str | None = NEW_RELEASE) -> dict[str, Any]:
+    """R3. VERIFIED only when: the observation is exactly U4 under the owner-accepted baseline (two releases
+    {OLD, NEW}, current -> NEW, the replacement running from NEW, exactly one invocation after the U0 cursor,
+    NRestarts 0, the restart boundary effective, every preserved fact exact); W9 direct = W9_LATER_STATE and seamed =
+    W9_5 (the W9 code reads HELD as a later state, as at M-B10), W10 = W10_1_HELD_EXACT; the health capture is
+    CONSISTENT with the custodied K-WIT and bound to the same InvocationID / MainPID before and after it; and the
+    three denial proofs PASS."""
+    base = trusted_baseline(baseline, new_release=new_release)
+    item = _exact(evidence, POST9A_R_FIELDS, "post9aR")
+    _need(item["evidenceType"] == POST9A_R_TYPE and item["schemaVersion"] == 1 and item["mode"] == MODE,
+          "POST9A_R_TYPE")
+    doc = parse_observation(item["observation"], new_release=new_release)
+    reasons = []
+    if item["baselineSubjectSha256"] != document_sha256(base):
+        reasons.append("BASELINE_NOT_BOUND")
+    phase = _judge(doc, base, None, new_release)["phase"]
+    if phase != U4:
+        reasons.append("OBSERVATION_NOT_U4:" + phase)
+    reasons += [f"{name}:{item[name]}" for name, expected in POST9A_R_PHASES.items() if item[name] != expected]
+    if not (isinstance(item["w10OutputSha256"], str) and _HEX64.fullmatch(item["w10OutputSha256"])):
+        reasons.append("W10_OUTPUT_DIGEST")
+    capture = item["healthCapture"]
+    service = doc["witness"]["service"] or {}
+    identity = {"InvocationID": service.get("InvocationID"), "MainPID": service.get("MainPID")}
+    if not (isinstance(capture, Mapping) and set(capture) == HEALTH_CAPTURE_FIELDS
+            and capture["before"] == identity and capture["after"] == identity
+            and capture["health"] == HEALTH_EXACT and doc["witness"]["health"] == HEALTH_EXACT):
+        reasons.append("HEALTH_NOT_BOUND_OR_NOT_CONSISTENT")
+    if item["denials"] != POST9A_R_DENIALS:
+        reasons.append("DENIAL_PROOFS")
+    return {"result": "POST9A_R_NOT_VERIFIED" if reasons else "POST9A_R_VERIFIED", "reasons": reasons,
+            "invocationId": identity["InvocationID"], "mainPid": identity["MainPID"],
+            "evidenceSha256": document_sha256(item), "notRequired": list(POST9A_R_NOT_REQUIRED),
+            "authorizes": "NOTHING"}
+
+
+def render_replacement_statement(evidence: Any, baseline: Any, *, new_release: str | None = NEW_RELEASE) -> bytes:
+    """The canonical replacement acceptance statement. Refused unless POST9A-R is VERIFIED."""
+    report = post9a_r(evidence, baseline, new_release=new_release)
+    _need(report["result"] == "POST9A_R_VERIFIED", "POST9A_R_NOT_VERIFIED", ",".join(report["reasons"]))
+    base = trusted_baseline(baseline, new_release=new_release)
+    return _statement(REPLACEMENT_LINES, subject=report["evidenceSha256"],
+                      baseline=_sha(_statement_bytes(baseline["statement"])), invocation=report["invocationId"],
+                      mainpid=report["mainPid"], new=new_release, old=OLD_RELEASE, cursor=base["journalCursor"],
+                      w10=evidence["w10Phase"], w10out=evidence["w10OutputSha256"])
+
+
+def trusted_replacement(acceptance: Any, baseline: Any, *, new_release: str | None = NEW_RELEASE) -> tuple[str, str]:
+    """R2. The replacement identity, only from a verified local acceptance: POST9A-R VERIFIED over the evidence,
+    the statement byte-exactly canonical for it, and the record binding both digests and the identity."""
+    _need(isinstance(acceptance, Mapping) and set(acceptance) == BUNDLE_FIELDS[REPLACEMENT_RECORD_TYPE],
+          "ACCEPTANCE_FIELDS", REPLACEMENT_RECORD_TYPE)
+    statement = render_replacement_statement(acceptance["evidence"], baseline, new_release=new_release)
+    report = post9a_r(acceptance["evidence"], baseline, new_release=new_release)
+    base = trusted_baseline(baseline, new_release=new_release)
+    _verify_bundle(acceptance, REPLACEMENT_RECORD_TYPE, "evidence", statement, acceptance_record(
+        REPLACEMENT_RECORD_TYPE, acceptance["evidence"], statement, new_release=new_release,
+        invocation=(report["invocationId"], report["mainPid"]), cursor=base["journalCursor"]))
+    return report["invocationId"], report["mainPid"]
+
+
+def classify(document: Any, baseline: Any = None, replacement: Any = None, *,
+             new_release: str | None = NEW_RELEASE) -> dict[str, Any]:
+    """One judgement. `baseline` is the owner-accepted U0 bundle (R1); without it only the U0 candidate can be
+    judged. `replacement` is the verified local replacement acceptance (R2), required for U5. Precedence: HALT on
+    proven facts, then UNKNOWN, then STOP classes, then the exact phases."""
+    _need(isinstance(new_release, str) and _SHA40.fullmatch(new_release) is not None and new_release != OLD_RELEASE,
+          "NEW_RELEASE_NOT_ESTABLISHED")
+    doc = parse_observation(document, new_release=new_release)
+    base = None if baseline is None else trusted_baseline(baseline, new_release=new_release)
+    _need(replacement is None or base is not None, "BASELINE_REQUIRED")
+    accepted = None if replacement is None else trusted_replacement(replacement, baseline, new_release=new_release)
+    return _judge(doc, base, accepted, new_release)
+
+
+def package_ready_admissible(document: Any, baseline: Any = None, replacement: Any = None, *, release_sha: str,
                              new_release: str | None = NEW_RELEASE) -> tuple[bool, str]:
-    """The M-B12 package READY gate across this transition. READY is never admissible while two releases are
-    installed (the judge's own E-01 also refuses: `release_entries == [release_sha]`), never on aee323e (its
-    E-19 cannot pass on the real host line), and never on a HALT / STOP / UNKNOWN."""
-    phase = verdict.get("phase")
+    """The M-B12 package READY gate across this transition. It classifies the observation ITSELF (never a caller's
+    verdict). READY is never admissible while two releases are installed (the judge's own E-01 also refuses:
+    `release_entries == [release_sha]`), never on aee323e (its E-19 cannot pass on the real host line), and never on
+    a HALT / STOP / UNKNOWN or before the replacement's verified acceptance (U5)."""
+    try:
+        phase = classify(document, baseline, replacement, new_release=new_release)["phase"]
+    except Refused as exc:
+        return False, "REFUSED:" + exc.reason
     if phase in TWO_RELEASE_PHASES:
         return False, "TWO_RELEASE_INTERMEDIATE"
     if phase not in EXACT_PHASES:
-        return False, "NOT_EXACT"
+        return False, "NOT_EXACT:" + phase
     if phase == U0 or release_sha == OLD_RELEASE:
         return False, "INSTALLED_RELEASE_E19_DEFECT"
-    if new_release is None or release_sha != new_release:
-        return False, "RELEASE_NOT_THE_ACCEPTED_NEW_RELEASE"
+    if release_sha != new_release:
+        return False, "RELEASE_NOT_THE_NEW_RELEASE"
     return True, "U5_SINGLE_NEW_RELEASE"
 
 
@@ -493,11 +782,13 @@ def _read_json(path: str) -> Any:
 
 def main(argv: list[str]) -> int:
     try:
-        if len(argv) in (2, 3) and argv[0] == "classify":
-            verdict = classify(_read_json(argv[1]), None if len(argv) == 2 else _read_json(argv[2]))
+        if len(argv) in (2, 3, 4) and argv[0] == "classify":
+            docs = [_read_json(path) for path in argv[1:]] + [None] * (4 - len(argv))
+            verdict = classify(docs[0], docs[1], docs[2])
             sys.stdout.write(json.dumps(verdict, sort_keys=True) + "\n")
             return 0 if verdict["phase"] in EXACT_PHASES else 2
-        sys.stderr.write("usage: e19_p1b10_upgrade.py classify <observation.json> [<baseline.json>]\n")
+        sys.stderr.write("usage: e19_p1b10_upgrade.py classify <observation.json> [<u0-acceptance.json> "
+                         "[<replacement-acceptance.json>]]\n")
         return 64
     except (Refused, OSError, ValueError) as exc:
         sys.stderr.write(f"e19_p1b10_upgrade: REFUSED {exc}\n")
