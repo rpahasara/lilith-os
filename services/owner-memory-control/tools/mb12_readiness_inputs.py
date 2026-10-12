@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""15B2b-B1b-3e M-B12 PR-B1: the PR-1 readiness input builder and its stdin envelope reader (pure).
+
+Record: docs/architecture/slice-15b2b-b1b3e-mb12-prb1-prerequisite-tooling.md.
+REPOSITORY ONLY. Nothing here contacts a host, reads a credential, starts a unit or evaluates readiness.
+
+`build` turns owner-held evidence into the closed `LILITH_PR1_VERIFIER_INPUTS` document that the release's root verifier
+parses (`lilith_authority_root.verifier.parse_verifier_inputs`; the M-B11 `ownerInputs`), wrapped in one envelope whose
+SHA-256 the owner reviews. `read_envelope` is the host-side half: it accepts the envelope on stdin, so no input file is
+placed on DEV (OD-M11-15, PROPOSED), and returns the document only if the bytes are exactly the reviewed ones.
+
+Fail-closed rules (never a default, never a synthetic PASS):
+
+- every observed input carries its own `observedAt` and evidence digest, inside one declared window; outside it is
+  STALE;
+- the K-ACT / K-WIT publication bytes must be the recorded ones (file SHA-256, B3, K-WIT fingerprint);
+- the activation line is passed VERBATIM, and must be the complete host line (the PR #185 form). The release judge
+  `pr1_acceptance` still compares the 3-field prefix: E-19 therefore FAILS on every real observation (record §8). The
+  builder never rewrites the line to make E-19 pass;
+- a proof enters only from its mapped producer (`PROPOSED_PROOF_PRODUCERS`, OD-M11-14); `OS_DENIAL`, `SECRET_HYGIENE`
+  and `PRESERVATION_SET` have no producer and are REFUSED; a missing proof stays missing (NOT_READY downstream);
+- PR-2 / PR-3 enter only as the outputs of `mb12_pr2_inventory.package_input` / `mb12_pr3_material.package_input`
+  (owner acceptance / confirmation by digest); otherwise they are `null` (E-20 / E-21 NOT_READY).
+
+    input document != readiness;  envelope digest != owner acceptance;  READY is the verifier's, never the builder's
+
+Forms:
+
+    ... build <build-inputs.json>          owner side: the envelope bytes on stdout (JCS + LF)
+    ... verify-envelope <sha256> < env     either side: check the stdin bytes; prints the document digest only
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, BinaryIO, Mapping
+
+HERE = Path(__file__).resolve().parent
+_OWNER_MEMORY = HERE.parent
+if str(_OWNER_MEMORY) not in sys.path:
+    sys.path.insert(0, str(_OWNER_MEMORY))
+
+import rfc8785  # noqa: E402
+
+from lilith_owner_memory import pr1_acceptance as PA  # noqa: E402
+from lilith_owner_memory import pr1_bootstrap as B  # noqa: E402
+from lilith_owner_memory import successor_custody as SC  # noqa: E402
+from lilith_owner_memory import witness_readiness as WR  # noqa: E402
+
+INPUT_TYPE = "LILITH_PR1_VERIFIER_INPUTS"               # = lilith_authority_root.verifier.INPUT_TYPE
+ENVELOPE_TYPE = "LILITH_MB12_READINESS_INPUT_ENVELOPE"
+ENVELOPE_FIELDS = frozenset({"envelopeType", "schemaVersion", "environment", "inputsSha256", "inputs", "provenance"})
+BUILD_TYPE = "LILITH_MB12_READINESS_BUILD_INPUTS"
+BUILD_FIELDS = frozenset({"buildType", "schemaVersion", "environment", "window", "release", "current", "kActPublication",
+                          "kWitPublication", "proofs", "activation", "snapshotInventory", "offHostMaterial"})
+MAX_ENVELOPE = 256 * 1024                                # = lilith_authority_root.cli.MAX_INPUT
+_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+_SHA40 = re.compile(r"[0-9a-f]{40}\Z")
+_INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+
+# The complete line `lilith-activation-verify` prints on DEV (exit 1), byte-identical in every preserved host POST.
+HOST_ACTIVATION_DARK_LINE = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false"
+HOST_ACTIVATION_EXIT = 1
+
+# OD-M11-14 (PROPOSED, not accepted): proof name -> the one producer whose transcript may be bound. None = no producer.
+PROPOSED_PROOF_PRODUCERS = {
+    "SIGNER_DENIAL": "scripts/authority_custody_denial_proof.py:P1B-12",
+    "DEPLOYER_DENIAL": "scripts/deployer_authority_boundary_proof.sh:DR-5",
+    "BROKER_DENIAL": "scripts/authority_custody_denial_proof.py:P1B-12",
+    "BROKER_PRESERVATION": "scripts/verify_broker_dev_current_incarnation.py:preservation",
+    "OS_DENIAL": None,
+    "SECRET_HYGIENE": None,
+    "PRESERVATION_SET": None,
+}
+assert tuple(PROPOSED_PROOF_PRODUCERS) == PA.REQUIRED_PROOFS
+
+# The accepted DEV records (public values only).
+DEV_PINS = {
+    "releaseSha": "aee323e94412accbe321bc84eae78c5b8cf95afc",
+    "attestedManifestSha256": "1d578ca707a95134dab218c826408b4380e7af0b5839160f47ede37232b94e8f",
+    "pinnedCurrentSha256": "6a61c350e848a833868f4573982fca9c75e2af79ccc9bd3716ae0303c26973f3",
+    "kActPublicationFileSha256": "d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032",
+    "kActPublicKeySha256": "dd13a1fb302375a4e7ec81131a72920e23e365e06a0b6dc9bb7ab124dadc01ed",
+    "kWitPublicKeySha256": "5d778701def439b6c896392750c12685c26b67edfc908bed1a80f02eab0d0bdf",
+}
+PIN_FIELDS = frozenset(DEV_PINS)
+_CURRENT_FIELDS = frozenset({"path", "kind", "uid", "gid", "mode", "device", "inode", "size", "mtimeNs", "ctimeNs",
+                             "sha256"})
+_OBSERVED = frozenset({"observedAt", "evidenceSha256"})
+_PROOF_FIELDS = frozenset({"result", "transcriptSha256", "detail", "producer"}) | _OBSERVED
+_SNAPSHOT_FIELDS = frozenset({"status", "recordSha256", "artefactClasses", "namedDebts"})
+_OFFHOST_FIELDS = frozenset({"status", "registerSha256", "genesisPinDigest", "kRootPublicKeySha256",
+                             "kWitPublicKeySha256", "kActPublicationSha256", "registryHead", "releaseSha",
+                             "releaseManifestSha256", "authorizationIds", "burnedOrdinals"})
+_RUNTIME_DIGEST_NAMES = frozenset({"authority", "witness", "rootTooling"})
+
+KNOWN_PACKAGE_DEFECTS = (
+    "E19_ACTIVATION_LINE_FORM: pr1_acceptance.ACTIVATION_DARK_LINE is the 3-field prefix "
+    "'ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT'; the host prints the complete line with "
+    "'advisoryConfigEnabled=false'; E19_ACTIVATION_DARK FAILs ACTIVATION_NOT_DARK on every real observation",
+)
+
+
+class Refused(ValueError):
+    def __init__(self, reason: str, detail: str | None = None):
+        super().__init__(reason if detail is None else f"{reason}:{detail}")
+        self.reason = reason
+        self.detail = detail
+
+
+def _need(condition: Any, reason: str, detail: str | None = None) -> None:
+    if not condition:
+        raise Refused(reason, detail)
+
+
+def _exact(value: Any, fields: frozenset[str], name: str) -> Mapping[str, Any]:
+    _need(isinstance(value, Mapping) and set(value) == fields, "INPUT_MALFORMED", name)
+    return value
+
+
+def _hex(value: Any, name: str) -> str:
+    _need(isinstance(value, str) and _HEX64.fullmatch(value), "INPUT_MALFORMED", name)
+    return value
+
+
+def _instant(value: Any, name: str) -> datetime:
+    _need(isinstance(value, str) and _INSTANT.fullmatch(value), "INPUT_MALFORMED", name)
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def _b64u_decode(value: Any, name: str) -> bytes:
+    _need(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]+", value), "INPUT_MALFORMED", name)
+    raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    _need(_b64u(raw) == value, "INPUT_MALFORMED", name)
+    return raw
+
+
+def _b64u(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def document_digest(document: Mapping[str, Any]) -> str:
+    """SHA-256(JCS(document)): the `inputsSha256` the envelope binds."""
+    return _sha256(rfc8785.dumps(dict(document)))
+
+
+def envelope_bytes(envelope: Mapping[str, Any]) -> bytes:
+    """The one wire form: JCS + exactly one LF."""
+    return rfc8785.dumps(dict(envelope)) + b"\n"
+
+
+def build(build_inputs: Any, *, environment: str, pins: Mapping[str, str]) -> tuple[bytes, dict[str, Any]]:
+    """(envelope bytes, report). Refuses rather than default any field."""
+    doc = _exact(build_inputs, BUILD_FIELDS, "build")
+    _need(doc["buildType"] == BUILD_TYPE and type(doc["schemaVersion"]) is int and doc["schemaVersion"] == 1,
+          "INPUT_MALFORMED", "type")
+    _need(doc["environment"] == environment, "ENVIRONMENT_MISMATCH", str(doc["environment"]))
+    _need(isinstance(pins, Mapping) and set(pins) == PIN_FIELDS, "PINS_MALFORMED")
+    window = _exact(doc["window"], frozenset({"notBefore", "notAfter"}), "window")
+    lower, upper = _instant(window["notBefore"], "notBefore"), _instant(window["notAfter"], "notAfter")
+    _need(lower <= upper, "INPUT_MALFORMED", "window")
+    provenance: dict[str, Any] = {"window": dict(window)}
+
+    def observed(item: Mapping[str, Any], name: str) -> None:
+        at = _instant(item["observedAt"], f"{name}.observedAt")
+        _need(lower <= at <= upper, "INPUT_STALE", name)
+        provenance[name] = {"observedAt": item["observedAt"], "evidenceSha256": _hex(item["evidenceSha256"], name)}
+
+    # Release provenance and the reviewed runtime digests (E-1).
+    release = _exact(doc["release"], frozenset({"releaseSha", "attestedManifestSha256", "reviewedRuntimeDigests"}),
+                     "release")
+    _need(release["releaseSha"] == pins["releaseSha"] and _SHA40.fullmatch(release["releaseSha"]),
+          "RELEASE_NOT_RECORD")
+    _need(release["attestedManifestSha256"] == pins["attestedManifestSha256"], "MANIFEST_NOT_RECORD")
+    reviewed = release["reviewedRuntimeDigests"]
+    if reviewed is not None:
+        _need(isinstance(reviewed, Mapping) and set(reviewed) <= _RUNTIME_DIGEST_NAMES and reviewed,
+              "INPUT_MALFORMED", "reviewedRuntimeDigests")
+        for name, value in reviewed.items():
+            _hex(value, f"reviewedRuntimeDigests.{name}")
+
+    # First-preflight CURRENT (E-4): a root observation of the pinned ciphertext; never decrypted here.
+    current = _exact(doc["current"], _CURRENT_FIELDS | _OBSERVED, "current")
+    observed(current, "firstPreflightCurrent")
+    _need(current["path"] == SC.CURRENT_PATH and current["kind"] == WR.REGULAR and current["mode"] == "0600",
+          "CURRENT_NOT_PINNED_SLOT")
+    _need(current["sha256"] == pins["pinnedCurrentSha256"], "CURRENT_SHA256_NOT_PINNED")
+    for name in ("device", "inode", "mtimeNs", "ctimeNs"):
+        try:
+            _need(PA.parse_decimal(current[name]) is not None, "INPUT_MALFORMED", name)
+        except ValueError as exc:
+            raise Refused("INPUT_MALFORMED", name) from exc
+    _need(type(current["uid"]) is int and type(current["gid"]) is int and type(current["size"]) is int,
+          "INPUT_MALFORMED", "current identity")
+
+    # Publications (E-2, E-10): exact recorded bytes.
+    kact = _b64u_decode(_exact(doc["kActPublication"], frozenset({"bytes"}), "kActPublication")["bytes"], "kAct")
+    try:
+        _value, parsed = SC.parse_publication_bytes(kact)
+    except Exception as exc:  # noqa: BLE001
+        raise Refused("KACT_PUBLICATION_INVALID", getattr(exc, "code", type(exc).__name__)) from exc
+    _need(_sha256(kact) == pins["kActPublicationFileSha256"], "KACT_PUBLICATION_NOT_RECORD")
+    _need(parsed.public_key_sha256 == pins["kActPublicKeySha256"], "KACT_FINGERPRINT_MISMATCH")
+    kwit = _b64u_decode(_exact(doc["kWitPublication"], frozenset({"bytes"}), "kWitPublication")["bytes"], "kWit")
+    try:
+        witness = B.WitnessKeyPublicationV1.from_dict(B.parse_publication_document(kwit))
+    except Exception as exc:  # noqa: BLE001
+        raise Refused("KWIT_PUBLICATION_INVALID", getattr(exc, "code", type(exc).__name__)) from exc
+    _need(witness.public_key_sha256 == pins["kWitPublicKeySha256"], "KWIT_FINGERPRINT_MISMATCH")
+
+    # Proofs (E-7 .. E-9, E-22, E-23): only from a mapped producer; nothing defaulted.
+    _need(isinstance(doc["proofs"], Mapping), "INPUT_MALFORMED", "proofs")
+    proofs, producers = {}, {}
+    for name, item in sorted(doc["proofs"].items()):
+        _need(name in PROPOSED_PROOF_PRODUCERS, "PROOF_NAME_UNKNOWN", str(name))
+        item = _exact(item, _PROOF_FIELDS, f"proof {name}")
+        _need(PROPOSED_PROOF_PRODUCERS[name] is not None, "PROOF_PRODUCER_UNMAPPED", name)
+        _need(item["producer"] == PROPOSED_PROOF_PRODUCERS[name], "PROOF_PRODUCER_MISMATCH", name)
+        _need(item["result"] in (PA.PASS, PA.FAIL), "INPUT_MALFORMED", f"proof {name}.result")
+        _need(item["detail"] is None or isinstance(item["detail"], str), "INPUT_MALFORMED", f"proof {name}.detail")
+        observed(item, f"proof:{name}")
+        proofs[name] = {"result": item["result"], "transcriptSha256": _hex(item["transcriptSha256"], name),
+                        "detail": item["detail"]}
+        producers[name] = item["producer"]
+    provenance["proofProducers"] = producers
+
+    # Activation (E-19): the complete host line, passed verbatim.
+    activation = _exact(doc["activation"], frozenset({"stdout", "exitCode", "b1cUnchanged"}) | _OBSERVED,
+                        "activation")
+    observed(activation, "activation")
+    text = activation["stdout"]
+    _need(isinstance(text, str) and text.endswith("\n") and text.count("\n") == 1, "ACTIVATION_OUTPUT_NOT_ONE_LINE")
+    _need(type(activation["exitCode"]) is int and activation["exitCode"] == HOST_ACTIVATION_EXIT
+          and text[:-1] == HOST_ACTIVATION_DARK_LINE, "ACTIVATION_NOT_DARK", text[:-1])
+    _need(activation["b1cUnchanged"] is True, "ACTIVATION_B1C_CHANGED")
+
+    # PR-2 / PR-3: the accepted / confirmed tool outputs, or null.
+    snapshot = doc["snapshotInventory"]
+    if snapshot is not None:
+        snapshot = dict(_exact(snapshot, _SNAPSHOT_FIELDS, "snapshotInventory"))
+        _need(snapshot["status"] == "ACCEPTED", "SNAPSHOT_INVENTORY_NOT_ACCEPTED")
+    material = doc["offHostMaterial"]
+    if material is not None:
+        material = dict(_exact(material, _OFFHOST_FIELDS, "offHostMaterial"))
+        _need(material["status"] == "PRESENT" and material["releaseSha"] == pins["releaseSha"]
+              and material["releaseManifestSha256"] == pins["attestedManifestSha256"]
+              and material["kWitPublicKeySha256"] == pins["kWitPublicKeySha256"], "OFFHOST_MATERIAL_NOT_RECORD")
+        _need(material["authorizationIds"] == [] and material["burnedOrdinals"] == [], "OFFHOST_REGISTER_NOT_EMPTY")
+
+    inputs = {
+        "inputType": INPUT_TYPE, "schemaVersion": 1, "environment": environment,
+        "releaseSha": release["releaseSha"], "attestedManifestSha256": release["attestedManifestSha256"],
+        "reviewedRuntimeDigests": None if reviewed is None else dict(reviewed),
+        "pinnedCurrentSha256": pins["pinnedCurrentSha256"],
+        "firstPreflightCurrent": {name: current[name] for name in sorted(_CURRENT_FIELDS)},
+        "kActPublication": _b64u(kact), "kWitPublication": _b64u(kwit), "proofs": proofs,
+        "activation": {"line": text[:-1], "b1cUnchanged": True},
+        "snapshotInventory": snapshot, "offHostMaterial": material,
+    }
+    envelope = {"envelopeType": ENVELOPE_TYPE, "schemaVersion": 1, "environment": environment,
+                "inputsSha256": document_digest(inputs), "inputs": inputs, "provenance": provenance}
+    raw = envelope_bytes(envelope)
+    _need(len(raw) <= MAX_ENVELOPE, "ENVELOPE_TOO_LARGE")
+    missing = [name for name in PA.REQUIRED_PROOFS if name not in proofs]
+    report = {"envelopeSha256": _sha256(raw), "inputsSha256": envelope["inputsSha256"],
+              "expectedNotReady": sorted(
+                  [f"PROOF_MISSING:{name}" for name in missing]
+                  + (["E20_SNAPSHOT_INVENTORY:SNAPSHOT_INVENTORY_ABSENT_PR2"] if snapshot is None else [])
+                  + (["E21_OFFHOST_REGISTER:OFFHOST_REGISTER_ABSENT_PR3"] if material is None else [])
+                  + ["E19_ACTIVATION_DARK:ACTIVATION_NOT_DARK"]),
+              "knownPackageDefects": list(KNOWN_PACKAGE_DEFECTS), "readinessEvaluated": False,
+              "authorityGranted": False}
+    return raw, report
+
+
+def read_envelope(stream: BinaryIO | bytes, *, expected_sha256: str, environment: str) -> dict[str, Any]:
+    """The host-side reader: the verifier input document, only from exactly the reviewed envelope bytes."""
+    _hex(expected_sha256, "expected_sha256")
+    raw = stream if isinstance(stream, bytes) else stream.read(MAX_ENVELOPE + 1)
+    _need(isinstance(raw, bytes) and 0 < len(raw) <= MAX_ENVELOPE, "ENVELOPE_SIZE")
+    _need(hmac.compare_digest(_sha256(raw), expected_sha256), "ENVELOPE_DIGEST_MISMATCH")
+
+    def no_duplicates(pairs):
+        keys = [k for k, _ in pairs]
+        _need(len(keys) == len(set(keys)), "ENVELOPE_DUPLICATE_KEY")
+        return dict(pairs)
+    try:
+        envelope = json.loads(raw.decode("utf-8"), object_pairs_hook=no_duplicates)
+    except (UnicodeDecodeError, ValueError) as exc:
+        if isinstance(exc, Refused):
+            raise
+        raise Refused("ENVELOPE_MALFORMED") from exc
+    envelope = _exact(envelope, ENVELOPE_FIELDS, "envelope")
+    _need(envelope_bytes(envelope) == raw, "ENVELOPE_NOT_CANONICAL")
+    _need(envelope["envelopeType"] == ENVELOPE_TYPE and type(envelope["schemaVersion"]) is int
+          and envelope["schemaVersion"] == 1, "ENVELOPE_MALFORMED")
+    _need(envelope["environment"] == environment, "ENVELOPE_ENVIRONMENT_MISMATCH")
+    inputs = envelope["inputs"]
+    _need(isinstance(inputs, Mapping) and inputs.get("inputType") == INPUT_TYPE
+          and inputs.get("environment") == environment, "ENVELOPE_INPUTS_MALFORMED")
+    _need(hmac.compare_digest(document_digest(inputs), str(envelope["inputsSha256"])), "INPUTS_DIGEST_MISMATCH")
+    return dict(inputs)
+
+
+def _load(path: str) -> Any:
+    return json.loads(Path(path).read_bytes().decode("utf-8"))
+
+
+def main(argv: list[str]) -> int:
+    try:
+        if len(argv) == 2 and argv[0] == "build":
+            raw, report = build(_load(argv[1]), environment="dev", pins=DEV_PINS)
+            sys.stdout.buffer.write(raw)
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if len(argv) == 2 and argv[0] == "verify-envelope":
+            inputs = read_envelope(sys.stdin.buffer, expected_sha256=argv[1], environment="dev")
+            sys.stdout.write(json.dumps({"envelopeSha256": argv[1], "inputsSha256": document_digest(inputs),
+                                         "readinessEvaluated": False}, sort_keys=True) + "\n")
+            return 0
+        raise Refused("USAGE")
+    except (Refused, ValueError, OSError) as exc:
+        print(f"mb12_readiness_inputs: REFUSED {getattr(exc, 'reason', type(exc).__name__)}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
