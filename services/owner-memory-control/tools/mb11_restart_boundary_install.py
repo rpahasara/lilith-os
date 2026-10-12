@@ -70,7 +70,13 @@ SHADOW_BASES = ("/etc/systemd/system.control", "/run/systemd/system.control", "/
                 "/run/systemd/system.attached", "/run/systemd/generator", "/usr/local/lib/systemd/system",
                 "/usr/lib/systemd/system", "/run/systemd/generator.late")
 ACTIVATION_VERIFY = "/usr/local/sbin/lilith-activation-verify"
-ACTIVATION_DARK = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT"
+# The COMPLETE dark line, compared by exact equality (never prefix / substring): `lilith-activation-verify` (B1c,
+# `scripts/dev_deployer/lilith_activation_verify.py`) prints one line, exit 1, ending in an `advisoryConfigEnabled`
+# field. The original tool (`b67f9ecf…`) omitted that field and so refused the real host line: P1B-10R read-only
+# preflight 2026-10-12 `REFUSED NOT_P10R_0:P10R_AUTHORITY_NOT_DARK` (no plan, no digest; that HALT stays recorded).
+# The value below is the line observed byte-identically in every preserved root custody read (host/06-POST, 07-POST).
+ACTIVATION_DARK = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false"
+ACTIVATION_DARK_EXIT = 1
 SYSTEMCTL = "/usr/bin/systemctl"
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}
 
@@ -151,10 +157,29 @@ def _units(names: Sequence[str]) -> dict[str, dict[str, str]]:
 
 
 def _activation() -> str | None:
-    result = subprocess.run([ACTIVATION_VERIFY], env=FIXED_ENV, capture_output=True, text=True, timeout=30,
-                            check=False)
-    lines = result.stdout.strip().splitlines()
-    return lines[-1] if lines else None
+    result = subprocess.run([ACTIVATION_VERIFY], env=FIXED_ENV, capture_output=True, timeout=30, check=False)
+    return activation_line(result.returncode, result.stdout)
+
+
+def activation_line(returncode: int, stdout: bytes) -> str | None:
+    """The verifier's line, only when it printed exactly one ASCII line + LF with the NOT_ACCEPTED exit code. Any
+    other output (exit code, extra or missing lines, CR, non-ASCII) becomes an UNEXPECTED marker that can never equal
+    `ACTIVATION_DARK`; no output at all is None (UNCLASSIFIED)."""
+    if not stdout:
+        return None
+    try:
+        text = stdout.decode("ascii")
+    except UnicodeDecodeError:
+        text = None
+    if returncode == ACTIVATION_DARK_EXIT and text is not None and text.endswith("\n") and text.count("\n") == 1 \
+            and "\r" not in text:
+        return text[:-1]
+    return f"UNEXPECTED_ACTIVATION_OUTPUT rc={returncode} stdout={stdout!r}"
+
+
+def activation_dark(line: Any) -> bool:
+    """Exact equality with the complete known-safe line: no prefix, substring or field-wise acceptance."""
+    return isinstance(line, str) and line == ACTIVATION_DARK
 
 
 def observe(root: Path | str = Path("/"), *, units: Callable[[Sequence[str]], dict] | None = None,
@@ -290,7 +315,7 @@ def classify(obs: Mapping[str, Any]) -> dict[str, Any]:
     if klass == "FOREIGN" or obs.get("shadows"):
         return _result(P10R_FOREIGN, reasons + (["SHADOW_FRAGMENT_OR_DROPIN_PRESENT"] if obs.get("shadows") else []),
                        klass)
-    if obs.get("activationChecked") and obs.get("activation") != ACTIVATION_DARK:
+    if obs.get("activationChecked") and not activation_dark(obs.get("activation")):
         return _result(P10R_DARK if obs.get("activation") else UNCLASSIFIED,
                        reasons + ["ACTIVATION:" + str(obs.get("activation"))], klass)
     if units is None:

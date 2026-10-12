@@ -31,7 +31,13 @@ import mb11_signer_verifier as V  # noqa: E402
 POSIX = os.name == "posix"
 OWNER = (os.getuid(), os.getgid()) if POSIX else (0, 0)
 DEPLOY = ROOT / "services/authority-dev/deploy"
-DARK = lambda: I.ACTIVATION_DARK  # noqa: E731
+# Independently observed, NOT derived from the tool: the root `lilith-activation-verify` stdout (exit 1) on DEV,
+# byte-identical in every preserved custody read (host/06-POST and the P1B-10R preflight's host/07-POST included).
+REAL_HOST_ACTIVATION_STDOUT = b"ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false\n"
+REAL_HOST_ACTIVATION = REAL_HOST_ACTIVATION_STDOUT.decode("ascii").rstrip("\n")
+# The constant of the original tool (b67f9ecf…): the P1B-10R preflight refused the real line against it.
+ORIGINAL_DARK_CONSTANT = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT"
+DARK = lambda: REAL_HOST_ACTIVATION  # noqa: E731
 
 
 class FakeSystemd:
@@ -308,6 +314,127 @@ class StageTests(unittest.TestCase):
         self.assertEqual(V._restart_boundary(self.root, self.systemd)["reasons"], I.boundary_reasons(production))
         if OWNER != (0, 0):
             self.assertTrue(any("METADATA" in r for r in I.boundary_reasons(production)))
+
+
+UNSAFE_ACTIVATION_LINES = {
+    "original three-field constant (field missing)": ORIGINAL_DARK_CONSTANT,
+    "advisory enabled": "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=true",
+    "advisory unreadable": "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=unreadable",
+    "advisory capitalised": "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=False",
+    "advisory empty": "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=",
+    "advisory duplicated": REAL_HOST_ACTIVATION + " advisoryConfigEnabled=false",
+    "advisory duplicated, unsafe second": REAL_HOST_ACTIVATION + " advisoryConfigEnabled=true",
+    "unexpected extra field": REAL_HOST_ACTIVATION + " grantId=x",
+    "trailing space": REAL_HOST_ACTIVATION + " ",
+    "leading space": " " + REAL_HOST_ACTIVATION,
+    "fields reordered": "ACTIVATION=NOT_ACCEPTED advisoryConfigEnabled=false reason=GRANT_ABSENT",
+    "reason missing": "ACTIVATION=NOT_ACCEPTED advisoryConfigEnabled=false",
+    "other reason": "ACTIVATION=NOT_ACCEPTED reason=SIGNATURE_INVALID advisoryConfigEnabled=false",
+    "accepted": 'ACTIVATION=ACCEPTED {"grantId": "x"} advisoryConfigEnabled=false',
+    "status altered": "ACTIVATION=ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false",
+    "lower-case status": REAL_HOST_ACTIVATION.lower(),
+    "embedded newline": REAL_HOST_ACTIVATION + "\nACTIVATION=ACCEPTED {}",
+    "embedded CR": REAL_HOST_ACTIVATION + "\r",
+    "unexpected-output marker": "UNEXPECTED_ACTIVATION_OUTPUT rc=0 stdout=b''",
+    "empty string": "",
+}
+
+
+class ActivationLineTests(unittest.TestCase):
+    """The activation-dark predicate is the complete, independently observed host line (exact equality)."""
+
+    def test_the_tool_constant_is_the_independently_observed_host_line(self):
+        self.assertEqual(I.ACTIVATION_DARK, REAL_HOST_ACTIVATION)
+        self.assertEqual(I.ACTIVATION_DARK_EXIT, 1)
+        # the B1c emitter prints exactly this shape (one line, exit 1) with a lower-case boolean advisory field
+        emitter = (ROOT / "scripts/dev_deployer/lilith_activation_verify.py").read_text(encoding="utf-8")
+        self.assertIn('print(f"ACTIVATION=NOT_ACCEPTED reason={exc.reason} advisoryConfigEnabled={advisory}")\n'
+                      "        return 1\n", emitter)
+        self.assertIn('.get("canonicalLtmEnabled") is True).lower()', emitter)
+        self.assertTrue(I.activation_dark(REAL_HOST_ACTIVATION))
+        self.assertEqual(I.activation_line(1, REAL_HOST_ACTIVATION_STDOUT), REAL_HOST_ACTIVATION)
+
+    def test_the_original_constant_is_what_refused_the_real_line(self):
+        # The recorded failure: the old predicate (exact equality with the three-field constant) rejected the real
+        # line. The corrected predicate accepts that line and now rejects the old constant (a missing field).
+        self.assertNotEqual(REAL_HOST_ACTIVATION, ORIGINAL_DARK_CONSTANT)
+        self.assertTrue(I.activation_dark(REAL_HOST_ACTIVATION))
+        self.assertFalse(I.activation_dark(ORIGINAL_DARK_CONSTANT))
+
+    def test_every_unsafe_or_malformed_line_is_not_dark(self):
+        for label, line in UNSAFE_ACTIVATION_LINES.items():
+            with self.subTest(case=label):
+                self.assertFalse(I.activation_dark(line), line)
+        for value in (None, b"x", 1, [REAL_HOST_ACTIVATION]):
+            self.assertFalse(I.activation_dark(value), value)
+
+    def test_the_verifier_output_parse_is_strict(self):
+        line = REAL_HOST_ACTIVATION_STDOUT
+        cases = {
+            "exit 0": (0, line), "exit 2": (2, line), "exit -9": (-9, line),
+            "no newline": (1, line.rstrip(b"\n")), "two newlines": (1, line + b"\n"),
+            "preceding line": (1, b"ACTIVATION=ACCEPTED {}\n" + line), "following line": (1, line + b"extra\n"),
+            "CRLF": (1, line.rstrip(b"\n") + b"\r\n"), "non-ASCII": (1, line.replace(b"false", b"f\xc3\xa4lse")),
+        }
+        for label, (rc, stdout) in cases.items():
+            with self.subTest(case=label):
+                parsed = I.activation_line(rc, stdout)
+                self.assertTrue(parsed.startswith("UNEXPECTED_ACTIVATION_OUTPUT "), parsed)
+                self.assertFalse(I.activation_dark(parsed))
+        self.assertIsNone(I.activation_line(1, b""))
+        self.assertEqual(I.activation_line(1, b"ACTIVATION=ACCEPTED {}\n"), "ACTIVATION=ACCEPTED {}")
+
+    def test_the_production_reader_passes_exact_bytes_and_exit_code(self):
+        import subprocess
+
+        def fake(rc, stdout):
+            return lambda argv, **kw: subprocess.CompletedProcess(argv, rc, stdout, b"")
+        with mock.patch.object(I.subprocess, "run", side_effect=fake(1, REAL_HOST_ACTIVATION_STDOUT)) as run:
+            self.assertEqual(I._activation(), REAL_HOST_ACTIVATION)
+        self.assertEqual(run.call_args.args[0], [I.ACTIVATION_VERIFY])
+        self.assertNotIn("text", run.call_args.kwargs)
+        self.assertNotIn("input", run.call_args.kwargs)
+        with mock.patch.object(I.subprocess, "run",
+                               side_effect=fake(1, b"noise\n" + REAL_HOST_ACTIVATION_STDOUT)):
+            self.assertFalse(I.activation_dark(I._activation()))      # the old reader took only the last line
+        with mock.patch.object(I.subprocess, "run", side_effect=fake(0, REAL_HOST_ACTIVATION_STDOUT)):
+            self.assertFalse(I.activation_dark(I._activation()))
+
+
+@unittest.skipUnless(POSIX, "POSIX ownership and modes")
+class ActivationStageTests(unittest.TestCase):
+    """The stage judgement and plan on an otherwise exact P10R_0 root, for the real line and every unsafe one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = make_root(self.tmp.name)
+        self.systemd = FakeSystemd(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_real_host_line_is_p10r_0_and_plans(self):
+        observed = obs(self.root, self.systemd, DARK)
+        self.assertEqual(I.classify(observed)["phase"], I.P10R_0)
+        self.assertEqual(observed["activation"], REAL_HOST_ACTIVATION)
+        self.assertRegex(I.plan_digest(observed), r"^[0-9a-f]{64}$")
+
+    def test_the_recorded_preflight_refusal_is_reproduced_for_the_original_constant(self):
+        result = I.classify(obs(self.root, self.systemd, lambda: ORIGINAL_DARK_CONSTANT))
+        self.assertEqual(result["phase"], I.P10R_DARK)
+        self.assertEqual(result["route"], I.ROUTES[I.P10R_DARK])
+
+    def test_unsafe_lines_halt_and_the_install_refuses(self):
+        digest = I.plan_digest(obs(self.root, self.systemd, DARK))
+        for label, line in UNSAFE_ACTIVATION_LINES.items():
+            with self.subTest(case=label):
+                expected = I.UNCLASSIFIED if not line else I.P10R_DARK
+                self.assertEqual(phase(self.root, self.systemd, lambda: line), expected)
+                with self.assertRaises(I.Refused) as caught:
+                    I.install(digest, root=self.root, units=self.systemd, activation=lambda: line, chown=False,
+                              owner=OWNER)
+                self.assertTrue(caught.exception.reason.startswith("NOT_P10R_0:"), caught.exception.reason)
+                self.assertFalse((self.root / "etc/systemd/system" / f"{B.SERVICE_UNIT}.d").exists())
 
 
 class ObserverDeltaTests(unittest.TestCase):
