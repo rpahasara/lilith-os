@@ -1,7 +1,8 @@
 """15B2b-B1b-3e M-B11 PR-A1: the CANDIDATE signer restart boundary (OD-M11-11, O2-D). Source and fixture tests only.
 
 The behaviour itself is proven (or falsified) by `scripts/probe_signer_restart_boundary.py` on the disposable CI
-runner. These tests pin the candidate, the exact effective-configuration judgement, the derivation of the synthetic
+runner. The files live in services/owner-memory-control (control tooling), never in the release-controlled
+services/authority-dev tree. These tests pin the candidate, the exact effective-configuration judgement, the derivation of the synthetic
 probe units from the release units, the probe's safety gate and its fail-closed judgement.
 """
 
@@ -17,11 +18,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVICE = ROOT / "services/authority-dev"
-sys.path.insert(0, str(SERVICE / "ceremony"))
+sys.path.insert(0, str(ROOT / "services/owner-memory-control/tools"))
 sys.path.insert(0, str(SERVICE))
 
+import mb11_restart_boundary as B  # noqa: E402
 import release_file_set as RFS  # noqa: E402
-import signer_restart_boundary as B  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("probe_signer_restart_boundary",
                                                ROOT / "scripts/probe_signer_restart_boundary.py")
@@ -51,6 +52,7 @@ class CandidateTests(unittest.TestCase):
             self.assertNotIn(b"\r", data)
             self.assertTrue(data.endswith(b"\n"))
             self.assertIn(b"NOT accepted, NOT installed anywhere", data)
+        self.assertFalse(str(B.DROPIN_ROOT.resolve()).startswith(str(SERVICE.resolve())))
         self.assertEqual(sorted(p.relative_to(B.DROPIN_ROOT).as_posix() for p in B.DROPIN_ROOT.rglob("*") if p.is_file()),
                          ["lilith-authority-dev.service.d/10-no-implicit-restart.conf",
                           "lilith-authority-dev.socket.d/10-no-reactivation.conf"])
@@ -60,6 +62,7 @@ class CandidateTests(unittest.TestCase):
         self.assertNotIn("StopWhenUnneeded", SOCKET)
         self.assertNotIn("RefuseManualStart", SOCKET)
         self.assertNotIn("dropins", "".join(RFS.DEPLOY_ASSETS))
+        RFS.check_source_tree(ROOT)                  # the release-controlled tree is exactly its reviewed file set
         source = (SERVICE / "release_file_set.py").read_text(encoding="utf-8")
         self.assertNotIn("dropins", source)
         self.assertNotIn("signer_restart_boundary", source)

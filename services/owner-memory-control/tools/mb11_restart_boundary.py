@@ -1,8 +1,9 @@
 """LILITH 15B2b-B1b-3e M-B11 PR-A1: the CANDIDATE signer restart / socket-reactivation boundary (OD-M11-11, O2-D).
 
-Control tooling, stdlib only. NOT release payload, NOT installed, NOT accepted. It holds:
+Control tooling (services/owner-memory-control/tools; outside the release-controlled services/authority-dev
+tree), stdlib only. NOT release payload, NOT installed, NOT accepted. It holds:
 
-- the two candidate drop-ins (`dropins/`) and their pins;
+- the two candidate drop-ins (`mb11_restart_boundary_dropins/`) and their pins;
 - `check_effective`: the exact judgement of one unit's effective configuration (its `systemctl show` properties, its
   `DropInPaths` and the bytes of each drop-in). Any drop-in other than the pinned candidate and the host's recorded
   pre-existing set is a refusal; a missing, renamed, re-ordered or re-worded candidate is a refusal;
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 HERE = Path(__file__).resolve().parent
-DROPIN_ROOT = HERE / "dropins"
+DROPIN_ROOT = HERE / "mb11_restart_boundary_dropins"
 SERVICE_UNIT = "lilith-authority-dev.service"
 SOCKET_UNIT = "lilith-authority-dev.socket"
 UNIT_DIR = "/etc/systemd/system"

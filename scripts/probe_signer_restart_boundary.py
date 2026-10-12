@@ -4,7 +4,7 @@
 DISPOSABLE GITHUB-HOSTED RUNNER ONLY. It refuses to run unless it is root on a systemd host that is not DEV
 (machine-id and hostname), carries no LILITH authority path, holds none of its own probe units yet, and is given
 `--disposable-runner`. It never touches a LILITH unit, credential, socket or path: every unit it starts is a
-uniquely named synthetic copy derived from the release unit files (`signer_restart_boundary.derive_probe_units`),
+uniquely named synthetic copy derived from the release unit files (`mb11_restart_boundary.derive_probe_units`),
 and its credential is a throwaway encrypted with THIS runner's own host key.
 
     sudo -n /usr/bin/python3 -I -B scripts/probe_signer_restart_boundary.py run --disposable-runner --out <json>
@@ -43,11 +43,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
-CEREMONY = ROOT / "services/authority-dev/ceremony"
-if str(CEREMONY) not in sys.path:
-    sys.path.insert(0, str(CEREMONY))
+TOOLS = ROOT / "services/owner-memory-control/tools"
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
 
-import signer_restart_boundary as B  # noqa: E402
+import mb11_restart_boundary as B  # noqa: E402
 
 NAME = "lilith-mb11rb-probe"
 USER = "lilith-mb11rb-probe"
@@ -285,6 +285,7 @@ def install_units() -> dict:
 
 
 def make_credential() -> tuple[str, bytes]:
+    os.makedirs(os.path.dirname(PATHS["credential"]), mode=0o755, exist_ok=True)
     run([SYSTEMD_CREDS, "setup"])                                          # this runner's own host key
     plain = os.urandom(48)
     scratch = f"/run/{NAME}-plain"
@@ -502,21 +503,22 @@ def cleanup() -> dict:
     return {"unitsRemoved": not os.path.exists(f"{UNIT_DIR}/{SERVICE}")}
 
 
-def observe() -> dict:
-    observations: dict[str, Any] = {"probe": NAME, "systemd": run([SYSTEMCTL, "--version"]).stdout.splitlines()[:1]}
-    observations["units"] = install_units()
-    expected, credential = make_credential()
-    observations["credential"] = {"plaintextSha256": expected, "encryptedSha256": B.sha256(credential),
-                                  "key": "this runner's host key (systemd-creds --with-key=host)"}
-    ctl("daemon-reload", check=True)
+def observe(observations: dict[str, Any]) -> None:
+    """Fills `observations` in place, so a failure part-way keeps everything observed before it."""
+    observations["probe"] = NAME
+    observations["systemd"] = run([SYSTEMCTL, "--version"]).stdout.splitlines()[:1]
     try:
+        observations["units"] = install_units()
+        expected, credential = make_credential()
+        observations["credential"] = {"plaintextSha256": expected, "encryptedSha256": B.sha256(credential),
+                                      "key": "this runner's host key (systemd-creds --with-key=host)"}
+        ctl("daemon-reload", check=True)
         observations["baseline"] = baseline(expected)
         before = observations["baseline"]["dropInPathsBefore"]
         preexisting = {unit: before[unit].split() for unit in (SERVICE, SOCKET)}
         observations["candidate"] = candidate(expected, credential, preexisting)
     finally:
         observations["cleanup"] = cleanup()
-    return observations
 
 
 # ------------------------------------------------------------------- judgement ---
@@ -628,10 +630,11 @@ def main(argv: list[str]) -> int:
     except Refused as exc:
         print(f"probe_signer_restart_boundary: REFUSED {exc}", file=sys.stderr)
         return 2
+    observations: dict[str, Any] = {}
     try:
-        observations = observe()
+        observe(observations)
     except Exception as exc:  # noqa: BLE001 - any probe error is a FAIL, never a PASS
-        observations = {"error": f"{type(exc).__name__}: {exc}"}
+        observations["error"] = f"{type(exc).__name__}: {exc}"
         print(f"ERROR {observations['error']}")
     checks = judge(observations)
     verdict = "PASS" if checks and all(item["pass"] for item in checks) else "FAIL"
