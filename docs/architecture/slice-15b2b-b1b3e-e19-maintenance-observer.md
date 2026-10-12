@@ -94,9 +94,19 @@ merged `RESTART_BOUNDARY`. The checks are read-only: installed bytes plus effect
 missing drop-in, changed bytes, an extra `DropInPaths` entry, `Restart=on-failure`, `StopWhenUnneeded=no` or a
 pending reload each refuse maintenance readiness. Nothing is installed or reloaded.
 
+## 3a. Owner-review corrections on `7742b6fc` (CHANGES REQUIRED, F1–F5)
+
+| Finding | Correction | Regression |
+| --- | --- | --- |
+| **F1** bytecode | `sys.dont_write_bytecode = True` is set before any tool or release import. Importing release modules from `current` as root would otherwise write `__pycache__` into `releases/<sha>`, a mutation that also fails the tree check. **The live operator must still run the interpreter read-only (`-I -B`, as the `mb6_operator` BOOT loader does)**, because a top-level script import compiles before the flag runs. | `test_p4_f1_observer_execution_writes_no_bytecode`: a subprocess with no `-B` and no `PYTHONDONTWRITEBYTECODE` runs the observer and imports a release-shaped module; no `__pycache__` or `.pyc` appears anywhere |
+| **F2** W10 binding | The W10 report's `witnessInvocationId`, `witnessMainPid` and `witnessNRestarts` must equal the observation's witness identity. At observe time a non-matching report is discarded, so the ledger head and genesis become UNKNOWN. In `post9a_r_evidence` it is refused (`W10_NOT_THIS_OBSERVATION`), even when its own digest is valid. | `test_p1_f2_a_stale_w10_report_cannot_be_spliced_into_post9a_r` (a U0 report with a U4 observation) |
+| **F3** unit identity | `FragmentPath` is read. Each witness unit must be exactly `/etc/systemd/system/<unit>`, and no shadow fragment or `.d` directory may exist in any `SHADOW_BASES` location (the P1B-10R list, reused from `mb11_restart_boundary_install`). Failures appear in `unitFragmentReasons`, and `maintenanceReady` requires that list to be empty. | `test_p2_f3_a_shadow_unit_or_foreign_fragment_refuses_readiness` (`/run/systemd/system` unit, `/run/systemd/system/<socket>.d`, transient fragment) |
+| **F4** journal retention | Before witness loads are counted after the baseline cursor, `_cursor_retained` reads the first entry of `journalctl --cursor=<C>` (one bounded line, then journalctl is stopped). The cursor counts as retained only if that entry's `__CURSOR` is exactly `C`; a vacuumed cursor lands on the nearest entry and is `False`. Not retained or unreadable leaves the invocation list `null` (UNKNOWN) and refuses readiness. The same applies to the U0 candidate. The exact live seek behaviour is a DEV proof obligation for the operator slice. | `test_p5_f4_an_unretained_baseline_cursor_makes_loads_unknown`, `test_p5_f4_retention_is_proven_by_the_exact_entry_at_the_cursor` |
+| **F5** release `venv` | Before `venv/` is excluded from the walk, `lstat` must show a genuine directory, owned by the canonical owner, mode `0755`. A symlink, a regular file, a wider mode or a missing `venv` fails the tree check. **Installer parity gap (recorded, not changed here):** `install_authority_dev.release_tree_failures` removes `venv` from the walk without this check. Closing it is a separate installer change. | `test_p3_f5_the_release_venv_must_be_a_genuine_root_directory` |
+
 ## 4. Tests
 
-The new suite `test_b1b3e_e19_maintenance_observer.py` has 28 tests and runs on a POSIX synthetic host. That host is
+The new suite `test_b1b3e_e19_maintenance_observer.py` has 34 tests (28 plus the six F1–F5 regressions in §3a) and runs on a POSIX synthetic host. That host is
 a temporary root with real release trees (installer `manifest_for` / `canonical`), custody files and the real
 candidate drop-ins. It fakes only systemd, the journal, the owner CLI, activation, W10 and the broker. The custody
 digest pins are patched to the synthetic bytes; the drop-in pins are the real ones.
@@ -132,7 +142,8 @@ digest pins are patched to the synthetic bytes; the drop-in pins are the real on
 2. **The witness restart-boundary installer and status tool**, following P1B-10R. The boundary must be effective
    before any U0 baseline can be accepted; today the observer would correctly report it as not effective.
 3. **An operator form** that streams this observer as a pinned in-memory bundle over the existing transport
-   (`mb6_operator` BOOT pattern). There is no DEV run yet.
+   (`mb6_operator` BOOT pattern, interpreter `-I -B`). There is no DEV run yet. Its first live use must also
+   prove the `journalctl --cursor` retention behaviour (F4).
 4. **The NEW release**, built from protected main, attested and pinned in `NEW_RELEASE` / `NEW_MANIFEST_SHA256` by a
    merged owner record. Until then `observe` refuses.
 5. **The re-pinned two-release host-read path** for the remaining `mb9` / `mb10` reads (merged record §8), the

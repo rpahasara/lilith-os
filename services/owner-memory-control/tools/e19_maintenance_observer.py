@@ -51,11 +51,17 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+# F1 (PR #189 review): read-only Python. Set before ANY tool or release module import: importing release modules
+# from /opt/lilith-authority-dev/current as root would otherwise write __pycache__ into the release tree. The live
+# operator must also run the interpreter read-only (`-I -B`, as the mb6 BOOT loader does).
+sys.dont_write_bytecode = True
+
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import e19_p1b10_upgrade as E  # noqa: E402  (the merged contract; pinned below)
+import mb11_restart_boundary_install as RBI  # noqa: E402  (SHADOW_BASES only; the P1B-10R shadow list)
 
 E19_CONTRACT_SHA256 = "18d07807aee56a1cd6c043749faf247027654d074ec55f4ae88926d67041438e"
 BUNDLE_TYPE = "LILITH_E19_MAINTENANCE_OBSERVATION_BUNDLE"
@@ -104,7 +110,11 @@ SIGNER_SERVICE = "lilith-authority-dev.service"
 BROKER_SERVICE = "lilith-memory-broker.service"
 UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState", "NeedDaemonReload", "MainPID",
                    "NRestarts", "InvocationID", "Result", "DropInPaths", "Restart", "StopWhenUnneeded",
-                   "RefuseManualStart")
+                   "RefuseManualStart", "FragmentPath")
+# F3: the accepted fragment of each witness unit, and the systemd locations a shadow fragment or drop-in could use.
+WITNESS_FRAGMENTS = {unit: f"/etc/systemd/system/{unit}" for unit in (E.WITNESS_SERVICE, E.OWNER_SOCKET,
+                                                                      E.SIGNER_SOCKET)}
+SHADOW_BASES = RBI.SHADOW_BASES
 W10_EXACT = ("W10_1_HELD_EXACT", "W10_1S_HELD_EXACT_WITNESS_STOPPED")
 W9_SEAMED_EXACT = ("W9_5_GENESIS_COMMITTED_EXACT", "W9_5S_GENESIS_COMMITTED_STOPPED")
 # The three reviewed read-only denial proofs of POST10 and their exact terminal PASS lines.
@@ -214,6 +224,14 @@ def release_tree_verified(root: Path, sha: str, owner: tuple[int, int] = (0, 0))
     except OSError:
         return None
     expected[MANIFEST] = hashlib.sha256(raw).hexdigest()
+    try:                                     # F5: a genuine root-owned 0755 directory, never a symlink or other type
+        venv = os.lstat(top / "venv")
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    if not stat.S_ISDIR(venv.st_mode) or (venv.st_uid, venv.st_gid) != owner or stat.S_IMODE(venv.st_mode) != 0o755:
+        return False
     seen = set()
     try:
         for directory, subdirs, files in os.walk(top, followlinks=False):
@@ -291,6 +309,26 @@ def _invocations(unit: str, after: str | None, run: Callable[..., Any] = subproc
         argv.append("--after-cursor=" + after)
     result = run(argv, env=FIXED_ENV, capture_output=True, text=True, timeout=60, check=False)
     return parse_invocations(result.stdout.splitlines()) if result.returncode == 0 else None
+
+
+def _cursor_retained(cursor: str, popen: Callable[..., Any] = subprocess.Popen) -> bool | None:
+    """F4: True only when the journal still holds the EXACT entry at `cursor`: a seek to a vacuumed or rotated-out
+    cursor silently lands on the nearest retained entry, and `--after-cursor` would then undercount. Reads one bounded
+    JSON line and stops journalctl. The exact live behaviour is a DEV proof obligation (record §2)."""
+    if not isinstance(cursor, str) or not cursor or any(c.isspace() for c in cursor):
+        return None
+    proc = popen([JOURNALCTL, "-o", "json", "--no-pager", "--quiet", "--cursor=" + cursor], env=FIXED_ENV,
+                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        line = proc.stdout.readline(1 << 20)
+    finally:
+        proc.kill()
+        proc.wait(timeout=30)
+    try:
+        entry = json.loads(line) if line.strip() else None
+    except ValueError:
+        return None
+    return isinstance(entry, dict) and entry.get("__CURSOR") == cursor
 
 
 def _process_cwd(root: Path, pid: str) -> str | None:
@@ -401,8 +439,8 @@ def _safe(call: Callable[[], Any]) -> Any:
 def observe(inputs: Mapping[str, Any], *, root: Path | str = Path("/"), units: Callable | None = None,
             journal_tail: Callable | None = None, invocations: Callable | None = None, cwd: Callable | None = None,
             activation: Callable | None = None, health: Callable | None = None, w10: Callable | None = None,
-            broker: Callable | None = None, new_release: str | None = E.NEW_RELEASE,
-            owner: tuple[int, int] = (0, 0)) -> dict[str, Any]:
+            broker: Callable | None = None, cursor_retained: Callable | None = None,
+            new_release: str | None = E.NEW_RELEASE, owner: tuple[int, int] = (0, 0)) -> dict[str, Any]:
     """One read-only observation bundle: {observation, healthCapture, w10Report, w10ReportSha256}. The keyword
     arguments after `root` are TEST seams; the defaults are the root host reads."""
     _check_contract()
@@ -416,7 +454,9 @@ def observe(inputs: Mapping[str, Any], *, root: Path | str = Path("/"), units: C
     unit_facts = _safe(lambda: units((*witness_units, SIGNER_SERVICE, BROKER_SERVICE)))
     cursor = _safe(journal_tail or _journal_tail)
     after = inputs["afterCursor"] if inputs["afterCursor"] is not None else cursor
-    witness_loads = _safe(lambda: (invocations or _invocations)(E.WITNESS_SERVICE, after))
+    retained = _safe(lambda: (cursor_retained or _cursor_retained)(after)) if after is not None else None
+    witness_loads = (_safe(lambda: (invocations or _invocations)(E.WITNESS_SERVICE, after)) if retained is True
+                     else None)                                    # F4: an unretained baseline is UNKNOWN
     signer_loads = _safe(lambda: (invocations or _invocations)(SIGNER_SERVICE, None))
     boundary = _boundary(unit_facts, root)
 
@@ -448,6 +488,9 @@ def observe(inputs: Mapping[str, Any], *, root: Path | str = Path("/"), units: C
         signer["invocationsEver"] = signer_loads
 
     report = _safe(lambda: (w10 or _w10)(inputs, root))
+    w10_bound = report is not None and service is not None and w10_identity(report) == observation_identity(service)
+    if not w10_bound:
+        report = None                    # F2: a report for another incarnation is not evidence for this one: UNKNOWN
     broker_result = _safe(broker or _broker)
     preserved = {
         "kActCurrentBlobSha256": _sha_file(_host(root, CREDENTIAL)),
@@ -498,7 +541,8 @@ def observe(inputs: Mapping[str, Any], *, root: Path | str = Path("/"), units: C
     }
     return {"bundleType": BUNDLE_TYPE, "schemaVersion": 1, "observation": observation, "healthCapture": capture,
             "w10Report": report, "w10ReportSha256": None if report is None else E.document_sha256(report),
-            "socketContacted": contacted,
+            "socketContacted": contacted, "baselineCursorRetained": retained,
+            "unitIdentity": _unit_identity(unit_facts, root),
             "authorizes": "NOTHING"}
 
 
@@ -523,6 +567,42 @@ def boundary_reasons(observation: Mapping[str, Any]) -> list[str]:
     return reasons
 
 
+def w10_identity(report: Mapping[str, Any]) -> tuple:
+    return (report.get("witnessInvocationId") or None, str(report.get("witnessMainPid")),
+            str(report.get("witnessNRestarts")))
+
+
+def observation_identity(service: Mapping[str, Any]) -> tuple:
+    return (service.get("InvocationID") or None, str(service.get("MainPID")), str(service.get("NRestarts")))
+
+
+def _unit_identity(units: Mapping[str, Mapping[str, str]] | None, root: Path) -> dict[str, Any] | None:
+    """F3: each witness unit's effective FragmentPath and every shadow fragment / drop-in path present elsewhere."""
+    if units is None:
+        return None
+    out = {}
+    for unit in WITNESS_FRAGMENTS:
+        shadows = [f"{base}/{unit}{suffix}" for base in SHADOW_BASES for suffix in ("", ".d")
+                   if os.path.lexists(_host(root, f"{base}/{unit}{suffix}"))]
+        out[unit] = {"FragmentPath": units[unit].get("FragmentPath"), "shadows": shadows}
+    return out
+
+
+def unit_fragment_reasons(bundle: Mapping[str, Any]) -> list[str]:
+    """Why a witness unit is not exactly its accepted /etc fragment (empty = exact)."""
+    identity = bundle.get("unitIdentity")
+    if not isinstance(identity, Mapping):
+        return ["UNIT_IDENTITY_UNOBSERVED"]
+    reasons = []
+    for unit, fragment in WITNESS_FRAGMENTS.items():
+        facts = identity.get(unit) if isinstance(identity.get(unit), Mapping) else {}
+        if facts.get("FragmentPath") != fragment:
+            reasons.append(f"{unit}:FragmentPath")
+        if not isinstance(facts.get("shadows"), list) or facts["shadows"]:
+            reasons.extend(f"SHADOW:{path}" for path in facts.get("shadows") or ["UNOBSERVED"])
+    return reasons
+
+
 def verify(bundle: Mapping[str, Any], u0_acceptance: Any, replacement: Any = None, *,
            new_release: str | None = E.NEW_RELEASE) -> dict[str, Any]:
     """The merged classifier against the owner-accepted U0 bundle (two-release aware; no installer status, no E-01).
@@ -531,8 +611,9 @@ def verify(bundle: Mapping[str, Any], u0_acceptance: Any, replacement: Any = Non
     _need(isinstance(bundle, Mapping) and bundle.get("bundleType") == BUNDLE_TYPE, "BUNDLE_TYPE")
     verdict = E.classify(bundle["observation"], u0_acceptance, replacement, new_release=new_release)
     reasons = boundary_reasons(bundle["observation"])
-    return {**verdict, "restartBoundaryReasons": reasons,
-            "maintenanceReady": verdict["phase"] in E.EXACT_PHASES and not reasons}
+    fragments = unit_fragment_reasons(bundle)
+    return {**verdict, "restartBoundaryReasons": reasons, "unitFragmentReasons": fragments,
+            "maintenanceReady": verdict["phase"] in E.EXACT_PHASES and not reasons and not fragments}
 
 
 def denial_result(proof: str, transcript: bytes, exit_code: int) -> str:
@@ -554,6 +635,9 @@ def post9a_r_evidence(bundle: Mapping[str, Any], denials: Mapping[str, tuple[byt
     _need(isinstance(denials, Mapping) and set(denials) == set(DENIAL_PASS), "DENIAL_SET")
     report = bundle["w10Report"]
     _need(isinstance(report, Mapping) and bundle.get("w10ReportSha256") == E.document_sha256(report), "W10_NOT_BOUND")
+    service = ((bundle.get("observation") or {}).get("witness") or {}).get("service")
+    _need(isinstance(service, Mapping) and w10_identity(report) == observation_identity(service),
+          "W10_NOT_THIS_OBSERVATION")                              # F2: digest-valid but stale / substituted
     base = E.trusted_baseline(u0_acceptance, new_release=new_release)
     capture = bundle["healthCapture"]
     return {"evidenceType": E.POST9A_R_TYPE, "schemaVersion": 1, "mode": E.MODE,

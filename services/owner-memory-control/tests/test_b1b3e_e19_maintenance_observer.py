@@ -121,6 +121,8 @@ class SyntheticHost:
         self.w10_report = copy.deepcopy(W10_EXACT_REPORT)
         self.broker = dict(BROKER_PASS)
         self.activation = E.ACTIVATION_LINE_E19
+        self.retained = True
+        self.w10_identity = None              # None: the report describes the observed witness (the real W10 does)
         self.fail = set()
 
     def p(self, absolute: str) -> Path:
@@ -172,7 +174,8 @@ class SyntheticHost:
         out = {}
         for name in names:
             base = {"Id": name, "LoadState": "loaded", "UnitFileState": "static", "NeedDaemonReload": "no",
-                    "DropInPaths": "", "Restart": "no", "StopWhenUnneeded": "no", "RefuseManualStart": "no"}
+                    "DropInPaths": "", "Restart": "no", "StopWhenUnneeded": "no", "RefuseManualStart": "no",
+                    "FragmentPath": f"/etc/systemd/system/{name}"}
             if name == E.WITNESS_SERVICE:
                 base.update(dict(zip(("ActiveState", "SubState", "MainPID", "InvocationID", "NRestarts", "Result"),
                                      row)))
@@ -192,6 +195,19 @@ class SyntheticHost:
             return None
         return list(self.witness_loads if unit == E.WITNESS_SERVICE else self.signer_loads)
 
+    def w10(self):
+        """The W10 report as the unchanged verifier would produce it for the CURRENT witness state."""
+        if self.w10_report is None:
+            return None
+        state, identity, _cwd = self.witness
+        running = state == "RUNNING"
+        report = copy.deepcopy(self.w10_report)
+        report.update(witnessInvocationId=identity[0] if running else None,
+                      witnessMainPid=identity[1] if running else "0", witnessNRestarts="0")
+        if self.w10_identity is not None:
+            report.update(witnessInvocationId=self.w10_identity[0], witnessMainPid=self.w10_identity[1])
+        return report
+
     def cwd(self, _root, _pid):
         return f"{O.OPT}/releases/{self.witness[2]}"
 
@@ -206,8 +222,9 @@ class SyntheticHost:
                   "candidateDigest": E.PRESERVED_PINS["witnessGenesis"], "updatedAt": "2026-10-09T08:00:00Z"}
         return O.observe(inputs, root=self.root, units=self.units, journal_tail=lambda: self.tail,
                          invocations=self.invocations, cwd=self.cwd, activation=lambda: self.activation,
-                         health=self.health_call, w10=lambda _i, _r: copy.deepcopy(self.w10_report),
-                         broker=lambda: dict(self.broker), new_release=new_release, owner=self.owner)
+                         health=self.health_call, w10=lambda _i, _r: self.w10(),
+                         broker=lambda: dict(self.broker), cursor_retained=lambda _c: self.retained,
+                         new_release=new_release, owner=self.owner)
 
     # ---- phase transitions (what the separately authorized operations would leave behind)
     def to_u1(self):
@@ -315,7 +332,8 @@ class PhaseObservationTests(ObserverTestCase):
                                                  "PR1_PACKAGE_READY"])
         self.assertEqual(report["evidence"]["healthCapture"]["before"],
                          {"InvocationID": REPLACEMENT[0], "MainPID": REPLACEMENT[1]})
-        self.assertEqual(report["evidence"]["w10OutputSha256"], E.document_sha256(W10_EXACT_REPORT))
+        self.assertEqual(report["evidence"]["w10OutputSha256"], E.document_sha256(bundle["w10Report"]))
+        self.assertEqual(bundle["w10Report"]["witnessInvocationId"], REPLACEMENT[0])
         source = (TOOLS / "e19_maintenance_observer.py").read_text(encoding="utf-8")
         self.assertNotIn("status --expect", source)
         self.assertNotIn("verify_installed_release", source)
@@ -661,6 +679,10 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(set(O.WITNESS_UNIT_FILES), set(I.WITNESS_UNIT_TARGETS.values()))
         self.assertEqual(set(O.CLIS), set(I.CLI_TARGETS.values()))
         self.assertEqual(O.KACT_PUBLICATION, M6.KACT_PUBLICATION)
+        import mb11_restart_boundary_install as RBI
+
+        self.assertEqual(O.SHADOW_BASES, RBI.SHADOW_BASES)
+        self.assertIn("/run/systemd/system", O.SHADOW_BASES)
         self.assertTrue(O.REGISTRY.startswith(I.REGISTRY_DIR + "/"))
 
     def test_invocation_parsing(self):
@@ -683,6 +705,163 @@ class SourceTests(unittest.TestCase):
         self.assertIsNone(O._ledger_head(None))
         self.assertEqual(O._genesis(dict(exact, committedGenesisDigest=None)), O.ABSENT)
         self.assertIsNone(O._genesis(None))
+
+
+
+class Pr189ReviewRegressionTests(ObserverTestCase):
+    """The PR #189 owner-review probes P1–P5 (findings F2, F3, F5, F1, F4), each now refused."""
+
+    def test_p1_f2_a_stale_w10_report_cannot_be_spliced_into_post9a_r(self):
+        u0_bundle = self.later()                                  # W10 while the ending incarnation ran
+        self.assertEqual(u0_bundle["w10Report"]["witnessInvocationId"], E.ENDING_INCARNATION[0])
+        self.host.to_u4()
+        u4 = self.later()
+        spliced = dict(u4, w10Report=u0_bundle["w10Report"], w10ReportSha256=u0_bundle["w10ReportSha256"])
+        with self.assertRaises(E.Refused) as caught:
+            O.post9a_r(spliced, DENIALS_PASS, self.u0, new_release=NEW)
+        self.assertEqual(caught.exception.reason, "W10_NOT_THIS_OBSERVATION")
+        self.assertEqual(O.post9a_r(u4, DENIALS_PASS, self.u0, new_release=NEW)["result"], "POST9A_R_VERIFIED")
+        # At observe time a report for another incarnation is discarded: ledger head and genesis become UNKNOWN.
+        self.host.w10_identity = E.ENDING_INCARNATION
+        stale = self.later()
+        self.assertIsNone(stale["w10Report"])
+        verdict = self.verify(stale)
+        self.assertEqual(verdict["phase"], E.UNKNOWN)
+        self.assertIn("UNOBSERVED:preserved.ledgerHead", verdict["reasons"])
+        self.assertIn("UNOBSERVED:preserved.witnessGenesis", verdict["reasons"])
+
+    def test_p2_f3_a_shadow_unit_or_foreign_fragment_refuses_readiness(self):
+        self.host.to_u1()
+        self.assertEqual(self.verify(self.later())["unitFragmentReasons"], [])
+        shadow = f"/run/systemd/system/{E.WITNESS_SERVICE}"
+        self.host.write(shadow, b"[Service]\nExecStart=/bin/true\n")
+        verdict = self.verify(self.later())
+        self.assertIs(verdict["maintenanceReady"], False)
+        self.assertIn("SHADOW:" + shadow, verdict["unitFragmentReasons"])
+        self.host.p(shadow).unlink()
+        dropin_dir = f"/run/systemd/system/{E.OWNER_SOCKET}.d"
+        self.host.p(dropin_dir).mkdir(parents=True)
+        self.assertIn("SHADOW:" + dropin_dir, self.verify(self.later())["unitFragmentReasons"])
+        self.host.p(dropin_dir).rmdir()
+        real = self.host.units
+
+        def foreign(names):
+            out = real(names)
+            if E.SIGNER_SOCKET in out:
+                out[E.SIGNER_SOCKET]["FragmentPath"] = f"/run/systemd/transient/{E.SIGNER_SOCKET}"
+            return out
+
+        self.host.units = foreign
+        verdict = self.verify(self.later())
+        self.assertEqual(verdict["unitFragmentReasons"], [f"{E.SIGNER_SOCKET}:FragmentPath"])
+        self.assertIs(verdict["maintenanceReady"], False)
+        self.assertEqual(O.unit_fragment_reasons({}), ["UNIT_IDENTITY_UNOBSERVED"])
+
+    def test_p3_f5_the_release_venv_must_be_a_genuine_root_directory(self):
+        self.host.to_u1()
+        venv = self.host.p(f"{O.RELEASES}/{NEW}/venv")
+        self.assertIs(O.release_tree_verified(self.host.root, NEW, self.host.owner), True)
+        foreign = self.host.p("/tmp/foreign-venv")
+        foreign.mkdir(parents=True)
+
+        def symlinked():
+            venv.rmdir()
+            os.symlink(foreign, venv)
+
+        def regular_file():
+            venv.unlink()
+            venv.write_bytes(b"not a directory")
+
+        def wide_mode():
+            venv.unlink()
+            venv.mkdir()
+            os.chmod(venv, 0o777)
+
+        def missing():
+            venv.rmdir()
+
+        for mutate in (symlinked, regular_file, wide_mode, missing):
+            mutate()
+            with self.subTest(case=mutate.__name__):
+                self.assertIs(O.release_tree_verified(self.host.root, NEW, self.host.owner), False)
+                self.assertEqual(self.verify(self.later())["phase"], E.STOP_NEW_TREE)
+
+    def test_p4_f1_observer_execution_writes_no_bytecode(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as work:
+            tools = Path(work) / "tools"
+            tools.mkdir()
+            for name in ("e19_maintenance_observer.py", "e19_p1b10_upgrade.py", "mb11_restart_boundary_install.py",
+                         "mb11_restart_boundary.py"):
+                shutil.copyfile(TOOLS / name, tools / name)
+            release = Path(work) / "release" / "lilith_probe"
+            release.mkdir(parents=True)
+            (release / "__init__.py").write_text("VALUE = 1\n", encoding="ascii")
+            code = ("import runpy, sys; sys.path.insert(0, sys.argv[1]); "
+                    "runpy.run_path(sys.argv[1] + '/e19_maintenance_observer.py', run_name='observer_probe'); "
+                    "sys.path.insert(0, sys.argv[2]); import lilith_probe; assert lilith_probe.VALUE == 1")
+            env = {k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+            result = subprocess.run([sys.executable, "-c", code, str(tools), str(release.parent)], env=env,
+                                    capture_output=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            written = [str(p) for p in Path(work).rglob("*") if p.name == "__pycache__" or p.suffix == ".pyc"]
+            self.assertEqual(written, [])
+        self.assertIn("sys.dont_write_bytecode = True", (TOOLS / "e19_maintenance_observer.py").read_text("utf-8"))
+
+    def test_p5_f4_an_unretained_baseline_cursor_makes_loads_unknown(self):
+        self.host.to_u4()
+        for retained in (False, None):
+            self.host.retained = retained
+            bundle = self.later()
+            with self.subTest(retained=retained):
+                self.assertIsNone(bundle["observation"]["witness"]["invocations"]["ids"])
+                self.assertIs(bundle["baselineCursorRetained"], retained)
+                verdict = self.verify(bundle)
+                self.assertEqual(verdict["phase"], E.UNKNOWN)
+                self.assertIn("UNOBSERVED:witness.invocations.ids", verdict["reasons"])
+                self.assertIs(verdict["maintenanceReady"], False)
+        self.setUp()                                               # the U0 candidate needs a retained cursor too
+        self.host.retained = False
+        self.host.tail = cursor("1f4a")
+        with self.assertRaises(E.Refused) as caught:
+            u0_acceptance(self.host.observe()["observation"])
+        self.assertEqual(caught.exception.reason, "BASELINE_NOT_U0")
+
+    def test_p5_f4_retention_is_proven_by_the_exact_entry_at_the_cursor(self):
+        base = cursor("1f4a")
+
+        class Proc:
+            def __init__(self, line):
+                self.stdout = types.SimpleNamespace(readline=lambda limit: line)
+                self.killed = False
+
+            def kill(self):
+                self.killed = True
+
+            def wait(self, timeout):
+                return 0
+
+        calls = []
+
+        def popen(line):
+            def make(argv, **kw):
+                calls.append(argv)
+                proc = Proc(line)
+                calls.append(proc)
+                return proc
+            return make
+
+        cases = {json.dumps({"__CURSOR": base}) + "\n": True,                  # the exact entry is retained
+                 json.dumps({"__CURSOR": cursor("2000")}) + "\n": False,       # vacuumed: the nearest entry
+                 "": False, "not json\n": None}
+        for line, expected in cases.items():
+            with self.subTest(line=line[:30]):
+                self.assertIs(O._cursor_retained(base, popen=popen(line)), expected)
+                self.assertIn("--cursor=" + base, calls[-2])
+                self.assertNotIn("--after-cursor=" + base, calls[-2])
+                self.assertTrue(calls[-1].killed)
+        self.assertIsNone(O._cursor_retained("has space", popen=popen("")))
 
 
 if __name__ == "__main__":
