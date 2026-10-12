@@ -697,7 +697,7 @@ class ReadinessInputTests(unittest.TestCase):
                      proofs={"BROKER_PRESERVATION": proof_item(BROKER_PASS.replace(b'":"', b'": "', 1), 0)})
         for name in ("OS_DENIAL", "SECRET_HYGIENE", "PRESERVATION_SET"):
             with self.subTest(name=name):
-                self.refused("PROOF_PRODUCER_UNMAPPED", proofs={name: proof_item(b"PASS\n", 0)})
+                self.refused("TRANSCRIPT_CONTRACT", proofs={name: proof_item(b"PASS\n", 0)})
 
     def test_blocker2_custody_transcript_is_rebuilt_from_the_pinned_script(self):
         exact = RI.expected_custody_denial_pass("P1B-12").decode("ascii").splitlines()
@@ -763,8 +763,7 @@ class SourceGuardTests(unittest.TestCase):
 
     def test_proof_producers_are_the_recorded_mapping_and_pinned_scripts(self):
         self.assertEqual(tuple(RI.PROPOSED_PROOF_PRODUCERS), PA.REQUIRED_PROOFS)
-        self.assertEqual({n for n, p in RI.PROPOSED_PROOF_PRODUCERS.items() if p is None},
-                         {"OS_DENIAL", "SECRET_HYGIENE", "PRESERVATION_SET"})
+        self.assertEqual({n for n, p in RI.PROPOSED_PROOF_PRODUCERS.items() if p is None}, set())   # PR-B2
         for relative, digest in RI.PRODUCER_SCRIPT_SHA256.items():
             with self.subTest(relative=relative):
                 self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), digest)
