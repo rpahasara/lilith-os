@@ -25,7 +25,10 @@ judged here from root observations:
 - the two root readiness evaluations (HOLD_RELEASE_ELIGIBILITY and FULL_READINESS), computed by the release's own
   root verifier over the SAME captured HEALTH (`readiness_pair`), never by the signer;
 - the ledger directory bytes (`observe_ledger_bytes`): the logical ledger is the W9 / M-B6 judgement (unchanged);
-  byte equality and sidecar residue are judged here.
+  byte equality and sidecar residue are judged here;
+- the effective restart boundary (PR-A2, `mb11_restart_boundary_install.boundary_reasons`): the release fragments plus
+  exactly the pinned owner overlay, with `Restart=no`, `StopWhenUnneeded=yes`, `RefuseManualStart=yes` in effect.
+  Every exact W11 phase requires it; unobserved is UNKNOWN, inexact is `W11_UNEXPECTED_UNIT_STATE`.
 
     signer started != signer verified != readiness != signing permission != Registry effective != authority
     HEALTH (B4) = a claim;  B1 = B2 = B3 = B4 (+ B5, B6) = the binding;  root readiness != owner acceptance
@@ -100,13 +103,14 @@ CREDENTIAL_EXIT_STATUSES = frozenset({"3", "4", "243"})        # server.EXIT_CRE
 DARK_FACTS = ("authorityGranted", "liveEntryAuthorized", "issuanceReady", "successorCurrent")
 DARK_PACKAGE_FLAGS = ("authorityGranted", "activationGranted", "issuanceWired")
 UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState", "NeedDaemonReload", "MainPID",
-                   "NRestarts", "InvocationID", "Result", "ExecMainStatus")
+                   "NRestarts", "InvocationID", "Result", "ExecMainStatus", "FragmentPath", "DropInPaths", "Restart",
+                   "StopWhenUnneeded", "RefuseManualStart")
 # The W10 view of the signer side while it is judged here (W9 / W10 code unchanged).
 MASKED_UNIT = {"LoadState": "loaded", "UnitFileState": "static", "NeedDaemonReload": "no", "ActiveState": "inactive",
                "SubState": "dead", "MainPID": "0", "NRestarts": "0", "InvocationID": "", "Result": "success"}
 
 # ------------------------------------------------------------------ phases ---
-W11_0 = "W11_0_PRE_SIGNER_EXACT"                     # W10_1 exact; signer never started; no K-ACT load recorded
+W11_0 = "W11_0_PRE_SIGNER_EXACT"                     # W10_1 exact; boundary effective; never started; no load recorded
 W11_1 = "W11_1_SIGNER_STARTED_EXACT"                 # W10_1 (signer judged here); one load; H, E, F, G exact
 W11_1S = "W11_1S_STOPPED_AFTER_FIRST_LOAD"           # W10_1 (signer judged here); signer stopped after exactly one load
 W11_HOLD = "W11_HOLD_NOT_EXACT"                      # any W10 hold HALT: malformed, misbound, unexpected, foreign
@@ -516,6 +520,9 @@ def classify(observation: Mapping[str, Any]) -> dict[str, Any]:
         unknown.append("LEDGER_UNREADABLE")
     if not isinstance(first_load_recorded, bool):
         unknown.append("FIRST_LOAD_RECORD_UNKNOWN")
+    boundary = obs.get("restartBoundary")
+    if not isinstance(boundary, Mapping) or not isinstance(boundary.get("reasons"), list):
+        unknown.append("RESTART_BOUNDARY_UNOBSERVED")
     for key in ("dbSha256", "witnessInvocationId", "witnessMainPid"):
         if not isinstance(baseline.get(key), str) or not baseline.get(key):
             unknown.append("BASELINE_MISSING:" + key)
@@ -564,6 +571,7 @@ def classify(observation: Mapping[str, Any]) -> dict[str, Any]:
             unit_reasons.append("NOT_LOADED_CURRENT:" + name)
     if state == "SOCKET_ONLY":
         unit_reasons.append("SOCKET_LISTENING_WITHOUT_SERVICE")      # any root connection would load K-ACT
+    unit_reasons += ["RESTART_BOUNDARY_NOT_EFFECTIVE:" + str(r) for r in boundary["reasons"]]
     if state == "RUNNING":
         process = obs.get("process")
         ids = obs.get("signerIds")
@@ -661,7 +669,8 @@ def _report(phase: str, reasons: list[str], obs: Mapping[str, Any], state: str |
 def evaluate(evidence: Mapping[str, Any], *, root: Path | str = Path("/"), owner_uid: int = 0, owner_gid: int = 0,
              units: Callable[[Sequence[str]], dict] | None = None, journal: Callable[[str | None], dict] | None = None,
              process: Callable[[Path, str], dict | None] | None = None, w10: Callable[..., dict] | None = None,
-             readiness: Callable[..., dict] | None = None, **w10_seams: Any) -> dict[str, Any]:
+             readiness: Callable[..., dict] | None = None,
+             restart_boundary: Callable[[Path, Callable], dict] | None = None, **w10_seams: Any) -> dict[str, Any]:
     """One read-only observation and judgement. `evidence` holds the owner-side inputs: the expected ledger head,
     candidate digest and updatedAt (as for W10), the baseline (pre-start DB SHA-256, witness incarnation, journal
     cursor), `firstLoadRecorded`, the captured HEALTH (or null), the signer ids and the verifier owner inputs. The
@@ -681,8 +690,13 @@ def evaluate(evidence: Mapping[str, Any], *, root: Path | str = Path("/"), owner
                                                  owner_gid=owner_gid)
         except Exception as exc:  # noqa: BLE001 - an evaluation that cannot run is UNKNOWN, never success
             pair = {"error": type(exc).__name__}
+    try:
+        boundary = (restart_boundary or _restart_boundary)(root, units)
+    except Exception as exc:  # noqa: BLE001 - an unreadable boundary is UNKNOWN, never success
+        boundary = {"error": type(exc).__name__}
     observation = {
         "w10": masked, "units": signer["units"], "paths": signer["paths"], "process": signer["process"],
+        "restartBoundary": boundary,
         "journal": (journal or journal_invocations)(baseline.get("journalCursor")), "health": capture,
         "readiness": pair if isinstance(pair, Mapping) and "error" not in pair else None,
         "ledger": observe_ledger_bytes(root), "baseline": baseline,
@@ -691,6 +705,14 @@ def evaluate(evidence: Mapping[str, Any], *, root: Path | str = Path("/"), owner
     report = classify(observation)
     report["observation"] = observation
     return report
+
+
+def _restart_boundary(root: Path, units: Callable[[Sequence[str]], dict] | None) -> dict[str, Any]:
+    """The effective restart boundary, read-only (fragments, overlay bytes and metadata, unit properties)."""
+    import mb11_restart_boundary_install as RBI
+
+    observed = RBI.observe(root, units=units, activation=None)
+    return {"reasons": RBI.boundary_reasons(observed), "shadows": observed["shadows"]}
 
 
 # ------------------------------------------------------------------ entry ---
