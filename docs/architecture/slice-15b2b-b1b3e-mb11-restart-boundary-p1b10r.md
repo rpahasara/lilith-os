@@ -25,7 +25,8 @@ the overlay is NOT invisible: the host observer and the W9 / W10 unit checks see
 | candidate `lilith-authority-dev.socket.d/10-no-reactivation.conf` (`[Unit] StopWhenUnneeded=yes`, `RefuseManualStart=yes`) | `85589f80764311f7e1152cf0e9ea51208662bce25806ceb524777961f579b9b9` |
 | release fragment `/etc/systemd/system/lilith-authority-dev.service` (`aee323e`) | `11b6d00f04d998caa156875fb587dd642cb7d78dd9b6d1866616cc0b9bc1b254` |
 | release fragment `/etc/systemd/system/lilith-authority-dev.socket` (`aee323e`) | `bff5e9275ad1478dd068855465d65542ceb338e5e9236e43d1bd43d7c50c194f` |
-| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` | `b67f9ecf29dba235b8be76ad70c41a267cf5f09a22871beea85a6a189f075792` |
+| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (activation-line correction, §10) | `e052b2511013ef37a047a074e85a8c711d9c06bba4f01cb56dc906ee6994a803` |
+| superseded original of the same tool (PR-A2 #184, merged `7f8406d`; refused the real activation line, §10) | `b67f9ecf29dba235b8be76ad70c41a267cf5f09a22871beea85a6a189f075792` |
 | `services/owner-memory-control/tools/mb11_signer_verifier.py` (W11, extended) | `020ab5b15b02ac7d46b2cc8dd402481576646fbebcab708522df50f96e8782ad` |
 
 The candidate bytes are the exact PR-A1 files (`mb11_restart_boundary.DROPINS`); the runner proof (all 20 assertions,
@@ -49,14 +50,14 @@ refuses otherwise: no silent overwrite, repair, completion or rollback.
 
 | Phase | Exactly when | Route |
 | --- | --- | --- |
-| `P10R_0_PRE_INSTALL_EXACT` | release fragments exact (bytes, `root:root 0644`, `FragmentPath` in `/etc`); no overlay and no shadow anywhere; both units inactive, no InvocationID, static, loaded, `NeedDaemonReload=no`, `DropInPaths` empty, release defaults loaded; activation `GRANT_ABSENT` | install only by plan digest and go |
+| `P10R_0_PRE_INSTALL_EXACT` | release fragments exact (bytes, `root:root 0644`, `FragmentPath` in `/etc`); no overlay and no shadow anywhere; both units inactive, no InvocationID, static, loaded, `NeedDaemonReload=no`, `DropInPaths` empty, release defaults loaded; activation exactly the complete dark line (§10) | install only by plan digest and go |
 | `P10R_1_INSTALLED_RELOAD_PENDING` | overlay exact; both units `NeedDaemonReload=yes` and still the release defaults (`DropInPaths` empty) | the owner's separate daemon-reload |
 | `P10R_2_EFFECTIVE_EXACT` | overlay exact; `DropInPaths` exactly the two candidates; `Restart=no`, `StopWhenUnneeded=yes`, `RefuseManualStart=yes`; `NeedDaemonReload=no`; units inactive and static | verified; startup is separate |
 | `P10R_PARTIAL_INSTALL` | a strict prefix of the install's own write order (incl. an `O_EXCL` file created but not yet written) | STOP; never completed or removed by a tool |
 | `P10R_FOREIGN_OR_ALTERED` | any other entry, altered bytes or metadata, a symlink, an extra link, a non-prefix order, or any shadow fragment / drop-in for these names in the other systemd search paths | HALT |
 | `P10R_UNIT_NOT_EXACT` | fragments changed, enabled, unloaded, `FragmentPath` elsewhere, an unexpected reload state, an unexpected drop-in path, or an inexact effective property | STOP / revalidate |
 | `P10R_SIGNER_NOT_INACTIVE` | a signer unit is active or has an InvocationID | STOP (W11 judges a running signer) |
-| `P10R_AUTHORITY_NOT_DARK` | the activation line is not `ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT` | HALT |
+| `P10R_AUTHORITY_NOT_DARK` | the activation output is not exactly one line `ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false` with exit 1 (§10) | HALT |
 | `UNCLASSIFIED_STOP` | units or activation unreadable, or reload pending yet partly effective | STOP; UNKNOWN is never success |
 
 Every result carries `startupAuthorized`, `reloadPerformedByTool`, `authorityGranted`, `registryEffective`,
@@ -135,3 +136,46 @@ ISSUANCE_AUTHORITY = NONE
 FIRST_MEMORY_READY = NOT REACHED
 PROD = NOT AUTHORIZED
 ```
+
+## 10. Activation-line correction (after the first read-only preflight)
+
+**What happened.** On 2026-10-12 the owner authorized one read-only DEV preflight and `plan` against `7f8406d`.
+`observe` reported everything in the `P10R_0` shape: fragments exact, no overlay, no shadow, units inactive, static
+and loaded, `NeedDaemonReload=no`, `DropInPaths` empty, release defaults loaded. `plan` was then refused with
+`REFUSED NOT_P10R_0:P10R_AUTHORITY_NOT_DARK` (route `HALT_PENDING_OWNER_ADJUDICATION`). No plan and no digest were
+produced, and DEV was not changed. That HALT stays recorded as it happened. This correction does not reclassify it,
+does not turn it into a plan, and does not let any later step reuse that preflight.
+
+**The defect.** The original tool (`b67f9ecf…`) required the activation line to equal
+`ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT`. The B1c verifier (`scripts/dev_deployer/lilith_activation_verify.py`)
+always appends a final `advisoryConfigEnabled=<true|false|unreadable>` field. Every preserved root custody read,
+host/06-POST and the preflight's host/07-POST included, shows the same complete line:
+`ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false`. The tests had built their fake
+activation from the tool's own constant, so they could not catch the mismatch.
+
+**The correction** (`e052b251…`):
+
+- `ACTIVATION_DARK` is now that complete line.
+- `activation_dark` accepts by exact equality only. Prefix, substring and field-wise acceptance are not used.
+- The production reader (`activation_line`) takes the raw bytes and the exit code. It returns the line only when
+  the verifier printed exactly one ASCII line ending in LF and exited 1.
+- Anything else becomes an `UNEXPECTED_ACTIVATION_OUTPUT` marker, which can never be dark. That covers another exit
+  code, an extra preceding or following line (the original tool kept only the last line), a missing LF, CR or
+  non-ASCII bytes. Empty output stays `UNCLASSIFIED_STOP`.
+- These forms are all refused, never `P10R_0`: `advisoryConfigEnabled=true`, `unreadable` or capitalised values, a
+  missing, empty or duplicated field, an extra field, reordered fields, another reason or status, and surrounding
+  whitespace. The original three-field line is also refused, as a missing field.
+
+**What did not change.** The phases, routes, plan-digest body, install writes and every other judgement are
+unchanged. W11 (`mb11_signer_verifier.py`, still `020ab5b1…`) is not affected: it reads the boundary with
+`activation=None`, judges only `boundary_reasons`, and never compares the activation line.
+
+**Tests.** They now use the independently observed host stdout bytes, not the tool constant, and pin the B1c emitter
+format. They reproduce the recorded refusal for the original constant, cover every unsafe variant above at both the
+predicate and the stage level (the install refuses with nothing written), and cover the strict byte and exit-code
+parse.
+
+**What a later P1B-10R needs.** The corrected tool must be merged and deployed, followed by its own preservation,
+before any later P1B-10R. That later run needs a new owner authorization for a fresh read-only preflight and `plan`
+under this pin. Nothing in this section authorizes an installation, a daemon-reload or a signer start. The §9 state
+block is left unchanged by this correction.
