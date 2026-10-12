@@ -12,8 +12,14 @@ ceremony register), checks each against the accepted repository records, and ass
 
 What it never does: invent a fingerprint (each comes from the owner's bytes and must equal the record), fill the
 authorization-ID list or the burned-ordinal register (both must be EMPTY at PR-1: E-21, and the registers must say
-so), create the successor ceremony register (the owner supplies it), or emit `status=PRESENT` without an owner
-confirmation naming this exact candidate digest. A SYNTHETIC_FIXTURE is never a package input.
+so), create the successor ceremony register (the owner supplies it), or emit `status=PRESENT` unless an owner
+confirmation of this exact candidate digest is ESTABLISHED. A SYNTHETIC_FIXTURE is never a package input.
+
+Owner-confirmation trust boundary. A caller-supplied confirmation document is never evidence of an owner decision by
+itself (DEV_SYNTHETIC owner acts are unsigned). Its only established binding is a merged owner record pinned in
+source: `DEV_ACCEPTED_CANDIDATES` (candidate digest -> confirmation record SHA-256), which is EMPTY, so every DEV
+package input is REFUSED. `package_input` assembles the candidate itself from the owner inputs; it never takes an
+assembled object. DEV expectations and pins cannot be overridden; TEST must pass an explicit `Pr3TrustV1`.
 
 E-25 … E-28 (owner freshness, record 1, P3-3 storage, envelope 1) are NOT bound here: the verifier input has no field
 for them (OD-M11-13). `offhost_reproduction` is the RR-38 B comparison of this material with a PR-1 package.
@@ -31,6 +37,7 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -81,11 +88,21 @@ DEV_EXPECTED = {
     "releaseManifestSha256": "1d578ca707a95134dab218c826408b4380e7af0b5839160f47ede37232b94e8f",      # PR-1A
 }
 EXPECTED_FIELDS = frozenset(DEV_EXPECTED)
+# Owner PR-3 confirmations established by a merged owner record: candidate digest -> confirmation record SHA-256.
+DEV_ACCEPTED_CANDIDATES: Mapping[str, str] = {}
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 NONCLAIMS = ("candidate assembled != PR-3 full material accepted", "register entry != authorization",
              "pin != K-ROOT, != K-WIT", "E-25..E-28 owner-side bindings: NOT BOUND (OD-M11-13)",
              "authorityGranted: false")
+
+
+@dataclass(frozen=True)
+class Pr3TrustV1:
+    """What PR-3 material is judged against. DEV: `trust_for("dev", None)` only; never caller-supplied."""
+
+    expected: Mapping[str, Any]
+    accepted_candidates: Mapping[str, str]
 
 
 class Refused(ValueError):
@@ -125,16 +142,27 @@ def candidate_digest(candidate: Mapping[str, Any]) -> str:
     return _sha256(CANDIDATE_DOMAIN + rfc8785.dumps(dict(candidate)))
 
 
-def assemble(inputs: Any, *, environment: str, expected: Mapping[str, Any]) -> dict[str, Any]:
+def trust_for(environment: str, trust: Pr3TrustV1 | None) -> Pr3TrustV1:
+    """DEV: the pinned trust only (a caller value is refused). Elsewhere: an explicit, complete `Pr3TrustV1`."""
+    if environment == "dev":
+        _need(trust is None, "DEV_TRUST_NOT_OVERRIDABLE")
+        return Pr3TrustV1(dict(DEV_EXPECTED), dict(DEV_ACCEPTED_CANDIDATES))
+    _need(isinstance(trust, Pr3TrustV1) and isinstance(trust.expected, Mapping)
+          and set(trust.expected) == EXPECTED_FIELDS and isinstance(trust.accepted_candidates, Mapping),
+          "TRUST_REQUIRED")
+    return trust
+
+
+def assemble(inputs: Any, *, environment: str, trust: Pr3TrustV1 | None = None) -> dict[str, Any]:
     """The candidate (`material` in the exact E-21 verifier form, `sources`, `digest`) or Refused.
 
-    Every value is derived from the owner's bytes and compared with `expected` (`DEV_EXPECTED` on DEV)."""
+    Every value is derived from the owner's bytes and compared with the trust's expectations (`DEV_EXPECTED`)."""
+    expected = trust_for(environment, trust).expected
     _need(isinstance(inputs, Mapping) and set(inputs) == INPUT_FIELDS, "INPUT_MALFORMED", "fields")
     _need(inputs["inputType"] == INPUT_TYPE and type(inputs["schemaVersion"]) is int
           and inputs["schemaVersion"] == 1, "INPUT_MALFORMED", "type")
     _need(inputs["environment"] == environment, "ENVIRONMENT_MISMATCH", str(inputs["environment"]))
     _need(inputs["evidenceClass"] in EVIDENCE_CLASSES, "INPUT_MALFORMED", "evidenceClass")
-    _need(isinstance(expected, Mapping) and set(expected) == EXPECTED_FIELDS, "EXPECTED_MALFORMED")
     raw = {name: _b64u(inputs[name], name) for name in SOURCES}
 
     # K-ACT (E-2): the exact keygen bytes, = the record file, = B3.
@@ -221,11 +249,14 @@ def assemble(inputs: Any, *, environment: str, expected: Mapping[str, Any]) -> d
             "pr3FullMaterialAccepted": False, "authorityGranted": False, "nonclaims": list(NONCLAIMS)}
 
 
-def package_input(assembled: Mapping[str, Any], confirmation: Any, *, environment: str) -> dict[str, Any]:
-    """The E-21 `offHostMaterial` verifier input, only for owner-retained bytes the owner confirmed by digest."""
+def package_input(inputs: Any, confirmation: Any, *, environment: str, trust: Pr3TrustV1 | None = None
+                  ) -> dict[str, Any]:
+    """The E-21 `offHostMaterial` verifier input: assembled here from the owner inputs, and only when the owner's
+    confirmation of exactly that candidate digest is established by `trust.accepted_candidates`."""
+    trust = trust_for(environment, trust)
+    assembled = assemble(inputs, environment=environment, trust=trust)
     candidate = assembled["candidate"]
     _need(candidate["evidenceClass"] == OWNER_RETAINED, "SYNTHETIC_FIXTURE_NOT_PACKAGE_INPUT")
-    _need(candidate_digest(candidate) == assembled["candidateDigest"], "CANDIDATE_DIGEST_MISMATCH")
     _need(confirmation is not None, "OWNER_CONFIRMATION_ABSENT")
     _need(isinstance(confirmation, Mapping) and set(confirmation) == CONFIRMATION_FIELDS
           and confirmation["confirmationType"] == CONFIRMATION_TYPE and type(confirmation["schemaVersion"]) is int
@@ -236,6 +267,8 @@ def package_input(assembled: Mapping[str, Any], confirmation: Any, *, environmen
           "OWNER_CONFIRMATION_MALFORMED")
     _need(confirmation["confirmedCandidateDigest"] == assembled["candidateDigest"],
           "OWNER_CONFIRMATION_DIGEST_MISMATCH")
+    _need(trust.accepted_candidates.get(assembled["candidateDigest"]) == confirmation["confirmationRecordSha256"],
+          "OWNER_CONFIRMATION_NOT_ESTABLISHED")
     return dict(candidate["material"])
 
 
@@ -271,10 +304,9 @@ def _load(path: str) -> Any:
 def main(argv: list[str]) -> int:
     try:
         if len(argv) == 2 and argv[0] == "candidate":
-            out = assemble(_load(argv[1]), environment="dev", expected=DEV_EXPECTED)
+            out = assemble(_load(argv[1]), environment="dev")
         elif len(argv) == 3 and argv[0] == "package-input":
-            out = package_input(assemble(_load(argv[1]), environment="dev", expected=DEV_EXPECTED),
-                                _load(argv[2]), environment="dev")
+            out = package_input(_load(argv[1]), _load(argv[2]), environment="dev")   # DEV trust: pins only
         else:
             raise Refused("USAGE")
     except (Refused, ValueError, OSError) as exc:

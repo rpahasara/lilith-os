@@ -19,13 +19,22 @@ Canonical rules applied unchanged (never weakened):
 Evidence classes are never interchangeable:
 
     SYNTHETIC_FIXTURE  -> classified, never ACCEPTED, never a package input
-    LIVE_OBSERVATION   -> classified; a package input only with an owner acceptance of this exact inventory digest
+    LIVE_OBSERVATION   -> classified; a package input only when the owner acceptance of this exact inventory digest
+                          is ESTABLISHED (below) and the window starts at or after the accepted freshness cutoff
     classification PASS != owner acceptance;  owner acceptance != freshness at a later step;  inventory != authority
+
+Owner-acceptance trust boundary. A caller-supplied acceptance document is never evidence of an owner decision by
+itself: DEV_SYNTHETIC owner acceptance is unsigned, so its only established binding in this repository is a reviewed,
+merged owner record whose accepted value is pinned in source (the `ACCEPTED_GENESIS` / `EXPECTED_HELD_SHA256`
+pattern). `DEV_ACCEPTED_INVENTORIES` (inventory digest -> acceptance record SHA-256) is that pin and is EMPTY, and the
+DEV freshness cutoff `DEV_FRESHNESS_NOT_BEFORE` (OD-M12-3) is UNDECIDED: every DEV package input is REFUSED until both
+exist. The DEV trust values cannot be overridden by a caller; other environments (TEST) must pass an explicit
+`Pr2TrustV1` with every field set.
 
 Forms (off-host, stdlib + rfc8785):
 
     ... classify <inventory.json>                         the classification report
-    ... package-input <inventory.json> <acceptance.json> <notBefore>   the E-20 verifier input, or REFUSED
+    ... package-input <inventory.json> <acceptance.json>  the E-20 verifier input (DEV trust), or REFUSED
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ import hashlib
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -85,6 +95,10 @@ DEV_KEY_IDENTITIES = {
 }
 # Recorded non-snapshot debt carried forward (M-B2 completion, crash window C-4). Named, never dropped.
 DEV_CARRIED_DEBTS = ("C-4",)
+# OD-M12-3 (UNDECIDED): the DEV lower freshness bound for M-B12 inputs. None refuses every DEV package input.
+DEV_FRESHNESS_NOT_BEFORE: str | None = None
+# Owner PR-2 acceptances established by a merged owner record: inventory digest -> acceptance record SHA-256. EMPTY.
+DEV_ACCEPTED_INVENTORIES: Mapping[str, str] = {}
 
 INVENTORY_FIELDS = frozenset({"inventoryType", "schemaVersion", "environment", "evidenceClass", "window",
                               "keys", "listings", "artefacts", "carriedDebts", "privateEvidenceSha256"})
@@ -102,6 +116,16 @@ _DEBT_NAME = re.compile(r"[A-Z0-9][A-Z0-9._-]{0,63}\Z")
 
 NONCLAIMS = ("snapshot inventory != authority", "classification PASS != owner acceptance",
              "wholeHostRollbackProtected: false", "inventory freshness ends at its window")
+
+
+@dataclass(frozen=True)
+class Pr2TrustV1:
+    """What a PR-2 package input is judged against. DEV: `dev_trust()` only; never caller-supplied."""
+
+    expected_keys: Mapping[str, str]
+    not_before: str
+    accepted_inventories: Mapping[str, str]
+    required_carried_debts: tuple[str, ...]
 
 
 class Refused(ValueError):
@@ -214,6 +238,8 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
         _need(item["kind"] in ARTEFACT_KINDS, "INVENTORY_MALFORMED", "kind")
         _need(isinstance(item["material"], list) and len(set(item["material"])) == len(item["material"])
               and set(item["material"]) <= set(MATERIAL) | {PLAINTEXT}, "INVENTORY_MALFORMED", "material")
+        # No canonical class exists for "no custody material": an artefact of the custody disk holds it all.
+        _need(item["material"], "INVENTORY_ARTEFACT_MATERIAL_EMPTY", item["artefactId"])
         _need(item["location"] in LOCATIONS and item["accessHistory"] in (KNOWN, UNKNOWN), "INVENTORY_MALFORMED",
               item["artefactId"])
         _need(item["debtName"] is None or (isinstance(item["debtName"], str)
@@ -223,6 +249,9 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
         artefacts.append(item)
     _need(len({a["artefactId"] for a in artefacts}) == len(artefacts), "INVENTORY_MALFORMED", "artefactId duplicated")
     miscounted = [kind for kind in ARTEFACT_KINDS if kind in listings and listings[kind]["count"] != counted[kind]]
+    # Admin Activity create calls (snapshot / image / machine image). The schema binds no call to an artefact, so
+    # ANY call is a snapshot that may exist outside this inventory: UNKNOWN_PROVENANCE (gate §5.2 class 3).
+    create_calls = listings["ADMIN_ACTIVITY_CREATE_CALLS"]["count"] if "ADMIN_ACTIVITY_CREATE_CALLS" in listings else 0
 
     _need(isinstance(doc["carriedDebts"], list), "INVENTORY_MALFORMED", "carriedDebts")
     carried = {}
@@ -244,6 +273,8 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
                  if role in {MATERIAL.get(m) for m in a["material"]}
                  or (role in SEALED_UNDER_HOST_KEY and a in holds_secret) or PLAINTEXT in a["material"]]
         per_key[role] = min(found, key=SEVERITY.index) if found else NO_SNAPSHOTS
+        if create_calls:
+            per_key[role] = min(per_key[role], UNKNOWN_PROVENANCE, key=SEVERITY.index)
 
     reasons = []
     if missing:
@@ -252,6 +283,8 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
         reasons.append("LISTING_INCOMPLETE:" + ",".join(incomplete))
     if miscounted:
         reasons.append("LISTING_COUNT_MISMATCH:" + ",".join(miscounted))
+    if create_calls:
+        reasons.append(f"ADMIN_ACTIVITY_CREATE_CALLS_UNEXPLAINED:{create_calls}")
     for role in KEY_ROLES:
         if per_key[role] not in PERMITTED:
             reasons.append(f"KEY_CLASS_NOT_PERMITTED:{role}:{per_key[role]}")
@@ -261,8 +294,8 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
     absent = sorted(set(required_carried_debts) - set(carried))
     if absent:
         reasons.append("CARRIED_DEBT_MISSING:" + ",".join(absent))
-    if missing or incomplete or miscounted:
-        artefact_classes = [UNKNOWN_PROVENANCE]               # an incomplete listing is unknown provenance
+    if missing or incomplete or miscounted or create_calls:
+        artefact_classes = [UNKNOWN_PROVENANCE]               # incomplete or unexplained: unknown provenance
     elif not artefacts:
         artefact_classes = [NO_SNAPSHOTS]
     else:
@@ -276,14 +309,39 @@ def classify(document: Any, *, environment: str, expected_keys: Mapping[str, str
             "ownerAccepted": False, "authorityGranted": False, "nonclaims": list(NONCLAIMS)}
 
 
-def package_input(document: Any, acceptance: Any, *, environment: str, expected_keys: Mapping[str, str] | None,
-                  not_before: str | None, required_carried_debts: tuple[str, ...] = ()) -> dict[str, Any]:
+def dev_trust() -> Pr2TrustV1:
+    """The DEV trust values (repository pins). Refused while OD-M12-3 is undecided."""
+    _need(DEV_FRESHNESS_NOT_BEFORE is not None, "FRESHNESS_CUTOFF_UNDECIDED", "OD-M12-3")
+    return Pr2TrustV1(dict(DEV_KEY_IDENTITIES), DEV_FRESHNESS_NOT_BEFORE, dict(DEV_ACCEPTED_INVENTORIES),
+                      DEV_CARRIED_DEBTS)
+
+
+def trust_for(environment: str, trust: Pr2TrustV1 | None) -> Pr2TrustV1:
+    """DEV: the pinned trust only (a caller value is refused). Elsewhere: an explicit, complete `Pr2TrustV1`."""
+    if environment == "dev":
+        _need(trust is None, "DEV_TRUST_NOT_OVERRIDABLE")
+        return dev_trust()
+    _need(isinstance(trust, Pr2TrustV1), "TRUST_REQUIRED")
+    _need(isinstance(trust.expected_keys, Mapping) and set(trust.expected_keys) == set(SEALED_UNDER_HOST_KEY),
+          "TRUST_MALFORMED", "expected_keys")
+    for role in SEALED_UNDER_HOST_KEY:
+        _hex(trust.expected_keys[role], f"expected_keys.{role}")
+    _instant(trust.not_before, "not_before")
+    _need(isinstance(trust.accepted_inventories, Mapping) and isinstance(trust.required_carried_debts, tuple),
+          "TRUST_MALFORMED")
+    return trust
+
+
+def package_input(document: Any, acceptance: Any, *, environment: str, trust: Pr2TrustV1 | None = None
+                  ) -> dict[str, Any]:
     """The E-20 `snapshotInventory` verifier input, or Refused.
 
-    Only a LIVE_OBSERVATION whose classification PASSes and whose owner acceptance names exactly this inventory
-    digest becomes `status=ACCEPTED`. The acceptance is supplied, never created here."""
-    report = classify(document, environment=environment, expected_keys=expected_keys, not_before=not_before,
-                      required_carried_debts=required_carried_debts)
+    Only a LIVE_OBSERVATION that classifies PASS against the trust's key identities, freshness cutoff and carried
+    debts, with an owner acceptance naming exactly this inventory digest AND that acceptance established by
+    `trust.accepted_inventories` (DEV: a merged owner record pin), becomes `status=ACCEPTED`."""
+    trust = trust_for(environment, trust)
+    report = classify(document, environment=environment, expected_keys=trust.expected_keys,
+                      not_before=trust.not_before, required_carried_debts=trust.required_carried_debts)
     _need(report["evidenceClass"] == LIVE_OBSERVATION, "SYNTHETIC_FIXTURE_NOT_PACKAGE_INPUT")
     _need(report["classification"] == "PASS", "INVENTORY_CLASSIFICATION_FAIL", ";".join(report["reasons"]))
     owner = _exact(acceptance, ACCEPTANCE_FIELDS, "acceptance") if acceptance is not None else None
@@ -294,6 +352,8 @@ def package_input(document: Any, acceptance: Any, *, environment: str, expected_
     _need(owner["acceptedInventoryDigest"] == report["inventoryDigest"], "OWNER_ACCEPTANCE_DIGEST_MISMATCH")
     _need(_instant(owner["acceptedAt"], "acceptedAt") >= _instant(report["window"]["endedAt"], "endedAt"),
           "OWNER_ACCEPTANCE_BEFORE_WINDOW_END")
+    _need(trust.accepted_inventories.get(report["inventoryDigest"]) == owner["acceptanceRecordSha256"],
+          "OWNER_ACCEPTANCE_NOT_ESTABLISHED")
     return {"status": "ACCEPTED", "recordSha256": report["inventoryDigest"],
             "artefactClasses": list(report["artefactClasses"]), "namedDebts": list(report["namedDebts"])}
 
@@ -312,10 +372,8 @@ def main(argv: list[str]) -> int:
         if len(argv) == 2 and argv[0] == "classify":
             out = classify(_load(argv[1]), environment="dev", expected_keys=DEV_KEY_IDENTITIES,
                            required_carried_debts=DEV_CARRIED_DEBTS)
-        elif len(argv) == 4 and argv[0] == "package-input":
-            # The freshness bound is an explicit argument: its DEV value is an owner decision (record OD-M12-3).
-            out = package_input(_load(argv[1]), _load(argv[2]), environment="dev", expected_keys=DEV_KEY_IDENTITIES,
-                                not_before=argv[3], required_carried_debts=DEV_CARRIED_DEBTS)
+        elif len(argv) == 3 and argv[0] == "package-input":
+            out = package_input(_load(argv[1]), _load(argv[2]), environment="dev")   # DEV trust: pins only
         else:
             raise Refused("USAGE")
     except (Refused, ValueError, OSError) as exc:
