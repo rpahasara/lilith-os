@@ -196,6 +196,10 @@ pins.
 | `SECRET_HYGIENE` | E-22 | **none** | **GAP**: ceremony records report scans (for example M-B2 "secret scan 0"), but no tool produces a bindable E-22 result over journal, transcript and publication scans for every PR-1B ceremony |
 | `PRESERVATION_SET` | E-23 | **none** | **GAP**: the host POST preservation readers cover parts (broker, units), but no tool emits a B1b-3d §23 preservation-set result (Stage III, broker, API unit) as one transcript |
 
+> **Update (PR-B2).** `OS_DENIAL`, `SECRET_HYGIENE` and `PRESERVATION_SET` now have producers with exact
+> transcript contracts ([PR-B2 record](slice-15b2b-b1b3e-mb12-prb2-proof-producers.md)); the gaps above are closed
+> in source only. Nothing was run on DEV and every DEV provenance pin stays empty.
+
 The DR-5 contract checks only the two final lines; the full DR-5 row set is judged by the accepted DR-5 target tools
 (`mb10_dr5_target.py` / `mb11_dr5_target.py`), and binding that judgement into E-08 is part of the provenance pin.
 

@@ -22,8 +22,9 @@ Fail-closed rules (never a default, never a synthetic PASS):
   bytes must satisfy that producer's exact terminal contract (phase, final line, exit status; for the custody denial
   proof the complete expected PASS transcript is rebuilt from the script's own rows), the result and transcript digest
   are DERIVED here, and the digest must be ESTABLISHED by the trust's accepted-transcript pins (DEV:
-  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`, EMPTY). `OS_DENIAL`, `SECRET_HYGIENE`, `PRESERVATION_SET` have no producer and are
-  REFUSED; a missing proof stays missing (NOT_READY downstream);
+  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`, EMPTY). `OS_DENIAL`, `SECRET_HYGIENE`, `PRESERVATION_SET` have the PR-B2
+  producers (`mb12_os_denial_proof`, `mb12_secret_hygiene_proof`, `mb12_preservation_set_proof`) with exact contracts;
+  a missing proof stays missing (NOT_READY downstream);
 - PR-2 / PR-3 enter only through `mb12_pr2_inventory.package_input` / `mb12_pr3_material.package_input`, called here on
   the canonical inventory + acceptance / owner inputs + confirmation; a package object is never accepted. Both refuse
   on DEV until a merged owner record pins the accepted digest.
@@ -91,14 +92,17 @@ HOST_ACTIVATION_EXIT = 1
 CUSTODY_DENIAL = "scripts/authority_custody_denial_proof.py:P1B-12"
 DEPLOYER_BOUNDARY = "scripts/deployer_authority_boundary_proof.sh:DR-5"
 BROKER_PRESERVATION = "scripts/verify_broker_dev_current_incarnation.py:preservation"
+OS_DENIAL_UNIT = "services/owner-memory-control/tools/mb12_os_denial_proof.py:UNIT"
+SECRET_HYGIENE_SCOPE = "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py:prove"
+PRESERVATION_SET_COMPARE = "services/owner-memory-control/tools/mb12_preservation_set_proof.py:compare"
 PROPOSED_PROOF_PRODUCERS = {
     "SIGNER_DENIAL": CUSTODY_DENIAL,
     "DEPLOYER_DENIAL": DEPLOYER_BOUNDARY,
     "BROKER_DENIAL": CUSTODY_DENIAL,
     "BROKER_PRESERVATION": BROKER_PRESERVATION,
-    "OS_DENIAL": None,
-    "SECRET_HYGIENE": None,
-    "PRESERVATION_SET": None,
+    "OS_DENIAL": OS_DENIAL_UNIT,
+    "SECRET_HYGIENE": SECRET_HYGIENE_SCOPE,
+    "PRESERVATION_SET": PRESERVATION_SET_COMPARE,
 }
 assert tuple(PROPOSED_PROOF_PRODUCERS) == PA.REQUIRED_PROOFS
 # The reviewed producer script bytes (repository HEAD). A changed producer invalidates every transcript contract.
@@ -107,6 +111,9 @@ PRODUCER_SCRIPT_SHA256 = {
     "scripts/deployer_authority_boundary_proof.sh": "9b569f9bee8f07f0bf13ec1d20e2607d9e01c601a2e94a2988320e5bc4160f43",
     "scripts/verify_broker_dev_current_incarnation.py":
         "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf",
+    "services/owner-memory-control/tools/mb12_os_denial_proof.py": "e67542287f869e6d8e56ee30321593424e41c964e682e5326fd8dc15a6fd8ef3",
+    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "251fb5409eb75693316c2dba560ea0c8446fe66e4e22a15d0a744350cc3b97de",
+    "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "79f47ae8f25e5d20f0066485196e910f78e3949c03dc97bebfbbf84681e485f8",
 }
 # Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s. EMPTY.
 DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {}
@@ -218,13 +225,18 @@ def _producer_script(relative: str) -> bytes:
     return raw
 
 
+def _producer_module(relative: str) -> Any:
+    """The pinned producer, loaded for its constants and pure functions only (`main` runs under `__main__` alone)."""
+    _producer_script(relative)
+    spec = importlib.util.spec_from_file_location("_mb12_producer_" + Path(relative).stem, REPO / relative)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def expected_custody_denial_pass(phase: str = "P1B-12") -> bytes:
     """The complete PASS transcript `authority_custody_denial_proof.py <phase>` prints, rebuilt from its own rows."""
-    relative = "scripts/authority_custody_denial_proof.py"
-    _producer_script(relative)
-    spec = importlib.util.spec_from_file_location("_mb12_custody_denial_rows", REPO / relative)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)                 # constants only: `main` runs under `__main__` alone
+    module = _producer_module("scripts/authority_custody_denial_proof.py")
     active = module.PHASES.index(phase)
     lines = []
     for first, principals, op, path in module.ROWS:
@@ -283,8 +295,91 @@ def _broker_preservation(raw: bytes, exit_code: int) -> tuple[str, str | None]:
     return result, None
 
 
+def _fail_contract(lines: list[str], exit_code: int, final: str, what: str) -> tuple[str, str | None]:
+    """A FAIL transcript: exit 1, the producer's FAIL final line, and at least one observed `FAIL: ` row. A refusal
+    with no observation (NOT_ROOT, USAGE, an unestablished baseline) is not a proof result at all."""
+    _need(exit_code == 1 and re.fullmatch(final, lines[-1]) is not None
+          and any(line.startswith("FAIL: ") for line in lines[:-1]), "TRANSCRIPT_CONTRACT", what)
+    return PA.FAIL, None
+
+
+def _os_denial(raw: bytes, exit_code: int) -> tuple[str, str | None]:
+    lines = _lines(raw)
+    module = _producer_module(OS_DENIAL_UNIT.split(":")[0])
+    if exit_code == 0:
+        _need(raw in (module.expected_pass(module.DROPINS_NONE), module.expected_pass(module.DROPINS_P1B10R)),
+              "TRANSCRIPT_CONTRACT", "OS_DENIAL PASS not exact")
+        return PA.PASS, None
+    return _fail_contract(lines, exit_code, re.escape(module.final_line(False)), "OS_DENIAL FAIL")
+
+
+def _secret_hygiene(raw: bytes, exit_code: int) -> tuple[str, str | None]:
+    lines = _lines(raw)
+    module = _producer_module(SECRET_HYGIENE_SCOPE.split(":")[0])
+    ceremonies = module.CEREMONIES
+    scope = re.fullmatch(rf"SCOPE: sha256=([0-9a-f]{{64}}) ceremonies={re.escape(','.join(ceremonies))}", lines[0])
+    _need(scope is not None, "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE scope line")
+    digest = scope.group(1)
+    if exit_code != 0:
+        return _fail_contract(lines, exit_code, rf"SECRET_HYGIENE_PROOF=FAIL scope={digest}", "SECRET_HYGIENE FAIL")
+    # A PASS is admissible only when the producer's own (pinned) scope is closed: no open scope decision, every
+    # canonical record named, every DEV window recorded.
+    _need(not module.UNRESOLVED_SCOPE and all(c.record for c in ceremonies.values())
+          and all(c.venue == "S25" or (c.window and None not in c.window) for c in ceremonies.values()),
+          "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE producer scope not closed")
+    _need(len(lines) >= 3 and lines[-1] == f"SECRET_HYGIENE_PROOF=PASS scope={digest}"
+          and re.fullmatch(r"JOURNAL_SCAN: sha256=[0-9a-f]{64} PASS", lines[-2]) is not None,
+          "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE final lines")
+    seen: dict[str, set[str]] = {name: set() for name in ceremonies}
+    for line in lines[1:-2]:
+        item = re.fullmatch(r"ITEM: (\S+) (TRANSCRIPT|PUBLICATION:[A-Z0-9_]+) sha256=([0-9a-f]{64}) bytes=\d+ CLEAN",
+                            line)
+        covered = re.fullmatch(r"COVERED: (\S+) boot=[0-9a-f]{32} window=(\S+)/(\S+)", line)
+        offhost = re.fullmatch(r"OFFHOST: (\S+) S25 \(no DEV journal\)", line)
+        match = item or covered or offhost
+        _need(match is not None and match.group(1) in ceremonies, "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE line")
+        spec = ceremonies[match.group(1)]
+        if item is not None:
+            role = item.group(2)
+            if role != "TRANSCRIPT":
+                _need(role == f"PUBLICATION:{spec.publication}" and (spec.publication_sha256 is None
+                                                                      or item.group(3) == spec.publication_sha256),
+                      "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE publication")
+            seen[match.group(1)].add(role)
+        elif covered is not None:
+            _need(spec.venue == "DEV" and (covered.group(2), covered.group(3)) == tuple(spec.window),
+                  "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE coverage")
+            seen[match.group(1)].add("COVERED")
+        else:
+            _need(spec.venue == "S25", "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE venue")
+            seen[match.group(1)].add("OFFHOST")
+    for name, spec in ceremonies.items():
+        required = {"TRANSCRIPT", "COVERED" if spec.venue == "DEV" else "OFFHOST"}
+        if spec.publication:
+            required.add(f"PUBLICATION:{spec.publication}")
+        _need(required <= seen[name], "TRANSCRIPT_CONTRACT", f"SECRET_HYGIENE scope incomplete {name}")
+    return PA.PASS, None
+
+
+def _preservation_set(raw: bytes, exit_code: int) -> tuple[str, str | None]:
+    lines = _lines(raw)
+    module = _producer_module(PRESERVATION_SET_COMPARE.split(":")[0])
+    _need(len(lines) >= 2, "TRANSCRIPT_CONTRACT", "PRESERVATION_SET short")
+    baseline = re.fullmatch(r"BASELINE: sha256=([0-9a-f]{64}) observedAt=(\S+)", lines[0])
+    observation = re.fullmatch(r"OBSERVATION: sha256=([0-9a-f]{64}) observedAt=(\S+)", lines[1])
+    _need(baseline is not None and observation is not None, "TRANSCRIPT_CONTRACT", "PRESERVATION_SET header")
+    _need(baseline.group(1) in module.ACCEPTED_BASELINES, "TRANSCRIPT_CONTRACT", "PRESERVATION_SET baseline not accepted")
+    if exit_code == 0:
+        _need(raw == module.expected_pass(baseline.group(1), baseline.group(2), observation.group(1),
+                                          observation.group(2)), "TRANSCRIPT_CONTRACT", "PRESERVATION_SET PASS not exact")
+        return PA.PASS, None
+    return _fail_contract(lines, exit_code, rf"PRESERVATION_SET_PROOF=FAIL baseline={baseline.group(1)}",
+                          "PRESERVATION_SET FAIL")
+
+
 CONTRACTS: Mapping[str, Callable[[bytes, int], tuple[str, str | None]]] = {
-    CUSTODY_DENIAL: _custody_denial, DEPLOYER_BOUNDARY: _deployer_boundary, BROKER_PRESERVATION: _broker_preservation}
+    CUSTODY_DENIAL: _custody_denial, DEPLOYER_BOUNDARY: _deployer_boundary, BROKER_PRESERVATION: _broker_preservation,
+    OS_DENIAL_UNIT: _os_denial, SECRET_HYGIENE_SCOPE: _secret_hygiene, PRESERVATION_SET_COMPARE: _preservation_set}
 
 
 def admit_proof(name: str, item: Any, trust: ReadinessTrustV1) -> dict[str, Any]:
