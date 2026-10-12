@@ -31,6 +31,7 @@ for _p in (TOOLS, Path(__file__).resolve().parent):
 import mb6_dr5_target as T  # noqa: E402
 import mb6_ledger_verifier as V  # noqa: E402
 import mb6_operator as O  # noqa: E402
+import e19_p1b10_upgrade as E19  # noqa: E402
 import post_reboot_repin as RP  # noqa: E402
 
 CONTROL = "78683b2a36dd5bd2674e9664712b13702d1aa404"
@@ -302,7 +303,10 @@ class PackageTests(unittest.TestCase):
                    "lilith_authority_root": "services/authority-dev", "lilith_owner_memory": "services/owner-memory-control",
                    "lilith_memory": "services/core-api", "lilith_recovery_witness": "services/recovery-witness"}
         for module, pin in rows.items():                                               # control bytes = the pins
-            self.assertEqual(sha((ROOT / sources[module.split("/")[0]] / module).read_bytes()), pin, module)
+            data = (ROOT / sources[module.split("/")[0]] / module).read_bytes()
+            if module == E19.PR1_ACCEPTANCE_MEMBER:          # historical aee323e pin; source carries the E-19 fix
+                data = E19.reverse_e19(data)
+            self.assertEqual(sha(data), pin, module)
 
     def test_go_template_is_the_operator_lines(self):
         block = section(self.text, "The lines are exactly `mb6_operator.MB6_GO_LINES`:\n\n```text\n", "```")
@@ -442,6 +446,8 @@ class ReadinessProbeTests(unittest.TestCase):
             for package, base in sources.items():
                 shutil.copytree(ROOT / base / package, release / package,
                                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            member = release / E19.PR1_ACCEPTANCE_MEMBER        # the installed aee323e bytes, not the E-19 source
+            member.write_bytes(E19.reverse_e19(member.read_bytes()))
             wrapper = Path(work) / "lilith-authority-ledger-dev"
             shutil.copyfile(ROOT / "services/authority-dev/bin/lilith-authority-ledger-dev", wrapper)
             probe = (O.READINESS_PROBE.replace("/opt/lilith-authority-dev/current", release.as_posix())

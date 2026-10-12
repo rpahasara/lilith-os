@@ -700,7 +700,7 @@ class BuilderAdmissionTests(unittest.TestCase):
 
 @unittest.skipUnless(POSIX, "the synthetic PR-1 host needs POSIX ownership and modes")
 class EndToEndTests(unittest.TestCase):
-    def test_all_seven_producers_leave_only_the_e19_release_defect(self):
+    def test_all_seven_producers_and_the_corrected_e19_judge_give_synthetic_ready(self):
         """A synthetic TEST result under TEST trust and a closed TEST scope; it says nothing about DEV readiness."""
         transcripts = dict(T1.transcripts())
         transcripts["OS_DENIAL"] = (OS.expected_pass(OS.DROPINS_NONE), 0)
@@ -719,8 +719,10 @@ class EndToEndTests(unittest.TestCase):
                                    environment="test", trust=trust)
             result = case.evaluate(case.roundtrip(raw))
             failing = {n: o.reason for n, o in result.checks.items() if o.status != "PASS"}
-            self.assertEqual(failing, {"E19_ACTIVATION_DARK": "ACTIVATION_NOT_DARK"})
-            self.assertEqual(result.status, "NOT_READY")
+            # Before the E-19 correction this left exactly E19_ACTIVATION_DARK. TEST trust only: no DEV meaning.
+            self.assertEqual(failing, {})
+            self.assertEqual(result.status, "READY")
+            self.assertEqual(report["expectedNotReady"], [])
 
 
 class DevFailsClosedTests(unittest.TestCase):

@@ -139,6 +139,9 @@ KNOWN_PACKAGE_DEFECTS = (
     "'ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT'; the host prints the complete line with "
     "'advisoryConfigEnabled=false'; E19_ACTIVATION_DARK FAILs ACTIVATION_NOT_DARK on every real observation",
 )
+# Installed releases whose judge carries that defect. The repository judge is corrected (E-19 release maintenance
+# record); the defect stays real for as long as aee323e is the installed release.
+E19_DEFECTIVE_RELEASES = frozenset({"aee323e94412accbe321bc84eae78c5b8cf95afc"})
 
 
 @dataclass(frozen=True)
@@ -522,14 +525,15 @@ def build(build_inputs: Any, *, environment: str, trust: ReadinessTrustV1 | None
     raw = envelope_bytes(envelope)
     _need(len(raw) <= MAX_ENVELOPE, "ENVELOPE_TOO_LARGE")
     missing = [name for name in PA.REQUIRED_PROOFS if name not in proofs]
+    defective = release["releaseSha"] in E19_DEFECTIVE_RELEASES
     failing = [name for name, proof in proofs.items() if proof["result"] != PA.PASS]
     report = {"envelopeSha256": _sha256(raw), "inputsSha256": envelope["inputsSha256"],
               "expectedNotReady": sorted(
                   [f"PROOF_MISSING:{name}" for name in missing] + [f"PROOF_NOT_PASS:{name}" for name in failing]
                   + (["E20_SNAPSHOT_INVENTORY:SNAPSHOT_INVENTORY_ABSENT_PR2"] if snapshot is None else [])
                   + (["E21_OFFHOST_REGISTER:OFFHOST_REGISTER_ABSENT_PR3"] if material is None else [])
-                  + ["E19_ACTIVATION_DARK:ACTIVATION_NOT_DARK"]),
-              "knownPackageDefects": list(KNOWN_PACKAGE_DEFECTS), "readinessEvaluated": False,
+                  + (["E19_ACTIVATION_DARK:ACTIVATION_NOT_DARK"] if defective else [])),
+              "knownPackageDefects": list(KNOWN_PACKAGE_DEFECTS) if defective else [], "readinessEvaluated": False,
               "authorityGranted": False}
     return raw, report
 

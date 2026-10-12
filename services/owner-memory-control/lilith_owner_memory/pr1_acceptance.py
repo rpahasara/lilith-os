@@ -455,7 +455,21 @@ class ActivationObservationV1:
     b1c_unchanged: bool
 
 
-ACTIVATION_DARK_LINE = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT"
+# E-19: the COMPLETE line the B1c activation verifier prints while the grant is absent
+# (`scripts/dev_deployer/lilith_activation_verify.py`, NOT_ACCEPTED branch), byte-identical in every
+# preserved DEV host POST. Exact equality only: no prefix, trim, case or field-order tolerance.
+ACTIVATION_DARK_LINE = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false"
+
+
+def _activation_evidence(value: Any) -> str | None:
+    """The observed line as package evidence: a UTF-8-encodable `str`, else None (never a canonicalization crash)."""
+    if type(value) is not str:
+        return None
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return value
 
 # PR-2 (snapshot inventory). Absent until PR-2 exists; never a default pass.
 SNAPSHOT_ACCEPTED = "ACCEPTED"
@@ -757,10 +771,13 @@ def evaluate_pr1_acceptance(inputs: Pr1AcceptanceInputsV1, *, mode: str) -> Pr1A
     # E-19 activation stays dark.
     activation = inputs.activation
     record("E19_ACTIVATION_DARK", None if isinstance(activation, ActivationObservationV1)
-           and activation.line == ACTIVATION_DARK_LINE and activation.b1c_unchanged is True
+           and type(activation.line) is str and activation.line == ACTIVATION_DARK_LINE
+           and activation.b1c_unchanged is True
            else ("ACTIVATION_UNOBSERVED" if activation is None else "ACTIVATION_NOT_DARK"))
+    # A malformed value FAILs above and is evidenced as null: it never reaches (or crashes) the package digest.
     evidence["activation"] = None if not isinstance(activation, ActivationObservationV1) else {
-        "line": activation.line, "b1cUnchanged": activation.b1c_unchanged}
+        "line": _activation_evidence(activation.line),
+        "b1cUnchanged": activation.b1c_unchanged if type(activation.b1c_unchanged) is bool else None}
 
     # E-20 PR-2 snapshot inventory (never manufactured here).
     record("E20_SNAPSHOT_INVENTORY", _snapshot_reason(inputs.snapshot_inventory))
