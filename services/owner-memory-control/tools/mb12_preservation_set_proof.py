@@ -6,11 +6,17 @@ DESIGN / SOURCE ONLY. Running `observe` live needs a separate owner authorizatio
 
 Preflight §19 E-23 is "preservation set (B1b-3d §23) unchanged: Stage III, broker, API unit"; B1b-3d §23 defines the
 set: "the B1c helper, library, verifier, and sudoers; activation; the legacy broker release, selector, units,
-`dev.json`, and state file metadata; the Stage III artifacts; the API unit". `MEMBERS` is exactly that set. Two forms:
+`dev.json`, and state file metadata; the Stage III artifacts; the API unit". `MEMBERS` is exactly that set (22). Two
+forms:
 
-- `observe` (root, DEV): one read-only `lstat` / bounded read of every member (never through a symlink; directories
-  listed recursively with per-entry hashes; the broker state files as metadata only; absent members recorded as
-  ABSENT). It prints one canonical JSON observation. An observation is evidence, never a proof.
+- `observe` (root, DEV): one read-only observation of every member. Every directory is opened `O_DIRECTORY |
+  O_NOFOLLOW` and walked relative to its descriptor; every entry is `lstat`-ed through that descriptor; every regular
+  file is opened `O_NOFOLLOW` through it and its `fstat` must be the same file (device, inode, size, mtime) before and
+  after the read; symlinks are recorded by target and never followed. Trees record every entry (path, type, owner,
+  mode, size, SHA-256), so additions, removals and modifications all change the observation. Bounds (`LIMITS`) are
+  checked BEFORE allocation and a member that exceeds one, holds an unsupported type, or changes during the read is
+  recorded as `refused` (never truncated); a refused member is never EQUAL. The broker state files are metadata only
+  (§23); absent members are recorded ABSENT. It prints one canonical JSON observation: evidence, never a proof.
 - `compare <baseline.json> <observation.json>` (owner, off-host): member-by-member equality against a BASELINE
   observation that the owner accepted and that is pinned by its SHA-256 in `ACCEPTED_BASELINES` (EMPTY: no baseline
   is accepted, so compare FAILS `BASELINE_NOT_ESTABLISHED` today). A PASS transcript is exactly `expected_pass(…)`.
@@ -39,7 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 OBSERVATION_TYPE = "LILITH_MB12_PRESERVATION_SET_OBSERVATION"
-FILE, TREE, LINK, LISTING, METADATA = "FILE", "TREE", "LINK", "LISTING", "METADATA"
+FILE, TREE, LINK, METADATA = "FILE", "TREE", "LINK", "METADATA"
 STAGE3_VAULT = "/var/lib/.lilith-memory-broker-stage3-a2"
 # B1b-3d §23, in order. Paths: scripts/dev_deployer/install_dev_deployer_boundary.sh (B1c),
 # scripts/verify_broker_dev_current_incarnation.py (broker, Stage III), the B1b-3d design §2 (API unit).
@@ -49,7 +55,7 @@ MEMBERS: tuple[tuple[str, str, str], ...] = (
     ("B1C_VERIFIER", "/usr/local/sbin/lilith-activation-verify", FILE),
     ("B1C_SUDOERS", "/etc/sudoers.d/lilith-dev-deployer", FILE),
     ("ACTIVATION", "/etc/lilith-os-dev", TREE),
-    ("BROKER_RELEASES", "/opt/lilith-memory-broker/releases", LISTING),
+    ("BROKER_RELEASES", "/opt/lilith-memory-broker/releases", TREE),       # the release CONTENTS, every file hashed
     ("BROKER_SELECTOR", "/opt/lilith-memory-broker/current", LINK),
     ("BROKER_SERVICE_UNIT", "/etc/systemd/system/lilith-memory-broker.service", FILE),
     ("BROKER_SOCKET_UNIT", "/etc/systemd/system/lilith-memory-broker.socket", FILE),
@@ -71,14 +77,25 @@ MEMBERS: tuple[tuple[str, str, str], ...] = (
 EXCLUDED_PREFIXES = ("/etc/credstore", "/etc/lilith-authority", "/var/lib/lilith-authority", "/opt/lilith-authority",
                      "/etc/lilith-recovery-witness", "/var/lib/lilith-recovery-witness", "/run/credentials",
                      "/var/lib/systemd/credential.secret", "/run/lilith-authority", "/run/lilith-recovery-witness")
-MAX_FILE = 16 * 1024 * 1024
-MAX_TREE_ENTRIES = 4096
+# Bounds, per member, checked before allocation. The broker release holds a Python venv whose size on DEV is NOT
+# observed: these bound memory (≈ 200 B of JSON per entry), time and output while admitting a venv of tens of thousands
+# of files; a larger tree is REFUSED (the proof then cannot pass until an owner decision), never truncated.
+LIMITS = {"maxFileBytes": 64 * 1024 * 1024, "maxTreeEntries": 65536, "maxTreeBytes": 1024 * 1024 * 1024,
+          "maxDepth": 32}
+CHUNK = 1 << 20
 # Owner-accepted baseline observations: SHA-256 of the exact observation bytes -> the acceptance record SHA-256. EMPTY.
 ACCEPTED_BASELINES: Mapping[str, str] = {}
 NONCLAIM = ("NONCLAIM: DR-5 equality, HELD / custody / CURRENT / witness / ledger preservation and broker continuity "
             "are not judged here")
-_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NONBLOCK", 0)
+# TEST seam only: called after an entry's `lstat` and before it is opened (a race can be simulated).
+_AFTER_LSTAT: Callable[[int | None, str], None] | None = None
+
+
+class Refusal(Exception):
+    pass
 
 
 def _kind(mode: int) -> str:
@@ -96,59 +113,109 @@ def _meta(meta: os.stat_result) -> dict[str, Any]:
             "mode": format(stat.S_IMODE(meta.st_mode), "04o")}
 
 
-def _file_sha(path: str, meta: os.stat_result) -> str | None:
-    if meta.st_size > MAX_FILE:
-        return None
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+def _same(a: os.stat_result, b: os.stat_result) -> bool:
+    return (a.st_dev, a.st_ino, a.st_size, a.st_mtime_ns, stat.S_IFMT(a.st_mode)) == \
+        (b.st_dev, b.st_ino, b.st_size, b.st_mtime_ns, stat.S_IFMT(b.st_mode))
+
+
+class _Budget:
+    def __init__(self) -> None:
+        self.entries = 0
+        self.bytes = 0
+
+    def entry(self) -> None:
+        self.entries += 1
+        if self.entries > LIMITS["maxTreeEntries"]:
+            raise Refusal("TREE_TOO_MANY_ENTRIES")
+
+    def size(self, size: int) -> None:
+        if size > LIMITS["maxFileBytes"]:
+            raise Refusal("FILE_TOO_LARGE")
+        self.bytes += size
+        if self.bytes > LIMITS["maxTreeBytes"]:
+            raise Refusal("TREE_TOO_MANY_BYTES")
+
+
+def _hash_file(dirfd: int | None, name: str, meta: os.stat_result, budget: _Budget) -> str:
+    budget.size(meta.st_size)                                   # before any allocation
+    fd = os.open(name, _FILE_FLAGS, dir_fd=dirfd)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not _same(meta, opened):
+            raise Refusal("IDENTITY_CHANGED")
         digest, total = hashlib.sha256(), 0
-        while chunk := os.read(fd, 1 << 20):
+        while chunk := os.read(fd, CHUNK):
             total += len(chunk)
-            if total > MAX_FILE:
-                return None
+            if total > meta.st_size:
+                raise Refusal("CHANGED_DURING_READ")
             digest.update(chunk)
+        if total != meta.st_size or not _same(meta, os.fstat(fd)):
+            raise Refusal("CHANGED_DURING_READ")
         return digest.hexdigest()
     finally:
         os.close(fd)
 
 
-def _entry(path: str) -> dict[str, Any]:
+def _entry(dirfd: int | None, name: str, budget: _Budget, depth: int) -> dict[str, Any]:
+    """One entry relative to `dirfd`, never through a symlink. Directories recurse; other types are refused."""
     try:
-        meta = os.lstat(path)
+        meta = os.lstat(name, dir_fd=dirfd)
     except FileNotFoundError:
         return {"kind": "ABSENT"}
+    if _AFTER_LSTAT is not None:
+        _AFTER_LSTAT(dirfd, name)
     value = _meta(meta)
     if value["kind"] == "REGULAR":
         value["size"] = meta.st_size
-        value["sha256"] = _file_sha(path, meta)
+        value["sha256"] = _hash_file(dirfd, name, meta, budget)
     elif value["kind"] == "SYMLINK":
-        value["target"] = os.readlink(path)
+        value["target"] = os.readlink(name, dir_fd=dirfd)
+    elif value["kind"] == "DIRECTORY":
+        if depth > LIMITS["maxDepth"]:
+            raise Refusal("TREE_TOO_DEEP")
+        fd = os.open(name, _DIR_FLAGS, dir_fd=dirfd)
+        try:
+            if not _same(meta, os.fstat(fd)):
+                raise Refusal("IDENTITY_CHANGED")
+            names = []
+            with os.scandir(fd) as iterator:
+                for item in iterator:
+                    budget.entry()                              # before the name is kept
+                    names.append(item.name)
+            value["entries"] = [[child, _entry(fd, child, budget, depth + 1)] for child in sorted(names)]
+        finally:
+            os.close(fd)
+    else:
+        raise Refusal("UNSUPPORTED_TYPE")
     return value
 
 
 def observe_member(path: str, form: str) -> dict[str, Any]:
-    if form == METADATA:
+    """The observation of one member. A refusal is recorded (with the member's own `lstat` facts if any), never
+    hidden; the member is then never EQUAL."""
+    parent, name = os.path.split(path)
+    budget = _Budget()
+    try:
+        parent_fd = os.open(parent, _DIR_FLAGS)
+    except FileNotFoundError:
+        return {"kind": "ABSENT"}
+    try:
+        if form == METADATA:
+            try:
+                return _meta(os.lstat(name, dir_fd=parent_fd))
+            except FileNotFoundError:
+                return {"kind": "ABSENT"}
         try:
-            return _meta(os.lstat(path))
-        except FileNotFoundError:
-            return {"kind": "ABSENT"}
-    value = _entry(path)
-    if form == LISTING and value["kind"] == "DIRECTORY":
-        value["names"] = sorted(os.listdir(path))[:MAX_TREE_ENTRIES + 1]
-    if form == TREE and value["kind"] == "DIRECTORY":
-        entries, stack = [], [""]
-        while stack and len(entries) <= MAX_TREE_ENTRIES:
-            relative = stack.pop()
-            for name in sorted(os.listdir(os.path.join(path, relative) if relative else path)):
-                child = f"{relative}/{name}" if relative else name
-                item = _entry(os.path.join(path, child))
-                entries.append([child, item])
-                if item["kind"] == "DIRECTORY":
-                    stack.append(child)
-        value["entries"] = sorted(entries, key=lambda pair: pair[0])
-    return value
+            value = _entry(parent_fd, name, budget, 0)
+        except Refusal as refusal:
+            return {"refused": refusal.args[0]}
+        if form == TREE and value["kind"] not in ("DIRECTORY", "ABSENT"):
+            return {"refused": "NOT_A_DIRECTORY", "kind": value["kind"]}
+        if form in (FILE, LINK) and value["kind"] == "DIRECTORY":
+            return {"refused": "UNEXPECTED_DIRECTORY", "kind": "DIRECTORY"}
+        return value
+    finally:
+        os.close(parent_fd)
 
 
 def canonical(document: Mapping[str, Any]) -> bytes:
@@ -160,7 +227,7 @@ def observe(*, member: Callable[[str, str], dict] = observe_member, euid: Callab
     if euid() != 0:
         raise PermissionError("NOT_ROOT")
     return canonical({"observationType": OBSERVATION_TYPE, "schemaVersion": 1, "environment": "dev",
-                      "observedAt": now(),
+                      "observedAt": now(), "limits": dict(LIMITS),
                       "members": [{"name": name, "path": path, "form": form, "observed": member(path, form)}
                                   for name, path, form in MEMBERS]})
 
@@ -182,9 +249,11 @@ def parse_observation(raw: bytes) -> dict[str, Any]:
     except (UnicodeDecodeError, ValueError) as exc:
         raise CompareError("OBSERVATION_MALFORMED") from exc
     if not isinstance(doc, dict) or canonical(doc) != raw or set(doc) != {"observationType", "schemaVersion",
-                                                                          "environment", "observedAt", "members"} \
+                                                                          "environment", "observedAt", "limits",
+                                                                          "members"} \
             or doc["observationType"] != OBSERVATION_TYPE or doc["schemaVersion"] != 1 or doc["environment"] != "dev" \
-            or not isinstance(doc["observedAt"], str) or not _INSTANT.fullmatch(doc["observedAt"]):
+            or not isinstance(doc["observedAt"], str) or not _INSTANT.fullmatch(doc["observedAt"]) \
+            or doc["limits"] != LIMITS:
         raise CompareError("OBSERVATION_MALFORMED")
     members = doc["members"]
     if not isinstance(members, list) or [(m.get("name"), m.get("path"), m.get("form")) if isinstance(m, dict)
@@ -201,6 +270,13 @@ def expected_pass(baseline_sha256: str, baseline_at: str, observation_sha256: st
     lines += [f"EQUAL: {name} {path}" for name, path, _form in MEMBERS]
     lines += [NONCLAIM, f"PRESERVATION_SET_PROOF=PASS baseline={baseline_sha256}"]
     return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def complete(observed: Any) -> bool:
+    """No refusal anywhere in the member (a refused, oversized, changing or unsupported member is never EQUAL)."""
+    if not isinstance(observed, Mapping) or "refused" in observed:
+        return False
+    return all(isinstance(pair, list) and len(pair) == 2 and complete(pair[1]) for pair in observed.get("entries", ()))
 
 
 def compare(baseline_raw: bytes, observation_raw: bytes, *, accepted: Mapping[str, str] = ACCEPTED_BASELINES,
@@ -222,7 +298,7 @@ def compare(baseline_raw: bytes, observation_raw: bytes, *, accepted: Mapping[st
     say(f"OBSERVATION: sha256={observation_sha} observedAt={observation['observedAt']}")
     failures = []
     for before, after in zip(baseline["members"], observation["members"]):
-        if before["observed"] == after["observed"] and _complete(after["observed"]):
+        if before["observed"] == after["observed"] and complete(after["observed"]):
             say(f"EQUAL: {after['name']} {after['path']}")
         else:
             failures.append(f"FAIL: CHANGED_OR_INCOMPLETE {after['name']} {after['path']}")
@@ -231,16 +307,6 @@ def compare(baseline_raw: bytes, observation_raw: bytes, *, accepted: Mapping[st
     say(NONCLAIM)
     say(f"PRESERVATION_SET_PROOF={'FAIL' if failures else 'PASS'} baseline={baseline_sha}")
     return not failures
-
-
-def _complete(observed: Mapping[str, Any]) -> bool:
-    """A member whose bytes could not be hashed (too large, not regular after open) or whose tree was truncated
-    is never EQUAL, even when the baseline shows the same gap."""
-    if observed.get("kind") == "REGULAR" and "sha256" in observed and observed["sha256"] is None:
-        return False
-    if len(observed.get("entries", ())) > MAX_TREE_ENTRIES or len(observed.get("names", ())) > MAX_TREE_ENTRIES:
-        return False
-    return all(_complete(item) for _name, item in observed.get("entries", ()))
 
 
 def main(argv: Sequence[str]) -> int:

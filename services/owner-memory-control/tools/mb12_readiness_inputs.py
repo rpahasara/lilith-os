@@ -112,8 +112,8 @@ PRODUCER_SCRIPT_SHA256 = {
     "scripts/verify_broker_dev_current_incarnation.py":
         "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf",
     "services/owner-memory-control/tools/mb12_os_denial_proof.py": "e67542287f869e6d8e56ee30321593424e41c964e682e5326fd8dc15a6fd8ef3",
-    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "a23886d91502fcdbe5b764b3a5aac9c9854762a3912fa4dccd39c2549c4ce5dc",
-    "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "369c854c450c4b187a8ae42d3d3b1dbe030b214c2519a95c2c284c38306e8e5f",
+    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "251fb5409eb75693316c2dba560ea0c8446fe66e4e22a15d0a744350cc3b97de",
+    "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "79f47ae8f25e5d20f0066485196e910f78e3949c03dc97bebfbbf84681e485f8",
 }
 # Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s. EMPTY.
 DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {}
@@ -316,23 +316,48 @@ def _os_denial(raw: bytes, exit_code: int) -> tuple[str, str | None]:
 def _secret_hygiene(raw: bytes, exit_code: int) -> tuple[str, str | None]:
     lines = _lines(raw)
     module = _producer_module(SECRET_HYGIENE_SCOPE.split(":")[0])
-    ceremonies = ",".join(module.PR1B_CREDENTIAL_CEREMONIES)
-    scope = re.fullmatch(rf"SCOPE: sha256=([0-9a-f]{{64}}) ceremonies={re.escape(ceremonies)}", lines[0])
+    ceremonies = module.CEREMONIES
+    scope = re.fullmatch(rf"SCOPE: sha256=([0-9a-f]{{64}}) ceremonies={re.escape(','.join(ceremonies))}", lines[0])
     _need(scope is not None, "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE scope line")
     digest = scope.group(1)
     if exit_code != 0:
         return _fail_contract(lines, exit_code, rf"SECRET_HYGIENE_PROOF=FAIL scope={digest}", "SECRET_HYGIENE FAIL")
+    # A PASS is admissible only when the producer's own (pinned) scope is closed: no open scope decision, every
+    # canonical record named, every DEV window recorded.
+    _need(not module.UNRESOLVED_SCOPE and all(c.record for c in ceremonies.values())
+          and all(c.venue == "S25" or (c.window and None not in c.window) for c in ceremonies.values()),
+          "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE producer scope not closed")
     _need(len(lines) >= 3 and lines[-1] == f"SECRET_HYGIENE_PROOF=PASS scope={digest}"
           and re.fullmatch(r"JOURNAL_SCAN: sha256=[0-9a-f]{64} PASS", lines[-2]) is not None,
           "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE final lines")
-    seen: dict[str, set[str]] = {}
+    seen: dict[str, set[str]] = {name: set() for name in ceremonies}
     for line in lines[1:-2]:
-        item = re.fullmatch(r"ITEM: (\S+) (TRANSCRIPT|PUBLICATION) sha256=[0-9a-f]{64} bytes=\d+ CLEAN", line)
-        _need(item is not None and item.group(1) in module.PR1B_CREDENTIAL_CEREMONIES, "TRANSCRIPT_CONTRACT",
-              "SECRET_HYGIENE item line")
-        seen.setdefault(item.group(1), set()).add(item.group(2))
-    _need(all(set(roles) <= seen.get(name, set()) for name, roles in module.PR1B_CREDENTIAL_CEREMONIES.items()),
-          "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE scope incomplete")
+        item = re.fullmatch(r"ITEM: (\S+) (TRANSCRIPT|PUBLICATION:[A-Z0-9_]+) sha256=([0-9a-f]{64}) bytes=\d+ CLEAN",
+                            line)
+        covered = re.fullmatch(r"COVERED: (\S+) boot=[0-9a-f]{32} window=(\S+)/(\S+)", line)
+        offhost = re.fullmatch(r"OFFHOST: (\S+) S25 \(no DEV journal\)", line)
+        match = item or covered or offhost
+        _need(match is not None and match.group(1) in ceremonies, "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE line")
+        spec = ceremonies[match.group(1)]
+        if item is not None:
+            role = item.group(2)
+            if role != "TRANSCRIPT":
+                _need(role == f"PUBLICATION:{spec.publication}" and (spec.publication_sha256 is None
+                                                                      or item.group(3) == spec.publication_sha256),
+                      "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE publication")
+            seen[match.group(1)].add(role)
+        elif covered is not None:
+            _need(spec.venue == "DEV" and (covered.group(2), covered.group(3)) == tuple(spec.window),
+                  "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE coverage")
+            seen[match.group(1)].add("COVERED")
+        else:
+            _need(spec.venue == "S25", "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE venue")
+            seen[match.group(1)].add("OFFHOST")
+    for name, spec in ceremonies.items():
+        required = {"TRANSCRIPT", "COVERED" if spec.venue == "DEV" else "OFFHOST"}
+        if spec.publication:
+            required.add(f"PUBLICATION:{spec.publication}")
+        _need(required <= seen[name], "TRANSCRIPT_CONTRACT", f"SECRET_HYGIENE scope incomplete {name}")
     return PA.PASS, None
 
 
