@@ -654,7 +654,9 @@ class ReleaseIdentityTests(unittest.TestCase):
         for text in texts:
             for needle in ("activation grant", "ACTIVATION=ACCEPTED", "lilith-canonical-activation", "sudoers"):
                 self.assertNotIn(needle, text)
-        self.assertEqual(PA.ACTIVATION_DARK_LINE, "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT")
+        # E-19 (record slice-15b2b-b1b3e-e19-release-maintenance.md): the complete host line, exact.
+        self.assertEqual(PA.ACTIVATION_DARK_LINE,
+                         "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false")
 
 
 if __name__ == "__main__":

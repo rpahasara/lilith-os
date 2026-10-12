@@ -547,7 +547,6 @@ class ReadinessInputTests(unittest.TestCase):
         self.assertEqual(failing, {
             "E07_SIGNER_CUSTODY_DENIAL": "PROOF_MISSING:OS_DENIAL",
             "E18_OFFHOST_REPRODUCTION_INPUTS": "OFFHOST_MATERIAL_UNAVAILABLE",
-            "E19_ACTIVATION_DARK": "ACTIVATION_NOT_DARK",
             "E20_SNAPSHOT_INVENTORY": "SNAPSHOT_INVENTORY_ABSENT_PR2",
             "E21_OFFHOST_REGISTER": "OFFHOST_REGISTER_ABSENT_PR3",
             "E22_SECRET_HYGIENE": "PROOF_MISSING:SECRET_HYGIENE",
@@ -559,13 +558,13 @@ class ReadinessInputTests(unittest.TestCase):
         raw, report = self.build(trust=self.trust(pr2=t2, pr3=t3), pr2=pr2, pr3=pr3)
         result = self.evaluate(self.roundtrip(raw))
         failing = {name for name, outcome in result.checks.items() if outcome.status != "PASS"}
-        self.assertEqual(failing, {"E07_SIGNER_CUSTODY_DENIAL", "E19_ACTIVATION_DARK", "E22_SECRET_HYGIENE",
-                                   "E23_PRESERVATION_SET"})
+        self.assertEqual(failing, {"E07_SIGNER_CUSTODY_DENIAL", "E22_SECRET_HYGIENE", "E23_PRESERVATION_SET"})
         material = self.roundtrip(raw)["offHostMaterial"]
         self.assertEqual(M3.offhost_reproduction(material, result.package), [])
-        self.assertEqual(report["expectedNotReady"], ["E19_ACTIVATION_DARK:ACTIVATION_NOT_DARK",
-                                                      "PROOF_MISSING:OS_DENIAL", "PROOF_MISSING:PRESERVATION_SET",
+        # The synthetic release is not aee323e, so the corrected judge's E-19 is not an expected gap here.
+        self.assertEqual(report["expectedNotReady"], ["PROOF_MISSING:OS_DENIAL", "PROOF_MISSING:PRESERVATION_SET",
                                                       "PROOF_MISSING:SECRET_HYGIENE"])
+        self.assertEqual(report["knownPackageDefects"], [])
 
     def test_a_verified_fail_transcript_passes_through_as_fail(self):
         names = {"BROKER_DENIAL", "BROKER_PRESERVATION"}
@@ -580,17 +579,19 @@ class ReadinessInputTests(unittest.TestCase):
 
     def test_activation_is_the_complete_host_line_passed_verbatim(self):
         self.assertEqual(self.roundtrip(self.build()[0])["activation"]["line"], REAL_HOST_ACTIVATION)
-        for stdout, exit_code in ((PA.ACTIVATION_DARK_LINE + "\n", 1), (REAL_HOST_ACTIVATION + "\n", 0),
+        for stdout, exit_code in (("ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT\n", 1),
+                                  (REAL_HOST_ACTIVATION + "\n", 0),
                                   (REAL_HOST_ACTIVATION, 1), ("ACTIVATION=ACCEPTED {}\n", 1)):
             activation = {"stdout": stdout, "exitCode": exit_code, "b1cUnchanged": True, "observedAt": T1,
                           "evidenceSha256": H("a")}
             with self.subTest(stdout=stdout, exit_code=exit_code), self.assertRaises(RI.Refused):
                 self.build(activation=activation)
 
-    def test_known_defect_e19_rejects_the_complete_host_line(self):
-        """Pins the PR #185-class mismatch in the release judge (record §8). A fix must change this test."""
-        self.assertEqual(PA.ACTIVATION_DARK_LINE, "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT")
-        self.assertTrue(RI.HOST_ACTIVATION_DARK_LINE.startswith(PA.ACTIVATION_DARK_LINE + " "))
+    def test_e19_judge_is_corrected_in_source_and_the_defect_scoped_to_aee323e(self):
+        """Record §8 defect, corrected in source by the E-19 release-maintenance slice (OD-M12-5 / E19-D1, PROPOSED).
+        The installed release aee323e keeps the 3-field judge until a separately authorized release transition."""
+        self.assertEqual(PA.ACTIVATION_DARK_LINE, RI.HOST_ACTIVATION_DARK_LINE)
+        self.assertEqual(RI.E19_DEFECTIVE_RELEASES, frozenset({RI.DEV_PINS["releaseSha"]}))
         dev = (ROOT / "scripts/dev_deployer/lilith_activation_verify.py").read_text(encoding="utf-8")
         self.assertIn('print(f"ACTIVATION=NOT_ACCEPTED reason={exc.reason} advisoryConfigEnabled={advisory}")', dev)
 
@@ -751,7 +752,8 @@ class SourceGuardTests(unittest.TestCase):
         pinned = release_file_set.SHARED_HASHES
         path = "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py"
         self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(), pinned[path])
-        self.assertEqual(pinned[path], "e0928854e1fcf4107458939ba9ebf1903cf7a4d0ab6808f7e89108db1444bbff")
+        # e0928854 (aee323e) -> the E-19 correction (test_b1b3e_e19_release_maintenance pins the exact edits).
+        self.assertEqual(pinned[path], "0d2e6ccabf916425a1dfa7dc587bfcb3d7a232eb6c52c5cd938d573199715cff")
         for name in self.SOURCES:
             self.assertFalse(any(name in key for key in pinned), name)
 
