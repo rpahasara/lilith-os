@@ -232,10 +232,15 @@ class Hammer:
 # --------------------------------------------------------------------- windows ---
 
 class Window:
-    """One observation window: exec attempts, process invocations, decryptions and credential failures."""
+    """One observation window: NEW exec attempts, process invocations, decryptions and credential failures.
+
+    The service incarnation already running when the window opens (its InvocationID) is recorded and excluded:
+    systemd's own exit / stop messages about it carry its ID, and its child may write its record after `active` is
+    reported (Type=simple). Any OTHER invocation ID in the window is a new exec attempt."""
 
     def __init__(self, expected_credential: str):
         self.expected = expected_credential
+        self.preexisting = show(SERVICE, "InvocationID").get("InvocationID", "")
         run([JOURNALCTL, "--sync"])
         self.t0 = time.time()
         self.usec0 = int(self.t0 * 1_000_000)
@@ -261,9 +266,11 @@ class Window:
         log = Path(f"/var/lib/{PATHS['state']}/invocations.jsonl")
         if log.exists():
             records = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
-        records = [r for r in records if r["t"] >= self.t0]
-        return {"serviceExecAttempts": len(invocations), "invocationIds": sorted(invocations),
-                "processInvocations": len(records),
+        records = [r for r in records if r["t"] >= self.t0 and (not self.preexisting
+                                                                 or r["invocation"] != self.preexisting)]
+        new = sorted(invocations - {self.preexisting})
+        return {"serviceExecAttempts": len(new), "invocationIds": new, "preexistingInvocationId": self.preexisting,
+                "allInvocationIdsMentioned": sorted(invocations), "processInvocations": len(records),
                 "credentialDecryptionsObserved": sum(1 for r in records if r["credentialSha256"] == self.expected),
                 "credentialSetupFailures": failures,
                 "processInvocationIds": [r["invocation"] for r in records]}

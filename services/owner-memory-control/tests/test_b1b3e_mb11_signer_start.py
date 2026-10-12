@@ -16,6 +16,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -508,9 +509,168 @@ class StaticBoundaryTests(unittest.TestCase):
             self.assertFalse(needle in source, needle)
 
     def test_no_live_capable_operator_or_workflow_change_in_this_slice(self):
+        # Owner exception (PR #183, 2026-10-12): the ONE disposable-runner synthetic restart-boundary probe step is the
+        # only M-B11 workflow reference allowed; everything else stays prohibited (`mb11_workflow_violations`).
         self.assertFalse((TOOLS / "mb11_operator.py").exists())
-        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
-            self.assertNotIn("mb11", workflow.read_text(encoding="utf-8"), workflow.name)
+        self.assertEqual(mb11_workflow_violations(workflow_texts()), [])
+
+
+# ----------------------------------------------------------- M-B11 workflow guard (owner exception) ---
+# The single approved M-B11 workflow reference: the synthetic restart-boundary probe (PR-A1, OD-M11-11) in the
+# read-only `repository-contracts` job of `ci.yml`, byte-exact. It drives only synthetic units through the
+# control-side `scripts/probe_signer_restart_boundary.py`; it never names the live operator, the real signer, a real
+# credential or an authority operation. Any other M-B11 reference, any live-capable token, a moved, renamed or
+# altered step, a self-hosted runner, wider permissions, credentials, or a weakened PR / DEV separation fails.
+APPROVED_WORKFLOW = "ci.yml"
+APPROVED_JOB = "repository-contracts"
+APPROVED_STEP = (
+    "      - name: Probe the candidate M-B11 signer restart boundary with synthetic units on this disposable runner\n"
+    "        shell: bash\n"
+    "        run: |\n"
+    "          # Synthetic units only (never a LILITH unit); a throwaway credential under this runner's own host key.\n"
+    "          set +e\n"
+    "          sudo -n /usr/bin/python3 -I -B scripts/probe_signer_restart_boundary.py run --disposable-runner --out "
+    "\"${RUNNER_TEMP}/mb11-restart-boundary.json\"\n"
+    "          status=$?\n"
+    "          set -e\n"
+    "          sudo -n cat \"${RUNNER_TEMP}/mb11-restart-boundary.json\" || true\n"
+    "          exit \"${status}\"\n")
+PROBE_SCRIPT = "scripts/probe_signer_restart_boundary.py"
+MB11_MARK = re.compile(r"(?i)m-?b11")
+# Live-capable M-B11 / signer / credential / authority operations: never in any workflow.
+LIVE_TOKENS = ("mb11_operator", "mb11_signer_verifier", "mb11_dr5_target", "lilith-authority-hold-dev",
+               "lilith-authority-verify-dev", "lilith-authority-recovery-dev", "lilith-authority-keygen-dev",
+               "lilith-recovery-witness-owner-dev", "systemd-creds", "LoadCredentialEncrypted", "owner-actor",
+               "credstore", "release_initial", "create_initial_held", "ISSUE_OWNER_EVIDENCE")
+LIVE_PATTERNS = (re.compile(r"systemctl\s+(?:--\S+\s+)*(?:start|restart|enable|try-restart|reload-or-restart)\s+"
+                            r"lilith-(?:authority|recovery)"),)
+CI_HEADER = ("on:\n  pull_request:\n  push:\n    branches:\n      - main\n  workflow_dispatch:\n\n"
+             "permissions:\n  contents: read\n")
+CI_FORBIDDEN = ("secrets.", "id-token", "google-github-actions", "gcloud", "environment:", "self-hosted",
+                "systemctl restart", "pull_request_target")
+DEV_SEPARATION = ("name: LILITH DEV deployment", "if: always() && github.event_name == 'pull_request'",
+                  "needs: [repository-contracts, frontend-quality, backend-quality]", "permissions:\n      contents: read",
+                  'test "${CONTRACTS}" = success', 'test "${FRONTEND}" = success', 'test "${BACKEND}" = success',
+                  "PR_SOURCE_VALIDATION=PASS DEV_AUTH=NONE DEV_DEPLOYMENT=NONE")
+
+
+def workflow_texts() -> dict[str, str]:
+    return {path.name: path.read_text(encoding="utf-8") for path in sorted((ROOT / ".github/workflows").glob("*.yml"))}
+
+
+def _jobs(text: str) -> dict[str, str]:
+    body = text.split("\njobs:\n", 1)[1] if "\njobs:\n" in text else ""
+    heads = list(re.finditer(r"(?m)^  ([A-Za-z0-9_-]+):\n", body))
+    return {m.group(1): body[m.start():heads[i + 1].start() if i + 1 < len(heads) else len(body)]
+            for i, m in enumerate(heads)}
+
+
+def _steps(job: str) -> list[str]:
+    heads = list(re.finditer(r"(?m)^      - ", job))
+    return [job[m.start():heads[i + 1].start() if i + 1 < len(heads) else len(job)].rstrip("\n") + "\n"
+            for i, m in enumerate(heads)]
+
+
+def mb11_workflow_violations(workflows: dict[str, str]) -> list[str]:
+    """Every reason the workflow set leaves the owner exception. `[]` only for exactly the approved probe step."""
+    out: list[str] = []
+    for name, text in workflows.items():
+        out += [f"LIVE_TOKEN:{name}:{token}" for token in LIVE_TOKENS if token in text]
+        out += [f"LIVE_COMMAND:{name}" for pattern in LIVE_PATTERNS if pattern.search(text)]
+        if name != APPROVED_WORKFLOW and (MB11_MARK.search(text) or PROBE_SCRIPT in text):
+            out.append("MB11_OUTSIDE_APPROVED_WORKFLOW:" + name)
+    ci = workflows.get(APPROVED_WORKFLOW)
+    if ci is None:
+        return out + ["APPROVED_WORKFLOW_MISSING"]
+    header = ci.split("\njobs:\n", 1)[0]
+    if CI_HEADER not in header or header.count("permissions:") != 1 or header.count("on:") != 1:
+        out.append("CI_TRIGGERS_OR_PERMISSIONS_CHANGED")
+    out += [f"CI_FORBIDDEN:{token}" for token in CI_FORBIDDEN if token in ci]
+    if ci.count("permissions:") != 2 or len(re.findall(r"(?m)^ *contents: read$", ci)) != 2 \
+            or re.search(r"(?m)^ *[a-z-]+: write$", ci):
+        out.append("CI_PERMISSIONS_NOT_READ_ONLY")
+    jobs = _jobs(ci)
+    marked = [(job, step) for job, text in jobs.items() for step in _steps(text)
+              if MB11_MARK.search(step) or PROBE_SCRIPT in step]
+    if marked != [(APPROVED_JOB, APPROVED_STEP)]:
+        out.append("MB11_STEPS_NOT_EXACTLY_THE_APPROVED_PROBE")
+    if len(MB11_MARK.findall(ci)) != len(MB11_MARK.findall(APPROVED_STEP)) or ci.count(PROBE_SCRIPT) != 1:
+        out.append("MB11_REFERENCE_OUTSIDE_THE_APPROVED_STEP")
+    job = jobs.get(APPROVED_JOB, "")
+    if re.findall(r"(?m)^    runs-on: (.+)$", job) != ["ubuntu-latest"]:
+        out.append("APPROVED_JOB_NOT_ON_A_GITHUB_HOSTED_RUNNER")
+    if re.search(r"(?m)^    (?:permissions|environment|container|services|env|if|needs|strategy|uses):", job):
+        out.append("APPROVED_JOB_CONTEXT_CHANGED")
+    separation = jobs.get("pr-source-required-check", "")
+    if any(needle not in separation for needle in DEV_SEPARATION):
+        out.append("PR_DEV_SEPARATION_WEAKENED")
+    return out
+
+
+class Mb11WorkflowGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.workflows = workflow_texts()
+        self.ci = self.workflows[APPROVED_WORKFLOW]
+
+    def violations(self, **changed):
+        return mb11_workflow_violations({**self.workflows, **changed})
+
+    def test_the_exact_approved_synthetic_step_passes_and_uses_only_control_side_code(self):
+        self.assertEqual(mb11_workflow_violations(self.workflows), [])
+        self.assertEqual(self.ci.count(APPROVED_STEP), 1)
+        self.assertIn(APPROVED_STEP, _jobs(self.ci)[APPROVED_JOB])
+        tree = ast.parse((ROOT / PROBE_SCRIPT).read_text(encoding="utf-8"))
+        imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names} | \
+            {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
+        self.assertIn("mb11_restart_boundary", imported)
+        self.assertFalse(imported & {"mb11_operator", "mb11_signer_verifier", "mb11_dr5_target", "lilith_authority_dev",
+                                     "lilith_authority_root"})
+
+    def test_every_departure_from_the_exception_fails(self):
+        extra = ("      - name: Run another M-B11 check\n        run: python scripts/probe_signer_restart_boundary.py run\n\n")
+        anchor = "      - name: Validate trusted broker lifecycle and production absence gates\n"
+        cases = {
+            "extra M-B11 step": self.ci.replace(anchor, extra + anchor),
+            "live command substituted": self.ci.replace(
+                "scripts/probe_signer_restart_boundary.py run --disposable-runner",
+                "services/owner-memory-control/tools/mb11_operator.py mb11 . . go.txt"),
+            "self-hosted runner": self.ci.replace("    name: Repository contracts\n    runs-on: ubuntu-latest\n",
+                                                  "    name: Repository contracts\n    runs-on: self-hosted\n"),
+            "wider token permissions": self.ci.replace("permissions:\n  contents: read\n",
+                                                       "permissions:\n  contents: write\n", 1),
+            "id-token added": self.ci.replace("permissions:\n  contents: read\n",
+                                              "permissions:\n  contents: read\n  id-token: write\n", 1),
+            "credentials added": self.ci.replace("        shell: bash\n        run: |\n          # Synthetic",
+                                                 "        shell: bash\n        env:\n          K: ${{ secrets.DEV_KEY }}\n"
+                                                 "        run: |\n          # Synthetic"),
+            "unauthorized invocation elsewhere": self.ci.replace(
+                "      - name: Run Slice 8-15 architecture regressions\n",
+                "      - name: Classify\n        run: python services/owner-memory-control/tools/mb11_signer_verifier.py"
+                " classify x\n\n      - name: Run Slice 8-15 architecture regressions\n"),
+            "probe-named live step": self.ci.replace(anchor, "      - name: Probe synthetic test\n        run: sudo -n "
+                                                     "/usr/local/sbin/lilith-authority-verify-dev eligibility x\n\n"
+                                                     + anchor),
+            "signer start disguised": self.ci.replace(anchor, "      - name: Warm cache\n        run: sudo systemctl "
+                                                      "start lilith-authority-dev.service\n\n" + anchor),
+            "DEV separation weakened": self.ci.replace("PR_SOURCE_VALIDATION=PASS DEV_AUTH=NONE DEV_DEPLOYMENT=NONE",
+                                                       "PR_SOURCE_VALIDATION=PASS"),
+            "aggregator needs changed": self.ci.replace("needs: [repository-contracts, frontend-quality, backend-quality]",
+                                                        "needs: [frontend-quality, backend-quality]"),
+            "trigger widened": self.ci.replace("  pull_request:\n", "  pull_request_target:\n", 1),
+            "approved job context changed": self.ci.replace("    name: Repository contracts\n",
+                                                            "    name: Repository contracts\n    environment: dev\n"),
+        }
+        for label, mutated in cases.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, self.ci, label)
+                self.assertNotEqual(self.violations(**{APPROVED_WORKFLOW: mutated}), [], label)
+        moved_ci = self.ci.replace(APPROVED_STEP + "\n", "")
+        self.assertNotEqual(moved_ci, self.ci)
+        deploy = self.workflows["deploy-dev.yml"]
+        self.assertNotEqual(self.violations(**{APPROVED_WORKFLOW: moved_ci, "deploy-dev.yml": deploy + APPROVED_STEP}),
+                            [])
+        self.assertIn("MB11_OUTSIDE_APPROVED_WORKFLOW:deploy-dev.yml",
+                      self.violations(**{"deploy-dev.yml": deploy + "\n# mb11\n"}))
 
 
 # ------------------------------------------------------------------------------------------ records ---
