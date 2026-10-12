@@ -265,7 +265,7 @@ capture step (no capture tool exists), the live process facts.
 
 | Tool | SHA-256 |
 | --- | --- |
-| `services/owner-memory-control/tools/mb11_signer_verifier.py` | `2fb0fe0d7781c2758d71d3dcc3968e1bb415be0b41881c47933ea1e2423aa614` |
+| `services/owner-memory-control/tools/mb11_signer_verifier.py` | `020ab5b15b02ac7d46b2cc8dd402481576646fbebcab708522df50f96e8782ad` (PR-A2: restart-boundary observation, [P1B-10R record](slice-15b2b-b1b3e-mb11-restart-boundary-p1b10r.md); was `2fb0fe0d7781c2758d71d3dcc3968e1bb415be0b41881c47933ea1e2423aa614`) |
 | `services/owner-memory-control/tools/mb11_dr5_target.py` | `c72cf1b2a5713a32471f0de5ad1afd56a1a65edfa6992386f1452207ce1db6fc` |
 
 Reused unchanged: `mb10_held_verifier.py` `73a8fe9aec48fab7fb628a3427bc690876b55a4ae1ead55f1b7e00032075b8e3`,

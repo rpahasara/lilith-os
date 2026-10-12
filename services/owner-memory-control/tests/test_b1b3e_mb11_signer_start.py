@@ -259,7 +259,7 @@ def running(**overrides):
         "readiness": good_readiness(),
         "ledger": {"readable": True, "listing": {V.LEDGER_NAME: 61440}, "dbSha256": DB_SHA},
         "baseline": {"dbSha256": DB_SHA, "witnessInvocationId": WITNESS_INVOCATION, "witnessMainPid": "777"},
-        "firstLoadRecorded": True, "signerIds": [995, 985],
+        "firstLoadRecorded": True, "signerIds": [995, 985], "restartBoundary": {"reasons": []},
     }
     obs.update(overrides)
     return obs
@@ -356,6 +356,8 @@ class ClassifierTests(unittest.TestCase):
             "ledger": running(ledger={"readable": False}),
             "baseline": running(baseline={"dbSha256": DB_SHA}),
             "record": running(firstLoadRecorded="yes"),
+            "boundary unobserved": running(restartBoundary=None),
+            "boundary unreadable": running(restartBoundary={"error": "OSError"}),
             "nothing": {},
         }.items():
             with self.subTest(label=label):
@@ -408,6 +410,10 @@ class ClassifierTests(unittest.TestCase):
             "extra field": (running(health={**running()["health"], "health": {**good_health(), "x": 1}}),
                             V.W11_HEALTH),
             "no health": (running(health=None), V.W11_RESTART),
+            "boundary not effective": (running(restartBoundary={"reasons": ["lilith-authority-dev.service:"
+                                                                            "EFFECTIVE_RESTART_NOT_NO"]}), V.W11_UNIT),
+            "boundary not effective before start": (stopped(loads=0, firstLoadRecorded=False, restartBoundary={
+                "reasons": ["OVERLAY_EMPTY"]}), V.W11_UNIT),
             "residue": (running(ledger={"readable": True, "listing": {V.LEDGER_NAME: 1, V.WAL_NAME: 0,
                                                                      V.SHM_NAME: 32768}, "dbSha256": DB_SHA}),
                         V.W11_RESIDUE),
@@ -985,7 +991,8 @@ class SignerHostTests(_HostBase):
                               process=lambda _root, pid: ({"cwd": V.RELEASE_CWD, "argv": list(V.EXEC_ARGV),
                                                            "uid": self.signer_ids[0], "gid": self.signer_ids[1]}
                                                           if pid == "4242" else None),
-                              readiness=lambda *_a, **_k: good_readiness(), **self.seams())
+                              readiness=lambda *_a, **_k: good_readiness(),
+                              restart_boundary=lambda _root, _units: {"reasons": []}, **self.seams())
 
     def test_w11_0_then_running_then_stopped_after_the_first_load(self):
         self.committed()
