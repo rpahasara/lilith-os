@@ -55,6 +55,18 @@ UNITS = (E.WITNESS_SERVICE, E.OWNER_SOCKET, E.SIGNER_SOCKET)          # install 
 DROPINS = {unit: (Path(path).name, E.WITNESS_DROPINS[path])
            for unit, path in ((E.WITNESS_SERVICE, E.SERVICE_DROPIN), (E.OWNER_SOCKET, E.SOCKET_DROPINS[E.OWNER_SOCKET]),
                               (E.SIGNER_SOCKET, E.SOCKET_DROPINS[E.SIGNER_SOCKET]))}
+# The exact bytes of the files in `E.DROPIN_SOURCE` (a test proves equality), embedded so the in-memory bundle needs none.
+_SOCKET_DROPIN = (b"# LILITH 15B2b-B1b-3e E-19 CANDIDATE (E19-D3, R4). NOT accepted, NOT installed anywhere.\n"
+                  b"# A witness socket exists only while a started witness needs it: it can never start the witness by "
+                  b"itself.\n"
+                  b"[Unit]\nStopWhenUnneeded=yes\nRefuseManualStart=yes\n")
+DROPIN_BYTES = {
+    E.WITNESS_SERVICE: (b"# LILITH 15B2b-B1b-3e E-19 CANDIDATE (E19-D3, R4). NOT accepted, NOT installed anywhere.\n"
+                        b"# Every K-WIT load must come from its own authorized start: never an automatic restart.\n"
+                        b"[Service]\nRestart=no\n"),
+    E.OWNER_SOCKET: _SOCKET_DROPIN,
+    E.SIGNER_SOCKET: _SOCKET_DROPIN,
+}
 # The accepted release fragments (`E.OLD_RELEASE` assets, byte-identical in the repository; a test re-derives them).
 FRAGMENTS = {
     E.WITNESS_SERVICE: "9f78130c06491d184aff7066de99f804bf3816e171c63d6f70b734b1c6e85d7d",
@@ -111,9 +123,10 @@ def candidate_path(unit: str) -> str:
 
 
 def candidate_bytes(unit: str) -> bytes:
-    """The merged candidate bytes, refused unless they still hash to the merged pin."""
+    """The embedded candidate bytes, refused unless they still hash to the merged pin. Never read from
+    `E.DROPIN_SOURCE`: under the mb6 BOOT bundle `__file__` is synthetic, so no file beside the tools exists on DEV."""
     name, pin = DROPINS[unit]
-    data = (E.DROPIN_SOURCE / f"{unit}.d" / name).read_bytes()
+    data = DROPIN_BYTES[unit]
     if hashlib.sha256(data).hexdigest() != pin:
         raise Refused("CANDIDATE_NOT_PINNED", unit)
     return data

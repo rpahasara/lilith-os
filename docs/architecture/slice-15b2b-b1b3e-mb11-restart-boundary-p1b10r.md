@@ -26,7 +26,9 @@ the overlay is NOT invisible: the host observer and the W9 / W10 unit checks see
 | release fragment `/etc/systemd/system/lilith-authority-dev.service` (`aee323e`) | `11b6d00f04d998caa156875fb587dd642cb7d78dd9b6d1866616cc0b9bc1b254` |
 | release fragment `/etc/systemd/system/lilith-authority-dev.socket` (`aee323e`) | `bff5e9275ad1478dd068855465d65542ceb338e5e9236e43d1bd43d7c50c194f` |
 | `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (activation-line correction, §10) | `e052b2511013ef37a047a074e85a8c711d9c06bba4f01cb56dc906ee6994a803` |
-| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (real-systemd installed-state correction, §10a) | `fe855baade9b6cc9eb12d734b3c7016d07937f093e02c8eb874f3c5727d6b520` |
+| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (real-systemd installed-state correction, §10a; superseded by §10b) | `fe855baade9b6cc9eb12d734b3c7016d07937f093e02c8eb874f3c5727d6b520` |
+| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (in-memory payload correction, §10b; current) | `44ab3f048ffe5b2cbe8e721f469e3a913004be87a1d6dfcb8092bb575e452b48` |
+| `services/owner-memory-control/tools/mb11_restart_boundary.py` (embedded candidate bytes, §10b; was `888a5bc1…`) | `10147341819c27bb3720a87264ffea78f1bf1c3c2a23d7804ac900370cfe7419` |
 | superseded original of the same tool (PR-A2 #184, merged `7f8406d`; refused the real activation line, §10) | `b67f9ecf29dba235b8be76ad70c41a267cf5f09a22871beea85a6a189f075792` |
 | `services/owner-memory-control/tools/mb11_signer_verifier.py` (W11, extended) | `020ab5b15b02ac7d46b2cc8dd402481576646fbebcab708522df50f96e8782ad` |
 
@@ -210,3 +212,22 @@ yet partly effective" expectation is split into the loaded case (`P10R_UNIT`) an
 
 This changes source only. Nothing is installed, reloaded or started, and P1B-10R is still not authorized. The §9
 state block is unchanged.
+
+## 10b. In-memory payload correction (2026-10-13)
+
+**Finding.** The live route runs tools through the pinned mb6 BOOT loader, which sets every module's `__file__` to
+`<mb6-bundle:NAME>`. `candidate_bytes` read the drop-ins from `DROPIN_ROOT`, a path derived from `__file__`, which
+does not exist on DEV. The same defect stopped the E-19 witness WRB_1 attempt before DEV contact
+([E-19 witness restart boundary](slice-15b2b-b1b3e-e19-witness-restart-boundary.md) §7). In this tool it was
+latent, and worse: `install` read the bytes inside its write loop, after the first `mkdir`.
+
+**Correction.** `mb11_restart_boundary.DROPIN_BYTES` embeds the exact candidate bytes, and `candidate_bytes` checks
+them against the unchanged pins. `install` verifies both payloads before it observes or writes anything; a mismatch
+is `Refused`. The files in `mb11_restart_boundary_dropins/` and their pins are unchanged; a test proves the embedded
+bytes equal them. The tool pins are `44ab3f04…` (install) and `10147341…` (boundary); `fe855baa…` is obsolete.
+
+**Regression.** `test_b1b3e_inmemory_installer_payloads.py` runs the real BOOT loader from an empty working
+directory with no tool or drop-in file reachable, and both installers return their exact pinned bytes. Tampered
+embedded bytes refuse `install` before any observation or write.
+
+This changes source only. Nothing is installed, reloaded or started, and P1B-10R is still not authorized.

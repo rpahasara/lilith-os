@@ -182,3 +182,19 @@ Both §2a findings in merged code are corrected in source, in one repository-onl
   ([P1B-10R record](slice-15b2b-b1b3e-mb11-restart-boundary-p1b10r.md) §10a).
 
 This tool is unchanged. DEV's systemd version still has to be established before any live step.
+
+## 7. In-memory payload correction (2026-10-13)
+
+**Finding.** The owner-authorized WRB_1 attempt (plan digest `2cd44f40d59740b66f2755d6d62ff65a4ea33a187f46c3662b89d01106da6df1`)
+stopped before DEV contact. `install` reads its payload with `candidate_bytes`, which read
+`E.DROPIN_SOURCE`. That path derives from `__file__`, which the mb6 BOOT bundle makes synthetic
+(`<mb6-bundle:NAME>`), so the files are absent on DEV. `install` would have failed with `FileNotFoundError` before
+any observation or write. A local reproduction showed this; nothing was run on DEV.
+
+**Correction.** `DROPIN_BYTES` in this tool embeds the exact candidate bytes. `candidate_bytes` checks them against
+the unchanged contract pins (`E.WITNESS_DROPINS`) and never reads `E.DROPIN_SOURCE`. The contract (`152022ee…`) and the
+drop-in files are unchanged; a test proves the embedded bytes equal them. Tool SHA-256:
+`e4b7e09a8b84e836ae5714a30c6a2a086d50d0e4e5f00e7a372a1c2231e52246`. `7d9f925203d7ee8b827dcf637561a7305f60a1f2628eacc4ca749514c2dbc341` is obsolete.
+
+The plan digest covers DEV state and the candidate pins, not the tool hash. Any WRB_1 attempt still needs a fresh
+WRB_0 freshness check under the new pin and its own owner go. Nothing is installed, reloaded or started.

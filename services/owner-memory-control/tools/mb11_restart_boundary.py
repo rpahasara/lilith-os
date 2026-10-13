@@ -31,6 +31,16 @@ DROPINS = {
     SERVICE_UNIT: ("10-no-implicit-restart.conf", "e3faf9efa91f0238ee6110a33cf6c9f024aca1029fe05bd26fba4c21679c6b92"),
     SOCKET_UNIT: ("10-no-reactivation.conf", "85589f80764311f7e1152cf0e9ea51208662bce25806ceb524777961f579b9b9"),
 }
+# The exact bytes of the files in `DROPIN_ROOT` (a test proves equality), embedded so the in-memory bundle needs none.
+DROPIN_BYTES = {
+    SERVICE_UNIT: (b"# LILITH 15B2b-B1b-3e M-B11 PR-A1 CANDIDATE (OD-M11-11, O2-D). NOT accepted, NOT installed anywhere.\n"
+                   b"# Every K-ACT load must come from its own authorized start: never an automatic restart.\n"
+                   b"[Service]\nRestart=no\n"),
+    SOCKET_UNIT: (b"# LILITH 15B2b-B1b-3e M-B11 PR-A1 CANDIDATE (OD-M11-11, O2-D). NOT accepted, NOT installed anywhere.\n"
+                  b"# The owner socket exists only while a started signer needs it: it can never start the signer by "
+                  b"itself.\n"
+                  b"[Unit]\nStopWhenUnneeded=yes\nRefuseManualStart=yes\n"),
+}
 # The effective properties each candidate must produce (`systemctl show -p ...` values).
 EXPECTED_PROPERTIES = {
     SERVICE_UNIT: {"Restart": "no"},
@@ -48,8 +58,10 @@ def sha256(data: bytes) -> str:
 
 
 def candidate_bytes(unit: str) -> bytes:
+    """The embedded candidate bytes, refused unless they still hash to the pin. Never read from `DROPIN_ROOT`: under
+    the mb6 BOOT bundle `__file__` is synthetic, so no file beside this module exists on DEV."""
     name, pin = DROPINS[unit]
-    data = (DROPIN_ROOT / f"{unit}.d" / name).read_bytes()
+    data = DROPIN_BYTES[unit]
     if sha256(data) != pin:
         raise ValueError("CANDIDATE_DROPIN_PIN_MISMATCH:" + unit)
     return data
