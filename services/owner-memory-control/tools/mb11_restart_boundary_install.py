@@ -383,6 +383,10 @@ def install(digest: str, *, root: Path | str = Path("/"), units: Callable[[Seque
     root = Path(root)
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         raise Refused("PLAN_DIGEST_INVALID")
+    try:
+        payloads = {unit: B.candidate_bytes(unit) for unit in UNITS}        # pinned bytes verified before any write
+    except ValueError as exc:
+        raise Refused(str(exc)) from exc
     before = observe(root, units=units, activation=activation, owner=owner)
     phase = classify(before)["phase"]
     if phase != P10R_0:
@@ -399,7 +403,7 @@ def install(digest: str, *, root: Path | str = Path("/"), units: Callable[[Seque
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
                      | getattr(os, "O_CLOEXEC", 0), FILE_MODE)
         try:
-            os.write(fd, B.candidate_bytes(unit))
+            os.write(fd, payloads[unit])
             if hasattr(os, "fchmod"):
                 os.fchmod(fd, FILE_MODE)
             if chown:

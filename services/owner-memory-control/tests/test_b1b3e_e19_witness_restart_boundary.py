@@ -409,13 +409,9 @@ class PinAndStaticTests(unittest.TestCase):
         self.assertEqual(sha((TOOLS / "e19_p1b10_upgrade.py").read_bytes()), O.E19_CONTRACT_SHA256)
 
     def test_a_tampered_candidate_is_refused(self):
-        with tempfile.TemporaryDirectory() as work:
-            fake = Path(work)
-            for unit in W.UNITS:
-                (fake / f"{unit}.d").mkdir()
-                (fake / f"{unit}.d" / W.DROPINS[unit][0]).write_bytes(W.candidate_bytes(unit) + b"# x\n")
-            with mock.patch.object(E, "DROPIN_SOURCE", fake), self.assertRaises(E.Refused):
-                W.candidate_bytes(E.WITNESS_SERVICE)
+        tampered = {E.WITNESS_SERVICE: W.candidate_bytes(E.WITNESS_SERVICE) + b"# x\n"}
+        with mock.patch.dict(W.DROPIN_BYTES, tampered), self.assertRaises(E.Refused):
+            W.candidate_bytes(E.WITNESS_SERVICE)
 
     def test_dr5_output_is_unchanged_by_the_overlay(self):
         script = (ROOT / T10.DR5_SCRIPT).read_bytes()
