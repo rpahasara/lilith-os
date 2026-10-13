@@ -171,3 +171,14 @@ DR-5 DELTA = EMPTY (proven from the pinned script); HOST OBSERVER DELTA = exactl
 POST-MERGE M-B10 PRESERVATION = NOT ESTABLISHED;  E19-D1 … E19-D5 = PROPOSED
 LIVE_MUTATION = NONE;  DEV_CONTACT = NONE;  WITNESS / K-WIT / SIGNER / HELD / LEDGER / RELEASE = UNCHANGED
 ```
+
+## 6. Merged-code findings closed (2026-10-13)
+
+Both §2a findings in merged code are corrected in source, in one repository-only slice:
+
+- the E-19 contract's load counting
+  ([E-19 release maintenance](slice-15b2b-b1b3e-e19-release-maintenance.md) §14);
+- the P1B-10R installed-but-not-reloaded phase
+  ([P1B-10R record](slice-15b2b-b1b3e-mb11-restart-boundary-p1b10r.md) §10a).
+
+This tool is unchanged. DEV's systemd version still has to be established before any live step.

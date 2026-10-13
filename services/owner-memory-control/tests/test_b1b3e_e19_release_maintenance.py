@@ -25,6 +25,7 @@ for _p in (TOOLS, ROOT / "services/authority-dev", ROOT / "services/owner-memory
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import e19_maintenance_observer as O  # noqa: E402
 import e19_p1b10_upgrade as E  # noqa: E402
 import mb6_operator as M6  # noqa: E402
 import mb9_dr5_target as T9  # noqa: E402
@@ -387,8 +388,10 @@ class TransitionPhaseTests(unittest.TestCase):
         for identity in E.HISTORICAL_INCARNATIONS:
             doc = observation(entries=(OLD, NEW), target=NEW, identity=identity, cwd=NEW, loads=(identity[0],))
             self.assertEqual(judge(doc)["phase"], E.STOP_ORIGINAL_RESTARTED)
+        # The ending incarnation's own journal entries are not a load (real systemd 255): an observation that shows
+        # it still running while current -> NEW is the running-across-select STOP, never an exact phase.
         doc = observation(entries=(OLD, NEW), target=NEW, cwd=NEW, loads=(E.ENDING_INCARNATION[0],))
-        self.assertEqual(judge(doc)["phase"], E.STOP_ORIGINAL_RESTARTED)
+        self.assertEqual(judge(doc)["phase"], E.STOP_MIXED)
 
     def test_without_a_baseline_only_the_u0_candidate_is_judged(self):
         """Without the accepted baseline a later observation is never exact: its invocation list is anchored to a
@@ -656,6 +659,70 @@ class JournalBindingTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(judge(doc)["phase"], E.STOP_JOURNAL)
         self.assertEqual(judge(observation(entries=(OLD, NEW), at=CURSOR0))["phase"], E.U1)   # same cursor is fine
+
+
+class JournalLoadCountingTests(unittest.TestCase):
+    """Real systemd 255 (PR #190 probe): `journalctl -u … --after-cursor` returns the running ending incarnation's own
+    log lines and its stop entries with its InvocationID. A K-WIT load is a DISTINCT, NEWLY STARTED invocation."""
+
+    ENDING = E.ENDING_INCARNATION[0]
+
+    def test_the_ending_incarnations_own_entries_never_count_in_any_phase(self):
+        cases = {
+            E.U0: observation(loads=(self.ENDING,)),                                         # its log lines
+            E.U1: observation(entries=(OLD, NEW), loads=(self.ENDING,)),
+            E.U2: observation(entries=(OLD, NEW), witness="STOPPED", cwd=None, loads=(self.ENDING,)),  # its stop
+            E.U3: observation(entries=(OLD, NEW), target=NEW, witness="STOPPED", cwd=None, loads=(self.ENDING,)),
+            E.U4: observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW,
+                              loads=(self.ENDING, REPLACEMENT[0])),
+            E.U5: observation(entries=(NEW,), target=NEW, identity=REPLACEMENT, cwd=NEW,
+                              loads=(REPLACEMENT[0], self.ENDING)),
+        }
+        for phase, doc in cases.items():
+            with self.subTest(phase=phase):
+                self.assertEqual(judge(doc)["phase"], phase)
+
+    def test_exactly_one_replacement_and_nothing_else(self):
+        one = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=(REPLACEMENT[0],))
+        self.assertEqual(judge(one)["phase"], E.U4)
+        extra = H32("an unexpected additional incarnation")
+        for loads, phase in (((self.ENDING, REPLACEMENT[0], extra), E.STOP_LOADS),
+                             ((extra, REPLACEMENT[0]), E.STOP_LOADS),
+                             ((self.ENDING,), E.STOP_LOADS),                  # the replacement never logged a start
+                             ((), E.STOP_LOADS)):
+            doc = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW, loads=loads)
+            with self.subTest(loads=loads):
+                self.assertEqual(judge(doc)["phase"], phase)
+        for doc, phase in ((observation(entries=(OLD, NEW), loads=(self.ENDING, extra)), E.STOP_ORIGINAL_RESTARTED),
+                           (observation(entries=(OLD, NEW), witness="STOPPED", cwd=None, loads=(self.ENDING, extra)),
+                            E.STOP_START_FAILED),
+                           (observation(entries=(OLD, NEW), target=NEW, witness="STOPPED", cwd=None,
+                                        loads=(E.HISTORICAL_INCARNATIONS[0][0],)), E.STOP_START_FAILED)):
+            with self.subTest(phase=phase):
+                self.assertEqual(judge(doc)["phase"], phase)
+
+    def test_repeated_messages_are_one_invocation(self):
+        lines = [json.dumps({"_SYSTEMD_INVOCATION_ID": self.ENDING, "MESSAGE": f"line {i}"}) for i in range(5)]
+        lines += [json.dumps({"INVOCATION_ID": self.ENDING, "UNIT": E.WITNESS_SERVICE, "MESSAGE": "Stopped"})]
+        self.assertEqual(O.parse_invocations(lines), [self.ENDING])
+        lines += [json.dumps({"INVOCATION_ID": REPLACEMENT[0], "MESSAGE": "Started"})] * 3
+        self.assertEqual(O.parse_invocations(lines), [self.ENDING, REPLACEMENT[0]])
+        duplicated = observation(entries=(OLD, NEW), target=NEW, identity=REPLACEMENT, cwd=NEW,
+                                 loads=(REPLACEMENT[0], REPLACEMENT[0]))
+        with self.assertRaises(E.Refused) as caught:                    # a document must carry distinct ids
+            judge(duplicated)
+        self.assertEqual(caught.exception.reason, "OBSERVATION_FIELDS")
+
+    def test_a_missing_or_unbound_baseline_cursor_is_never_success(self):
+        doc = copy.deepcopy(PATH[E.U4])
+        doc["witness"]["invocations"]["ids"] = None                     # an unretained cursor (observer F4)
+        self.assertEqual(judge(doc)["phase"], E.UNKNOWN)
+        doc = copy.deepcopy(PATH[E.U4])
+        doc["witness"]["invocations"]["afterCursor"] = None
+        self.assertEqual(judge(doc)["phase"], E.UNKNOWN)
+        doc = copy.deepcopy(PATH[E.U4])
+        doc["witness"]["invocations"]["afterCursor"] = cursor("1f49")
+        self.assertEqual(judge(doc)["phase"], E.STOP_JOURNAL)
 
 
 class InterruptedAndUnsafeStateTests(unittest.TestCase):
