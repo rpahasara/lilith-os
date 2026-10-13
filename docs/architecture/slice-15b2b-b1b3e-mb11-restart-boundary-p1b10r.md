@@ -26,6 +26,7 @@ the overlay is NOT invisible: the host observer and the W9 / W10 unit checks see
 | release fragment `/etc/systemd/system/lilith-authority-dev.service` (`aee323e`) | `11b6d00f04d998caa156875fb587dd642cb7d78dd9b6d1866616cc0b9bc1b254` |
 | release fragment `/etc/systemd/system/lilith-authority-dev.socket` (`aee323e`) | `bff5e9275ad1478dd068855465d65542ceb338e5e9236e43d1bd43d7c50c194f` |
 | `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (activation-line correction, §10) | `e052b2511013ef37a047a074e85a8c711d9c06bba4f01cb56dc906ee6994a803` |
+| `services/owner-memory-control/tools/mb11_restart_boundary_install.py` (real-systemd installed-state correction, §10a) | `fe855baade9b6cc9eb12d734b3c7016d07937f093e02c8eb874f3c5727d6b520` |
 | superseded original of the same tool (PR-A2 #184, merged `7f8406d`; refused the real activation line, §10) | `b67f9ecf29dba235b8be76ad70c41a267cf5f09a22871beea85a6a189f075792` |
 | `services/owner-memory-control/tools/mb11_signer_verifier.py` (W11, extended) | `020ab5b15b02ac7d46b2cc8dd402481576646fbebcab708522df50f96e8782ad` |
 
@@ -179,3 +180,33 @@ parse.
 before any later P1B-10R. That later run needs a new owner authorization for a fresh read-only preflight and `plan`
 under this pin. Nothing in this section authorizes an installation, a daemon-reload or a signer start. The §9 state
 block is left unchanged by this correction.
+
+## 10a. Installed-but-not-reloaded phase on real systemd (correction, 2026-10-13)
+
+**Finding.** The E-19 PR #190 review ran a disposable systemd 255 probe (255.4-1ubuntu8.17): synthetic units, a
+throwaway credential, and drop-ins copied byte-exact
+([E-19 witness restart boundary](slice-15b2b-b1b3e-e19-witness-restart-boundary.md) §2a). It showed that writing
+new drop-ins leaves `NeedDaemonReload=no` until the reload, with `DropInPaths` empty and the release defaults still
+in effect. `classify` required `NeedDaemonReload=yes` on both units for `P10R_1`, so a real install on systemd 255
+would have read back as `P10R_UNIT_NOT_EXACT` (`P1B10R_INSTALLED_READBACK_NOT_P10R_1`). The PR-A1 runner probe never
+asserted that property after an install, and the test fake set it by `files_changed()`.
+
+**Correction** (`e052b251…` → `fe855baade9b6cc9eb12d734b3c7016d07937f093e02c8eb874f3c5727d6b520`). With the overlay exact on disk:
+
+- **`P10R_1`:** no unit reports a drop-in in `DropInPaths` and every unit still has the release defaults, whatever
+  `NeedDaemonReload` reads (`yes` or `no`; any other value is `UNCLASSIFIED_STOP`);
+- **unknown:** a property that already differs while nothing is loaded is `UNCLASSIFIED_STOP`;
+- **`P10R_UNIT_NOT_EXACT`:** one unit reports its drop-in while the other does not;
+- **`P10R_2`:** unchanged; both loaded, exactly effective, `NeedDaemonReload=no`. Both loaded while a reload is
+  flagged again is `P10R_UNIT_NOT_EXACT`.
+
+No-overwrite (`mkdir` / `O_EXCL`), partial-prefix, foreign-overlay, shadow, activation and inactive-signer rules are
+unchanged, and so are `boundary_reasons`, used by W11.
+
+**Regression.** `test_real_systemd_255_installed_state_keeps_need_daemon_reload_no`: the install read-back is
+`P10R_1` with `NeedDaemonReload=no`; reload gives `P10R_2`; a mixed load is `P10R_UNIT`. The earlier "reload pending
+yet partly effective" expectation is split into the loaded case (`P10R_UNIT`) and the not-loaded case
+(`UNCLASSIFIED`).
+
+This changes source only. Nothing is installed, reloaded or started, and P1B-10R is still not authorized. The §9
+state block is unchanged.

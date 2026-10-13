@@ -449,7 +449,13 @@ def _judge(doc: Mapping[str, Any], base: Mapping[str, Any] | None, accepted: tup
     if cursor is None or anchored is None or cursor[2] != BOOT_ID.replace("-", "") \
             or invocations["afterCursor"] != anchor or cursor[0] != anchored[0] or cursor[1] < anchored[1]:
         return result(STOP_JOURNAL)
-    loads = invocations["ids"]
+    # A K-WIT load is a DISTINCT, NEWLY STARTED invocation. `journalctl -u … --after-cursor` also returns the running
+    # ending incarnation's own log lines and its stop entries, all with its InvocationID (real systemd 255, PR #190
+    # probe): they are never a load, and repeated entries of one invocation are one id (the observer deduplicates; a
+    # document that repeats an id is malformed).
+    ids = invocations["ids"]
+    _need(len(ids) == len(set(ids)), "OBSERVATION_FIELDS", "invocations.ids")
+    loads = [i for i in ids if i != ENDING_INCARNATION[0]]
 
     # ---- the restart boundary: a prerequisite in every phase
     if _canonical(witness["restartBoundary"]) != _canonical(RESTART_BOUNDARY):

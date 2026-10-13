@@ -337,13 +337,18 @@ def classify(obs: Mapping[str, Any]) -> dict[str, Any]:
         if reload != ["no", "no"] or defaults:
             return _result(P10R_UNIT, reasons + defaults + ["RELOAD_STATE:" + ",".join(reload)], klass)
         return _result(P10R_0, reasons, klass)
-    # EXACT overlay
-    if reload == ["yes", "yes"]:
-        loaded = [f"{u}:{k}" for u in UNITS for k, v in RELEASE_DEFAULTS[u].items() if units[u].get(k) != v]
-        loaded += [f"{u}:DropInPaths" for u in UNITS if units[u].get("DropInPaths")]
-        if loaded:
-            return _result(UNCLASSIFIED, reasons + loaded, klass)       # reload pending yet partly effective
+    # EXACT overlay. Real systemd 255 keeps `NeedDaemonReload=no` when only drop-ins are added (E-19 PR #190 disposable
+    # systemd probe), so "installed, not yet reloaded" is proven by what systemd LOADED, not by that flag: no unit
+    # reports a drop-in and every unit still has the release defaults. The flag may then read `yes` or `no`. A unit
+    # that already reports its drop-in while the other does not is never P10R_1.
+    in_effect = [bool(units[u].get("DropInPaths")) for u in UNITS]
+    if not any(in_effect):
+        defaults = [f"{u}:{k}" for u in UNITS for k, v in RELEASE_DEFAULTS[u].items() if units[u].get(k) != v]
+        if defaults or any(r not in ("yes", "no") for r in reload):
+            return _result(UNCLASSIFIED, reasons + defaults + ["RELOAD_STATE:" + ",".join(reload)], klass)
         return _result(P10R_1, reasons, klass)
+    if not all(in_effect):
+        return _result(P10R_UNIT, reasons + [f"{u}:DropInPaths" for u, on in zip(UNITS, in_effect) if not on], klass)
     effective = boundary_reasons(obs)
     if reload != ["no", "no"] or effective:
         return _result(P10R_UNIT, reasons + effective + ["RELOAD_STATE:" + ",".join(reload)], klass)
@@ -422,7 +427,8 @@ def _fsync_dir(path: Path) -> None:
 
 # ------------------------------------------------------- what other observations see ---
 # The overlay is NOT invisible: the PR-1A host observer reports it. After install + reload exactly these observer
-# facts change (record §6); the W9 / W10 unit checks see `NeedDaemonReload=yes` between install and reload.
+# facts change (record §6). Between install and reload the W9 / W10 unit checks see `NeedDaemonReload=yes` only on
+# a systemd that flags added drop-ins; systemd 255 leaves it `no` (record §10a), so only `expect` proves the reload.
 
 def expected_observer_changes() -> dict[str, Any]:
     return {

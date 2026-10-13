@@ -63,7 +63,7 @@ if str(HERE) not in sys.path:
 import e19_p1b10_upgrade as E  # noqa: E402  (the merged contract; pinned below)
 import mb11_restart_boundary_install as RBI  # noqa: E402  (SHADOW_BASES only; the P1B-10R shadow list)
 
-E19_CONTRACT_SHA256 = "18d07807aee56a1cd6c043749faf247027654d074ec55f4ae88926d67041438e"
+E19_CONTRACT_SHA256 = "152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb"
 BUNDLE_TYPE = "LILITH_E19_MAINTENANCE_OBSERVATION_BUNDLE"
 INPUT_FIELDS = frozenset({"newRelease", "afterCursor", "expectedHead", "candidateDigest", "updatedAt"})
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}

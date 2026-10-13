@@ -299,7 +299,25 @@ class StageTests(unittest.TestCase):
         self.systemd.reload()
         self.systemd.state[B.SERVICE_UNIT].update(NeedDaemonReload="yes")
         self.systemd.state[B.SOCKET_UNIT].update(NeedDaemonReload="yes")
-        self.assertEqual(phase(self.root, self.systemd), I.UNCLASSIFIED)    # reload pending yet partly effective
+        # The overlay is loaded (DropInPaths) yet systemd flags a reload again: never P10R_1 / P10R_2 (record §10a).
+        self.assertEqual(phase(self.root, self.systemd), I.P10R_UNIT)
+        self.systemd.reload()                                     # not loaded, yet a property already differs
+        self.systemd.state[B.SERVICE_UNIT].update(DropInPaths="", Restart="no")
+        self.systemd.state[B.SOCKET_UNIT].update(DropInPaths="")
+        self.assertEqual(phase(self.root, self.systemd), I.UNCLASSIFIED)
+
+    def test_real_systemd_255_installed_state_keeps_need_daemon_reload_no(self):
+        """Record §10a: a disposable systemd 255 probe showed added drop-ins leave `NeedDaemonReload=no` until the
+        reload. The installed-not-reloaded phase is proven by what systemd loaded (no DropInPaths, release
+        defaults), so the install read-back is P10R_1 without `files_changed()`; a mixed load is P10R_UNIT."""
+        digest = I.plan_digest(obs(self.root, self.systemd))
+        result = I.install(digest, root=self.root, units=self.systemd, activation=DARK, chown=False, owner=OWNER)
+        self.assertEqual([self.systemd.state[u]["NeedDaemonReload"] for u in I.UNITS], ["no", "no"])
+        self.assertEqual((result["result"], result["readBack"]["phase"]), ("P1B10R_INSTALLED", I.P10R_1))
+        self.systemd.reload()
+        self.assertEqual(phase(self.root, self.systemd), I.P10R_2)
+        self.systemd.state[B.SOCKET_UNIT].update(DropInPaths="", **I.RELEASE_DEFAULTS[B.SOCKET_UNIT])
+        self.assertEqual(phase(self.root, self.systemd), I.P10R_UNIT)       # one unit loaded, the other not
 
     def test_the_w11_verifier_reads_the_same_boundary(self):
         self.assertNotEqual(V._restart_boundary(self.root, self.systemd)["reasons"], [])

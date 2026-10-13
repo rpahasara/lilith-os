@@ -162,3 +162,10 @@ POST-MERGE M-B10 PRESERVATION (after #186 / #187 / #188) = NOT ESTABLISHED
 E19-D1 … E19-D5 = PROPOSED;  LIVE_MUTATION = NONE;  DEV_CONTACT = NONE
 RELEASE / current / WITNESS / K-WIT / CUSTODY / HELD / LEDGER / SIGNER = UNCHANGED;  authorityGranted = false
 ```
+
+## 7. Contract re-pin (2026-10-13)
+
+The merged contract's load counting was corrected
+([E-19 release maintenance](slice-15b2b-b1b3e-e19-release-maintenance.md) §14). `E19_CONTRACT_SHA256` moves
+`18d07807…` → `152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb`; observer `51c58178…` → `6c9e97e339ccba19eb77c530b80a0a71f383f4abb4147e165a910f1ba9e1603a`. Nothing else in the observer changes;
+`parse_invocations` already reports distinct ids.

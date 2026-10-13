@@ -581,3 +581,39 @@ E19-D1 … E19-D5 = PROPOSED;  OD-M11-13, OD-M11-15, OD-M12-5 = PROPOSED
 LIVE_MUTATION = NONE;  DEV_CONTACT = NONE;  RELEASE / current / WITNESS / K-WIT / CUSTODY / HELD / LEDGER = UNCHANGED
 SIGNER = INACTIVE;  K-ACT = NOT LOADED;  AUTHORITY_ACTIVE = NO;  authorityGranted = false
 ```
+
+## 14. Witness load counting on real systemd (correction, 2026-10-13)
+
+**Finding.** On a disposable systemd 255 probe
+([E-19 witness restart boundary](slice-15b2b-b1b3e-e19-witness-restart-boundary.md) §2a), `journalctl -u <unit>
+--after-cursor` returned the running invocation's own log lines and its stop or failure entries, all carrying its
+InvocationID. The contract counted every id after the U0 cursor as a K-WIT load, so:
+
+- a log line of the running ending incarnation in U0 / U1 gave `US_ENDING_INCARNATION_CHANGED`;
+- its stop entries in U2 / U3 gave `US_REPLACEMENT_START_FAILED`;
+- in U4 / U5 the ending id plus the replacement gave `US_KWIT_LOADS_NOT_EXACTLY_ONE`.
+
+Every live run would have stopped falsely.
+
+**Correction** (`e19_p1b10_upgrade.py` `18d07807…` → `152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb`). A load is a **distinct, newly started**
+invocation: the ids after the accepted U0 cursor, without the ending incarnation's id
+`8af12bd64d024d0eba56bbcedbc534a6`.
+
+- U0 … U3 require none.
+- U4 / U5 require exactly the running replacement.
+- Any other id is still a STOP. The historical B3 id is a load like any other new id, and is refused.
+- A document that repeats an id is malformed (`OBSERVATION_FIELDS`); the observer deduplicates.
+- Cursor retention, boot, journal identity (`s=` / `i=` / `b=`), `afterCursor` binding and UNKNOWN on missing
+  evidence are unchanged.
+
+The observer re-pins the contract: `E19_CONTRACT_SHA256` → `152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb` (observer `51c58178…` →
+`6c9e97e339ccba19eb77c530b80a0a71f383f4abb4147e165a910f1ba9e1603a`). The observer's reads and judgements are otherwise unchanged.
+
+**Regressions.** `JournalLoadCountingTests`:
+
+- the ending incarnation's own entries in every phase U0 … U5;
+- exactly one replacement, with additional, missing or historical incarnations refused;
+- repeated messages counted as one invocation;
+- a missing or unbound baseline cursor is never success.
+
+This changes source only and runs nothing live.
