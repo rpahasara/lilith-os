@@ -598,7 +598,10 @@ class ForgedInputTests(ObserverTestCase):
         with self.assertRaises(E.Refused) as caught:
             O.observe({"newRelease": NEW}, root=self.host.root, new_release=NEW)
         self.assertEqual(caught.exception.reason, "INPUT_FIELDS")
-        self.assertIsNone(E.NEW_RELEASE)
+        self.assertEqual(E.NEW_RELEASE, "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb")   # the merged owner pin
+        with self.assertRaises(E.Refused) as caught:              # inputs for another NEW, against the pinned default
+            self.host.observe(new_release=E.NEW_RELEASE)
+        self.assertEqual(caught.exception.reason, "NEW_RELEASE_NOT_ESTABLISHED")
         with self.assertRaises(E.Refused):
             O.verify({"bundleType": "X"}, self.u0, new_release=NEW)
 

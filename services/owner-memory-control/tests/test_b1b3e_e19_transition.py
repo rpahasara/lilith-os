@@ -142,17 +142,28 @@ class PinTests(unittest.TestCase):
 
 class RecordTests(unittest.TestCase):
     RECORD = ROOT / "docs/architecture/slice-15b2b-b1b3e-e19-transition-implementation.md"
+    PIN_RECORD = ROOT / "docs/architecture/slice-15b2b-b1b3e-e19-new-release-pin.md"
 
     def test_the_record_pins_every_new_or_reused_tool_and_runs_nothing(self):
+        # The transition record is historical (as merged); the CURRENT pins are recorded by the NEW-release pin record.
         text = self.RECORD.read_text(encoding="utf-8")
-        for path in (X.STAGES, X.OBSERVER, X.CONTRACT, X.M9.INSTALLER, X.MB10_OPERATOR):
-            self.assertIn(f"`{path}`", text, path)
-            self.assertIn(f"`{X.TOOL_PINS[path]}`", text, path)
         state = text.split("## 6. State", 1)[1]
         for line in ("NOTHING RUN", "LIVE_MUTATION = NONE", "NEW_RELEASE = NOT BUILT / NOT PINNED"):
             self.assertIn(line, state)
-        self.assertIsNone(E.NEW_RELEASE)
-        self.assertIsNone(E.NEW_MANIFEST_SHA256)
+        pin = self.PIN_RECORD.read_text(encoding="utf-8")
+        for path in (X.STAGES, X.OBSERVER, X.CONTRACT, X.M9.INSTALLER, X.MB10_OPERATOR):
+            self.assertIn(f"`{path}`", pin, path)
+            self.assertIn(f"`{X.TOOL_PINS[path]}`", pin, path)
+        for value in (E.NEW_RELEASE, E.NEW_MANIFEST_SHA256, *E.NEW_RELEASE_ATTESTATION.values()):
+            self.assertIn(f"`{value}`", pin)
+        for target, sets in E.NEW_DR5_TARGETS.items():
+            self.assertIn(f"`{target}`", pin)
+            for lines, digest in sets.values():
+                self.assertIn(f"`{digest}`", pin)
+        state = pin.split("## 7. State", 1)[1]
+        for line in ("LIVE_MUTATION = NONE", "DEV_CONTACT = NONE", "INSTALLED = aee323e",
+                     "NEW_DR5_TARGETS = DERIVED_PINNED_NOT_ACCEPTED"):
+            self.assertIn(line, state)
 
 
 # ======================================================================================= installer stages (A) ===
@@ -738,8 +749,12 @@ class OperatorTests(OperatorCase):
         self.dev.plink = tampered
         self.assertEqual(self.op.observe(self.repo, self.work, "U0")["result"], "E19_OBSERVATION_NOT_RECEIVED")
         with self.assertRaises(X.Stop) as caught:
-            FakeOperator().bind(self.dev).observe(self.repo, self.work, "U0")      # the merged pins are still None
+            FakeOperator(new_release=None, new_manifest=None).bind(self.dev).observe(self.repo, self.work, "U0")
         self.assertEqual(caught.exception.code, "NEW_RELEASE_NOT_ESTABLISHED")
+        pinned = FakeOperator().bind(self.dev)                                    # the merged pins (the attested NEW)
+        self.assertEqual((pinned.new_release, pinned.new_manifest), (E.NEW_RELEASE, E.NEW_MANIFEST_SHA256))
+        with self.assertRaises((X.Stop, E.Refused)):                               # this host's evidence is for another NEW
+            pinned.observe(self.repo, self.work, "U0-PINNED")
 
     def test_missing_journal_evidence_is_never_a_phase(self):
         self.accept_u0()

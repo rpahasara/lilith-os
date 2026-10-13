@@ -198,6 +198,11 @@ class ReleasePinTests(unittest.TestCase):
         self.assertEqual(M6.RELEASE_SHA, OLD)
         self.assertEqual(RI.DEV_PINS["releaseSha"], OLD)
         self.assertEqual(RI.DEV_PINS["attestedManifestSha256"], E.OLD_MANIFEST_SHA256)
+        # The NEW pin lives in the contract alone: no current read path names it before the select.
+        named_new = {p.name for p in TOOLS.glob("*.py")
+                     if E.NEW_RELEASE[:12] in p.read_text(encoding="utf-8")
+                     or E.NEW_MANIFEST_SHA256[:12] in p.read_text(encoding="utf-8")}
+        self.assertEqual(named_new, {"e19_p1b10_upgrade.py"})
 
     def test_preserved_pins_equal_the_accepted_records(self):
         import mb3_registry_ceremony as M3C
@@ -358,19 +363,49 @@ class TransitionPhaseTests(unittest.TestCase):
         self.assertIn("completion record", E.ROUTES[E.U5][1])
         self.assertIn("NOT IMPLEMENTED", E.ROUTES[E.U0][1])
 
-    def test_the_repository_establishes_no_new_release_and_no_replacement(self):
-        self.assertIsNone(E.NEW_RELEASE)
-        self.assertIsNone(E.NEW_MANIFEST_SHA256)
+    def test_the_repository_pins_exactly_the_attested_new_release_and_no_replacement(self):
+        # The owner pin of the attested build (record e19-new-release-pin): the SOURCE commit of the archive.
+        self.assertEqual(E.NEW_RELEASE, "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb")
+        self.assertEqual(E.NEW_MANIFEST_SHA256, "b8393015e505495a81629411a4ecd33c0c372c7b16d2761094eb4e018bc300a2")
+        self.assertNotEqual(E.NEW_RELEASE, OLD)
+        self.assertNotEqual(E.NEW_MANIFEST_SHA256, E.OLD_MANIFEST_SHA256)
+        self.assertEqual(E.NEW_RELEASE_ATTESTATION["archiveSha256"],
+                         "a4ad24e8c261c6e5858c559f4102ac8d6cc6923cfc19a9a7ffe5720408ae3faf")
+        self.assertEqual(E.NEW_RELEASE_ATTESTATION["attestationDigest"],
+                         "d6f7f709d3b40dc42d6fb9c936137bb6c6871c36917c9d27f8f2faa634ff51d2")
         self.assertFalse(hasattr(E, "ACCEPTED_REPLACEMENT_INCARNATIONS"))   # R2: no repository merge during U4
-        self.assertEqual(set(E.NEW_DR5_TARGETS.values()), {None})
+        self.assertEqual(E.NEW_DR5_TARGETS_STATUS, "DERIVED_PINNED_NOT_ACCEPTED")
+        # Evidence for any other NEW (here the synthetic one) is refused by the pinned defaults.
         for call in (lambda: E.classify(PATH[E.U0]), lambda: E.render_u0_statement(BASE_OBS),
                      lambda: E.trusted_baseline(U0_ACCEPT), lambda: E.post9a_r(post9a_evidence(), U0_ACCEPT)):
             with self.assertRaises(E.Refused) as caught:
                 call()
-            self.assertEqual(caught.exception.reason, "NEW_RELEASE_NOT_ESTABLISHED")
+            self.assertEqual(caught.exception.reason, "OBSERVATION_RELEASES")
+        with self.assertRaises(E.Refused) as caught:
+            E.classify(PATH[E.U0], new_release=None)
+        self.assertEqual(caught.exception.reason, "NEW_RELEASE_NOT_ESTABLISHED")
         for bad in (OLD, "0" * 39, NEW.upper()):
             with self.subTest(bad=bad), self.assertRaises(E.Refused):
                 E.classify(PATH[E.U0], new_release=bad)
+
+    def test_the_pinned_new_release_is_installed_only_from_the_select(self):
+        """U0..U4 under the merged pins: before U3 `current` stays OLD and the witness runs from OLD; NEW is only a
+        staged sibling. Pinning NEW never makes the installed release read as NEW."""
+        def pinned(doc):
+            return json.loads(json.dumps(doc).replace(NEW, E.NEW_RELEASE))
+        base = pinned(BASE_OBS)
+        statement = E.render_u0_statement(base)
+        u0 = {"observation": base, "statement": statement.decode("ascii"),
+              "record": E.acceptance_record(E.U0_RECORD_TYPE, base, statement, new_release=E.NEW_RELEASE,
+                                            invocation=E.ENDING_INCARNATION, cursor=base["journalCursor"])}
+        for phase in (E.U0, E.U1, E.U2, E.U3, E.U4):
+            doc = pinned(PATH[phase])
+            with self.subTest(phase=phase):
+                self.assertEqual(E.classify(doc, u0)["phase"], phase)
+                selected = doc["currentTarget"].split("/", 1)[1]
+                self.assertEqual(selected, OLD if phase in (E.U0, E.U1, E.U2) else E.NEW_RELEASE)
+        early = pinned(observation(entries=(OLD, NEW), target=NEW))          # NEW selected under the running OLD
+        self.assertEqual(E.classify(early, u0)["phase"], E.STOP_MIXED)
 
     def test_u5_only_with_the_verified_replacement_acceptance(self):
         self.assertEqual(judge(PATH[E.U5], replacement=None)["phase"], E.STOP_RETIRED_EARLY)
@@ -933,7 +968,7 @@ class PackageReadyTests(unittest.TestCase):
         self.assertEqual(E.package_ready_admissible(PATH[E.U5], U0_ACCEPT, None, release_sha=NEW, new_release=NEW),
                          (False, "NOT_EXACT:" + E.STOP_RETIRED_EARLY))
         self.assertEqual(E.package_ready_admissible(PATH[E.U5], U0_ACCEPT, REPL_ACCEPT, release_sha=NEW),
-                         (False, "REFUSED:NEW_RELEASE_NOT_ESTABLISHED"))       # the repository has no NEW
+                         (False, "REFUSED:OBSERVATION_RELEASES"))     # a NEW other than the pinned one
         mixed = observation(entries=(OLD, NEW), target=NEW)
         self.assertEqual(E.package_ready_admissible(mixed, U0_ACCEPT, REPL_ACCEPT, release_sha=NEW, new_release=NEW),
                          (False, "NOT_EXACT:" + E.STOP_MIXED))
@@ -973,6 +1008,39 @@ class Dr5Tests(unittest.TestCase):
                     T9._invariants(name, after)
                     expected_equal = name == "predeploy-block"
                     self.assertEqual(T9.digest(after) == T10.TARGETS[target][name][1], expected_equal)
+
+    def test_the_pinned_e19_targets_are_the_swap_of_the_accepted_w10_texts_to_the_pinned_new(self):
+        self.assertEqual(set(E.NEW_DR5_TARGETS), set(E.NEW_DR5_SOURCES))
+        self.assertEqual(set(E.NEW_DR5_SOURCES.values()), {T10.RUNNING_HELD, T10.STOPPED_HELD})
+        for target, source in E.NEW_DR5_SOURCES.items():
+            texts = self.w10[source]["texts"]
+            swapped = E.derive_release_swap(texts, old=OLD, new=E.NEW_RELEASE)
+            again = E.derive_release_swap({k: list(v) for k, v in texts.items()}, old=OLD, new=E.NEW_RELEASE)
+            for name in T9.SETS:
+                with self.subTest(target=target, name=name):
+                    self.assertEqual(swapped[name], again[name])                           # deterministic
+                    self.assertEqual((len(swapped[name]), T9.digest(swapped[name])), E.NEW_DR5_TARGETS[target][name])
+                    self.assertEqual(swapped[name].count(E.DR5_RELEASE_LINE.format(sha=E.NEW_RELEASE)),
+                                     E.DR5_RELEASE_LINE_COUNTS[name])
+                    self.assertFalse(any(OLD in line for line in swapped[name]))
+                    T9._invariants(name, swapped[name])
+                    # the historical W10_1 targets are unchanged and differ wherever a release line moved
+                    self.assertEqual(E.NEW_DR5_TARGETS[target][name] == T10.TARGETS[source][name],
+                                     name == "predeploy-block")
+
+    def test_the_historical_w10_targets_stay_pinned_and_unaccepted_targets_have_no_phase(self):
+        self.assertEqual(T10.TARGETS[T10.RUNNING_HELD], {
+            "result-set": (192, "593c90e1778b0e90326cdf96314b328948c00b2207960d27be2b41874d05ff65"),
+            "dr5-block": (153, "ace51f27ac17a2d719ec19da582d09e21f0c7fb4be7b6ec81e1dd53cb369fd5a"),
+            "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae")})
+        self.assertEqual(T10.PHASE_TARGETS, {"W10_1_HELD_EXACT": T10.RUNNING_HELD,
+                                             "W10_1S_HELD_EXACT_WITNESS_STOPPED": T10.STOPPED_HELD})
+        self.assertEqual(sha((TOOLS / "mb10_dr5_target.py").read_bytes()),
+                         "29c359617605f67e812732c4bb6a9ca1b9439bfffcf22285e44d9f6c1999ccf0")
+        for name in E.NEW_DR5_TARGETS:                     # no routine comparison can select an E-19 target yet
+            self.assertNotIn(name, T10.PHASE_TARGETS.values())
+            with self.assertRaises(T9.TargetError):
+                T10.target_for(name)
 
     def test_the_swap_refuses_inexact_inputs(self):
         texts = self.w10[T10.RUNNING_HELD]["texts"]
