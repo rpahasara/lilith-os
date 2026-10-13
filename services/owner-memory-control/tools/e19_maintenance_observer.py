@@ -34,13 +34,22 @@ the local acceptance remains the owner's verbatim statement (merged contract §4
 
 Forms:
 
-    ... observe <inputs.json>                         root, DEV: one read-only observation bundle (JSON)
+    ... observe-inline <inputs-b64url> <inputs-sha256>  root, DEV: one read-only observation bundle (JSON); the live
+                                                      route (the pinned mb6 BOOT bundle over stdin, no host file)
+    ... observe <inputs.json>                         root: the same, inputs from a local file (workstation / tests)
     ... verify <bundle.json> <u0-acceptance.json> [<replacement-acceptance.json>]   pure
     ... post9a-r <bundle.json> <denials.json> <u0-acceptance.json>                  pure; grants nothing
+
+Live route (E-19 transition implementation, record docs/architecture/slice-15b2b-b1b3e-e19-transition-implementation.md):
+under the mb6 BOOT loader every module's `__file__` is `<mb6-bundle:NAME>` and no tool file exists on DEV. The
+contract pin is then judged from the pin map the loader itself enforced before executing anything (argv[1]), the
+broker reads come from the pinned bundled `verify_broker_dev_current_incarnation` module, and the inputs arrive in
+argv as canonical JSON bound to their SHA-256 (echoed as `inputsSha256` for the operator's record).
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -56,14 +65,22 @@ from typing import Any, Callable, Mapping, Sequence
 # operator must also run the interpreter read-only (`-I -B`, as the mb6 BOOT loader does).
 sys.dont_write_bytecode = True
 
+BOOT_FILE_PREFIX = "<mb6-bundle:"
+BUNDLED = str(globals().get("__file__", "")).startswith(BOOT_FILE_PREFIX)
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
+if not BUNDLED and str(HERE) not in sys.path:      # never put the remote cwd on sys.path under the BOOT loader
     sys.path.insert(0, str(HERE))
 
 import e19_p1b10_upgrade as E  # noqa: E402  (the merged contract; pinned below)
 import mb11_restart_boundary_install as RBI  # noqa: E402  (SHADOW_BASES only; the P1B-10R shadow list)
 
 E19_CONTRACT_SHA256 = "152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb"
+# The broker preservation reader: `scripts/verify_broker_dev_current_incarnation.py` at the owner-accepted post-reboot
+# re-pin (= mb9_operator.TOOL_PINS[BROKER]); bundled under the BOOT loader, loaded from the repository otherwise.
+BROKER_MODULE = "verify_broker_dev_current_incarnation"
+BROKER_SHA256 = "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf"
+MAX_INLINE_INPUTS = 4096
+_B64URL = re.compile(r"[A-Za-z0-9_-]+={0,2}\Z")
 BUNDLE_TYPE = "LILITH_E19_MAINTENANCE_OBSERVATION_BUNDLE"
 INPUT_FIELDS = frozenset({"newRelease", "afterCursor", "expectedHead", "candidateDigest", "updatedAt"})
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}
@@ -129,8 +146,46 @@ Refused = E.Refused
 _need = E._need
 
 
+def bundle_pins() -> dict[str, str] | None:
+    """Under the mb6 BOOT loader: the `name=sha256,...` map in argv[1], which the loader enforced (exit 96 unless every
+    bundled module's source hashes to its pin and the module set equals the pin set) before executing any module.
+    None when not running under the loader."""
+    if not BUNDLED or len(sys.argv) < 3:
+        return None
+    try:
+        pins = dict(item.split("=", 1) for item in sys.argv[1].split(","))
+    except ValueError:
+        return None
+    return pins if all(re.fullmatch(r"[0-9a-f]{64}", value) for value in pins.values()) else None
+
+
 def _check_contract() -> None:
+    pins = bundle_pins()
+    if BUNDLED:                                         # no file exists: judge the loader-enforced pin of the contract
+        _need(pins is not None and pins.get("e19_p1b10_upgrade") == E19_CONTRACT_SHA256, "E19_CONTRACT_PIN_MISMATCH")
+        return
     _need(hashlib.sha256(Path(E.__file__).read_bytes()).hexdigest() == E19_CONTRACT_SHA256, "E19_CONTRACT_PIN_MISMATCH")
+
+
+def encode_inputs(inputs: Mapping[str, Any]) -> tuple[str, str]:
+    """The operator side: canonical JSON (= the contract's canonical form), base64url, and its SHA-256."""
+    raw = E._canonical(dict(inputs))
+    return base64.urlsafe_b64encode(raw).decode("ascii"), hashlib.sha256(raw).hexdigest()
+
+
+def decode_inputs(encoded: str, digest: str) -> dict[str, Any]:
+    """The host side: exactly the canonical inputs whose SHA-256 the operator bound on the same command line."""
+    _need(isinstance(encoded, str) and len(encoded) <= MAX_INLINE_INPUTS and _B64URL.fullmatch(encoded) is not None,
+          "INPUTS_ENCODING")
+    _need(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) is not None, "INPUTS_DIGEST")
+    try:
+        raw = base64.urlsafe_b64decode(encoded.encode("ascii"))
+        value = json.loads(raw.decode("ascii"))
+    except (ValueError, UnicodeError) as exc:
+        raise Refused("INPUTS_ENCODING") from exc
+    _need(hashlib.sha256(raw).hexdigest() == digest, "INPUTS_DIGEST")
+    _need(isinstance(value, dict) and E._canonical(value) == raw, "INPUTS_NOT_CANONICAL")
+    return value
 
 
 def _host(root: Path, absolute: str) -> Path:
@@ -360,13 +415,27 @@ def _w10(args: Mapping[str, str], root: Path) -> dict[str, Any] | None:
     return V10.evaluate(args["expectedHead"], args["candidateDigest"], args["updatedAt"], root=root)
 
 
-def _broker() -> dict[str, Any] | None:
+def broker_module() -> Any:
+    """The pinned broker reader. Bundled: the loader-verified module (its pin must be the accepted one); otherwise the
+    repository file, hash-checked before it is executed. Never a path derived from a synthetic `__file__`."""
+    if BUNDLED:
+        pins = bundle_pins()
+        module = sys.modules.get(BROKER_MODULE)
+        _need(pins is not None and pins.get(BROKER_MODULE) == BROKER_SHA256 and module is not None
+              and str(getattr(module, "__file__", "")) == f"{BOOT_FILE_PREFIX}{BROKER_MODULE}>", "BROKER_NOT_BUNDLED")
+        return module
     import importlib.util
 
-    path = HERE.parents[2] / "scripts" / "verify_broker_dev_current_incarnation.py"
+    path = HERE.parents[2] / "scripts" / f"{BROKER_MODULE}.py"
+    _need(hashlib.sha256(path.read_bytes()).hexdigest() == BROKER_SHA256, "BROKER_PIN_MISMATCH")
     spec = importlib.util.spec_from_file_location("e19_broker_preservation", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _broker() -> dict[str, Any] | None:
+    module = broker_module()
     return module.evaluate_preservation(module.collect())
 
 
@@ -542,7 +611,7 @@ def observe(inputs: Mapping[str, Any], *, root: Path | str = Path("/"), units: C
     return {"bundleType": BUNDLE_TYPE, "schemaVersion": 1, "observation": observation, "healthCapture": capture,
             "w10Report": report, "w10ReportSha256": None if report is None else E.document_sha256(report),
             "socketContacted": contacted, "baselineCursorRetained": retained,
-            "unitIdentity": _unit_identity(unit_facts, root),
+            "unitIdentity": _unit_identity(unit_facts, root), "inputsSha256": E.document_sha256(dict(inputs)),
             "authorizes": "NOTHING"}
 
 
@@ -667,13 +736,14 @@ def _read_json(path: str) -> Any:
 
 def main(argv: list[str]) -> int:
     try:
-        if len(argv) == 2 and argv[0] == "observe":
+        if (len(argv) == 2 and argv[0] == "observe") or (len(argv) == 3 and argv[0] == "observe-inline"):
+            inputs = _read_json(argv[1]) if argv[0] == "observe" else decode_inputs(argv[1], argv[2])
             import mb6_ledger_verifier as V6
 
             V6.require_dev_root()
             if V6.RELEASE_TREE not in sys.path:
                 sys.path.insert(0, V6.RELEASE_TREE)
-            result = observe(_read_json(argv[1]))
+            result = observe(inputs)
         elif len(argv) in (3, 4) and argv[0] == "verify":
             result = verify(_read_json(argv[1]), _read_json(argv[2]), _read_json(argv[3]) if len(argv) == 4 else None)
         elif len(argv) == 4 and argv[0] == "post9a-r":
