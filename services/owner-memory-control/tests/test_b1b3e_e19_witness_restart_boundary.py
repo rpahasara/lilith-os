@@ -48,8 +48,10 @@ def sha(data: bytes) -> str:
 
 
 class FakeSystemd:
-    """Effective properties = release defaults overridden by the LOADED drop-ins; NeedDaemonReload compares the
-    drop-ins on disk with the loaded ones. A reload never touches the running witness unless told to misbehave."""
+    """Effective properties = release defaults overridden by the LOADED drop-ins. NeedDaemonReload follows REAL
+    systemd 255 (PR #190 review probe on a disposable host): adding drop-ins leaves it `no`; only a loaded drop-in
+    that disappeared from disk sets it. `flag_added_dropins=True` models a systemd that also flags added ones. A
+    reload never touches the running witness unless told to misbehave."""
 
     def __init__(self, root: Path):
         self.root = root
@@ -62,6 +64,7 @@ class FakeSystemd:
         self.ignore = set()                    # (unit, key) a broken systemd would not apply
         self.fragment_path = {}
         self.fail = False
+        self.flag_added_dropins = False
 
     def on_disk(self, unit: str) -> dict[str, bytes]:
         directory = self.root / f"etc/systemd/system/{unit}.d"
@@ -69,6 +72,12 @@ class FakeSystemd:
             return {}
         return {f"/etc/systemd/system/{unit}.d/{p.name}": p.read_bytes() for p in sorted(directory.iterdir())
                 if p.name.endswith(".conf")}
+
+    def need_reload(self, unit: str) -> str:
+        disk, loaded = self.on_disk(unit), self.loaded[unit]
+        if disk == loaded:
+            return "no"
+        return "yes" if self.flag_added_dropins or set(loaded) - set(disk) else "no"
 
     def daemon_reload(self):
         self.loaded = {unit: self.on_disk(unit) for unit in W.UNITS}
@@ -90,7 +99,7 @@ class FakeSystemd:
             base = {"Id": unit, "LoadState": "loaded", "UnitFileState": "static",
                     "FragmentPath": self.fragment_path.get(unit, f"/etc/systemd/system/{unit}"),
                     "DropInPaths": " ".join(sorted(self.loaded[unit])),
-                    "NeedDaemonReload": "yes" if self.on_disk(unit) != self.loaded[unit] else "no",
+                    "NeedDaemonReload": self.need_reload(unit),
                     "ActiveState": "active" if running else "inactive", "SubState": "running" if running else "dead",
                     "InvocationID": "", "MainPID": "0", "NRestarts": "0"}
             if unit == E.WITNESS_SERVICE:
@@ -149,7 +158,8 @@ class InstallationPhaseTests(BoundaryTestCase):
         self.assertEqual(result["readBack"]["phase"], W.WRB_1)
         self.assertIs(result["reloadPerformedByTool"], False)
         units = self.systemd.units(W.UNITS)
-        self.assertEqual([units[u]["NeedDaemonReload"] for u in W.UNITS], ["yes"] * 3)
+        self.assertEqual([units[u]["NeedDaemonReload"] for u in W.UNITS], ["no"] * 3)  # real systemd 255
+        self.assertEqual([units[u]["DropInPaths"] for u in W.UNITS], [""] * 3)        # not yet loaded
         self.assertEqual(units[E.WITNESS_SERVICE]["Restart"], "on-failure")          # not yet effective
         self.systemd.daemon_reload()                                                    # the owner's own command
         self.tail = cursor("2101")
@@ -224,6 +234,42 @@ class InstallationPhaseTests(BoundaryTestCase):
             with self.assertRaises(FileExistsError):
                 self.install(plan["planDigest"], plan["planCursor"])
         self.assertEqual((foreign / "10-no-implicit-restart.conf").read_bytes(), b"[Service]\nRestart=always\n")
+
+    def test_r1_wrb1_holds_whether_or_not_systemd_flags_added_drop_ins(self):
+        """PR #190 review R1: real systemd 255 reports NeedDaemonReload=no after the drop-ins are written."""
+        for flag in (False, True):
+            self.setUp()
+            self.systemd.flag_added_dropins = flag
+            plan = self.plan()
+            result = self.install(plan["planDigest"], plan["planCursor"])
+            with self.subTest(flag=flag):
+                self.assertEqual((result["result"], result["readBack"]["phase"]), ("WRB_INSTALLED", W.WRB_1))
+                self.systemd.daemon_reload()
+                self.assertEqual(self.classify(after=plan["planCursor"])["phase"], W.WRB_2)
+        self.setUp()                                   # not loaded, yet a property already differs: never WRB_1
+        plan = self.plan()
+        self.install(plan["planDigest"], plan["planCursor"])
+        real = self.systemd.units
+
+        def half(names):
+            out = real(names)
+            out[E.WITNESS_SERVICE]["Restart"] = "no"
+            return out
+
+        self.systemd.units = half
+        self.assertEqual(self.classify(after=plan["planCursor"])["phase"], W.UNCLASSIFIED)
+
+    def test_r2_the_running_incarnations_own_journal_entries_are_not_loads(self):
+        """PR #190 review R2: `journalctl -u --after-cursor` returns the running invocation's log and stop lines."""
+        self.systemd.loads.append(E.ENDING_INCARNATION[0])          # a log line of the running witness
+        plan = self.plan()
+        self.install(plan["planDigest"], plan["planCursor"])
+        self.systemd.daemon_reload()
+        self.assertEqual(self.classify(after=plan["planCursor"])["phase"], W.WRB_2)
+        self.systemd.loads.append(H32("a new invocation"))
+        verdict = self.classify(after=plan["planCursor"])
+        self.assertEqual(verdict["phase"], W.WRB_WITNESS)
+        self.assertIn("WITNESS_LOADED_AFTER_THE_PLAN_CURSOR", verdict["reasons"])
 
 
 class StateRefusalTests(BoundaryTestCase):

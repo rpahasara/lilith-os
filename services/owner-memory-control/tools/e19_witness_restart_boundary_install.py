@@ -260,7 +260,9 @@ def _witness_reasons(units: Mapping[str, Mapping[str, str]], journal: Mapping[st
         reasons.append("WITNESS_RESTARTED")
     if any(units[s].get("ActiveState") != "active" for s in (E.OWNER_SOCKET, E.SIGNER_SOCKET)):
         reasons.append("WITNESS_SOCKETS_NOT_ACTIVE")
-    if journal.get("witnessLoads") != []:
+    # A K-WIT load is a NEW invocation. `journalctl -u … --after-cursor` also returns the running invocation's own
+    # log lines and its stop messages (real systemd 255, PR #190 review probe), which are not loads.
+    if [i for i in journal.get("witnessLoads") or [] if i != ACCEPTED_INCARNATION[0]]:
         reasons.append("WITNESS_LOADED_AFTER_THE_PLAN_CURSOR")
     return reasons
 
@@ -312,11 +314,16 @@ def classify(obs: Mapping[str, Any]) -> dict[str, Any]:
         if reload != ["no", "no", "no"] or defaults:
             return _result(WRB_UNIT, reasons + defaults + ["RELOAD_STATE:" + ",".join(reload)], klass)
         return _result(WRB_0, reasons, klass)
-    # EXACT overlay
-    if reload == ["yes", "yes", "yes"]:
-        if defaults:
-            return _result(UNCLASSIFIED, reasons + defaults, klass)       # reload pending yet partly effective
+    # EXACT overlay. Real systemd 255 keeps `NeedDaemonReload=no` when only drop-ins are added (PR #190 review probe),
+    # so "not yet reloaded" is proven by what systemd LOADED: no unit reports the drop-in and every unit still has
+    # the release defaults. NeedDaemonReload may then read either value; a mixed load is never WRB_1.
+    loaded = [bool(units[u].get("DropInPaths")) for u in UNITS]
+    if not any(loaded):
+        if defaults or any(r not in ("yes", "no") for r in reload):
+            return _result(UNCLASSIFIED, reasons + defaults + ["RELOAD_STATE:" + ",".join(reload)], klass)
         return _result(WRB_1, reasons, klass)
+    if not all(loaded):
+        return _result(WRB_UNIT, reasons + [f"{u}:DropInPaths" for u, ok in zip(UNITS, loaded) if not ok], klass)
     effective = effective_reasons(obs)
     if reload != ["no", "no", "no"] or effective:
         return _result(WRB_UNIT, reasons + effective + ["RELOAD_STATE:" + ",".join(reload)], klass)

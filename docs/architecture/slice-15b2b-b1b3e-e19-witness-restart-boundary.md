@@ -6,7 +6,7 @@ Status:
 - **Base:** main `ee77aa7c113281fb6c32247b11b49b4cd1b0f585`, the PR #189 merge. Its workflow `38295150689` succeeded.
   The post-merge M-B10 preservation (DR-5 W10_1 EQUAL plus a fresh host POST) is still outstanding.
 - **What this slice adds:** the tool `services/owner-memory-control/tools/e19_witness_restart_boundary_install.py`
-  (SHA-256 `8691cd0558b8deceba3e424c0a63487b5bca928991f37d87b05c5f68fdc0b339`),
+  (SHA-256 `7d9f925203d7ee8b827dcf637561a7305f60a1f2628eacc4ca749514c2dbc341`),
   which installs and verifies the witness restart boundary that the merged E-19 contract requires before any U0
   baseline (`e19_p1b10_upgrade.py` §4.4, E19-D3, PROPOSED).
 - **What it reuses unchanged:** the three merged candidate drop-ins (`e19_witness_restart_dropins/`, pins
@@ -30,7 +30,7 @@ Unlike the signer, the witness **runs** during this stage. Every phase therefore
 | Phase | Facts |
 | --- | --- |
 | `WRB_0_PRE_INSTALL_EXACT` | release fragments byte-exact (`E.OLD_RELEASE` assets: service `9f78130c…`, owner socket `d260917f…`, signer socket `ad345d18…`), `FragmentPath` = `/etc/systemd/system/<unit>`, loaded, static; no overlay and no shadow anywhere in the P1B-10R `SHADOW_BASES`; release defaults in effect (`Restart=on-failure`, sockets `StopWhenUnneeded=no`, `RefuseManualStart=no`); `DropInPaths` empty; `NeedDaemonReload=no`; activation exactly dark; the witness as above |
-| `WRB_1_INSTALLED_RELOAD_PENDING` | the three overlay files exact (bytes, `root:root`, 0644, one link; directories 0755); `NeedDaemonReload=yes` on all three units, which still report the release defaults |
+| `WRB_1_INSTALLED_RELOAD_PENDING` | the three overlay files exact (bytes, `root:root`, 0644, one link; directories 0755); systemd has **not loaded** them: `DropInPaths` empty and the release defaults still in effect on all three units. `NeedDaemonReload` may read `no` (real systemd 255 does not flag added drop-ins; §2a) or `yes`. A unit that already reports a drop-in or a changed property while another does not is never WRB_1 |
 | `WRB_2_EFFECTIVE_EXACT` | `NeedDaemonReload=no`, and the effective properties plus drop-in bytes are exactly the merged `RESTART_BOUNDARY` (service `Restart=no`; sockets `StopWhenUnneeded=yes`, `RefuseManualStart=yes`; exact `DropInPaths`) |
 | `WRB_PARTIAL_INSTALL` | a strict prefix of the install's own writes (directory, then the file, unit by unit), including an `O_EXCL` file created but not yet written |
 | `WRB_FOREIGN_OR_ALTERED` | anything else in an overlay directory (altered bytes, extra files, wrong metadata, a symlink, an out-of-order directory) or any shadow fragment or `.d` |
@@ -70,7 +70,10 @@ The transitions are never merged into one:
   `/etc/systemd/system` inventory change by exactly the three candidates (`expected_observer_changes`).
   `observer_delta_reasons` flags any other change, including any change of the witness incarnation. Later host-POST
   byte comparisons must use it.
-- **W9 verifier and installer `status`: fail during WRB_1 only.** Both require `NeedDaemonReload=no`, so
+- **W9 verifier and installer `status` (corrected by the §2a probe).** On systemd 255 adding the drop-ins leaves
+  `NeedDaemonReload=no`, so these readers are **not** expected to fail in WRB_1; on a systemd that flags added
+  drop-ins they would fail there. Either way the effective configuration differs from the files until the reload,
+  which only `expect WRB_2` proves. Previous wording, kept for history: both require `NeedDaemonReload=no`, so
   W9/W10-based host reads and `status --expect` fail between install and reload. Install and reload should run
   back-to-back with no routine host read in between. From WRB_2 on they are unaffected, because neither reads
   `DropInPaths` or `Restart`.
@@ -80,9 +83,49 @@ The transitions are never merged into one:
 - **Ordering.** Only the three witness units change. The merged contract still requires the signer to have no
   drop-ins, so the P1B-10R signer overlay must wait until after the E-19 transition.
 
+## 2a. Real disposable systemd probe (PR #190 review, 2026-10-13)
+
+The probe was a local WSL Ubuntu-24.04 host running systemd 255 (255.4-1ubuntu8.17). It used synthetic units only:
+`e19wrb-probe.service` and two `Accept=no` sockets, mirroring the witness unit's dependency and restart directives,
+with a throwaway credential encrypted by that host's key. The merged candidate drop-ins were copied byte-exact
+under the probe names. No LILITH unit, credential or path was touched, and the units were removed afterwards.
+
+| Check | Observed |
+| --- | --- |
+| service-only start (`E.START_COMMAND` shape) | service and both sockets active; credential decrypted once (digest matched) |
+| drop-ins written, not yet reloaded | `DropInPaths` empty, release defaults (`Restart=on-failure`, sockets `no`/`no`), **`NeedDaemonReload=no`** on all three, so the fake systemd's `yes` was wrong (R1) |
+| `daemon-reload` | **same InvocationID / MainPID, NRestarts 0**; service and sockets still active (`StopWhenUnneeded=yes` does not stop the sockets of an active service); exactly one process invocation; no new invocation id |
+| effective after reload | service `Restart=no`; sockets `StopWhenUnneeded=yes`, `RefuseManualStart=yes`; exact single `DropInPaths`; `FragmentPath` `/etc/...`; `NeedDaemonReload=no`; `Restart` is absent from a socket's `show` output (the tool tolerates this) |
+| behaviour | a manual socket start is **refused** ("may be requested by dependency only"); after `kill -9` the service stays `failed` (no automatic restart), both sockets stop and the path is removed, a connection gets `FileNotFoundError` and starts nothing; a later service-only start works and pulls both sockets |
+| journal | `journalctl -u … --after-cursor` returns the running invocation's own log lines and its stop / failure entries (same InvocationID), so they are not loads (R2); a new start appears as a new id |
+| cursor retention (F4) | exact entry present → `True`; a well-formed cursor with no entry → `False`; a vacuumed cursor (only the post-rotation journal file) → `False`, while `--after-cursor` on that journal silently returns entries with rc 0 |
+
+**Corrections made in this PR** (each with a regression):
+
+- **R1.** WRB_1 is proven by what systemd *loaded*, not by `NeedDaemonReload`
+  (`test_r1_wrb1_holds_whether_or_not_systemd_flags_added_drop_ins`). The fake systemd now models systemd 255.
+- **R2.** A load is a **new** InvocationID; entries of the running accepted incarnation are not loads
+  (`test_r2_the_running_incarnations_own_journal_entries_are_not_loads`).
+
+**Findings in merged code (not changed by this PR; each needs its own slice):**
+
+- **The merged E-19 contract and observer (`e19_p1b10_upgrade.py`, `e19_maintenance_observer.py`) count every
+  invocation id after the U0 cursor as a load.** By the R2 observation:
+  - a log line of the running ending incarnation in U0/U1 classifies as `US_ENDING_INCARNATION_CHANGED`;
+  - after `STOP_COMMAND` the ending incarnation's stop entries make U2/U3 classify as `US_REPLACEMENT_START_FAILED`;
+  - in U4/U5 the ending id plus the replacement id is `US_KWIT_LOADS_NOT_EXACTLY_ONE`.
+
+  **This blocks any live U0–U5 run** until the contract counts only ids other than the ending incarnation, and in
+  U4/U5 exactly the replacement.
+- **The merged P1B-10R signer tool (`mb11_restart_boundary_install.py`) requires `NeedDaemonReload=yes` for
+  `P10R_1`.** By the R1 observation a real install on systemd 255 would read back as `P10R_UNIT_NOT_EXACT`. Its
+  runner probe never asserted that property after install.
+- **DEV's systemd version is not established here.** Every observation above is from systemd 255 and must be
+  re-proven on the target before a live step.
+
 ## 3. Tests
 
-The new suite `test_b1b3e_e19_witness_restart_boundary.py` has 17 tests and runs on a POSIX synthetic host. The fake
+The new suite `test_b1b3e_e19_witness_restart_boundary.py` has 19 tests (17 plus the R1 / R2 regressions) and runs on a POSIX synthetic host. The fake
 systemd derives the effective properties by parsing the drop-ins it last loaded (with the reviewed `parse_unit`), and
 reports `NeedDaemonReload=yes` while the files on disk differ from what it loaded.
 
@@ -107,8 +150,10 @@ reports `NeedDaemonReload=yes` while the files on disk differ from what it loade
 
 ## 4. Remaining live prerequisites (none authorized)
 
+0. **The merged-contract journal counting fix (§2a)**, before any live U0–U5 run.
 1. **The post-merge M-B10 preservation.** DR-5 W10_1 EQUAL and a fresh host POST after #186, #187, #188 and #189.
-2. **A disposable-runner proof**, like the P1B-10R probe, that on real systemd:
+2. **A proof on the DEV systemd version.** The §2a probe on systemd 255 already showed every property below;
+   DEV's version must be confirmed or the probe repeated. On real systemd:
    - the three drop-ins produce exactly `RESTART_BOUNDARY`;
    - `daemon-reload` does not restart an active service;
    - `StopWhenUnneeded=yes` leaves the sockets of an active service running;
