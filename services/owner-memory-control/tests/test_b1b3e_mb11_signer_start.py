@@ -645,7 +645,11 @@ class StaticBoundaryTests(unittest.TestCase):
     def test_no_live_capable_operator_or_workflow_change_in_this_slice(self):
         # Owner exception (PR #183, 2026-10-12): the ONE disposable-runner synthetic restart-boundary probe step is the
         # only M-B11 workflow reference allowed; everything else stays prohibited (`mb11_workflow_violations`).
-        self.assertFalse((TOOLS / "mb11_operator.py").exists())
+        # The M-B11 operator slice (2026-10-15) adds exactly the reviewed operator, pinned by its record; no workflow
+        # may name it (LIVE_TOKENS), and nothing in this design slice runs it.
+        operator = hashlib.sha256((TOOLS / "mb11_operator.py").read_bytes()).hexdigest()
+        record = (ROOT / "docs/architecture/slice-15b2b-b1b3e-mb11-signer-start-operator.md").read_text("utf-8")
+        self.assertIn(f"`mb11_operator.py` | `{operator}`", record)
         self.assertEqual(mb11_workflow_violations(workflow_texts()), [])
 
 
