@@ -69,7 +69,7 @@ TOOL_PINS = {
 # The W10 chain, the restart-boundary tools, the W11 verifier, then the generated evidence and the remote tail.
 BUNDLE = (*M10.W10_BUNDLE, RESTART_BOUNDARY, RESTART_BOUNDARY_INSTALL, W11_VERIFIER)
 
-RELEASE = "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb"                      # E-19 NEW, sole installed (U5)
+RELEASE = X.E.NEW_RELEASE                                                 # E-19 NEW, sole installed (U5); the contract pin
 P1B10R_PLAN = "2a004a4195116462d60fdff978229f9a2364427704e4d16d5dec729801106592"   # installed once; Option A
 WITNESS = ("90b28f9d06fd48a1a1bdc3ae39474fb1", "69238")                  # the accepted E-19 replacement
 W11_0, W11_1, W10_1 = "W11_0_PRE_SIGNER_EXACT", "W11_1_SIGNER_STARTED_EXACT", "W10_1_HELD_EXACT"

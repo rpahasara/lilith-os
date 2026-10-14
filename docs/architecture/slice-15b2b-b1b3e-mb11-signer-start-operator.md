@@ -164,7 +164,7 @@ The rendered go is plain ASCII with no `>`, so it survives the go-check normalis
 
 | Tool | SHA-256 |
 | --- | --- |
-| `mb11_operator.py` | `0b59bca47186e73ca59ccea473b089f262fc6d919fbbf3dff7c497a48d1aebf5` |
+| `mb11_operator.py` | `5dbfb4cce949cad752c190bac0952d19828fa1c1a912689a6c51f8de639c81a4` |
 | `mb11_start_remote.py` | `13914b3b6bc8509f552b4753ea2c7d0ceb3140e1213a44fdea49f921075abbef` |
 
 Reused unchanged and pinned in `mb11_operator.TOOL_PINS`:
