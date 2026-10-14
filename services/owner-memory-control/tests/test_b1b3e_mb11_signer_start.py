@@ -37,6 +37,7 @@ for _p in (ROOT / "services/core-api", ROOT / "services/owner-memory-control", T
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import e19_p1b10_upgrade as E  # noqa: E402
 import mb10_dr5_target as T10  # noqa: E402
 import mb11_dr5_target as D  # noqa: E402
 import mb11_signer_verifier as V  # noqa: E402
@@ -126,12 +127,14 @@ class Dr5TargetTests(unittest.TestCase):
             self.assertEqual(running[name]["removed"], [D.DEFERRED_LINE])
             self.assertEqual(running[name]["lines"], T10.TARGETS[T10.RUNNING_HELD][name][0] + 2)
         self.assertEqual((running["predeploy-block"]["added"], running["predeploy-block"]["removed"]), ([], []))
+        # record §14: derived on the accepted E-19 base (the pre-E-19 194 / 8c8b6eac and 155 / ba39512d are history)
         self.assertEqual(D.TARGETS[D.RUNNING_SIGNER_HELD]["result-set"],
-                         (194, "8c8b6eacb144e1d3587a9e6ea1694ff122c0c219ac6e9b90f1f2addd9b41ce93"))
+                         (194, "ff2468f09fb6721de776c857e096fe485b2399e70fa6c5d37877179c4de47509"))
         self.assertEqual(D.TARGETS[D.RUNNING_SIGNER_HELD]["dr5-block"],
-                         (155, "ba39512d64bbc0966dca4125ab1d390adf2d3b41718a279d57e5a4aa4e6d1e59"))
-        # a stopped signer leaves no deployer-visible trace: the post-HELD text, under a distinct name
-        self.assertEqual(D.TARGETS[D.STOPPED_AFTER_LOAD_HELD], T10.TARGETS[T10.RUNNING_HELD])
+                         (155, "4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"))
+        # a stopped signer leaves no deployer-visible trace: the post-HELD E-19 text, under a distinct name
+        self.assertEqual(D.TARGETS[D.STOPPED_AFTER_LOAD_HELD], dict(E.NEW_DR5_TARGETS["WITNESS_RUNNING_HELD_E19"]))
+        self.assertNotEqual(D.TARGETS[D.STOPPED_AFTER_LOAD_HELD], T10.TARGETS[T10.RUNNING_HELD])
         self.assertNotEqual(D.STOPPED_AFTER_LOAD_HELD, T10.RUNNING_HELD)
         texts = derived["targets"][D.RUNNING_SIGNER_HELD]["texts"]["result-set"]
         for line in D.PRESENT_BEFORE:                             # /run/lilith-authority-dev unchanged (OR-6)
@@ -167,7 +170,7 @@ class Dr5TargetTests(unittest.TestCase):
         own_pins = {name: (len(lines), T9.digest(lines)) for name, lines in tampered.items()}
         with self.assertRaises(D.TargetError) as caught:
             D.derive({k: T9.encode(v) for k, v in tampered.items()}, SCRIPT, base_pins=own_pins, w9_pins=None,
-                     w10_pins=None, target_pins=None)
+                     w10_pins=None, e19_pins=None, target_pins=None)
         self.assertTrue(caught.exception.reason.startswith(("SUBSTITUTION_SOURCE_NOT_EXACTLY_ONCE",
                                                             "SOURCE_DEFERRED_LINE_NOT_EXACTLY_ONCE")),
                         caught.exception.reason)
@@ -205,6 +208,131 @@ class Dr5TargetTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(json.loads(out.stdout)["targets"][D.RUNNING_SIGNER_HELD]["result-set"]["sha256"],
                          D.TARGETS[D.RUNNING_SIGNER_HELD]["result-set"][1])
+
+
+E19_BASE_PINS = {"result-set": (192, "91c91ec7d5001d8c13f8438cb3d653ea3ee9b6bc1e41087ec154fec834def13d"),
+                 "dr5-block": (153, "0692dc6df9dfbba2e6d81d985d56090025c11d2756a6397966346bb5f9e5fd16"),
+                 "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae")}
+PRE_E19_W11 = ("8c8b6eacb144e1d3587a9e6ea1694ff122c0c219ac6e9b90f1f2addd9b41ce93",
+               "ba39512d64bbc0966dca4125ab1d390adf2d3b41718a279d57e5a4aa4e6d1e59",
+               "593c90e1778b0e90326cdf96314b328948c00b2207960d27be2b41874d05ff65",
+               "ace51f27ac17a2d719ec19da582d09e21f0c7fb4be7b6ec81e1dd53cb369fd5a")
+
+
+def release_line(sha_):
+    return E.DR5_RELEASE_LINE.format(sha=sha_)
+
+
+class Dr5E19RebaseTests(unittest.TestCase):
+    """Record §14: the W11 targets are derived on the owner-accepted E-19 base `WITNESS_RUNNING_HELD_E19`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.derived = D.derive(accepted_sets(), SCRIPT)
+
+    def test_the_base_is_exactly_the_accepted_e19_target_and_the_e19_pins_are_unchanged(self):
+        self.assertEqual(D.E19_BASE, "WITNESS_RUNNING_HELD_E19")
+        self.assertEqual({k: tuple(v) for k, v in E.NEW_DR5_TARGETS[D.E19_BASE].items()}, E19_BASE_PINS)
+        self.assertEqual(E.NEW_DR5_SOURCES[D.E19_BASE], T10.RUNNING_HELD)
+        self.assertEqual(sha((TOOLS / "e19_p1b10_upgrade.py").read_bytes()), D.E19_CONTRACT_SHA256)
+        w10 = T10.derive(accepted_sets(), SCRIPT)["targets"][T10.RUNNING_HELD]["texts"]
+        base = D.e19_base(w10)
+        self.assertEqual({n: (len(base[n]), T9.digest(base[n])) for n in D.SETS}, E19_BASE_PINS)
+        self.assertEqual(base, E.derive_release_swap(w10, old=E.OLD_RELEASE, new=E.NEW_RELEASE))
+
+    def test_the_stopped_target_is_the_accepted_e19_base(self):
+        sets = self.derived["targets"][D.STOPPED_AFTER_LOAD_HELD]["sets"]
+        self.assertEqual({n: (sets[n]["lines"], sets[n]["sha256"]) for n in D.SETS}, E19_BASE_PINS)
+        self.assertEqual({n: tuple(v) for n, v in D.TARGETS[D.STOPPED_AFTER_LOAD_HELD].items()}, E19_BASE_PINS)
+        self.assertTrue(all(not sets[n]["added"] and not sets[n]["removed"] for n in D.SETS))
+
+    def test_the_running_target_is_the_e19_base_plus_exactly_the_signer_delta(self):
+        base = self.derived["targets"][D.STOPPED_AFTER_LOAD_HELD]["texts"]
+        running = self.derived["targets"][D.RUNNING_SIGNER_HELD]
+        for name in ("result-set", "dr5-block"):
+            self.assertEqual(running["sets"][name]["added"], list(D.DENIED_LINES))
+            self.assertEqual(running["sets"][name]["removed"], [D.DEFERRED_LINE])
+            self.assertEqual(running["texts"][name], T9.substitute(base[name], ((D.DEFERRED_LINE, D.DENIED_LINES),)))
+            self.assertEqual(running["sets"][name]["lines"], E19_BASE_PINS[name][0] + 2)
+        self.assertEqual(running["texts"]["predeploy-block"], base["predeploy-block"])
+        self.assertEqual(D.TARGETS[D.RUNNING_SIGNER_HELD]["predeploy-block"], E19_BASE_PINS["predeploy-block"])
+        self.assertEqual({n: (running["sets"][n]["lines"], running["sets"][n]["sha256"]) for n in D.SETS},
+                         {n: tuple(v) for n, v in D.TARGETS[D.RUNNING_SIGNER_HELD].items()})
+
+    def test_release_lines_are_new_only_in_every_target(self):
+        for target in (D.RUNNING_SIGNER_HELD, D.STOPPED_AFTER_LOAD_HELD):
+            texts = self.derived["targets"][target]["texts"]
+            for name in D.SETS:
+                self.assertEqual(texts[name].count(release_line(E.NEW_RELEASE)), E.DR5_RELEASE_LINE_COUNTS[name])
+                self.assertFalse(any(E.OLD_RELEASE in line for line in texts[name]), (target, name))
+        self.assertEqual(self.derived["base"], D.E19_BASE)
+        self.assertEqual(self.derived["release"], E.NEW_RELEASE)
+        self.assertIs(self.derived["accepted"], False)
+
+    def test_the_pre_e19_values_are_superseded(self):
+        pinned = {v[1] for target in D.TARGETS.values() for v in target.values()}
+        self.assertFalse(pinned & set(PRE_E19_W11))
+        self.assertEqual(T10.TARGETS[T10.RUNNING_HELD]["result-set"][1], PRE_E19_W11[2])   # W10 history unchanged
+
+    def test_a_pre_e19_log_is_never_equal(self):
+        w10 = T10.derive(accepted_sets(), SCRIPT)["targets"][T10.RUNNING_HELD]["texts"]
+        old_running = "\n".join(T9.substitute(w10["result-set"], ((D.DEFERRED_LINE, D.DENIED_LINES),))) + "\n"
+        old_stopped = "\n".join(w10["result-set"]) + "\n"
+        for phase, log in (("W11_1_SIGNER_STARTED_EXACT", old_running),
+                           ("W11_1S_STOPPED_AFTER_FIRST_LOAD", old_stopped)):
+            result = D.compare(phase, log)
+            self.assertEqual(result["result"], "DRIFT", phase)
+            self.assertGreater(result["oldReleaseLines"], 0, phase)
+        new_log = "\n".join(self.derived["targets"][D.RUNNING_SIGNER_HELD]["texts"]["result-set"]) + "\n"
+        result = D.compare("W11_1_SIGNER_STARTED_EXACT", new_log)
+        self.assertEqual((result["result"], result["oldReleaseLines"], result["base"]), ("EQUAL", 0, D.E19_BASE))
+
+    def test_a_base_that_is_not_the_accepted_e19_target_is_refused(self):
+        w10 = T10.derive(accepted_sets(), SCRIPT)["targets"][T10.RUNNING_HELD]["texts"]
+        tampered = copy.deepcopy(w10)
+        tampered["dr5-block"] = [line for line in tampered["dr5-block"] if line != "DENIED: test -w /opt"] + \
+            ["DENIED: test -w /opt"]
+        with self.assertRaises(D.TargetError) as caught:
+            D.e19_base(tampered)
+        self.assertEqual(caught.exception.reason, "E19_BASE_NOT_ACCEPTED_TARGET:dr5-block")
+        self.assertEqual(D.e19_base(tampered, e19_pins=None)["dr5-block"][-1], "DENIED: test -w /opt")  # TEST seam
+        missing = copy.deepcopy(w10)
+        missing["result-set"] = [line for line in missing["result-set"] if line != release_line(E.OLD_RELEASE)]
+        with self.assertRaises(E.Refused):
+            D.e19_base(missing, e19_pins=None)                     # the contract swap itself refuses
+
+    def test_a_synthetic_base_derives_through_the_seams(self):
+        sets = json.loads(FIXTURE.read_text(encoding="utf-8"))["sets"]
+        tampered = copy.deepcopy(sets)
+        tampered["result-set"].append("DENIED: test -w /synthetic-extra")
+        own = {name: (len(lines), T9.digest(lines)) for name, lines in tampered.items()}
+        encoded = {k: T9.encode(v) for k, v in tampered.items()}
+        with self.assertRaises(D.TargetError) as caught:
+            D.derive(encoded, SCRIPT, base_pins=own, w9_pins=None, w10_pins=None, target_pins=None)
+        self.assertEqual(caught.exception.reason, "E19_BASE_NOT_ACCEPTED_TARGET:result-set")
+        out = D.derive(encoded, SCRIPT, base_pins=own, w9_pins=None, w10_pins=None, e19_pins=None, target_pins=None)
+        self.assertIn("DENIED: test -w /synthetic-extra",
+                      out["targets"][D.STOPPED_AFTER_LOAD_HELD]["texts"]["result-set"])
+
+    def test_pin_mismatches_are_refused(self):
+        with mock.patch.object(D, "E19_CONTRACT_SHA256", "0" * 64):
+            with self.assertRaises(D.TargetError) as caught:
+                D.derive(accepted_sets(), SCRIPT)
+            self.assertEqual(caught.exception.reason, "E19_CONTRACT_PIN_MISMATCH")
+            with self.assertRaises(D.TargetError):
+                D.compare("W11_1_SIGNER_STARTED_EXACT", "x\n")
+
+    def test_phase_refusals_and_mapping_are_unchanged(self):
+        self.assertEqual(D.PHASE_TARGETS, {"W11_1_SIGNER_STARTED_EXACT": D.RUNNING_SIGNER_HELD,
+                                           "W11_1S_STOPPED_AFTER_FIRST_LOAD": D.STOPPED_AFTER_LOAD_HELD})
+        log = "\n".join(self.derived["targets"][D.STOPPED_AFTER_LOAD_HELD]["texts"]["result-set"]) + "\n"
+        for phase in ("W10_1_HELD_EXACT", "W10_1S_HELD_EXACT_WITNESS_STOPPED", "U5_OLD_RETIRED_REPLACEMENT_ACCEPTED",
+                      V.W11_0, V.UNCLASSIFIED):
+            with self.assertRaises(D.TargetError) as caught:
+                D.compare(phase, log)
+            self.assertTrue(caught.exception.reason.startswith("NO_BASELINE_STOP"), phase)
+        result = D.compare("W11_1S_STOPPED_AFTER_FIRST_LOAD", log)
+        self.assertEqual((result["result"], result["targetAccepted"], result["accepted"]), ("EQUAL", False, False))
 
 
 # ------------------------------------------------------------------------------------ classifier ---
@@ -510,7 +638,7 @@ class StaticBoundaryTests(unittest.TestCase):
                     for alias in node.names} | {node.module.split(".")[0] for node in ast.walk(tree)
                                                 if isinstance(node, ast.ImportFrom) and node.module}
         self.assertEqual(imported - {"__future__"}, {"hashlib", "json", "re", "sys", "pathlib", "mb10_dr5_target",
-                                                     "mb9_dr5_target"})
+                                                     "mb9_dr5_target", "e19_p1b10_upgrade"})
         for needle in ("write_bytes", "write_text", "open(", ".unlink"):
             self.assertFalse(needle in source, needle)
 

@@ -22,6 +22,12 @@ block is unchanged). A signer STOPPED after its first K-ACT load leaves no deplo
 post-HELD running-witness text, under a distinct target name. These are derived, PROPOSED targets: no live W11
 deployment observation exists yet.
 
+E-19 rebase (2026-10-14, record §14): the installed release is now the E-19 NEW release. The base is therefore the
+merged contract's `derive_release_swap(<OLD>, <NEW>)` over the W10 running-witness text (`e19_p1b10_upgrade.py`,
+pinned), required to equal the owner-accepted `WITNESS_RUNNING_HELD_E19` target BEFORE the signer delta is applied.
+The pre-E-19 W11 values (194 / `8c8b6eac…`, 155 / `ba39512d…`; stopped = W10_1 `593c90e1…`) named the retired release
+and are superseded for any future W11 use. A log naming the retired release is never EQUAL.
+
 | Form | Effect |
 | --- | --- |
 | `derive <result-set> <dr5-block> <predeploy-block> <dr5-script>` | the accepted post-M-B6 texts (via the pinned W9 and W10 derivations) and the pinned script; the delta is proven; each derived target must equal its pin |
@@ -43,6 +49,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import e19_p1b10_upgrade as E  # noqa: E402  (the merged E-19 contract: release swap + accepted NEW targets; pinned)
 import mb10_dr5_target as T10  # noqa: E402  (pinned; reused unchanged)
 import mb9_dr5_target as T9  # noqa: E402  (pinned; reused unchanged)
 
@@ -50,6 +57,9 @@ TargetError = T9.TargetError
 _need = T9._need
 SETS = T9.SETS
 MB10_DR5_TARGET_SHA256 = "29c359617605f67e812732c4bb6a9ca1b9439bfffcf22285e44d9f6c1999ccf0"
+E19_CONTRACT_SHA256 = "e8c8f6037ef51d4e2f7de7ac546f034bdf4893a717ef3bcb450d9fe52cb12cc2"
+# The owner-accepted E-19 base (E-19 completion acceptance, 2026-10-14) under which every W11 target is derived.
+E19_BASE = "WITNESS_RUNNING_HELD_E19"
 DR5_SCRIPT = T10.DR5_SCRIPT
 DR5_SCRIPT_SHA256 = T10.DR5_SCRIPT_SHA256
 SIGNER_RUNTIME = "/run/lilith-authority-dev"
@@ -79,14 +89,15 @@ RUNNING_SIGNER_HELD = "SIGNER_RUNNING_WITNESS_RUNNING_HELD"
 STOPPED_AFTER_LOAD_HELD = "SIGNER_STOPPED_AFTER_FIRST_LOAD_WITNESS_RUNNING_HELD"
 SOURCE = {RUNNING_SIGNER_HELD: T10.RUNNING_HELD, STOPPED_AFTER_LOAD_HELD: T10.RUNNING_HELD}
 SUBSTITUTIONS = {RUNNING_SIGNER_HELD: ((DEFERRED_LINE, DENIED_LINES),), STOPPED_AFTER_LOAD_HELD: ()}
-# The derived post-start targets (PROPOSED; not owner-accepted; no live W11 observation yet). Tests re-derive them.
+# The derived post-start targets on the E-19 NEW release (PROPOSED; not owner-accepted; no live W11 observation yet).
+# Tests re-derive them.
 TARGETS = {
     RUNNING_SIGNER_HELD: {
-        "result-set": (194, "8c8b6eacb144e1d3587a9e6ea1694ff122c0c219ac6e9b90f1f2addd9b41ce93"),
-        "dr5-block": (155, "ba39512d64bbc0966dca4125ab1d390adf2d3b41718a279d57e5a4aa4e6d1e59"),
+        "result-set": (194, "ff2468f09fb6721de776c857e096fe485b2399e70fa6c5d37877179c4de47509"),
+        "dr5-block": (155, "4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"),
         "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae"),
     },
-    STOPPED_AFTER_LOAD_HELD: dict(T10.TARGETS[T10.RUNNING_HELD]),
+    STOPPED_AFTER_LOAD_HELD: dict(E.NEW_DR5_TARGETS[E19_BASE]),
 }
 # W11 host phase (independently verified by `mb11_signer_verifier.py`) -> comparison target. Every other phase,
 # including every W9 and W10 phase, has no post-start baseline.
@@ -97,6 +108,20 @@ PHASE_TARGETS = {"W11_1_SIGNER_STARTED_EXACT": RUNNING_SIGNER_HELD,
 def _check_base_tool() -> None:
     _need(hashlib.sha256(Path(T10.__file__).read_bytes()).hexdigest() == MB10_DR5_TARGET_SHA256,
           "MB10_DR5_TARGET_PIN_MISMATCH")
+    _need(hashlib.sha256(Path(E.__file__).read_bytes()).hexdigest() == E19_CONTRACT_SHA256, "E19_CONTRACT_PIN_MISMATCH")
+    _need(E.NEW_DR5_SOURCES.get(E19_BASE) == T10.RUNNING_HELD, "E19_BASE_SOURCE_NOT_W10_RUNNING_HELD")
+
+
+def e19_base(texts: dict, *, e19_pins: dict | None = E.NEW_DR5_TARGETS) -> dict[str, list[str]]:
+    """The W10 running-witness text moved to the E-19 NEW release by the merged contract's exact swap; each set must
+    equal the accepted `WITNESS_RUNNING_HELD_E19` pin (`e19_pins=None`: TEST seam for synthetic baselines)."""
+    swapped = E.derive_release_swap(texts, old=E.OLD_RELEASE, new=E.NEW_RELEASE)
+    for name in SETS:
+        T9._invariants(name, swapped[name])
+        if e19_pins is not None:
+            _need((len(swapped[name]), T9.digest(swapped[name])) == tuple(e19_pins[E19_BASE][name]),
+                  "E19_BASE_NOT_ACCEPTED_TARGET:" + name)
+    return swapped
 
 
 def prove_signer_delta(script: bytes) -> dict:
@@ -118,15 +143,17 @@ def prove_signer_delta(script: bytes) -> dict:
 
 
 def derive(base: dict[str, bytes], script: bytes, *, base_pins: dict = T9.BASE, w9_pins: dict | None = T9.TARGETS,
-           w10_pins: dict | None = T10.TARGETS, target_pins: dict | None = TARGETS) -> dict:
-    """The post-start targets: the pinned W10 derivation, then the proven substitution. `*_pins=None` skips the
-    pinned equalities (TEST seams for synthetic baselines)."""
+           w10_pins: dict | None = T10.TARGETS, e19_pins: dict | None = E.NEW_DR5_TARGETS,
+           target_pins: dict | None = TARGETS) -> dict:
+    """The post-start targets: the pinned W10 derivation, the E-19 release swap (equal to the accepted E-19 base),
+    then the proven substitution. `*_pins=None` skips the pinned equalities (TEST seams for synthetic baselines)."""
     _check_base_tool()
     proof = prove_signer_delta(script)
     w10 = T10.derive(base, script, base_pins=base_pins, w9_pins=w9_pins, target_pins=w10_pins)
+    bases = {source: e19_base(w10["targets"][source]["texts"], e19_pins=e19_pins) for source in set(SOURCE.values())}
     out = {}
     for target, source in SOURCE.items():
-        texts = w10["targets"][source]["texts"]
+        texts = bases[source]
         derived, sets = {}, {}
         for name in SETS:
             lines = list(texts[name])
@@ -142,16 +169,17 @@ def derive(base: dict[str, bytes], script: bytes, *, base_pins: dict = T9.BASE, 
             added = [line for line in derived[name] if line not in lines]
             removed = [line for line in lines if line not in derived[name]]
             sets[name] = {"lines": len(derived[name]), "sha256": T9.digest(derived[name]),
-                          "counts": T9.counts(derived[name]), "sourceTarget": source, "added": added,
-                          "removed": removed}
+                          "counts": T9.counts(derived[name]), "sourceTarget": source, "base": E19_BASE,
+                          "added": added, "removed": removed}
             if target_pins is not None:
                 _need((sets[name]["lines"], sets[name]["sha256"]) == target_pins[target][name],
                       "TARGET_NOT_PINNED:" + target + ":" + name)
         out[target] = {"sets": sets, "texts": derived}
     return {"resultType": "LILITH_MB11_DR5_TARGETS", "schemaVersion": 1,
             "rule": "PHASE_BOUND_DR5_BASELINE_WITH_DERIVED_DELTA", "delta": "ONE_LATER_LINE_PROVEN_FROM_PINNED_SCRIPT",
-            "proof": proof, "targets": out, "accepted": False, "derived": True, "liveW11ObservationExists": False,
-            "w9AndW10TargetsUnchanged": True, "dr5EqualIsNotSignerEvidence": True}
+            "proof": proof, "base": E19_BASE, "release": E.NEW_RELEASE, "targets": out, "accepted": False,
+            "derived": True, "liveW11ObservationExists": False, "w9AndW10TargetsUnchanged": True,
+            "e19TargetsUnchanged": True, "dr5EqualIsNotSignerEvidence": True}
 
 
 def target_for(phase: str) -> tuple[str, dict]:
@@ -168,10 +196,13 @@ def compare(phase: str, log: str) -> dict:
     observed = {set_name: (len(lines), T9.digest(lines)) for set_name, lines in sets.items()}
     unequal = [set_name for set_name in SETS if observed[set_name] != target[set_name]]
     kinds = T9.counts(sets["result-set"])
+    old_lines = sum(1 for lines in sets.values() for line in lines if E.OLD_RELEASE in line)
     return {"resultType": "LILITH_MB11_DR5_PHASE_COMPARISON", "phase": phase, "target": name, "targetAccepted": False,
+            "base": E19_BASE,
             "observed": {set_name: {"lines": n, "sha256": h} for set_name, (n, h) in observed.items()},
-            "allowed": kinds["ALLOWED"], "fail": kinds["FAIL"], "unequal": unequal,
-            "result": "EQUAL" if not unequal and kinds["ALLOWED"] == 0 else "DRIFT", "accepted": False,
+            "allowed": kinds["ALLOWED"], "fail": kinds["FAIL"], "oldReleaseLines": old_lines, "unequal": unequal,
+            "result": "EQUAL" if not unequal and kinds["ALLOWED"] == 0 and old_lines == 0 else "DRIFT",
+            "accepted": False,
             "note": "DR-5 cannot observe HEALTH, the loaded key or the hold store: EQUAL is not signer evidence"}
 
 
