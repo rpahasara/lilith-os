@@ -81,7 +81,7 @@ TOOL_PINS = {
     OBSERVER: "bc3017d13a222db7af7aa590a8efeaf8959f8840ffbbf9e14c69b3de1ac4a38e",
     STAGES: "77279d4546db1da85dac489ccbcbf477adc9a3f1a9fcea274fc487ff0ab0396d",
     RESTART_BOUNDARY: "10147341819c27bb3720a87264ffea78f1bf1c3c2a23d7804ac900370cfe7419",
-    RESTART_BOUNDARY_INSTALL: "44ab3f048ffe5b2cbe8e721f469e3a913004be87a1d6dfcb8092bb575e452b48",
+    RESTART_BOUNDARY_INSTALL: "428d93b4b36bdb8d7783e2c1f22d3961fd5cf3623ce0ee0d419ab3b81c53c8af",
 }
 # The observer runs in ONE BOOT bundle with the W10 chain (it judges W9 / M-B6 / W10 in-process), the restart-boundary
 # helpers, the contract and the pinned broker reader. Dependency order: each import is registered before it executes.

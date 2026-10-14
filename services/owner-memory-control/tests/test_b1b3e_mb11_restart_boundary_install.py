@@ -534,10 +534,14 @@ class RecordTests(unittest.TestCase):
 
     def test_the_record_pins_names_and_keeps_every_boundary(self):
         text = self.RECORD.read_text(encoding="utf-8")
-        for value in (*(pin for _n, pin in B.DROPINS.values()), *I.FRAGMENTS.values(),
-                      hashlib.sha256((TOOLS / "mb11_restart_boundary_install.py").read_bytes()).hexdigest(),
-                      hashlib.sha256((TOOLS / "mb11_signer_verifier.py").read_bytes()).hexdigest()):
+        for value in (*(pin for _n, pin in B.DROPINS.values()), *I.FRAGMENTS.values()):
             self.assertTrue(value in text, value)
+        # The tool pins: this record, or EXACTLY the E-19 completion re-pin of that file (file -> SHA-256, no substring).
+        import e19_completion as C
+        for name in ("mb11_restart_boundary_install.py", "mb11_signer_verifier.py"):
+            value = hashlib.sha256((TOOLS / name).read_bytes()).hexdigest()
+            repinned = C.MB11_REPINNED_SHA256.get(f"services/owner-memory-control/tools/{name}")
+            self.assertTrue(value in text or repinned == value, name)
         for name in I.PHASES:
             self.assertTrue(f"`{name}`" in text, name)
         for od in (11, 16, 17, 18, 19, 20):

@@ -1,0 +1,168 @@
+{
+ "contractSha256": "e8c8f6037ef51d4e2f7de7ac546f034bdf4893a717ef3bcb450d9fe52cb12cc2",
+ "controlCommit": "3cdee90ea4c10b18b81f5d4b9c4c268657ce0ded",
+ "deploymentFreeze": "ACTIVE",
+ "evidenceManifests": {
+  "lilith-e19-host-u5-3cdee90": "bc2dc210c35832869e01b9768d6e9bfc45281db966a857394ce1ea6a81a1722e",
+  "lilith-e19-new-build-ba943e1a188d98f4108c9eec7149c0cf1a8f68bb": "b502b8dab36fa72349c5f386e02522b1a9b0325a4072c6a4189265979a7c21a7",
+  "lilith-e19-post9a-r-3cdee90": "c7aba574216f0d178603b68c498c12c6fcdb3f0dcea5749b815e29d3c3ec1efd",
+  "lilith-e19-replacement-accept-3cdee90": "e060b73273687e3bf80f6ffb6e76c00220f1eb8d82f5c26994126ec588b8cb14",
+  "lilith-e19-retire-3cdee90": "60bcaf4cf0500c7f6d4162258e86cefe396b624e255ff89a7209bb8510f77168",
+  "lilith-e19-select-3cdee90": "3b5a1fcae907562c475540417d48e6abc1ddc28d0be84ffd9877db6dc977f8d9",
+  "lilith-e19-stage-3cdee90": "3c9edfa5aa82e1ec16586aa8c138d2646c759c96756c0385d0c55db6c9f53b07",
+  "lilith-e19-start-3cdee90": "17170dec46201379bdd23d8190990994454e8a72d38216aa8326d2ac61aec5ac",
+  "lilith-e19-stop-3cdee90": "565e08f3047575567e29fc32b8c83c4007f9d3fa61e60caa2d1d50a69df0e1e8",
+  "lilith-e19-transfer-3cdee90": "361e83727fe8a9963e77a4ff1301c9b49fa027a93c7fa6caec86546a43fdd4b7",
+  "lilith-e19-u0-accept-3cdee90": "ea837b1112a7d9ddeb2b7f79fc16d2a587a226f00d8d0e4f2628da9b77e2aa63",
+  "lilith-e19-u0-prep-3cdee90": "be686d72f3f27528d47a8aabf7b35d849ce5875bbdc436d02c5bd48bab73eb94"
+ },
+ "finalHostU5": {
+  "e19State": "E19_OLD_RETIRED",
+  "hostResultSha256": "aac2b9266ac1fd41dbc11145a06d3d853104a66b55b46c9d0d916eb24d19a88a",
+  "result": "E19_HOST_U5_OLD_RETIRED_REPLACEMENT_ACCEPTED_PASS",
+  "selectedRelease": "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb",
+  "w10OutputSha256": "314ca426b03a8c79fa41f5f7070978a48eb5ac22c574d938812638a9a2848c93"
+ },
+ "finalU5": {
+  "observationSha256": "cb22dd2607755ff0822c12287a89e4c7117a487e74d3ac88373eeee4ce2d9256",
+  "phase": "U5_OLD_RETIRED_REPLACEMENT_ACCEPTED"
+ },
+ "firstPostTransitionDeploy": {
+  "deployRunId": null,
+  "dr5Comparison": null,
+  "dr5Target": "WITNESS_RUNNING_HELD_E19",
+  "targetStatus": "DERIVED_PINNED_NOT_ACCEPTED"
+ },
+ "mode": "UPGRADE_FROM_P1B10_DEV_SYNTHETIC",
+ "newRelease": {
+  "archiveSha256": "a4ad24e8c261c6e5858c559f4102ac8d6cc6923cfc19a9a7ffe5720408ae3faf",
+  "attestationDigest": "d6f7f709d3b40dc42d6fb9c936137bb6c6871c36917c9d27f8f2faa634ff51d2",
+  "manifestSha256": "b8393015e505495a81629411a4ecd33c0c372c7b16d2761094eb4e018bc300a2",
+  "releaseSha": "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb",
+  "state": "SOLE_INSTALLED_SELECTED"
+ },
+ "nonclaims": [
+  "RECORD_IS_NOT_OWNER_COMPLETION_ACCEPTANCE",
+  "NO_DR5_EQUAL_OBSERVED_YET",
+  "FREEZE_NOT_LIFTED",
+  "NOT_PACKAGE_READY",
+  "NOT_AUTHORITY",
+  "EVIDENCE_ON_OWNER_WORKSTATION_NOT_IN_REPOSITORY"
+ ],
+ "oldRelease": {
+  "manifestSha256": "1d578ca707a95134dab218c826408b4380e7af0b5839160f47ede37232b94e8f",
+  "releaseSha": "aee323e94412accbe321bc84eae78c5b8cf95afc",
+  "state": "RETIRED"
+ },
+ "operatorSha256": "a49ed4f54b0173dd7afb9a3d2ea1836631c2dcfc1019417dcbc1209284dc5c0f",
+ "ownerCompletionAcceptance": null,
+ "post9aR": {
+  "denials": {
+   "P1B-10": "PASS",
+   "P1B-5": "PASS",
+   "P1B-9b": "PASS"
+  },
+  "evidenceSha256": "d44d1c4bcf767b90471da83f86a19c15f0c77c5fdffd209b41018500e7fb08b8",
+  "observationSha256": "077ffe8cf922fa0fad552bc3f0d3cd1e5b9162d52a5b3fbb5daa1b003f4a6594",
+  "recordSha256": "e816ab498e8a74c62b4f58a374583136d2182e0a230e4df738118cb03e1f49e7",
+  "result": "POST9A_R_VERIFIED"
+ },
+ "recordType": "LILITH_E19_COMPLETION_RECORD",
+ "replacementAcceptance": {
+  "acceptanceSha256": "90e81b284eb87078fcc0495a961cd995fd8d3aaf8478a88536b24bb6ecaf9f3e",
+  "invocationId": "90b28f9d06fd48a1a1bdc3ae39474fb1",
+  "mainPid": "69238",
+  "statementSha256": "6a7847474b6126887c16b88c385d9884a50b937cbf8a776bb6783e0d18350eae",
+  "subjectSha256": "d44d1c4bcf767b90471da83f86a19c15f0c77c5fdffd209b41018500e7fb08b8"
+ },
+ "schemaVersion": 1,
+ "status": "TRANSITION_COMPLETE_U5_OWNER_COMPLETION_NOT_ACCEPTED",
+ "transitionSteps": [
+  {
+   "gateObservationSha256": "fec911ac1c1971e66421e207a38fa72ad65219f417f27cd0d0bf1f071eb40f46",
+   "goSha256": "2264de72a14ca12870aee30a5f9dae60db32a5ebbd8060c883d8ff0de39ed491",
+   "marker": "e19-stage",
+   "markerSha256": "c22dfac9bf9b13516938a39875e23ee6590486b38f20c4ce34ee4452155b8d23",
+   "postObservationSha256": "2ea5d644706e2b42fadea793c46dd8d05c6d29fc6ba613e87e18aa14262211c2",
+   "postPhase": "U1_NEW_STAGED_WITNESS_ON_OLD",
+   "prePhase": "U0_P1B10_EXACT",
+   "result": "E19_STAGE_REACHED_U1_NEW_STAGED_WITNESS_ON_OLD",
+   "step": "STAGE",
+   "stepRecordSha256": "5065269f5b34c81c04b93d0358cdf645c855422c7ea349792aa9b1e00db655e5"
+  },
+  {
+   "gateObservationSha256": "92e3967d8d8331116d3c9a244c1c2c666927e4cb23a1bc4395b2ea85c3313792",
+   "goSha256": "a958e13a7fafb41ca1fe19d39f15dcdb1e2fffc1bc9e5546ebc1b96ec9c9a0c9",
+   "marker": "e19-stop",
+   "markerSha256": "aedb35ed7e5f910d61e7b860ef1feea5fcfd9feee26f58b6e5a27a896ce1abd2",
+   "postObservationSha256": "3304539899b86aa9753d1c25623012255e988a45881260e2187c4c555516b873",
+   "postPhase": "U2_WITNESS_STOPPED_OLD_SELECTED",
+   "prePhase": "U1_NEW_STAGED_WITNESS_ON_OLD",
+   "result": "E19_STOP_REACHED_U2_WITNESS_STOPPED_OLD_SELECTED",
+   "step": "STOP",
+   "stepRecordSha256": "7d8c9cd3d7d7e940d1c172a9f697d854c8ee14a1da8c15c1c94471c9617f48fd"
+  },
+  {
+   "gateObservationSha256": "68ec7e012238bd53844cd8f873d5bb454bf436053fb564f43f78df1e84dbb74d",
+   "goSha256": "57151f4326c3e84dae2a53f481a13c0f4af1e0d9dc238ec9efe5b5fc81ca6458",
+   "marker": "e19-select",
+   "markerSha256": "fc6bca463948d2d90e57ca3bf001c1720f65adeb06d3849cb6a4790120e88080",
+   "postObservationSha256": "1a8698049732e6c275d1fb307189a84bc2d520d75d09e7a6dbfd0a1f30dd76cd",
+   "postPhase": "U3_NEW_SELECTED_WITNESS_STOPPED",
+   "prePhase": "U2_WITNESS_STOPPED_OLD_SELECTED",
+   "result": "E19_SELECT_REACHED_U3_NEW_SELECTED_WITNESS_STOPPED",
+   "step": "SELECT",
+   "stepRecordSha256": "aea3d493917ed76ce620fef98eacef20b53a7c5d3dde482c409f4d21e16d64ec"
+  },
+  {
+   "gateObservationSha256": "4c33b323953eb6be5550052bbb44abb232c80a2c1bf29f93ceff47b3b2808edf",
+   "goSha256": "2034b8874f3a479bd99483db1d7bca0de2607378af5c2ce6760b5b85656ca781",
+   "marker": "e19-start",
+   "markerSha256": "1c70b921472e47904b9c2ac8ca6d2b26d8b8ef05b3232aaaf5a11d00688d6465",
+   "postObservationSha256": "0149ce36bf5975aec9519bac1f6471edd4a6c96305f260f2b434206d80b54ef5",
+   "postPhase": "U4_REPLACEMENT_RUNNING_ON_NEW",
+   "prePhase": "U3_NEW_SELECTED_WITNESS_STOPPED",
+   "result": "E19_START_REACHED_U4_REPLACEMENT_RUNNING_ON_NEW",
+   "step": "START",
+   "stepRecordSha256": "1f02206b1fdd4c319ecafc28a46ada83bc7d2d96cef3e3fa3776a23dfc162a19"
+  },
+  {
+   "gateObservationSha256": "ccdc88d11db207e956a9a43c51bd1d3b40c06f1c6443969afc2b07ff26b4d8e7",
+   "goSha256": "594aa7a9381593680e69ee45575311f97e3bbc385519d8654b25a9fc615077dd",
+   "marker": "e19-retire",
+   "markerSha256": "e3e0c63da5e8367b72976e3cd75b09c29793633dafc2aee49793784a56e5b915",
+   "postObservationSha256": "cb22dd2607755ff0822c12287a89e4c7117a487e74d3ac88373eeee4ce2d9256",
+   "postPhase": "U5_OLD_RETIRED_REPLACEMENT_ACCEPTED",
+   "prePhase": "U4_REPLACEMENT_RUNNING_ON_NEW",
+   "result": "E19_RETIRE_REACHED_U5_OLD_RETIRED_REPLACEMENT_ACCEPTED",
+   "step": "RETIRE",
+   "stepRecordSha256": "e29eebbe8fb76867cd0419d2b35fd3bf1f788505c50a429fdd7c91c838334d83"
+  }
+ ],
+ "u0Baseline": {
+  "acceptanceSha256": "8c0c30fc806c32b229e47c0318ab1c10eec43574c566ca5261d3d56dea030052",
+  "endingIncarnation": [
+   "8af12bd64d024d0eba56bbcedbc534a6",
+   "1580"
+  ],
+  "journalCursor": "s=4704cb6f5e274d93999836f7cddc8231;i=a4b72;b=cb0d71da32a7402bb85e5748da012bff;m=5f99d71482;t=65dc49dddba00;x=5e0d7dc3d1086261",
+  "observationSha256": "6263ebea62ddd5e6f468182ea2cef81e9c8d9755c88f23579517f3fd966c751e",
+  "phase": "U0_P1B10_EXACT",
+  "statementSha256": "02d952f92082fd55b80c4468555be1ee61a7eb57446dc454fa96412bbafda4d4"
+ },
+ "witness": {
+  "acceptedReplacement": [
+   "90b28f9d06fd48a1a1bdc3ae39474fb1",
+   "69238"
+  ],
+  "endingIncarnation": [
+   "8af12bd64d024d0eba56bbcedbc534a6",
+   "1580"
+  ],
+  "invocationIdsAfterU0Cursor": [
+   "8af12bd64d024d0eba56bbcedbc534a6",
+   "90b28f9d06fd48a1a1bdc3ae39474fb1"
+  ],
+  "kWitLoadsAfterU0Cursor": 1
+ }
+}

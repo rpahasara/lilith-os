@@ -5,8 +5,8 @@ authorization; OD-M11-11 and the E-6 / RR-33 amendment are PROPOSED, not accepte
 
 Record: docs/architecture/slice-15b2b-b1b3e-mb11-restart-boundary-p1b10r.md.
 
-Control tooling under services/owner-memory-control/tools, never release payload: the accepted release `aee323e`
-and its unit fragments are not changed. The two candidate drop-ins are the exact PR-A1 bytes
+Control tooling under services/owner-memory-control/tools, never release payload: the installed release (`ba943e1`
+since E-19 U5; `aee323e` before) and its unit fragments are not changed. The two candidate drop-ins are the exact PR-A1 bytes
 (`mb11_restart_boundary.DROPINS`, proven on a disposable runner by `scripts/probe_signer_restart_boundary.py`).
 
 Four transitions, never merged into one:
@@ -50,8 +50,9 @@ TOOL_TYPE = "LILITH_MB11_RESTART_BOUNDARY_STAGE"
 STAGE = "P1B-10R"
 UNIT_DIR = "/etc/systemd/system"
 UNITS = (B.SERVICE_UNIT, B.SOCKET_UNIT)
-RELEASE_SHA = "aee323e94412accbe321bc84eae78c5b8cf95afc"
-# The accepted release fragments, byte-exact (`git show aee323e:services/authority-dev/deploy/<unit>`).
+RELEASE_SHA = "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb"   # E-19 U5 (completion record); was the E-19 OLD release
+# The accepted release fragments, byte-exact (`git show aee323e:services/authority-dev/deploy/<unit>`); byte-identical
+# in the E-19 release ba943e1 (its payload differs from aee323e only in pr1_acceptance.py).
 FRAGMENTS = {B.SERVICE_UNIT: "11b6d00f04d998caa156875fb587dd642cb7d78dd9b6d1866616cc0b9bc1b254",
              B.SOCKET_UNIT: "bff5e9275ad1478dd068855465d65542ceb338e5e9236e43d1bd43d7c50c194f"}
 FRAGMENT_MODE = 0o644
