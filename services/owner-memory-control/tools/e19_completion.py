@@ -9,19 +9,28 @@ files, writes nothing, contacts nothing.
 `host U5` PASS. Its status is `TRANSITION_COMPLETE_U5_OWNER_COMPLETION_NOT_ACCEPTED`: E-19 is NOT owner-complete and
 the deployment freeze is ACTIVE.
 
-The freeze lifts only through `freeze_lift_admissible`, which requires BOTH:
+The freeze lifts only through `freeze_lift_admissible(host_u5_dir, deploy_run_id, acceptance)`. It trusts no
+caller-supplied verdict, metadata, timestamp or log; it re-establishes everything itself:
 
-1. the first post-transition deploy's DR-5 comparison (`e19_dr5_target.compare`) = EQUAL to
-   `WITNESS_RUNNING_HELD_E19`, from a verified post-U5 `host U5` read and a named deploy run; and
-2. the owner's verbatim completion statement (rendered here from exactly that comparison) and its local record.
+1. provenance from the read-only GitHub Actions REST API (the owner's authenticated `gh`): PR #195 is MERGED into
+   main; the run is `Deploy LILITH Core API to DEV` (`.github/workflows/deploy-dev.yml`, event `workflow_run`; never
+   the PR-only "LILITH DEV deployment" CI stub), completed with conclusion success, on main at exactly the merge
+   commit, and the FIRST such run created after the merge; its log is fetched from GitHub here and hashed;
+2. a canonical `e19_operator host U5` directory whose own DEV-clock identity read (`identity.out`, rc 0, the DEV
+   host, machine-id and boot) was acquired strictly AFTER that run completed;
+3. `e19_dr5_target.compare(host dir, fetched log)`, recomputed here: EQUAL to `WITNESS_RUNNING_HELD_E19` with the
+   accepted replacement and the NEW release;
+4. the owner's verbatim completion statement, rendered from that evidence, and its local record binding the
+   evidence digest.
 
-Missing, partial, DRIFT, wrong-target, wrong-phase or unaccepted evidence never lifts it.
+Before the sanctioned deploy exists (PR not merged, no qualifying run) the gate is NOT admissible. Missing,
+uncertain, stale, pre-deploy, wrong-run, wrong-workflow, wrong-commit, DRIFT or unaccepted evidence never lifts it.
 
     | Form | Effect |
     | --- | --- |
     | `record` | the pinned completion record, validated |
-    | `render <dr5-comparison.json> <deploy-run-id>` | the canonical completion statement for that comparison |
-    | `gate <dr5-comparison.json> <deploy-run-id> <acceptance.json>` | the freeze-lift judgement (never a write) |
+    | `render <host-u5-dir> <deploy-run-id>` | the canonical completion statement (provenance fetched read-only) |
+    | `gate <host-u5-dir> <deploy-run-id> <acceptance.json>` | the freeze-lift judgement (never a write) |
 """
 
 from __future__ import annotations
@@ -29,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -56,6 +66,14 @@ REPINNED_TO_NEW = {
         "RELEASE_SHA (P1B-10R plan); signer fragments byte-identical in OLD and NEW",
     "services/owner-memory-control/tools/mb12_pr3_material.py": "DEV_EXPECTED releaseSha / releaseManifestSha256",
     "services/owner-memory-control/tools/mb12_readiness_inputs.py": "DEV_PINS releaseSha / attestedManifestSha256",
+}
+# The exact post-U5 SHA-256 of the two re-pinned M-B11 tools (file -> digest). The M-B11 record-pin tests accept these
+# and only these as the alternative to their own records; no other tool and no other field is admitted.
+MB11_REPINNED_SHA256 = {
+    "services/owner-memory-control/tools/mb11_signer_verifier.py":
+        "e21fd26fd68bcdea3d645a12ff53b647ef3aa8f62824e9c89712b8fcb85d4e1d",
+    "services/owner-memory-control/tools/mb11_restart_boundary_install.py":
+        "428d93b4b36bdb8d7783e2c1f22d3961fd5cf3623ce0ee0d419ab3b81c53c8af",
 }
 OLD_RELEASE_MENTIONS = {
     "services/owner-memory-control/tools/mb6_operator.py":
@@ -141,62 +159,165 @@ def load_record() -> dict:
 
 
 # ------------------------------------------------------------------ the freeze gate ---
+COMPLETION_PR = 195
+REPOSITORY = "rpahasara/lilith-os"
+DEPLOY_WORKFLOW_NAME = "Deploy LILITH Core API to DEV"
+DEPLOY_WORKFLOW_PATH = ".github/workflows/deploy-dev.yml"
+DEV_HOSTNAME, DEV_MACHINE_ID = "lilith-dev-01", "ae929170e6fa4c8ab9cc7b9547238d9d"
+_SHA40 = re.compile(r"[0-9a-f]{40}\Z")
+_INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 COMPLETION_LINES = (
     "I accept E-19 completion for UPGRADE_FROM_P1B10_DEV_SYNTHETIC (DEV_SYNTHETIC).",
     "Completion record SHA-256: {record}. Release {new} (manifest {manifest}) is the sole installed release; "
     "{old} is retired.",
     "Accepted replacement witness: InvocationID {invocation}, MainPID {mainpid}.",
-    "First post-transition deploy run {run}: DR-5 {target} EQUAL (comparison SHA-256 {comparison}).",
+    "PR #{pr} merged as {merge}; first post-transition deploy run {run} ({workflow}) succeeded, completed {completed}; "
+    "run log SHA-256 {log}.",
+    "Host U5 read at {acquired} (HOST_RESULT SHA-256 {host}); DR-5 {target} EQUAL (comparison SHA-256 {comparison}).",
+    "Evidence SHA-256: {evidence}.",
     "The E-19 deployment freeze ends with this acceptance. This acceptance authorizes nothing further: not package "
     "READY, not M-B11, not the signer, not the Registry, not authority.",
 )
 
 
-def _comparison_ok(comparison: Any) -> None:
-    _need(isinstance(comparison, Mapping) and comparison.get("resultType") == "LILITH_E19_DR5_PHASE_COMPARISON",
-          "DR5_COMPARISON_MISSING")
-    _need(comparison.get("result") == "EQUAL" and comparison.get("unequal") == [] and comparison.get("allowed") == 0
-          and comparison.get("oldReleaseLines") == 0, "DR5_NOT_EQUAL")
-    _need(comparison.get("target") == D.RUNNING_HELD_E19 and comparison.get("phase") == "W10_1_HELD_EXACT",
-          "DR5_WRONG_TARGET_OR_PHASE")
-    target = E.NEW_DR5_TARGETS[D.RUNNING_HELD_E19]
-    observed = comparison.get("observed") or {}
-    _need(all(observed.get(name) == {"lines": target[name][0], "sha256": target[name][1]} for name in D.SETS),
-          "DR5_OBSERVED_NOT_THE_PINNED_TARGET")
-    bound = comparison.get("hostEvidence") or {}
-    _need(all(isinstance(bound.get(k), str) and re.fullmatch(r"[0-9a-f]{64}", bound[k])
-              for k in ("hostResultSha256", "w10OutputSha256")), "DR5_HOST_EVIDENCE_MISSING")
+class GitHubSource:
+    """The read-only provenance source: the owner's authenticated `gh` CLI against the GitHub REST API. Every fact
+    the gate relies on is fetched here, never taken from the caller. Tests substitute a synthetic source."""
+
+    def __init__(self, repository: str = REPOSITORY):
+        self.repository = repository
+
+    def _gh(self, *args: str) -> bytes:
+        try:
+            result = subprocess.run(("gh", *args), capture_output=True, timeout=300, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise CompletionError("GITHUB_UNAVAILABLE") from exc
+        _need(result.returncode == 0 and bool(result.stdout), "GITHUB_UNAVAILABLE")
+        return result.stdout
+
+    def _api(self, path: str) -> Any:
+        try:
+            return json.loads(self._gh("api", path))
+        except ValueError as exc:
+            raise CompletionError("GITHUB_RESPONSE_UNPARSEABLE") from exc
+
+    def pull(self, number: int) -> Any:
+        return self._api(f"repos/{self.repository}/pulls/{number}")
+
+    def run(self, run_id: str) -> Any:
+        return self._api(f"repos/{self.repository}/actions/runs/{run_id}")
+
+    def deploy_runs(self) -> Any:
+        return self._api(f"repos/{self.repository}/actions/workflows/deploy-dev.yml/runs?branch=main"
+                         "&event=workflow_run&per_page=100")
+
+    def log(self, run_id: str) -> bytes:
+        return self._gh("run", "view", run_id, "-R", self.repository, "--log")
 
 
-def render_completion_statement(comparison: Any, deploy_run_id: Any) -> bytes:
-    """The canonical owner completion statement, from a verified EQUAL comparison only."""
+def deploy_provenance(run_id: Any, github: Any) -> tuple[dict, bytes]:
+    """The first post-transition deploy, established from GitHub only; refused (never substituted) otherwise."""
+    _need(isinstance(run_id, str) and _RUN_ID.fullmatch(run_id) is not None, "DEPLOY_RUN_ID")
+    _need(getattr(github, "repository", None) == REPOSITORY, "PROVENANCE_SOURCE_REPOSITORY")
+    pr = github.pull(COMPLETION_PR)
+    _need(isinstance(pr, Mapping) and pr.get("number") == COMPLETION_PR and pr.get("merged") is True,
+          "PR_NOT_MERGED")
+    merge, merged_at = pr.get("merge_commit_sha"), pr.get("merged_at")
+    _need(isinstance(merge, str) and _SHA40.fullmatch(merge) is not None and isinstance(merged_at, str)
+          and _INSTANT.fullmatch(merged_at) is not None and (pr.get("base") or {}).get("ref") == "main",
+          "PR_MERGE_UNVERIFIED")
+    run = github.run(run_id)
+    _need(isinstance(run, Mapping) and str(run.get("id")) == run_id, "RUN_NOT_FOUND")
+    _need(run.get("name") == DEPLOY_WORKFLOW_NAME and run.get("path") == DEPLOY_WORKFLOW_PATH, "RUN_WRONG_WORKFLOW")
+    _need((run.get("repository") or {}).get("full_name") == REPOSITORY, "RUN_WRONG_REPOSITORY")
+    _need(run.get("event") == "workflow_run" and run.get("head_branch") == "main", "RUN_WRONG_TRIGGER")
+    _need(run.get("status") == "completed" and run.get("conclusion") == "success", "RUN_NOT_SUCCESSFUL")
+    _need(run.get("head_sha") == merge, "RUN_NOT_THE_MERGE_COMMIT")
+    created, completed = run.get("created_at"), run.get("updated_at")
+    _need(all(isinstance(v, str) and _INSTANT.fullmatch(v) for v in (created, completed))
+          and merged_at <= created <= completed, "RUN_TIMES")
+    listing = github.deploy_runs()
+    runs = listing.get("workflow_runs") if isinstance(listing, Mapping) else None
+    _need(isinstance(runs, list), "RUN_LISTING_UNAVAILABLE")
+    after = sorted((r for r in runs if isinstance(r, Mapping) and r.get("event") == "workflow_run"
+                    and isinstance(r.get("created_at"), str) and r["created_at"] >= merged_at),
+                   key=lambda r: (r["created_at"], str(r.get("id"))))
+    _need(bool(after) and str(after[0].get("id")) == run_id, "RUN_NOT_THE_FIRST_AFTER_MERGE")
+    log = github.log(run_id)
+    _need(isinstance(log, bytes) and bool(log), "RUN_LOG_UNAVAILABLE")
+    return {"pr": COMPLETION_PR, "mergeCommit": merge, "mergedAt": merged_at, "runId": run_id,
+            "workflow": DEPLOY_WORKFLOW_PATH, "runCreatedAt": created, "runCompletedAt": completed,
+            "logSha256": _sha(log)}, log
+
+
+def host_binding(host_dir: Path, completed_at: str) -> dict:
+    """The canonical `host U5` directory; its DEV-clock acquisition instant strictly after the deploy completed."""
+    host_dir = Path(host_dir)
+    identity, rc = host_dir / "identity.out", host_dir / "identity.rc"
+    _need(identity.is_file() and not identity.is_symlink() and rc.is_file() and rc.read_text().strip() == "0",
+          "HOST_IDENTITY_MISSING")
+    lines = identity.read_bytes().decode("utf-8", "replace").splitlines()
+    _need(len(lines) >= 4 and _INSTANT.fullmatch(lines[0]) is not None, "HOST_IDENTITY_MALFORMED")
+    _need((lines[1], lines[2], lines[3]) == (DEV_HOSTNAME, DEV_MACHINE_ID, E.BOOT_ID), "HOST_NOT_DEV_THIS_BOOT")
+    _need(lines[0] > completed_at, "HOST_READ_NOT_AFTER_DEPLOY")
+    return {"acquiredAt": lines[0], "identitySha256": _sha(identity.read_bytes()),
+            "hostResultSha256": _sha((host_dir / "HOST_RESULT.json").read_bytes()),
+            "w10OutputSha256": _sha((host_dir / "w10verifier.out").read_bytes())}
+
+
+def completion_evidence(host_dir: Path, run_id: Any, github: Any = None) -> dict:
+    """Everything the owner's completion statement binds, recomputed from trusted sources only."""
+    load_record()
+    github = github if github is not None else GitHubSource()
+    provenance, log = deploy_provenance(run_id, github)
+    host = host_binding(Path(host_dir), provenance["runCompletedAt"])
+    comparison = D.compare(Path(host_dir), log.decode("utf-8", "replace"))          # recomputed, never supplied
+    _need(comparison.get("result") == "EQUAL" and comparison.get("target") == D.RUNNING_HELD_E19
+          and comparison.get("phase") == "W10_1_HELD_EXACT", "DR5_NOT_EQUAL_RUNNING_HELD_E19")
+    _need(comparison["hostEvidence"] == {"hostResultSha256": host["hostResultSha256"],
+                                         "w10OutputSha256": host["w10OutputSha256"]}, "HOST_EVIDENCE_CHANGED")
+    return {"completionRecordSha256": D.COMPLETION_RECORD_SHA256, "provenance": provenance, "host": host,
+            "comparison": comparison, "comparisonSha256": _sha(_canonical(comparison))}
+
+
+def _statement(evidence: Mapping[str, Any]) -> bytes:
     record = load_record()
-    _comparison_ok(comparison)
-    _need(isinstance(deploy_run_id, str) and _RUN_ID.fullmatch(deploy_run_id) is not None, "DEPLOY_RUN_ID")
+    p, h = evidence["provenance"], evidence["host"]
     values = {"record": D.COMPLETION_RECORD_SHA256, "new": E.NEW_RELEASE, "manifest": E.NEW_MANIFEST_SHA256,
               "old": E.OLD_RELEASE, "invocation": record["witness"]["acceptedReplacement"][0],
-              "mainpid": record["witness"]["acceptedReplacement"][1], "run": deploy_run_id,
-              "target": D.RUNNING_HELD_E19, "comparison": _sha(_canonical(comparison))}
+              "mainpid": record["witness"]["acceptedReplacement"][1], "pr": p["pr"], "merge": p["mergeCommit"],
+              "run": p["runId"], "workflow": p["workflow"], "completed": p["runCompletedAt"], "log": p["logSha256"],
+              "acquired": h["acquiredAt"], "host": h["hostResultSha256"], "target": D.RUNNING_HELD_E19,
+              "comparison": evidence["comparisonSha256"], "evidence": _sha(_canonical(evidence))}
     return ("\n".join(line.format(**values) for line in COMPLETION_LINES) + "\n").encode("ascii")
 
 
-def freeze_lift_admissible(comparison: Any, deploy_run_id: Any, acceptance: Any) -> tuple[bool, str]:
-    """True only for an EQUAL first-deploy comparison AND the owner's verbatim completion statement with its record.
-    It judges; it writes and lifts nothing."""
+def render_completion_statement(host_dir: Any, run_id: Any, github: Any = None) -> bytes:
+    """The canonical owner completion statement, from recomputed evidence only."""
+    return _statement(completion_evidence(Path(host_dir), run_id, github))
+
+
+def acceptance_record(evidence: Mapping[str, Any], statement: bytes) -> dict:
+    return {"recordType": COMPLETION_ACCEPTANCE_TYPE, "schemaVersion": 1, "mode": E.MODE,
+            "completionRecordSha256": D.COMPLETION_RECORD_SHA256, "deployRunId": evidence["provenance"]["runId"],
+            "mergeCommit": evidence["provenance"]["mergeCommit"], "evidenceSha256": _sha(_canonical(evidence)),
+            "statementSha256": _sha(statement)}
+
+
+def freeze_lift_admissible(host_dir: Any, run_id: Any, acceptance: Any, github: Any = None) -> tuple[bool, str]:
+    """True only when the recomputed first-deploy evidence is EQUAL AND the owner's verbatim statement over exactly
+    that evidence, with its record, is supplied. It judges; it writes and lifts nothing."""
     try:
-        load_record()
-        _comparison_ok(comparison)
-        statement = render_completion_statement(comparison, deploy_run_id)
+        evidence = completion_evidence(Path(host_dir), run_id, github)
+        statement = _statement(evidence)
         _need(isinstance(acceptance, Mapping) and set(acceptance) == {"statement", "record"},
               "COMPLETION_ACCEPTANCE_MISSING")
         raw = acceptance["statement"].encode("ascii") if isinstance(acceptance["statement"], str) else None
         _need(raw == statement, "COMPLETION_STATEMENT_NOT_CANONICAL")
-        expected = {"recordType": COMPLETION_ACCEPTANCE_TYPE, "schemaVersion": 1, "mode": E.MODE,
-                    "completionRecordSha256": D.COMPLETION_RECORD_SHA256, "deployRunId": deploy_run_id,
-                    "dr5ComparisonSha256": _sha(_canonical(comparison)), "statementSha256": _sha(statement)}
-        _need(isinstance(acceptance["record"], Mapping) and _canonical(acceptance["record"]) == _canonical(expected),
+        _need(isinstance(acceptance["record"], Mapping)
+              and _canonical(acceptance["record"]) == _canonical(acceptance_record(evidence, statement)),
               "COMPLETION_ACCEPTANCE_RECORD_MISMATCH")
-    except (CompletionError, D.TargetError, KeyError, TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (CompletionError, D.TargetError, KeyError, TypeError, ValueError, OSError, UnicodeEncodeError) as exc:
         return False, "FREEZE_ACTIVE:" + str(getattr(exc, "reason", None) or type(exc).__name__)
     return True, "FREEZE_LIFT_ADMISSIBLE"
 
@@ -213,10 +334,10 @@ def main(argv: list[str]) -> int:
             sys.stdout.write(json.dumps(load_record(), sort_keys=True, indent=1) + "\n")
             return 0
         if len(argv) == 3 and argv[0] == "render":
-            sys.stdout.buffer.write(render_completion_statement(_read_json(argv[1]), argv[2]))
+            sys.stdout.buffer.write(render_completion_statement(Path(argv[1]), argv[2]))
             return 0
         if len(argv) == 4 and argv[0] == "gate":
-            ok, reason = freeze_lift_admissible(_read_json(argv[1]), argv[2], _read_json(argv[3]))
+            ok, reason = freeze_lift_admissible(Path(argv[1]), argv[2], _read_json(argv[3]))
             sys.stdout.write(json.dumps({"admissible": ok, "reason": reason, "authorizes": "NOTHING"}) + "\n")
             return 0 if ok else 1
         print("e19_completion: REFUSED USAGE", file=sys.stderr)

@@ -109,16 +109,57 @@ refused (`NO_BASELINE_STOP` / `DR5_SETS_MISSING`). Any other difference is DRIFT
 
 ## 4. The freeze gate (`services/owner-memory-control/tools/e19_completion.py`)
 
-`freeze_lift_admissible(comparison, deploy_run_id, acceptance)` judges and writes nothing. It returns True only for:
+`freeze_lift_admissible(host_u5_dir, deploy_run_id, acceptance)` judges and writes nothing.
 
-- an `e19_dr5_target.compare` result = **EQUAL** to `WITNESS_RUNNING_HELD_E19` at `W10_1_HELD_EXACT`, with host
-  evidence digests and the pinned observed sets; **and**
-- a numeric deploy run id; **and**
-- the owner's verbatim completion statement (`render`), together with its local record binding the completion record,
-  the run id, the comparison digest and the statement digest.
+**Security correction.** It takes **no** comparison document and no run metadata from the caller. This fixes the
+review findings B1 and B2 on `af668a15`: the gate re-establishes everything itself.
 
-The following never lift the freeze: missing evidence, DRIFT, the STOPPED target, a reworded statement, another run,
-or a tampered record.
+**Deploy provenance (B2).** It is read only from the GitHub Actions REST API through the owner's authenticated `gh`
+(`GitHubSource`). The gate requires all of:
+
+- PR #195 `merged`, into `main`, giving its `merge_commit_sha` and `merged_at`;
+- run `<id>`:
+  - `name` = `Deploy LILITH Core API to DEV`, `path` = `.github/workflows/deploy-dev.yml`;
+  - repository `rpahasara/lilith-os`, `event` = `workflow_run`, `head_branch` = `main`;
+  - `completed` / `success`;
+  - `head_sha` = the merge commit;
+  - created after the merge;
+  - the **first** `workflow_run` deploy-dev run created after the merge.
+
+  The PR-only "LILITH DEV deployment" CI stub (`ci.yml`, `pull_request`) can never qualify.
+- the run log, fetched from GitHub by the gate (`gh run view <id> --log`) and hashed.
+
+**Host binding.** The canonical `e19_operator host U5` directory's own identity read (`identity.out`, rc 0) must name
+`lilith-dev-01`, the DEV machine-id and the accepted boot. Its DEV-clock UTC instant must be **strictly after** the
+run's completion (`updated_at`). The pre-merge host U5 read (`2026-10-14T07:31:33Z`) therefore can never qualify.
+
+**Recomputation (B1).** The gate runs `e19_dr5_target.compare(host dir, fetched log)` itself. The result must be EQUAL
+to `WITNESS_RUNNING_HELD_E19` at `W10_1_HELD_EXACT`, and its host evidence must equal the host digests above. A
+handcrafted EQUAL has no input path.
+
+**Owner binding.** The owner's verbatim statement (`render`) names:
+
+- the completion record, NEW, OLD and the replacement;
+- PR #195's merge commit, the run id and its completion instant, and the log SHA-256;
+- the host read instant and the HOST_RESULT SHA-256;
+- the comparison SHA-256 and the evidence SHA-256.
+
+The local acceptance record must bind the same evidence and statement digests.
+
+**Before the sanctioned deploy exists** (PR not merged, or no qualifying run), the result is `FREEZE_ACTIVE:…`.
+
+**What can never lift the freeze:**
+
+- missing, unparseable or other-repository provenance;
+- a wrong workflow, trigger, conclusion, commit, order or run id;
+- an empty or different log;
+- a pre-deploy, stale, other-host or other-boot host read;
+- DRIFT, the STOPPED target, or a witness other than the accepted replacement;
+- a reworded statement or a mismatched record.
+
+**Trust boundary.** GitHub's API and the owner's `gh` authentication are trusted for deploy facts. The `host U5`
+directory is the operator's own local record, as is every E-19 evidence directory, and its digests are bound into the
+owner's statement. Ordering relies on the DEV host clock and GitHub's clock both being UTC, NTP-synchronised.
 
 **New tool pins.**
 
@@ -126,7 +167,7 @@ or a tampered record.
 | --- | --- |
 | `services/owner-memory-control/tools/e19_completion_record.json` | `31bc707ebc9b58b376d233a30594eaa0e1f4d3b32444b172c741dbaeec66b3b8` |
 | `services/owner-memory-control/tools/e19_dr5_target.py` | `c7b99e446ecb107ad074ba14aff96238fb7bca8312ca5827c1396bec928b76be` |
-| `services/owner-memory-control/tools/e19_completion.py` | `8c9cf33d9acf54151277c772fe510c9356f6df3b4fda1b7a5e5b6c18177ff66b` |
+| `services/owner-memory-control/tools/e19_completion.py` | `aee80c9c0413326b0dcd339883e149a7c3c67df6aba2b644b07944f55b05db10` |
 
 ## 5. Validation
 
@@ -135,7 +176,9 @@ or a tampered record.
   - the updated E-19, M-B11 and M-B12 suites;
   - the full owner-memory-control, authority-dev and recovery-witness suites; `validate_repository.py`.
 - **Test changes:**
-  - the M-B11 record-pin tests now accept a tool pin from the M-B11 record **or** this record. The M-B11 design
+  - the M-B11 record-pin tests accept a tool pin from the M-B11 record (unchanged check) **or** exactly
+    `e19_completion.MB11_REPINNED_SHA256[<that file>]`. This is a structured file → SHA-256 map holding only the two
+    re-pinned M-B11 tools; it has no substring match, no concatenation and no other field (C1). The M-B11 design
     records are not rewritten;
   - the M-B12 E-19 defect test now names the retired release explicitly.
 
@@ -143,10 +186,11 @@ or a tampered record.
 
 1. Review this PR. Do not merge until the owner authorizes the first post-transition deploy.
 2. Merge. That triggers the first post-transition deploy (`Repository validation` → `Deploy LILITH Core API to DEV`).
-3. Read-only: `e19_operator host U5`, then `e19_dr5_target compare <host-u5-dir> <deploy-log>`. The result must be
-   EQUAL to `WITNESS_RUNNING_HELD_E19`.
-4. `e19_completion render <comparison> <run-id>`, then the owner's verbatim statement, then the local acceptance
-   record. `e19_completion gate` must return `FREEZE_LIFT_ADMISSIBLE`.
+3. Read-only, after the deploy completes: `e19_operator host U5`. That gives a fresh host directory whose identity
+   instant is later than the run's completion.
+4. `e19_completion render <host-u5-dir> <run-id>`. It fetches the provenance from GitHub, recomputes the DR-5 EQUAL
+   and renders the statement. Then the owner's verbatim statement and the local acceptance record follow.
+   `e19_completion gate <host-u5-dir> <run-id> <acceptance.json>` must return `FREEZE_LIFT_ADMISSIBLE`.
 5. The owner's E-19 completion acceptance, which lifts the freeze. Package READY, M-B11 and authority remain separate
    milestones.
 

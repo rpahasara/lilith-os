@@ -15,7 +15,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 TOOLS = ROOT / "services/owner-memory-control/tools"
-for _p in (TOOLS, ROOT / "services/authority-dev", ROOT / "services/owner-memory-control"):
+for _p in (TOOLS, ROOT / "services/authority-dev", ROOT / "services/owner-memory-control",
+           ROOT / "services/core-api"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -56,8 +57,12 @@ W10_RUNNING = {"phase": "W10_1_HELD_EXACT", "failures": [], "witnessInvocationId
 
 
 class HostDir:
-    def __init__(self, result=None, w10=None, rc="0\n"):
+    def __init__(self, result=None, w10=None, rc="0\n", identity=None, identity_rc="0\n"):
         self.path = Path(tempfile.mkdtemp())
+        if identity is not None:
+            (self.path / "identity.out").write_text(identity, encoding="ascii")
+        if identity_rc is not None:
+            (self.path / "identity.rc").write_text(identity_rc, encoding="ascii")
         if result is not None:
             (self.path / "HOST_RESULT.json").write_text(json.dumps(result, sort_keys=True) + "\n", encoding="ascii")
         if w10 is not None:
@@ -236,50 +241,180 @@ class Dr5CompareTests(unittest.TestCase):
             self.assertIn(result, ("DRIFT", "REFUSED"))
 
 
+MERGE = "1" * 40
+MERGED_AT, RUN_CREATED, RUN_DONE = "2026-10-15T01:00:00Z", "2026-10-15T01:02:00Z", "2026-10-15T01:08:00Z"
+RUN_ID = "40000000000"
+
+
+def identity(at="2026-10-15T01:20:00Z", host="lilith-dev-01", boot=E.BOOT_ID):
+    return f"{at}\n{host}\n{C.DEV_MACHINE_ID}\n{boot}\n7.0.0-1014-gcp\nREBOOT_REQUIRED=absent\n"
+
+
+class FakeGitHub:
+    """Synthetic GitHub records for a hypothetical merged PR #195 and its first deploy (tests only)."""
+
+    def __init__(self, log: bytes, **overrides):
+        self.repository = C.REPOSITORY
+        self._log = log
+        self.pr = {"number": 195, "merged": True, "merge_commit_sha": MERGE, "merged_at": MERGED_AT,
+                   "base": {"ref": "main"}}
+        self.runrec = {"id": int(RUN_ID), "name": C.DEPLOY_WORKFLOW_NAME, "path": C.DEPLOY_WORKFLOW_PATH,
+                       "repository": {"full_name": C.REPOSITORY}, "event": "workflow_run", "head_branch": "main",
+                       "status": "completed", "conclusion": "success", "head_sha": MERGE,
+                       "created_at": RUN_CREATED, "updated_at": RUN_DONE}
+        self.listing = {"workflow_runs": [dict(self.runrec),
+                                          {"id": 38504051046, "event": "workflow_run",
+                                           "created_at": "2026-10-14T03:00:56Z"}]}
+        for key, value in overrides.items():
+            setattr(self, key, value)
+
+    def pull(self, number):
+        return copy.deepcopy(self.pr) if number == 195 else None
+
+    def run(self, run_id):
+        return copy.deepcopy(self.runrec) if str(self.runrec.get("id")) == run_id else {"id": -1}
+
+    def deploy_runs(self):
+        return copy.deepcopy(self.listing)
+
+    def log(self, run_id):
+        return self._log
+
+
 class FreezeGateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         _, _, w10 = fixture_texts()
-        texts = E.derive_release_swap(w10[T10.RUNNING_HELD]["texts"], old=OLD, new=NEW)
-        host = HostDir(HOST_RESULT, W10_RUNNING)
-        with host as path:
-            cls.equal = D.compare(path, log_for(texts))
-            cls.drift = D.compare(path, log_for(w10[T10.RUNNING_HELD]["texts"]))
+        cls.new_log = log_for(E.derive_release_swap(w10[T10.RUNNING_HELD]["texts"], old=OLD, new=NEW)).encode()
+        cls.old_log = log_for(w10[T10.RUNNING_HELD]["texts"]).encode()
 
-    def acceptance(self, comparison, run="40000000000"):
-        statement = C.render_completion_statement(comparison, run)
-        record = {"recordType": C.COMPLETION_ACCEPTANCE_TYPE, "schemaVersion": 1, "mode": E.MODE,
-                  "completionRecordSha256": D.COMPLETION_RECORD_SHA256, "deployRunId": run,
-                  "dr5ComparisonSha256": sha(C._canonical(comparison)), "statementSha256": sha(statement)}
-        return {"statement": statement.decode("ascii"), "record": record}
+    def host(self, **kw):
+        kw.setdefault("identity", identity())
+        return HostDir(HOST_RESULT, W10_RUNNING, **kw)
 
-    def test_missing_or_unaccepted_evidence_never_lifts_the_freeze(self):
-        run = "40000000000"
-        self.assertFalse(C.freeze_lift_admissible(None, run, None)[0])
-        self.assertFalse(C.freeze_lift_admissible(self.drift, run, None)[0])
-        self.assertFalse(C.freeze_lift_admissible(self.equal, run, None)[0])                   # no owner acceptance
-        self.assertFalse(C.freeze_lift_admissible(self.equal, None, self.acceptance(self.equal))[0])
-        with self.assertRaises(C.CompletionError):
-            C.render_completion_statement(self.drift, run)
-        acc = self.acceptance(self.equal, run)
-        reworded = dict(acc, statement=acc["statement"].replace("I accept", "I  accept"))
-        self.assertFalse(C.freeze_lift_admissible(self.equal, run, reworded)[0])
-        other_run = self.acceptance(self.equal, "40000000001")
-        self.assertFalse(C.freeze_lift_admissible(self.equal, run, other_run)[0])
-        tampered = copy.deepcopy(self.equal)
-        tampered["observed"]["dr5-block"]["sha256"] = "0" * 64
-        self.assertFalse(C.freeze_lift_admissible(tampered, run, acc)[0])
-        stopped = dict(self.equal, target=D.STOPPED_HELD_E19)
-        self.assertFalse(C.freeze_lift_admissible(stopped, run, acc)[0])
-        bad_record = copy.deepcopy(acc)
-        bad_record["record"]["completionRecordSha256"] = "0" * 64
-        self.assertFalse(C.freeze_lift_admissible(self.equal, run, bad_record)[0])
+    def acceptance(self, host, github):
+        evidence = C.completion_evidence(host, RUN_ID, github)
+        statement = C.render_completion_statement(host, RUN_ID, github)
+        return {"statement": statement.decode("ascii"), "record": C.acceptance_record(evidence, statement)}
 
-    def test_the_exact_owner_statement_over_an_equal_comparison_is_admissible(self):
-        run = "40000000000"
-        ok, reason = C.freeze_lift_admissible(self.equal, run, self.acceptance(self.equal, run))
-        self.assertEqual((ok, reason), (True, "FREEZE_LIFT_ADMISSIBLE"))
-        self.assertEqual(C.load_record()["deploymentFreeze"], "ACTIVE")                      # a judgement writes nothing
+    def refused(self, host, github, acceptance=None, run=RUN_ID):
+        ok, reason = C.freeze_lift_admissible(host, run, acceptance, github)
+        self.assertFalse(ok, reason)
+        return reason
+
+    def test_genuine_synthetic_provenance_with_the_exact_statement_is_admissible(self):
+        with self.host() as host:
+            github = FakeGitHub(self.new_log)
+            acc = self.acceptance(host, github)
+            self.assertEqual(C.freeze_lift_admissible(host, RUN_ID, acc, github), (True, "FREEZE_LIFT_ADMISSIBLE"))
+            evidence = C.completion_evidence(host, RUN_ID, github)
+            self.assertEqual(evidence["provenance"]["logSha256"], sha(self.new_log))
+            self.assertEqual(evidence["comparison"]["result"], "EQUAL")
+        self.assertEqual(C.load_record()["deploymentFreeze"], "ACTIVE")                # a judgement writes nothing
+
+    def test_no_caller_verdict_is_accepted(self):
+        """The gate takes no comparison: a forged EQUAL document has nowhere to go, and the recomputed one decides."""
+        import inspect
+        self.assertEqual(list(inspect.signature(C.freeze_lift_admissible).parameters),
+                         ["host_dir", "run_id", "acceptance", "github"])
+        with self.host() as host:
+            github = FakeGitHub(self.old_log)                    # the deploy log does NOT carry the NEW texts
+            forged = {"resultType": "LILITH_E19_DR5_PHASE_COMPARISON", "result": "EQUAL"}
+            self.assertIn("DR5_NOT_EQUAL", self.refused(host, github, {"statement": "x", "record": forged}))
+
+    def test_missing_deployment_or_unmerged_pr_is_not_admissible(self):
+        with self.host() as host:
+            unmerged = FakeGitHub(self.new_log, pr={"number": 195, "merged": False, "merge_commit_sha": None})
+            self.assertIn("PR_NOT_MERGED", self.refused(host, unmerged))
+            other_source = FakeGitHub(self.new_log, repository="someone/else")      # never contacted
+            self.assertIn("PROVENANCE_SOURCE_REPOSITORY", self.refused(host, other_source))
+            pr_missing = FakeGitHub(self.new_log, pr=None)
+            self.assertIn("PR_NOT_MERGED", self.refused(host, pr_missing))
+            listing_missing = FakeGitHub(self.new_log, listing={})
+            self.assertIn("RUN_LISTING_UNAVAILABLE", self.refused(host, listing_missing))
+
+    def test_wrong_run_workflow_conclusion_sha_or_order_is_refused(self):
+        good = FakeGitHub(self.new_log).runrec
+        cases = {
+            "RUN_WRONG_WORKFLOW": dict(good, name="Repository validation", path=".github/workflows/ci.yml"),
+            "RUN_WRONG_TRIGGER": dict(good, event="workflow_dispatch"),
+            "RUN_NOT_SUCCESSFUL": dict(good, conclusion="failure"),
+            "RUN_NOT_THE_MERGE_COMMIT": dict(good, head_sha="2" * 40),
+            "RUN_WRONG_REPOSITORY": dict(good, repository={"full_name": "someone/else"}),
+            "RUN_TIMES": dict(good, created_at="2026-10-15T00:59:00Z"),                # before the merge
+        }
+        for reason, runrec in cases.items():
+            with self.subTest(reason=reason), self.host() as host:
+                self.assertIn(reason, self.refused(host, FakeGitHub(self.new_log, runrec=runrec)))
+        stub = dict(good, name="LILITH DEV deployment", path=".github/workflows/ci.yml", event="pull_request")
+        with self.host() as host:                                         # the PR-only CI stub is never a deploy
+            self.assertIn("RUN_WRONG_WORKFLOW", self.refused(host, FakeGitHub(self.new_log, runrec=stub)))
+        earlier = {"workflow_runs": [dict(good), {"id": 39999999999, "event": "workflow_run",
+                                                   "created_at": "2026-10-15T01:01:00Z"}]}
+        with self.host() as host:                                         # not the FIRST deploy after the merge
+            self.assertIn("RUN_NOT_THE_FIRST_AFTER_MERGE", self.refused(host, FakeGitHub(self.new_log, listing=earlier)))
+        with self.host() as host:
+            self.assertIn("RUN_NOT_FOUND", self.refused(host, FakeGitHub(self.new_log), run="40000000001"))
+            self.assertIn("DEPLOY_RUN_ID", self.refused(host, FakeGitHub(self.new_log), run="not-a-run"))
+
+    def test_log_digest_is_bound(self):
+        with self.host() as host:
+            github = FakeGitHub(self.new_log)
+            acc = self.acceptance(host, github)
+            tampered = FakeGitHub(self.new_log + b"\n")                  # another log body: another digest
+            self.assertIn("COMPLETION_STATEMENT_NOT_CANONICAL", self.refused(host, tampered, acc))
+            self.assertIn("RUN_LOG_UNAVAILABLE", self.refused(host, FakeGitHub(b"")))
+
+    def test_pre_deployment_or_stale_host_evidence_is_refused(self):
+        github = FakeGitHub(self.new_log)
+        for label, kw in {"before deploy completed": {"identity": identity(at="2026-10-15T01:05:00Z")},
+                          "the real pre-merge host U5 instant": {"identity": identity(at="2026-10-14T07:31:33Z")},
+                          "equal to completion": {"identity": identity(at=RUN_DONE)}}.items():
+            with self.subTest(case=label), self.host(**kw) as host:
+                self.assertIn("HOST_READ_NOT_AFTER_DEPLOY", self.refused(host, github))
+        with self.host(identity=identity(host="lilith-01")) as host:
+            self.assertIn("HOST_NOT_DEV_THIS_BOOT", self.refused(host, github))
+        with self.host(identity=identity(boot="0" * 8 + "-0000-0000-0000-" + "0" * 12)) as host:
+            self.assertIn("HOST_NOT_DEV_THIS_BOOT", self.refused(host, github))
+        with self.host(identity=None) as host:
+            self.assertIn("HOST_IDENTITY_MISSING", self.refused(host, github))
+        with self.host(identity_rc="1\n") as host:
+            self.assertIn("HOST_IDENTITY_MISSING", self.refused(host, github))
+        with self.host(identity="garbage\n") as host:
+            self.assertIn("HOST_IDENTITY_MALFORMED", self.refused(host, github))
+
+    def test_drift_or_unaccepted_evidence_never_lifts_the_freeze(self):
+        with self.host() as host:
+            self.assertIn("DR5_NOT_EQUAL", self.refused(host, FakeGitHub(self.old_log)))
+            github = FakeGitHub(self.new_log)
+            self.assertIn("COMPLETION_ACCEPTANCE_MISSING", self.refused(host, github, None))
+            acc = self.acceptance(host, github)
+            reworded = dict(acc, statement=acc["statement"].replace("I accept", "I  accept"))
+            self.assertIn("COMPLETION_STATEMENT_NOT_CANONICAL", self.refused(host, github, reworded))
+            bad = copy.deepcopy(acc)
+            bad["record"]["evidenceSha256"] = "0" * 64
+            self.assertIn("COMPLETION_ACCEPTANCE_RECORD_MISMATCH", self.refused(host, github, bad))
+        with HostDir(HOST_RESULT, dict(W10_RUNNING, witnessInvocationId="0" * 32), identity=identity()) as host:
+            self.assertIn("NO_BASELINE_STOP", self.refused(host, FakeGitHub(self.new_log)))
+
+
+class Mb11ExactPinTests(unittest.TestCase):
+    def test_the_alternative_pins_are_exactly_the_two_repinned_mb11_tools(self):
+        self.assertEqual(set(C.MB11_REPINNED_SHA256), {"services/owner-memory-control/tools/mb11_signer_verifier.py",
+                                                       "services/owner-memory-control/tools/mb11_restart_boundary_install.py"})
+        self.assertTrue(set(C.MB11_REPINNED_SHA256) <= set(C.REPINNED_TO_NEW))
+        for path, digest in C.MB11_REPINNED_SHA256.items():
+            self.assertEqual(sha((ROOT / path).read_bytes()), digest, path)
+            row = [line for line in RECORD_DOC.read_text(encoding="utf-8").splitlines() if line.startswith(f"| `{path}` |")]
+            self.assertEqual(len(row), 1, path)
+            self.assertTrue(row[0].rstrip().endswith(f"`{digest}` |"), path)
+
+    def test_unrelated_hashes_never_match(self):
+        self.assertIsNone(C.MB11_REPINNED_SHA256.get("services/owner-memory-control/tools/mb11_dr5_target.py"))
+        verifier = "services/owner-memory-control/tools/mb11_signer_verifier.py"
+        for unrelated in (D.COMPLETION_RECORD_SHA256, E.NEW_MANIFEST_SHA256,
+                          C.MB11_REPINNED_SHA256["services/owner-memory-control/tools/mb11_restart_boundary_install.py"]):
+            self.assertNotEqual(C.MB11_REPINNED_SHA256[verifier], unrelated)
 
 
 if __name__ == "__main__":
