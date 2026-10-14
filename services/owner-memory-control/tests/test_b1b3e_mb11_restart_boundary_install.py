@@ -534,10 +534,13 @@ class RecordTests(unittest.TestCase):
 
     def test_the_record_pins_names_and_keeps_every_boundary(self):
         text = self.RECORD.read_text(encoding="utf-8")
-        for value in (*(pin for _n, pin in B.DROPINS.values()), *I.FRAGMENTS.values(),
-                      hashlib.sha256((TOOLS / "mb11_restart_boundary_install.py").read_bytes()).hexdigest(),
-                      hashlib.sha256((TOOLS / "mb11_signer_verifier.py").read_bytes()).hexdigest()):
+        for value in (*(pin for _n, pin in B.DROPINS.values()), *I.FRAGMENTS.values()):
             self.assertTrue(value in text, value)
+        # The tool pins: this record, or the E-19 completion record that re-pinned RELEASE_SHA to the E-19 release.
+        completion = (ROOT / "docs/architecture/slice-15b2b-b1b3e-e19-completion-record.md").read_text(encoding="utf-8")
+        for value in (hashlib.sha256((TOOLS / "mb11_restart_boundary_install.py").read_bytes()).hexdigest(),
+                      hashlib.sha256((TOOLS / "mb11_signer_verifier.py").read_bytes()).hexdigest()):
+            self.assertTrue(value in text or value in completion, value)
         for name in I.PHASES:
             self.assertTrue(f"`{name}`" in text, name)
         for od in (11, 16, 17, 18, 19, 20):

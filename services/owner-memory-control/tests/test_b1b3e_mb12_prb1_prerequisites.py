@@ -435,7 +435,7 @@ class Pr3MaterialTests(unittest.TestCase):
                             ("kWitPublicKeySha256", "slice-15b2b-b1b3e-mb2-kwit-completion.md"),
                             ("genesisPinFileSha256", "slice-15b2b-b1b3e-mb7-mb8-package-a-completion.md"),
                             ("authorizationRegisterFileSha256", "slice-15b2b-b1b3e-mb7-mb8-package-a-completion.md"),
-                            ("releaseManifestSha256", "slice-15b2b-b1b3e-pr1a-acceptance.md")):
+                            ("releaseManifestSha256", "slice-15b2b-b1b3e-e19-completion-record.md")):
             with self.subTest(key=key):
                 self.assertIn(M3.DEV_EXPECTED[key], (records / record).read_text(encoding="utf-8"))
 
@@ -588,10 +588,11 @@ class ReadinessInputTests(unittest.TestCase):
                 self.build(activation=activation)
 
     def test_e19_judge_is_corrected_in_source_and_the_defect_scoped_to_aee323e(self):
-        """Record §8 defect, corrected in source by the E-19 release-maintenance slice (OD-M12-5 / E19-D1, PROPOSED).
-        The installed release aee323e keeps the 3-field judge until a separately authorized release transition."""
+        """Record §8 defect, corrected in source by the E-19 release-maintenance slice. aee323e carried the 3-field
+        judge; E-19 U5 retired it, and the pinned DEV release (ba943e1) carries the corrected judge."""
         self.assertEqual(PA.ACTIVATION_DARK_LINE, RI.HOST_ACTIVATION_DARK_LINE)
-        self.assertEqual(RI.E19_DEFECTIVE_RELEASES, frozenset({RI.DEV_PINS["releaseSha"]}))
+        self.assertEqual(RI.E19_DEFECTIVE_RELEASES, frozenset({"aee323e94412accbe321bc84eae78c5b8cf95afc"}))
+        self.assertNotIn(RI.DEV_PINS["releaseSha"], RI.E19_DEFECTIVE_RELEASES)
         dev = (ROOT / "scripts/dev_deployer/lilith_activation_verify.py").read_text(encoding="utf-8")
         self.assertIn('print(f"ACTIVATION=NOT_ACCEPTED reason={exc.reason} advisoryConfigEnabled={advisory}")', dev)
 

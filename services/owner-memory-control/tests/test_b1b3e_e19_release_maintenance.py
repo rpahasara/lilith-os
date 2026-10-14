@@ -190,19 +190,26 @@ class ReleasePinTests(unittest.TestCase):
             self.assertIn(line, unit)
 
     def test_every_aee323e_binding_in_the_tools_is_classified(self):
+        # Post-U5 (E-19 completion record): the current bindings name NEW; every remaining OLD mention is classified
+        # as history or provenance (`e19_completion`). The pre-transition map stays in the contract, as merged.
+        import e19_completion as C
+        self.assertEqual(set(E.CURRENT_RELEASE_BINDINGS) - {"services/owner-memory-control/tools/mb6_operator.py",
+                                                             "services/owner-memory-control/tools/mb9_operator.py",
+                                                             "services/owner-memory-control/tools/mb12_os_denial_proof.py"},
+                         set(C.REPINNED_TO_NEW))
         bound = {f"services/owner-memory-control/tools/{p.name}" for p in TOOLS.glob("*.py")
-                 if OLD[:7] in p.read_text(encoding="utf-8") and p.name != "e19_p1b10_upgrade.py"}
-        self.assertEqual(bound, set(E.CURRENT_RELEASE_BINDINGS) | E.HISTORICAL_RELEASE_BINDINGS)
-        self.assertFalse(set(E.CURRENT_RELEASE_BINDINGS) & E.HISTORICAL_RELEASE_BINDINGS)
+                 if OLD[:7] in p.read_text(encoding="utf-8")}
+        self.assertEqual(bound, set(C.OLD_RELEASE_MENTIONS))
+        self.assertTrue(E.HISTORICAL_RELEASE_BINDINGS <= set(C.OLD_RELEASE_MENTIONS))
         self.assertEqual(M6.PROVISION_MODULES[E.PR1_ACCEPTANCE_MEMBER], E.PR1_ACCEPTANCE_OLD_SHA256)  # historical
-        self.assertEqual(M6.RELEASE_SHA, OLD)
-        self.assertEqual(RI.DEV_PINS["releaseSha"], OLD)
-        self.assertEqual(RI.DEV_PINS["attestedManifestSha256"], E.OLD_MANIFEST_SHA256)
-        # The NEW pin lives in the contract alone: no current read path names it before the select.
-        named_new = {p.name for p in TOOLS.glob("*.py")
+        self.assertEqual(M6.RELEASE_SHA, OLD)                                                       # byte-identical
+        self.assertEqual(RI.DEV_PINS["releaseSha"], E.NEW_RELEASE)
+        self.assertEqual(RI.DEV_PINS["attestedManifestSha256"], E.NEW_MANIFEST_SHA256)
+        # NEW is named by the contract and by exactly the re-pinned current bindings.
+        named_new = {f"services/owner-memory-control/tools/{p.name}" for p in TOOLS.glob("*.py")
                      if E.NEW_RELEASE[:12] in p.read_text(encoding="utf-8")
                      or E.NEW_MANIFEST_SHA256[:12] in p.read_text(encoding="utf-8")}
-        self.assertEqual(named_new, {"e19_p1b10_upgrade.py"})
+        self.assertEqual(named_new, set(C.REPINNED_TO_NEW) | {"services/owner-memory-control/tools/e19_p1b10_upgrade.py"})
 
     def test_preserved_pins_equal_the_accepted_records(self):
         import mb3_registry_ceremony as M3C

@@ -691,7 +691,9 @@ class RecordTests(unittest.TestCase):
         for path in ("services/owner-memory-control/tools/mb11_signer_verifier.py",
                      "services/owner-memory-control/tools/mb11_dr5_target.py"):
             self.assertTrue(f"`{path}`" in self.text, path)
-            self.assertTrue(sha((ROOT / path).read_bytes()) in self.text, path)
+            # this record, or the E-19 completion record that re-pinned the verifier's RELEASE_SHA
+            completion = (ROOT / "docs/architecture/slice-15b2b-b1b3e-e19-completion-record.md").read_text(encoding="utf-8")
+            self.assertTrue(sha((ROOT / path).read_bytes()) in self.text + completion, path)
         for value in (V.B3_PUBLIC_KEY_SHA256, V.B2_CURRENT_BLOB_SHA256, *V.STRUCTURAL_REASONS,
                       V.EXPECTED_FULL_REASONS[0], D.TARGETS[D.RUNNING_SIGNER_HELD]["result-set"][1],
                       D.TARGETS[D.RUNNING_SIGNER_HELD]["dr5-block"][1]):

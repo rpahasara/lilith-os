@@ -120,8 +120,8 @@ DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {}
 
 # The accepted DEV records (public values only).
 DEV_PINS = {
-    "releaseSha": "aee323e94412accbe321bc84eae78c5b8cf95afc",
-    "attestedManifestSha256": "1d578ca707a95134dab218c826408b4380e7af0b5839160f47ede37232b94e8f",
+    "releaseSha": "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb",                                          # E-19 U5
+    "attestedManifestSha256": "b8393015e505495a81629411a4ecd33c0c372c7b16d2761094eb4e018bc300a2",      # E-19 U5
     "pinnedCurrentSha256": "6a61c350e848a833868f4573982fca9c75e2af79ccc9bd3716ae0303c26973f3",
     "kActPublicationFileSha256": "d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032",
     "kActPublicKeySha256": "dd13a1fb302375a4e7ec81131a72920e23e365e06a0b6dc9bb7ab124dadc01ed",
@@ -140,7 +140,7 @@ KNOWN_PACKAGE_DEFECTS = (
     "'advisoryConfigEnabled=false'; E19_ACTIVATION_DARK FAILs ACTIVATION_NOT_DARK on every real observation",
 )
 # Installed releases whose judge carries that defect. The repository judge is corrected (E-19 release maintenance
-# record); the defect stays real for as long as aee323e is the installed release.
+# record); the defect stays real for as long as aee323e is the installed release (retired at E-19 U5: history only).
 E19_DEFECTIVE_RELEASES = frozenset({"aee323e94412accbe321bc84eae78c5b8cf95afc"})
 
 

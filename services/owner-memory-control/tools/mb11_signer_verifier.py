@@ -69,7 +69,7 @@ LEDGER_STATE_DIR = "/var/lib/lilith-authority-dev"
 LEDGER_NAME = "authority_ledger.db"
 WAL_NAME = LEDGER_NAME + "-wal"
 SHM_NAME = LEDGER_NAME + "-shm"
-RELEASE_SHA = "aee323e94412accbe321bc84eae78c5b8cf95afc"
+RELEASE_SHA = "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb"   # E-19 U5 (completion record); was the E-19 OLD release
 RELEASE_CWD = "/opt/lilith-authority-dev/releases/" + RELEASE_SHA     # WorkingDirectory=…/current, resolved
 EXEC_ARGV = ("/opt/lilith-authority-dev/current/venv/bin/python", "-B", "-m", "lilith_authority_dev.server")
 MAX_LEDGER = 64 * 1024 * 1024
