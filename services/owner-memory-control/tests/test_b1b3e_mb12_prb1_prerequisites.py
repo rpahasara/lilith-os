@@ -47,6 +47,7 @@ T0, T1, T2 = "2026-10-12T10:00:00Z", "2026-10-12T10:30:00Z", "2026-10-12T11:00:0
 REAL_HOST_ACTIVATION = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false"
 OWNER_RECORD = H("owner record")
 OWNER_CONFIRMATION = H("owner confirmation")
+OD_M12_3_CUTOFF = "2026-10-14T18:27:00Z"          # OD-M12-3, owner-accepted 2026-10-15 (after deploy 38614708729)
 
 
 def b64u(raw: bytes) -> str:
@@ -245,8 +246,8 @@ class ForgeryPr2Tests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")
         with self.assertRaises(I2.Refused) as caught:
             I2.package_input(document, acceptance(digest, environment="dev"), environment="dev")
-        self.assertEqual(caught.exception.reason, "FRESHNESS_CUTOFF_UNDECIDED")
-        self.assertIsNone(I2.DEV_FRESHNESS_NOT_BEFORE)
+        self.assertEqual(caught.exception.reason, "INVENTORY_STALE")         # OD-M12-3 accepted: 2026-10-12 < cutoff
+        self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)
 
     def test_blocker4_admin_create_calls_without_artefacts_are_unknown_provenance(self):
         document, digest = live_inventory(ADMIN_ACTIVITY_CREATE_CALLS={"count": 3})   # NO_SNAPSHOTS at 64df007
@@ -726,13 +727,114 @@ class ReadinessInputTests(unittest.TestCase):
         inputs = build_inputs(self.X, self.host, self.manifest_sha, environment="dev")
         with self.assertRaises(RI.Refused) as caught:
             RI.build(inputs, environment="dev")
-        self.assertEqual(caught.exception.reason, "FRESHNESS_CUTOFF_UNDECIDED")
+        self.assertEqual(caught.exception.reason, "WINDOW_BEFORE_FRESHNESS_CUTOFF")   # OD-M12-3 accepted
         with self.assertRaises(RI.Refused) as caught:
             RI.build(inputs, environment="dev", trust=self.trust())
         self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")
         with self.assertRaises(RI.Refused) as caught:
             RI.build(build_inputs(self.X, self.host, self.manifest_sha), environment="test")
         self.assertEqual(caught.exception.reason, "TRUST_REQUIRED")
+
+
+# ------------------------------------------------- OD-M12-3: the accepted DEV freshness cutoff ---
+BEFORE_CUTOFF = "2026-10-14T18:26:59Z"
+AFTER_CUTOFF, LATER = "2026-10-14T19:00:00Z", "2026-10-14T20:00:00Z"
+
+
+def shifted_inputs(X, host, manifest_sha, *, not_before, at, environment=None):
+    """`build_inputs` with every observation at `at` inside the window [`not_before`, LATER]."""
+    value = build_inputs(X, host, manifest_sha, proofs={n: proof_item(*t, at=at) for n, t in transcripts().items()})
+    value["window"] = {"notBefore": not_before, "notAfter": LATER}
+    value["current"] = {**value["current"], "observedAt": at}
+    value["activation"] = {**value["activation"], "observedAt": at}
+    if environment is not None:
+        value["environment"] = environment
+    return value
+
+
+class OdM12_3CutoffTests(unittest.TestCase):
+    def test_one_cutoff_shared_by_the_dev_trusts_and_never_redeclared(self):
+        self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)
+        self.assertEqual(I2.dev_trust().not_before, OD_M12_3_CUTOFF)
+        self.assertEqual(RI.trust_for("dev", None).not_before, OD_M12_3_CUTOFF)
+        for name in ("mb12_readiness_inputs.py", "mb12_pr3_material.py"):
+            self.assertNotIn(OD_M12_3_CUTOFF, (TOOLS / name).read_text(encoding="utf-8"), name)
+
+    def test_pr2_freshness_boundary(self):
+        def report(start):
+            document = inventory(window=(start, LATER))
+            return I2.classify(document, environment="test", expected_keys=KEYS, not_before=OD_M12_3_CUTOFF)
+        with self.assertRaises(I2.Refused) as caught:
+            report(BEFORE_CUTOFF)
+        self.assertEqual(caught.exception.reason, "INVENTORY_STALE")
+        for start in (OD_M12_3_CUTOFF, AFTER_CUTOFF):                    # at or after: evaluated, not refused as stale
+            self.assertEqual(report(start)["classification"], "PASS", start)
+
+    def test_dev_pr2_is_never_accepted_without_a_pinned_owner_acceptance_or_from_a_fixture(self):
+        document, _ = live_inventory(environment="dev", window=(AFTER_CUTOFF, LATER))
+        for key in document["keys"]:                                     # the pinned DEV public identities
+            if key["role"] in I2.DEV_KEY_IDENTITIES:
+                key["publicKeySha256"] = I2.DEV_KEY_IDENTITIES[key["role"]]
+        digest = I2.inventory_digest(document)
+        with self.assertRaises(I2.Refused) as caught:
+            I2.package_input(document, acceptance(digest, environment="dev", at=LATER), environment="dev")
+        self.assertEqual(caught.exception.reason, "OWNER_ACCEPTANCE_NOT_ESTABLISHED")    # fresh, but not pinned
+        with self.assertRaises(I2.Refused) as caught:
+            I2.package_input(document, None, environment="dev")
+        self.assertEqual(caught.exception.reason, "OWNER_ACCEPTANCE_ABSENT")
+        fixture = inventory(environment="dev", window=(AFTER_CUTOFF, LATER), carried=("C-4",))
+        fixture["keys"] = [dict(key) for key in document["keys"]]
+        with self.assertRaises(I2.Refused) as caught:
+            I2.package_input(fixture, acceptance(I2.inventory_digest(fixture), environment="dev", at=LATER),
+                             environment="dev")
+        self.assertEqual(caught.exception.reason, "SYNTHETIC_FIXTURE_NOT_PACKAGE_INPUT")
+
+    def test_a_caller_cannot_override_the_dev_trust_or_its_cutoff(self):
+        document, digest = live_inventory(environment="dev", window=(BEFORE_CUTOFF, LATER))
+        permissive = pr2_trust(digest, not_before="2000-01-01T00:00:00Z")
+        with self.assertRaises(I2.Refused) as caught:
+            I2.package_input(document, acceptance(digest, environment="dev", at=LATER), environment="dev",
+                             trust=permissive)
+        self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")
+        with self.assertRaises(RI.Refused) as caught:
+            RI.trust_for("dev", RI.ReadinessTrustV1({}, "2000-01-01T00:00:00Z", {}, None, None))
+        self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")
+
+
+@unittest.skipUnless(POSIX, "the synthetic PR-1 host needs POSIX ownership and modes")
+class OdM12_3ReadinessTests(ReadinessInputTests):
+    def build_at(self, trust=None, *, not_before, at, environment=None):
+        inputs = shifted_inputs(self.X, self.host, self.manifest_sha, not_before=not_before, at=at,
+                                environment=environment)
+        return RI.build(inputs, environment=environment or inputs["environment"], trust=trust)
+
+    def test_readiness_window_and_observations_against_the_cutoff(self):
+        trust = self.trust(not_before=OD_M12_3_CUTOFF)
+        with self.assertRaises(RI.Refused) as caught:
+            self.build_at(trust, not_before=BEFORE_CUTOFF, at=AFTER_CUTOFF)
+        self.assertEqual(caught.exception.reason, "WINDOW_BEFORE_FRESHNESS_CUTOFF")
+        with self.assertRaises(RI.Refused) as caught:
+            self.build_at(trust, not_before=OD_M12_3_CUTOFF, at=BEFORE_CUTOFF)
+        self.assertEqual(caught.exception.reason, "INPUT_STALE")
+        for lower in (OD_M12_3_CUTOFF, AFTER_CUTOFF):                     # at or after: admitted to evaluation
+            envelope, _report = self.build_at(trust, not_before=lower, at=AFTER_CUTOFF)
+            document = RI.read_envelope(envelope, expected_sha256=hashlib.sha256(envelope).hexdigest(),
+                                        environment=self.X.ENV)
+            self.assertIsInstance(document, dict, lower)
+
+    def test_missing_proof_provenance_never_becomes_accepted(self):
+        trust = self.trust(transcripts_={}, not_before=OD_M12_3_CUTOFF)
+        with self.assertRaises(RI.Refused) as caught:
+            self.build_at(trust, not_before=OD_M12_3_CUTOFF, at=AFTER_CUTOFF)
+        self.assertEqual(caught.exception.reason, "PROOF_PROVENANCE_NOT_ESTABLISHED")
+
+    def test_synthetic_evidence_is_never_authentic_dev_evidence(self):
+        # Fresh, well-formed synthetic inputs under the pinned DEV trust: refused on a DEV record pin, never by
+        # freshness, never an envelope.
+        with self.assertRaises(RI.Refused) as caught:
+            self.build_at(None, not_before=OD_M12_3_CUTOFF, at=AFTER_CUTOFF, environment="dev")
+        self.assertIn(caught.exception.reason, ("RELEASE_NOT_RECORD", "MANIFEST_NOT_RECORD", "CURRENT_SHA256_NOT_PINNED",
+                                                "KACT_PUBLICATION_NOT_RECORD", "PROOF_PROVENANCE_NOT_ESTABLISHED"))
 
 
 # --------------------------------------------------------------- source guards ---
@@ -759,7 +861,7 @@ class SourceGuardTests(unittest.TestCase):
             self.assertFalse(any(name in key for key in pinned), name)
 
     def test_dev_trust_pins_are_empty_until_owner_records_exist(self):
-        self.assertIsNone(I2.DEV_FRESHNESS_NOT_BEFORE)
+        self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)          # OD-M12-3, owner-accepted 2026-10-15
         self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), {})
         self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), {})
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})

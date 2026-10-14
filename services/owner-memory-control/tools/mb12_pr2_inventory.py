@@ -27,9 +27,9 @@ Owner-acceptance trust boundary. A caller-supplied acceptance document is never 
 itself: DEV_SYNTHETIC owner acceptance is unsigned, so its only established binding in this repository is a reviewed,
 merged owner record whose accepted value is pinned in source (the `ACCEPTED_GENESIS` / `EXPECTED_HELD_SHA256`
 pattern). `DEV_ACCEPTED_INVENTORIES` (inventory digest -> acceptance record SHA-256) is that pin and is EMPTY, and the
-DEV freshness cutoff `DEV_FRESHNESS_NOT_BEFORE` (OD-M12-3) is UNDECIDED: every DEV package input is REFUSED until both
-exist. The DEV trust values cannot be overridden by a caller; other environments (TEST) must pass an explicit
-`Pr2TrustV1` with every field set.
+DEV freshness cutoff `DEV_FRESHNESS_NOT_BEFORE` (OD-M12-3) is owner-accepted (2026-10-14T18:27:00Z): every DEV package
+input is still REFUSED until its owner acceptance is pinned. The DEV trust values cannot be overridden by a caller;
+other environments (TEST) must pass an explicit `Pr2TrustV1` with every field set.
 
 Forms (off-host, stdlib + rfc8785):
 
@@ -95,8 +95,9 @@ DEV_KEY_IDENTITIES = {
 }
 # Recorded non-snapshot debt carried forward (M-B2 completion, crash window C-4). Named, never dropped.
 DEV_CARRIED_DEBTS = ("C-4",)
-# OD-M12-3 (UNDECIDED): the DEV lower freshness bound for M-B12 inputs. None refuses every DEV package input.
-DEV_FRESHNESS_NOT_BEFORE: str | None = None
+# OD-M12-3 (owner-ACCEPTED 2026-10-15): the immutable DEV lower freshness bound for M-B12 evidence, after the PR #198
+# deployment (38614708729, completed 2026-10-14T18:26:49Z). Shared by `mb12_readiness_inputs` (never a second cutoff).
+DEV_FRESHNESS_NOT_BEFORE: str | None = "2026-10-14T18:27:00Z"
 # Owner PR-2 acceptances established by a merged owner record: inventory digest -> acceptance record SHA-256. EMPTY.
 DEV_ACCEPTED_INVENTORIES: Mapping[str, str] = {}
 

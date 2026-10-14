@@ -149,12 +149,12 @@ The rendered go is plain ASCII with no `>`, so it survives the go-check normalis
 | OD-M11-12 | M-B12 `eligibilityReady` |
 | OD-M11-14 | M-B12 proof-name mapping |
 
-**Hard blocker for a live start: OD-M12-3 (UNDECIDED).**
+**Owner readiness inputs (OD-M12-3 ACCEPTED, §9).**
 
 - `gate` requires the owner readiness inputs envelope (`ownerInputs`). Without it, E/F cannot be evaluated and W11_1
   is unreachable.
-- `mb12_readiness_inputs build` refuses every DEV build until `mb12_pr2_inventory.DEV_FRESHNESS_NOT_BEFORE` is
-  decided (OD-M12-3).
+- `mb12_readiness_inputs build` now evaluates DEV evidence against the accepted cutoff (§9); a DEV envelope still
+  needs authentic post-cutoff evidence that matches every DEV record pin.
 - `DEV_ACCEPTED_PROOF_TRANSCRIPTS` is empty, so proofs stay missing (NOT_READY downstream, recorded not judged at
   M-B11).
 - The operator never defaults or synthesizes inputs: `owner_inputs` is `read_envelope` over the exact envelope bytes,
@@ -211,9 +211,26 @@ The W10 chain uses the `mb10_operator.TOOL_PINS` values.
 
 ```text
 MB11_OPERATOR = BUILT (source + synthetic tests); NOT RUN; NOT AUTHORIZED
-MB11 START = BLOCKED: owner readiness inputs (OD-M12-3 undecided) + MB11-GO-START
+MB11 START = BLOCKED: an authentic DEV owner readiness envelope + MB11-GO-START (OD-M12-3 accepted, §9)
 RESTART_BOUNDARY = EFFECTIVE, OWNER-ACCEPTED (P1B-10R Option A)
 SIGNER = INACTIVE;  K_ACT_LOADS = 0
 REGISTRY_EFFECTIVE = NO;  AUTHORITY_ACTIVE = NO;  ISSUANCE_AUTHORITY = NONE
 FIRST_MEMORY_READY = NOT REACHED;  PROD = NOT AUTHORIZED
 ```
+
+## 9. Addendum (2026-10-15): OD-M12-3 accepted
+
+**Owner decision.** OD-M12-3 is ACCEPTED: `DEV_FRESHNESS_NOT_BEFORE = "2026-10-14T18:27:00Z"`. It is the immutable lower
+freshness bound for M-B12 DEV evidence and follows the PR #198 deployment (`38614708729`, completed
+2026-10-14T18:26:49Z).
+
+- **One cutoff.** It is set only in `mb12_pr2_inventory.py` (now
+  `49d46b9ca166bae853653300cdd174d2b7ddb0025e72a80123b408cbc7055008`; was `24370a37…`, the value recorded in the
+  [PR-B1 record](slice-15b2b-b1b3e-mb12-prb1-prerequisite-tooling.md), which is not rewritten).
+  `mb12_readiness_inputs.trust_for("dev")` reads it through its existing import (`I2.DEV_FRESHNESS_NOT_BEFORE`);
+  `mb12_readiness_inputs.py` (`d325d07f…`, pinned by the operator) is unchanged.
+- **Still fail-closed.** `DEV_ACCEPTED_INVENTORIES`, `DEV_ACCEPTED_CANDIDATES` and `DEV_ACCEPTED_PROOF_TRANSCRIPTS` stay
+  empty. A DEV caller cannot override the trust. A synthetic fixture is never a package input. Evidence before the
+  cutoff is refused (`INVENTORY_STALE`, `WINDOW_BEFORE_FRESHNESS_CUTOFF`, `INPUT_STALE`).
+- **Tests.** `test_b1b3e_mb12_prb1_prerequisites` adds `OdM12_3CutoffTests` and `OdM12_3ReadinessTests`. The four
+  existing tests that asserted the undecided cutoff now assert the accepted value and the next fail-closed refusal.
