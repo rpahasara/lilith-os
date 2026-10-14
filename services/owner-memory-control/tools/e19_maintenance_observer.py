@@ -74,7 +74,7 @@ if not BUNDLED and str(HERE) not in sys.path:      # never put the remote cwd on
 import e19_p1b10_upgrade as E  # noqa: E402  (the merged contract; pinned below)
 import mb11_restart_boundary_install as RBI  # noqa: E402  (SHADOW_BASES only; the P1B-10R shadow list)
 
-E19_CONTRACT_SHA256 = "152022eeff26993f383ce0ba94c0ea552c7dda01ff3b87bc249be295106f34cb"
+E19_CONTRACT_SHA256 = "e8c8f6037ef51d4e2f7de7ac546f034bdf4893a717ef3bcb450d9fe52cb12cc2"
 # The broker preservation reader: `scripts/verify_broker_dev_current_incarnation.py` at the owner-accepted post-reboot
 # re-pin (= mb9_operator.TOOL_PINS[BROKER]); bundled under the BOOT loader, loaded from the repository otherwise.
 BROKER_MODULE = "verify_broker_dev_current_incarnation"

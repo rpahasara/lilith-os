@@ -55,9 +55,23 @@ MAX_OBSERVATION = 256 * 1024
 OPT = "/opt/lilith-authority-dev"
 OLD_RELEASE = "aee323e94412accbe321bc84eae78c5b8cf95afc"                                       # PR-1A (RR-33)
 OLD_MANIFEST_SHA256 = "1d578ca707a95134dab218c826408b4380e7af0b5839160f47ede37232b94e8f"
-# The NEW release does not exist. Only a merged owner record (after a build attestation) may set these.
-NEW_RELEASE: str | None = None
-NEW_MANIFEST_SHA256: str | None = None
+# The NEW release: the owner-authorized pin of the independently attested build (record
+# slice-15b2b-b1b3e-e19-new-release-pin.md). NEW_RELEASE is the SOURCE commit the archive was built from (the PR #193
+# merge), never the commit that carries this pin. It is a proposed target only: the INSTALLED release stays OLD
+# until the owner-authorized U2 -> U3 select, and every current read path keeps its OLD pins.
+NEW_RELEASE: str | None = "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb"
+NEW_MANIFEST_SHA256: str | None = "b8393015e505495a81629411a4ecd33c0c372c7b16d2761094eb4e018bc300a2"
+# Provenance of that pin (two independent builds, Windows + WSL, byte-identical; `attest_authority_dev_build.py`).
+# Record only: staging verifies the archive against its builder stamp and NEW_MANIFEST_SHA256.
+NEW_RELEASE_ATTESTATION = {
+    "archiveSha256": "a4ad24e8c261c6e5858c559f4102ac8d6cc6923cfc19a9a7ffe5720408ae3faf",
+    "archiveByteSize": 5355042,
+    "builderStampSha256": "cc1695184453c99bd0d0ffd3c18fca8eaf2b979e9f33a4c2a6fbd1b236837211",
+    "attestationDigest": "d6f7f709d3b40dc42d6fb9c936137bb6c6871c36917c9d27f8f2faa634ff51d2",
+    "buildRecipeSha256": "aa1c5200db931553271897f18a53306bd7c5ab6726d3b484b74d0b1e134ce092",
+    "authorityReleaseDigest": "5a7c990318e74fd3c8a5e39259a9382cbc7f3971ce38efad0fdc425c61a45f58",
+    "evidenceManifestSha256": "b502b8dab36fa72349c5f386e02522b1a9b0325a4072c6a4189265979a7c21a7",
+}
 
 # ------------------------------------------------------- the E-19 source delta ---
 PR1_ACCEPTANCE_MEMBER = "lilith_owner_memory/pr1_acceptance.py"
@@ -740,9 +754,25 @@ def package_ready_admissible(document: Any, baseline: Any = None, replacement: A
 # for the `releases/` listing and once for the `current` target. No other line names a release. Record §6.
 DR5_RELEASE_LINE = "DENIED: test -w /opt/lilith-authority-dev/releases/{sha}"
 DR5_RELEASE_LINE_COUNTS = {"result-set": 2, "dr5-block": 2, "predeploy-block": 0}
-# The replaced post-upgrade targets (derived later from the accepted W10_1 texts; PROPOSED; no pins exist).
-NEW_DR5_TARGETS: Mapping[str, Any] = {"WITNESS_RUNNING_HELD_E19": None,
-                                       "WITNESS_STATE_PRESENT_SERVICE_STOPPED_HELD_E19": None}
+# The replaced post-upgrade targets: `derive_release_swap(<OLD>, <NEW_RELEASE>)` over the accepted W10_1 texts
+# (`mb10_dr5_target.derive`, which itself re-checks the W10 pins), as (lines, SHA-256) per set. Tests re-derive them.
+# DERIVED and PINNED, NOT ACCEPTED and NOT EFFECTIVE: they apply only after U5 (the first post-U5 deploy), and only
+# the owner accepts them. Until then the routine deploy compares against the unchanged aee323e W10_1 targets.
+NEW_DR5_TARGETS_STATUS = "DERIVED_PINNED_NOT_ACCEPTED"
+NEW_DR5_SOURCES = {"WITNESS_RUNNING_HELD_E19": "WITNESS_RUNNING_HELD",
+                   "WITNESS_STATE_PRESENT_SERVICE_STOPPED_HELD_E19": "WITNESS_STATE_PRESENT_SERVICE_STOPPED_HELD"}
+NEW_DR5_TARGETS: Mapping[str, Any] = {
+    "WITNESS_RUNNING_HELD_E19": {
+        "result-set": (192, "91c91ec7d5001d8c13f8438cb3d653ea3ee9b6bc1e41087ec154fec834def13d"),
+        "dr5-block": (153, "0692dc6df9dfbba2e6d81d985d56090025c11d2756a6397966346bb5f9e5fd16"),
+        "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae"),
+    },
+    "WITNESS_STATE_PRESENT_SERVICE_STOPPED_HELD_E19": {
+        "result-set": (190, "a3d07a4342296dfdf424bc2f6f74e9add141e373d2822420ff15768abb74dc9e"),
+        "dr5-block": (151, "8d25c6766b61b23517db870d5ddb5887af0e3b8fefe9b2011ced3de09ce2452f"),
+        "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae"),
+    },
+}
 
 
 def derive_release_swap(texts: Mapping[str, list[str]], *, old: str, new: str) -> dict[str, list[str]]:
@@ -761,7 +791,9 @@ def derive_release_swap(texts: Mapping[str, list[str]], *, old: str, new: str) -
 
 
 # ------------------------------------------------------------ pin replacement map ---
-# Files with a CURRENT aee323e binding that the upgrade invalidates (re-pinned only after NEW exists; record §7).
+# Files with a CURRENT aee323e binding that the upgrade invalidates (record §7). They describe the INSTALLED
+# release, so they stay on aee323e while it is installed (pinning NEW here before the select would make the live
+# host read as NEW); they are re-pinned with the post-U5 completion record.
 CURRENT_RELEASE_BINDINGS = {
     "services/owner-memory-control/tools/mb6_operator.py":
         "RELEASE_SHA + RELEASE_MODULES/PROVISION_MODULES, reused by mb9_operator.readiness_ok (the mb10 host POST)",
