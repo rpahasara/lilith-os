@@ -197,6 +197,9 @@ observed `W10_1_HELD_EXACT` result set and DR-5 block of deploy `38162573937`, w
 equal the derived W11 texts byte for byte. The targets are derived and **not accepted**; no live W11 deployment
 observation exists. DR-5 cannot see HEALTH, the loaded key or the hold store.
 
+**Superseded for future W11 use (2026-10-14).** The values above are historical: they name the pre-E-19 release
+`aee323e`. Any future W11 comparison uses the E-19-rebased targets of §14.
+
 ## 9. Ledger preservation
 
 The HEALTH path opens the WAL ledger `mode=rw`, reads schema, meta, journal mode and journal, and closes; it issues no
@@ -266,7 +269,7 @@ capture step (no capture tool exists), the live process facts.
 | Tool | SHA-256 |
 | --- | --- |
 | `services/owner-memory-control/tools/mb11_signer_verifier.py` | `020ab5b15b02ac7d46b2cc8dd402481576646fbebcab708522df50f96e8782ad` (PR-A2: restart-boundary observation, [P1B-10R record](slice-15b2b-b1b3e-mb11-restart-boundary-p1b10r.md); was `2fb0fe0d7781c2758d71d3dcc3968e1bb415be0b41881c47933ea1e2423aa614`) |
-| `services/owner-memory-control/tools/mb11_dr5_target.py` | `c72cf1b2a5713a32471f0de5ad1afd56a1a65edfa6992386f1452207ce1db6fc` |
+| `services/owner-memory-control/tools/mb11_dr5_target.py` | `775f43e84e1e58c2c9d1e8b4f2f32dc955462d034963b74761a133003a16daf3` (E-19 rebase, §14; was `c72cf1b2a5713a32471f0de5ad1afd56a1a65edfa6992386f1452207ce1db6fc`) |
 
 Reused unchanged: `mb10_held_verifier.py` `73a8fe9aec48fab7fb628a3427bc690876b55a4ae1ead55f1b7e00032075b8e3`,
 `mb10_dr5_target.py` `29c359617605f67e812732c4bb6a9ca1b9439bfffcf22285e44d9f6c1999ccf0`, `mb9_dr5_target.py`
@@ -280,6 +283,7 @@ MB11_DESIGN_DIRECTION = OWNER-REVIEWED (2026-10-12; direction only)
 OD-M11-1..OD-M11-15 = PROPOSED; NONE ACCEPTED
 RESTART_AND_SOCKET_REACTIVATION_BOUND = NOT PROVEN (LIVE STARTUP BLOCKER)
 W11_DR5_TARGETS = DERIVED; NOT ACCEPTED; NO LIVE W11 OBSERVATION
+W11_DR5_BASE = WITNESS_RUNNING_HELD_E19 (E-19 rebase, 2026-10-14, §14)
 MB11_OPERATOR = NOT BUILT
 M-B11 = NOT AUTHORIZED
 SIGNER = INACTIVE
@@ -294,4 +298,62 @@ ISSUANCE_AUTHORITY = NONE
 FIRST_MEMORY = NOT AUTHORIZED
 FIRST_MEMORY_READY = NOT REACHED
 PROD = NOT AUTHORIZED
+```
+
+## 14. Addendum (2026-10-14): W11 DR-5 targets rebased onto E-19
+
+**Why.** E-19 replaced the installed release. On 2026-10-14 the owner accepted E-19 completion and the
+`WITNESS_RUNNING_HELD_E19` DR-5 targets ([E-19 completion acceptance](slice-15b2b-b1b3e-e19-completion-acceptance.md)).
+Since then, the NEW release `ba943e1a188d98f4108c9eec7149c0cf1a8f68bb` is the sole installed release and `aee323e` is
+retired. The §8 targets were derived from the post-HELD W10 texts, which name `aee323e` in their two release lines,
+so a post-start comparison against them could never be EQUAL on the current host.
+
+**Rule unchanged.** The rule stays `PHASE_BOUND_DR5_BASELINE_WITH_DERIVED_DELTA`. `mb11_dr5_target.derive` builds the
+targets in this order:
+
+1. it runs the pinned M-B10 derivation, unchanged;
+2. it applies the merged E-19 contract's exact `derive_release_swap(<OLD>, <NEW>)` (`e19_p1b10_upgrade.py`
+   `e8c8f6037ef51d4e2f7de7ac546f034bdf4893a717ef3bcb450d9fe52cb12cc2`, pinned in the tool);
+3. it requires the swapped running-witness text to equal the accepted `WITNESS_RUNNING_HELD_E19` target set by set,
+   **before** anything else;
+4. only then does it apply the §8 signer delta, which is unchanged and proven from the pinned script.
+
+No DR-5 line is hand-edited. `compare` also refuses EQUAL for any log that names the retired release.
+
+| W11 phase | Target | Result set | DR-5 block | Pre-deploy |
+| --- | --- | --- | --- | --- |
+| `W11_1_SIGNER_STARTED_EXACT` | `SIGNER_RUNNING_WITNESS_RUNNING_HELD` | 194 `ff2468f09fb6721de776c857e096fe485b2399e70fa6c5d37877179c4de47509` | 155 `4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64` | 29 `f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae` |
+| `W11_1S_STOPPED_AFTER_FIRST_LOAD` | `SIGNER_STOPPED_AFTER_FIRST_LOAD_WITNESS_RUNNING_HELD` | 192 `91c91ec7d5001d8c13f8438cb3d653ea3ee9b6bc1e41087ec154fec834def13d` (= `WITNESS_RUNNING_HELD_E19`) | 153 `0692dc6df9dfbba2e6d81d985d56090025c11d2756a6397966346bb5f9e5fd16` | 29 `f5087042…4cae` |
+
+- **Release lines.** Two NEW release lines are in the result set and two in the DR-5 block. There are none in the
+  pre-deploy block, and no target contains an OLD release line.
+- **Running delta.** The running target is the E-19 base with exactly one line replaced by three (+2 lines) in the
+  result set and the DR-5 block: the deferred `/run/credentials/lilith-authority-dev.service` line becomes `DENIED:
+  test -w`, `-r`, `-x`. The pre-deploy block is unchanged.
+- **Superseded values.** 194 `8c8b6eac…` / 155 `ba39512d…` and the stopped value 192 `593c90e1…` / 153 `ace51f27…`
+  stay in §8 as history. They are superseded for any future W11 use.
+
+**W11 verifier: no OLD-release dependency.**
+
+- `mb11_signer_verifier.py` already pins `RELEASE_SHA` / `RELEASE_CWD` to NEW (E-19 completion re-pin, unchanged).
+- The release modules it reaches through `/opt/lilith-authority-dev/current` are byte-identical in `aee323e` and
+  `ba943e1`: `lilith_authority_dev/ledger.py` `2853f2d7…`, `lilith_authority_root/observers.py` `5447eb67…` and
+  `lilith_authority_host/store_observer.py` `e22414fa…`. These are the imports of `mb6_ledger_verifier`, the W11
+  verifier and `mb9_witness_verifier`.
+- The ledger `SCHEMA_FINGERPRINT` pin of `mb6_ledger_verifier.ACCEPTED_PINS` therefore holds on NEW.
+- The E-19 payload delta (`pr1_acceptance.py`) is not on the W11 path.
+
+**Unchanged.**
+
+- The W9 / W10 tools and targets, the E-19 contract, `e19_dr5_target.py` and every E-19 record and evidence.
+- `e19_completion.MB11_REPINNED_SHA256`: it is the historical map of the completed E-19 transition, so the new
+  `mb11_dr5_target.py` pin is recorded here, not there.
+
+**Status.**
+
+```text
+W11_DR5_TARGETS = DERIVED ON WITNESS_RUNNING_HELD_E19; NOT ACCEPTED; NO LIVE W11 OBSERVATION
+W11_DR5_PRE_E19_VALUES = HISTORICAL; SUPERSEDED FOR FUTURE W11 USE
+OD-M11 DECISIONS = UNCHANGED BY THIS ADDENDUM
+LIVE_MUTATION = NONE;  DEV_CONTACT = NONE
 ```
