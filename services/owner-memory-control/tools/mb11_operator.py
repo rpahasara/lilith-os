@@ -17,6 +17,7 @@ them with one generated data module carrying the owner inputs.
 | `render <repo> <workdir>` | local: the exact owner go text bound to the latest PASS gate |
 | `start <repo> <workdir> <go>` | **mutation**: a fresh read-only gate (same bound facts), the marker, ONE `systemctl start` of the service, ONE read-only post (HEALTH capture + W11) |
 | `current <repo> <workdir>` | read-only DEV: one release `observe_current_blob().to_dict()` (the readiness `current` input), judged against the DEV readiness pins; no W11, no HEALTH |
+| `observe <repo> <workdir>` | read-only DEV, only after the one consumed start reached W11_1: the SAME POST11 document once more (one HEALTH query of the running signer + W11); exact only for the accepted incarnation, key and single load |
 
 Bindings: release `ba943e1` (E-19 U5), the owner-accepted effective P1B-10R boundary (plan `2a004a41…`, Option A; every
 exact W11 phase requires `boundary_reasons == []`), the accepted replacement witness `90b28f9d…` / 69238, the W11
@@ -64,7 +65,7 @@ TOOL_PINS = {
     W11_DR5_TARGET: "775f43e84e1e58c2c9d1e8b4f2f32dc955462d034963b74761a133003a16daf3",
     REMOTE: "04461ffe4d30d443c49e5ef2d314972fda41a0b3b8dda1765609fb64c1cad72f",
     E19_OPERATOR: "b98328162b72795de0579d5e7abb58ff55f1bd7498e53b8699d91af5d453c1dd",
-    READINESS_INPUTS: "d325d07f9e2ba23b1c5d98e295d415275c8aab88d0d9c50ea8081f99eb19ce2b",
+    READINESS_INPUTS: "a1c68c7e054d3f7cb2d5368e8772bbeb19d977e7552a5d770c4f0461696b0435",
     E19_RECORD: "31bc707ebc9b58b376d233a30594eaa0e1f4d3b32444b172c741dbaeec66b3b8",
 }
 # The W10 chain, the restart-boundary tools, the W11 verifier, then the generated evidence and the remote tail.
@@ -79,6 +80,7 @@ START_SIGNER_COMMAND = f"sudo -n /usr/bin/systemctl start {SIGNER_SERVICE}"
 GATE_DIR, STEP_DIR, MARKER = "gates", "steps", "mb11-start"
 GATE_FILE, START_FILE, ENVELOPE_FILE = "GATE.json", "START.json", "inputs.envelope"
 CURRENT_DIR, CURRENT_FILE = "current", "CURRENT.json"
+OBSERVE_DIR, OBSERVE_FILE = "observe", "OBSERVE.json"
 RELEASE_TREE_PREFIX = "/opt/lilith-authority-dev/current/"              # = mb6_ledger_verifier.RELEASE_TREE + "/"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -355,6 +357,76 @@ class Operator(X.Operator):
         return dict(record, next="read-only POST11, then the owner acceptance; nothing further is authorized"
                     if reached else "STOP: no retry, no automatic stop; read-only re-observation and owner adjudication")
 
+    # ------------------------------------------------- OBSERVE (read-only) ---
+
+    def _accepted_start(self, workdir: Path) -> tuple[Path, dict, dict, dict]:
+        """The one consumed start that reached W11_1: its gate, its record and its POST11 document (bytes re-checked)."""
+        _need((Path(workdir) / M6.ATTEMPT_DIR / f"{MARKER}.json").exists(), "START_NOT_CONSUMED")
+        directory = Path(workdir) / STEP_DIR
+        steps = sorted(p for p in directory.iterdir() if p.name.endswith("-START")) if directory.is_dir() else []
+        _need(len(steps) == 1, "START_STEP_NOT_EXACTLY_ONE")
+        record = json.loads((steps[0] / START_FILE).read_bytes())
+        post = (steps[0] / "post.out").read_bytes()
+        _need(record.get("result") == "MB11_START_REACHED_" + W11_1 and record.get("kActLoadCount") == 1
+              and record.get("postSha256") == sha256_hex(post), "START_NOT_THE_REACHED_W11_1")
+        latest, gate = self._latest_gate(workdir)
+        _need(latest.name == record.get("gate"), "START_GATE_NOT_THE_LATEST_GATE")
+        return latest, gate, record, json.loads(post)
+
+    @staticmethod
+    def judge_observe(remote: dict | None, accepted: dict) -> list[str]:
+        """`[]` only for W11_1 with the accepted signer incarnation and key, one K-ACT load and authority disabled."""
+        if remote is None:
+            return ["OBSERVE_NOT_RECEIVED"]
+        report, then = remote["report"], accepted["report"]
+
+        def signer(rep: dict) -> tuple:
+            unit = ((rep.get("observation") or {}).get("units") or {}).get(SIGNER_SERVICE) or {}
+            return unit.get("InvocationID"), unit.get("MainPID"), unit.get("NRestarts")
+
+        reasons = []
+        if report.get("phase") != W11_1 or report.get("reasons") != []:
+            reasons.append("PHASE:" + str(report.get("phase")))
+        if report.get("kActLoadCount") != 1 or remote.get("healthCaptureAttempted") is not True:
+            reasons.append("NOT_ONE_LOAD_WITH_HEALTH")
+        if signer(report) != signer(then) or None in signer(report):
+            reasons.append("SIGNER_NOT_THE_ACCEPTED_INCARNATION")
+        if report.get("healthPublicKeySha256") is None \
+                or report.get("healthPublicKeySha256") != then.get("healthPublicKeySha256"):
+            reasons.append("KEY_NOT_THE_ACCEPTED_KEY")
+        w10 = (report.get("observation") or {}).get("w10") or {}
+        if report.get("w10PhaseSignerJudgedSeparately") != W10_1 \
+                or (w10.get("witnessInvocationId"), w10.get("witnessMainPid")) != WITNESS:
+            reasons.append("W10_NOT_W10_1_WITH_THE_ACCEPTED_WITNESS")
+        if ((report.get("observation") or {}).get("restartBoundary") or {}).get("reasons") != []:
+            reasons.append("RESTART_BOUNDARY_NOT_EFFECTIVE")
+        if (report.get("authorityGranted"), report.get("authorityActive"), report.get("registryEffective"),
+                report.get("issuanceAuthority")) != (False, False, False, "NONE"):
+            reasons.append("AUTHORITY_NOT_DISABLED")
+        return reasons
+
+    def observe(self, repo: Path, workdir: Path) -> dict:
+        """ONE read-only re-observation of the accepted start: the identical POST11 document (same gate baseline, same
+        owner inputs), so the same W11 judgement and one HEALTH query. Never a gate, never the marker, never a start."""
+        self.pins(repo)
+        latest, gate, start, accepted = self._accepted_start(workdir)
+        inputs = self.owner_inputs((latest / ENVELOPE_FILE).read_bytes())
+        doc = self._doc("post", inputs, {"dbSha256": gate["dbSha256"], "journalCursor": gate["journalCursor"]})
+        _need(R.evidence_digest(doc) == accepted.get("evidenceSha256"), "OBSERVE_DOC_NOT_THE_ACCEPTED_POST11")
+        out = self._new_numbered(Path(workdir) / OBSERVE_DIR, "POST11")
+        remote = self._remote(repo, out, "remote", doc)
+        reasons = self.judge_observe(remote, accepted)
+        report = None if remote is None else remote["report"]
+        record = {"observe": out.name, "acquiredAt": self.now().strftime("%Y-%m-%dT%H:%M:%SZ"), "reasons": reasons,
+                  "phase": None if report is None else report.get("phase"),
+                  "kActLoadCount": None if report is None else report.get("kActLoadCount"),
+                  "observationSha256": sha256_hex((out / "remote.out").read_bytes()),
+                  "acceptedPostSha256": start["postSha256"], "evidenceSha256": R.evidence_digest(doc),
+                  "release": RELEASE, "result": "MB11_OBSERVE_" + ("W11_1_EXACT" if not reasons else "STOP")}
+        self._record(out / OBSERVE_FILE, record)
+        return dict(record, next="nothing is authorized; the phase is an input to the W11 DR-5 compare"
+                    if not reasons else "STOP: owner adjudication; no stop, restart or repair")
+
 
 USAGE = __doc__.split("| Form |", 1)[1].split("\n\n", 1)[0]
 
@@ -367,6 +439,7 @@ def main(argv: Sequence[str], operator: Operator | None = None) -> int:
         ("render", 2): lambda a: operator.render(Path(a[0]), Path(a[1])),
         ("start", 3): lambda a: operator.start(Path(a[0]), Path(a[1]), Path(a[2])),
         ("current", 2): lambda a: operator.current(Path(a[0]), Path(a[1])),
+        ("observe", 2): lambda a: operator.observe(Path(a[0]), Path(a[1])),
     }
     form = forms.get((argv[0], len(argv) - 1)) if argv else None
     if form is None:

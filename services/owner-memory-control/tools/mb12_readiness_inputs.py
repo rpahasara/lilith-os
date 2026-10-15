@@ -112,7 +112,7 @@ PRODUCER_SCRIPT_SHA256 = {
     "scripts/verify_broker_dev_current_incarnation.py":
         "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf",
     "services/owner-memory-control/tools/mb12_os_denial_proof.py": "e67542287f869e6d8e56ee30321593424e41c964e682e5326fd8dc15a6fd8ef3",
-    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "251fb5409eb75693316c2dba560ea0c8446fe66e4e22a15d0a744350cc3b97de",
+    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "29a7621993f98871568a76be166e31783f198a4ae34839672569aadcd9093fee",
     "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "79f47ae8f25e5d20f0066485196e910f78e3949c03dc97bebfbbf84681e485f8",
 }
 # Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s. EMPTY.
