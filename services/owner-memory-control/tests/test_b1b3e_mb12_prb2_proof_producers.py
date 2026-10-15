@@ -729,7 +729,7 @@ class DevFailsClosedTests(unittest.TestCase):
     def test_dev_inputs_still_fail_closed(self):
         with self.assertRaises(RI.Refused) as caught:
             RI.build({}, environment="dev")
-        self.assertEqual(caught.exception.reason, "FRESHNESS_CUTOFF_UNDECIDED")
+        self.assertEqual(caught.exception.reason, "INPUT_MALFORMED")      # OD-M12-3 accepted; still fail-closed
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})
         self.assertEqual(dict(PS.ACCEPTED_BASELINES), {})
         self.assertTrue(SH.UNRESOLVED_SCOPE)
