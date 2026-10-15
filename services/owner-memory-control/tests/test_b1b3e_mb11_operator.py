@@ -50,6 +50,14 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def good_current() -> dict:
+    """The canonical release `observe_current_blob().to_dict()` form of the pinned DEV CURRENT slot (synthetic times)."""
+    return {"path": "/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred", "kind": "REGULAR", "uid": 0,
+            "gid": 0, "mode": "0600", "device": "2049", "inode": "1738", "size": 219, "mtimeNs": "1790493331258019177",
+            "ctimeNs": "1790493331258019177",
+            "sha256": "6a61c350e848a833868f4573982fca9c75e2af79ccc9bd3716ae0303c26973f3"}
+
+
 def stopped_units() -> dict:
     units = T.stopped_units()
     for name in W.SIGNER_UNITS:
@@ -75,6 +83,9 @@ class FakeDev:
         self.health_value = T.good_health()
         self.paths = {"credentials": {"present": False}, "ownerSocket": {"present": False}}
         self.tail = CURSOR
+        self.current_doc = good_current()
+        self.current_module = "/opt/lilith-authority-dev/current/lilith_authority_root/observers.py"
+        self.clock = "2026-10-15T08:00:00Z"
         ledger = root / "var/lib/lilith-authority-dev"
         ledger.mkdir(parents=True)
         (ledger / W.LEDGER_NAME).write_bytes(b"synthetic ledger bytes")
@@ -132,7 +143,12 @@ class FakeDev:
                               ids=lambda: [995, 985], journal=lambda _c: {"readable": True,
                                                                           "invocations": list(self.invocations)},
                               process=self.process, w10=self.w10, readiness=self.readiness,
-                              restart_boundary=lambda _r, _u: {"reasons": list(self.boundary)})
+                              restart_boundary=lambda _r, _u: {"reasons": list(self.boundary)},
+                              current=self.observe_current, clock=lambda: self.clock)
+
+    def observe_current(self, root):
+        assert Path(root) == self.root
+        return dict(self.current_doc), self.current_module
 
     # ---- the transport ----
     def plink(self, command: str, payload: bytes):
@@ -361,6 +377,48 @@ class StartTests(OperatorCase):
         self.assertEqual(self.dev.health_calls, 0)
 
 
+@unittest.skipUnless(HAVE_JCS, "mb12_readiness_inputs needs rfc8785")
+class CurrentTests(OperatorCase):
+    def current(self) -> dict:
+        return self.op.current(ROOT, self.work)
+
+    def test_current_is_one_read_only_release_observation_judged_against_the_dev_pins(self):
+        report = self.current()
+        self.assertEqual(report["result"], "MB11_CURRENT_EXACT", report["reasons"])
+        self.assertEqual(report["observation"], good_current())
+        self.assertEqual(report["observedAt"], self.dev.clock)
+        self.assertEqual(self.dev.remote_forms, ["current"])
+        self.assertEqual((self.dev.mutations, self.dev.health_calls), ([], 0))
+        out = self.work / OP.CURRENT_DIR / "01-CURRENT"
+        self.assertEqual(sha((out / "remote.out").read_bytes()), report["observationSha256"])
+        self.assertEqual(json.loads((out / OP.CURRENT_FILE).read_bytes())["result"], "MB11_CURRENT_EXACT")
+        self.assertFalse(self.marker().exists())                         # never consumes the start attempt
+
+    def test_current_mismatch_is_a_stop_never_an_input(self):
+        cases = {
+            "CURRENT_SHA256_NOT_PINNED": lambda d: d.current_doc.update(sha256="0" * 64),
+            "CURRENT_NOT_PINNED_SLOT": lambda d: d.current_doc.update(mode="0644"),
+            "CURRENT_NOT_ROOT_OWNED": lambda d: d.current_doc.update(uid=995),
+            "CURRENT_IDENTITY_MALFORMED": lambda d: d.current_doc.update(inode="01738"),
+            "CURRENT_NOT_CANONICAL": lambda d: d.current_doc.update(nlink=1),
+            "CURRENT_NOT_AFTER_FRESHNESS_CUTOFF": lambda d: setattr(d, "clock", "2026-10-14T18:26:59Z"),
+            "CURRENT_NOT_THE_RELEASE_OBSERVER": lambda d: setattr(d, "current_module", "/tmp/observers.py"),
+        }
+        for reason, change in cases.items():
+            with self.subTest(reason=reason):
+                self.setUp()
+                change(self.dev)
+                report = self.current()
+                self.assertEqual(report["result"], "MB11_CURRENT_STOP")
+                self.assertIn(reason, report["reasons"])
+                self.assertEqual(self.dev.mutations, [])
+
+    def test_a_lost_or_unparseable_current_is_not_received(self):
+        self.dev.plink = lambda command, payload: self.dev.done(out=b'{"remoteType": "LILITH_MB11_START_REMOTE"')
+        report = self.current()
+        self.assertEqual((report["result"], report["reasons"]), ("MB11_CURRENT_STOP", ["CURRENT_NOT_RECEIVED"]))
+
+
 class RemoteTests(unittest.TestCase):
     def test_evidence_is_exact_and_digest_bound(self):
         doc = {"form": "gate", "expectedHead": "h", "candidateDigest": "d", "updatedAt": "u",
@@ -374,6 +432,10 @@ class RemoteTests(unittest.TestCase):
         namespace: dict = {}
         exec(R.evidence_module_source(doc), namespace)                   # noqa: S102
         self.assertEqual(namespace["DOC"], doc)
+        self.assertEqual(R.check_evidence({"form": "current"}, "current"), {"form": "current"})
+        for bad in ({"form": "current", "ownerInputs": INPUTS}, {"form": "gate"}):
+            with self.assertRaises(R.Refused):
+                R.check_evidence(bad, "current")
 
     @unittest.skipUnless(POSIX, "the bundled W10 chain needs POSIX (os.geteuid)")
     def test_the_bundle_runs_under_the_real_boot_loader_and_refuses_off_host(self):
@@ -393,6 +455,15 @@ class RemoteTests(unittest.TestCase):
         self.assertNotIn(b"EVIDENCE", ok.stderr)
         self.assertEqual(wrong.returncode, 2)
         self.assertIn(b"EVIDENCE_DIGEST_MISMATCH", wrong.stderr)         # before any host read
+        command, payload = op.bundle(ROOT, {"form": "current"})
+        pins, entry, form, digest = command.split('"')[-1].split()
+        self.assertEqual(form, "current")
+        with tempfile.TemporaryDirectory() as empty:
+            refused = subprocess.run([sys.executable, "-I", "-B", "-c", boot, pins, entry, form, digest],
+                                     input=base64.b64decode(payload), capture_output=True, cwd=empty, timeout=120,
+                                     check=False)
+        self.assertEqual(refused.returncode, 2, refused.stderr)          # refused off-host before the observation
+        self.assertIn(b"mb11_start_remote: REFUSED", refused.stderr)
 
     def test_the_remote_never_starts_stops_or_writes(self):
         source = (TOOLS / "mb11_start_remote.py").read_text(encoding="utf-8")

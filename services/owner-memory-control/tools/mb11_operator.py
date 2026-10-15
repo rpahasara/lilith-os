@@ -16,6 +16,7 @@ them with one generated data module carrying the owner inputs.
 | `gate <repo> <workdir> <envelope>` | read-only DEV: one W11 judgement; PASS only for exactly `W11_0_PRE_SIGNER_EXACT` |
 | `render <repo> <workdir>` | local: the exact owner go text bound to the latest PASS gate |
 | `start <repo> <workdir> <go>` | **mutation**: a fresh read-only gate (same bound facts), the marker, ONE `systemctl start` of the service, ONE read-only post (HEALTH capture + W11) |
+| `current <repo> <workdir>` | read-only DEV: one release `observe_current_blob().to_dict()` (the readiness `current` input), judged against the DEV readiness pins; no W11, no HEALTH |
 
 Bindings: release `ba943e1` (E-19 U5), the owner-accepted effective P1B-10R boundary (plan `2a004a41…`, Option A; every
 exact W11 phase requires `boundary_reasons == []`), the accepted replacement witness `90b28f9d…` / 69238, the W11
@@ -61,7 +62,7 @@ TOOL_PINS = {
     RESTART_BOUNDARY_INSTALL: X.TOOL_PINS[RESTART_BOUNDARY_INSTALL],
     W11_VERIFIER: "e21fd26fd68bcdea3d645a12ff53b647ef3aa8f62824e9c89712b8fcb85d4e1d",
     W11_DR5_TARGET: "775f43e84e1e58c2c9d1e8b4f2f32dc955462d034963b74761a133003a16daf3",
-    REMOTE: "13914b3b6bc8509f552b4753ea2c7d0ceb3140e1213a44fdea49f921075abbef",
+    REMOTE: "04461ffe4d30d443c49e5ef2d314972fda41a0b3b8dda1765609fb64c1cad72f",
     E19_OPERATOR: "b98328162b72795de0579d5e7abb58ff55f1bd7498e53b8699d91af5d453c1dd",
     READINESS_INPUTS: "d325d07f9e2ba23b1c5d98e295d415275c8aab88d0d9c50ea8081f99eb19ce2b",
     E19_RECORD: "31bc707ebc9b58b376d233a30594eaa0e1f4d3b32444b172c741dbaeec66b3b8",
@@ -77,6 +78,8 @@ SIGNER_SERVICE = "lilith-authority-dev.service"
 START_SIGNER_COMMAND = f"sudo -n /usr/bin/systemctl start {SIGNER_SERVICE}"
 GATE_DIR, STEP_DIR, MARKER = "gates", "steps", "mb11-start"
 GATE_FILE, START_FILE, ENVELOPE_FILE = "GATE.json", "START.json", "inputs.envelope"
+CURRENT_DIR, CURRENT_FILE = "current", "CURRENT.json"
+RELEASE_TREE_PREFIX = "/opt/lilith-authority-dev/current/"              # = mb6_ledger_verifier.RELEASE_TREE + "/"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 GO_LINES = (
@@ -138,8 +141,9 @@ class Operator(X.Operator):
 
     # ------------------------------------------------------------ owner inputs ---
 
-    def owner_inputs(self, raw: bytes) -> dict:
-        """The verifier input document, only from exactly these envelope bytes (`mb12_readiness_inputs`, pinned)."""
+    @staticmethod
+    def readiness_tool() -> Any:
+        """The pinned `mb12_readiness_inputs` module (the envelope reader and the DEV readiness pins)."""
         import importlib.util
 
         source = Path(__file__).resolve().parents[3] / READINESS_INPUTS
@@ -152,6 +156,11 @@ class Operator(X.Operator):
             spec.loader.exec_module(tool)
         _need(sha256_hex(Path(tool.__file__).read_bytes()) == TOOL_PINS[READINESS_INPUTS],
               "TOOL_PIN_MISMATCH:" + READINESS_INPUTS)
+        return tool
+
+    def owner_inputs(self, raw: bytes) -> dict:
+        """The verifier input document, only from exactly these envelope bytes (`mb12_readiness_inputs`, pinned)."""
+        tool = self.readiness_tool()
         try:
             return dict(tool.read_envelope(raw, expected_sha256=sha256_hex(raw), environment="dev"))
         except Exception as exc:  # noqa: BLE001 - the reader's own refusal is a STOP, never a default
@@ -241,6 +250,58 @@ class Operator(X.Operator):
               and sha256_hex((latest / ENVELOPE_FILE).read_bytes()) == record["envelopeSha256"], "GATE_EVIDENCE_CHANGED")
         return latest, record
 
+    # ------------------------------------------------------- CURRENT (read-only) ---
+
+    @staticmethod
+    def judge_current(remote: dict | None, tool: Any) -> list[str]:
+        """`[]` only for the release observer's exact pinned CURRENT slot, observed after the DEV freshness cutoff."""
+        if remote is None:
+            return ["CURRENT_NOT_RECEIVED"]
+        report = remote["report"]
+        current = report.get("current")
+        if not isinstance(current, dict) or set(current) != set(tool._CURRENT_FIELDS):
+            return ["CURRENT_NOT_CANONICAL"]
+        reasons = []
+        if (current["path"], current["kind"], current["mode"]) != (tool.SC.CURRENT_PATH, tool.WR.REGULAR, "0600"):
+            reasons.append("CURRENT_NOT_PINNED_SLOT")
+        if (current["uid"], current["gid"]) != (0, 0):
+            reasons.append("CURRENT_NOT_ROOT_OWNED")
+        if current["sha256"] != tool.DEV_PINS["pinnedCurrentSha256"]:
+            reasons.append("CURRENT_SHA256_NOT_PINNED")
+        try:
+            canonical = all(tool.PA.parse_decimal(current[name]) is not None
+                            for name in ("device", "inode", "mtimeNs", "ctimeNs"))
+        except ValueError:
+            canonical = False
+        if not canonical or type(current["size"]) is not int:
+            reasons.append("CURRENT_IDENTITY_MALFORMED")
+        at, until = report.get("observedAt"), report.get("observedUntil")
+        if not all(isinstance(v, str) and tool._INSTANT.fullmatch(v) for v in (at, until)) or not at <= until \
+                or tool.I2.DEV_FRESHNESS_NOT_BEFORE is None or at < tool.I2.DEV_FRESHNESS_NOT_BEFORE:
+            reasons.append("CURRENT_NOT_AFTER_FRESHNESS_CUTOFF")
+        if not str(report.get("observersModule", "")).startswith(RELEASE_TREE_PREFIX):
+            reasons.append("CURRENT_NOT_THE_RELEASE_OBSERVER")
+        return reasons
+
+    def current(self, repo: Path, workdir: Path) -> dict:
+        """ONE read-only bundle: the release's canonical CURRENT observation, never decrypted, never a W11 judgement."""
+        self.pins(repo)
+        tool = self.readiness_tool()
+        out = self._new_numbered(Path(workdir) / CURRENT_DIR, "CURRENT")
+        doc = {"form": "current"}
+        remote = self._remote(repo, out, "remote", doc)
+        reasons = self.judge_current(remote, tool)
+        report = None if remote is None else remote["report"]
+        record = {"current": out.name, "acquiredAt": self.now().strftime("%Y-%m-%dT%H:%M:%SZ"), "reasons": reasons,
+                  "observationSha256": sha256_hex((out / "remote.out").read_bytes()),
+                  "evidenceSha256": R.evidence_digest(doc), "release": RELEASE,
+                  "observedAt": None if report is None else report.get("observedAt"),
+                  "observedUntil": None if report is None else report.get("observedUntil"),
+                  "observation": None if report is None else report.get("current"),
+                  "result": "MB11_CURRENT_" + ("EXACT" if not reasons else "STOP")}
+        self._record(out / CURRENT_FILE, record)
+        return dict(record, next="nothing is authorized; the observation is an input, never readiness")
+
     # ------------------------------------------------------------------ the go ---
 
     def render(self, repo: Path, workdir: Path) -> dict:
@@ -305,6 +366,7 @@ def main(argv: Sequence[str], operator: Operator | None = None) -> int:
         ("gate", 3): lambda a: operator.gate(Path(a[0]), Path(a[1]), Path(a[2])),
         ("render", 2): lambda a: operator.render(Path(a[0]), Path(a[1])),
         ("start", 3): lambda a: operator.start(Path(a[0]), Path(a[1]), Path(a[2])),
+        ("current", 2): lambda a: operator.current(Path(a[0]), Path(a[1])),
     }
     form = forms.get((argv[0], len(argv) - 1)) if argv else None
     if form is None:

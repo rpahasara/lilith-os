@@ -14,6 +14,9 @@ file or a free argument; `main` refuses before any host read unless the argv dig
             the ledger DB bytes observed here as the baseline; plus the journal tail cursor taken BEFORE the judgement
     post    the HEALTH capture (only from an exact RUNNING incarnation, bound to its InvocationID / MainPID before
             and after), then the W11 judgement over the go-bound baseline with the first load recorded
+    current the release's own canonical CURRENT observation (`lilith_authority_root.observers.observe_current_blob`,
+            `to_dict` form: lstat identity + ciphertext SHA-256, never decrypted) and the host UTC instant; no W11
+            judgement, no HEALTH, no socket, no unit query
 
 It never starts, stops, enables or reloads a unit, never reads a credential and never writes. The one socket it may
 open is the signer owner socket, through the release's own `lilith_authority_root.clients.signer_health`, and only
@@ -33,13 +36,14 @@ from typing import Any, Callable, Mapping
 
 REMOTE_TYPE = "LILITH_MB11_START_REMOTE"
 EVIDENCE_MODULE = "mb11_start_evidence"
-FORMS = ("gate", "post")
+FORMS = ("gate", "post", "current")
 JOURNALCTL = "/usr/bin/journalctl"
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}
 SIGNER_USER = "lilith-authority-dev"
 _EVIDENCE_FIELDS = {
     "gate": frozenset({"form", "expectedHead", "candidateDigest", "updatedAt", "witness", "ownerInputs"}),
     "post": frozenset({"form", "expectedHead", "candidateDigest", "updatedAt", "witness", "ownerInputs", "baseline"}),
+    "current": frozenset({"form"}),
 }
 
 
@@ -65,6 +69,8 @@ def evidence_module_source(doc: Mapping[str, Any]) -> str:
 def check_evidence(doc: Any, form: str) -> Mapping[str, Any]:
     if form not in FORMS or not isinstance(doc, Mapping) or set(doc) != _EVIDENCE_FIELDS[form] or doc.get("form") != form:
         raise Refused("EVIDENCE_NOT_EXACT")
+    if form == "current":
+        return doc
     witness = doc["witness"]
     if not (isinstance(witness, list) and len(witness) == 2 and all(isinstance(v, str) and v for v in witness)):
         raise Refused("EVIDENCE_WITNESS_INVALID")
@@ -133,12 +139,34 @@ def capture_health(*, units: Callable, health: Callable[[], Mapping[str, Any]], 
 
 # --------------------------------------------------------------------- forms ---
 
+def observe_current(root: Any) -> tuple[dict[str, Any], str]:
+    """(the release observer's canonical CURRENT document, the observer module path). Read-only; never decrypted."""
+    from lilith_authority_root import observers as O
+
+    return O.observe_current_blob(root).to_dict(), str(O.__file__)
+
+
+def utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def run_form(doc: Mapping[str, Any], *, root: Any = "/", W: Any = None, units: Callable | None = None,
              health: Callable[[], Mapping[str, Any]] | None = None, tail: Callable[[], str | None] | None = None,
-             ids: Callable[[], list[int] | None] | None = None, **seams: Any) -> dict[str, Any]:
-    """One read-only form. `W`, `units`, `health`, `tail`, `ids` and `seams` (forwarded to `W.evaluate`) are TEST seams."""
+             ids: Callable[[], list[int] | None] | None = None, current: Callable | None = None,
+             clock: Callable[[], str] | None = None, **seams: Any) -> dict[str, Any]:
+    """One read-only form. `W`, `units`, `health`, `tail`, `ids`, `current`, `clock` and `seams` (forwarded to
+    `W.evaluate`) are TEST seams."""
     from pathlib import Path
 
+    if doc["form"] == "current":
+        before = (clock or utc_now)()
+        observed, module = (current or observe_current)(Path(root))
+        until = (clock or utc_now)()
+        return {"remoteType": REMOTE_TYPE, "schemaVersion": 1, "form": "current",
+                "evidenceSha256": evidence_digest(doc),
+                "report": {"current": observed, "observedAt": before, "observedUntil": until, "observersModule": module}}
     if W is None:
         import mb11_signer_verifier as W  # noqa: N811
     root = Path(root)

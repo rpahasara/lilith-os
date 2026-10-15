@@ -26,6 +26,7 @@ HEALTH (B4) = a signer claim;  E / F = the release root verifier over the same c
 | `gate <repo> <workdir> <envelope>` | **read-only DEV**: one BOOT bundle, form `gate`. PASS (`MB11_GATE_W11_0`) only for exactly `W11_0_PRE_SIGNER_EXACT` (rules below the table) |
 | `render <repo> <workdir>` | local: the exact go text, bound to the latest PASS gate |
 | `start <repo> <workdir> <go>` | **the only mutation** (sequence below the table) |
+| `current <repo> <workdir>` | **read-only DEV**: one BOOT bundle, form `current` (§10). No W11, no HEALTH, no marker |
 
 `gate` PASS also requires:
 
@@ -164,8 +165,8 @@ The rendered go is plain ASCII with no `>`, so it survives the go-check normalis
 
 | Tool | SHA-256 |
 | --- | --- |
-| `mb11_operator.py` | `5dbfb4cce949cad752c190bac0952d19828fa1c1a912689a6c51f8de639c81a4` |
-| `mb11_start_remote.py` | `13914b3b6bc8509f552b4753ea2c7d0ceb3140e1213a44fdea49f921075abbef` |
+| `mb11_operator.py` | `1ec09faea0a7b8c4f2eb58622a8119aa513c297057e9bda1dd9a8db49bf36bcd` |
+| `mb11_start_remote.py` | `04461ffe4d30d443c49e5ef2d314972fda41a0b3b8dda1765609fb64c1cad72f` |
 
 Reused unchanged and pinned in `mb11_operator.TOOL_PINS`:
 
@@ -234,3 +235,33 @@ freshness bound for M-B12 DEV evidence and follows the PR #198 deployment (`3861
   cutoff is refused (`INVENTORY_STALE`, `WINDOW_BEFORE_FRESHNESS_CUTOFF`, `INPUT_STALE`).
 - **Tests.** `test_b1b3e_mb12_prb1_prerequisites` adds `OdM12_3CutoffTests` and `OdM12_3ReadinessTests`. The four
   existing tests that asserted the undecided cutoff now assert the accepted value and the next fail-closed refusal.
+
+## 10. Addendum (2026-10-15): the read-only `current` form
+
+**Owner decision.** The owner authorized exactly one read-only root DEV invocation of the release's canonical
+`observe_current_blob`, over the existing pinned transport. No reviewed path emitted that form: the PR-1A observer's
+`currentBlob` has a different shape (integer device / inode / times, `nlink`). This addendum adds only that narrow form.
+
+- **Host tail** (`mb11_start_remote.py`, re-pinned in §6). Form `current` takes evidence `{"form": "current"}`
+  (digest-bound like the other forms). It runs the same `main` gates first: the digest check, `require_dev_root`, and
+  the release tree on `sys.path`. It then returns `lilith_authority_root.observers.observe_current_blob("/").to_dict()`
+  (lstat identity plus the ciphertext SHA-256, never decrypted), the host UTC instants before and after, and the
+  observer module path. It does no W11 judgement, no unit query, no HEALTH and no socket.
+- **Operator** (`mb11_operator.py`, re-pinned in §6). `current <repo> <workdir>` runs `pins`, then ONE bundle, and
+  records `current/NN-CURRENT/{remote.*, CURRENT.json}`. `MB11_CURRENT_EXACT` requires all of the following:
+  - the exact `to_dict` field set;
+  - the slot `SC.CURRENT_PATH`, `REGULAR`, `0600`, `0:0`;
+  - `sha256 == DEV_PINS.pinnedCurrentSha256`;
+  - canonical decimal strings;
+  - `observedAt` at or after `DEV_FRESHNESS_NOT_BEFORE`;
+  - an observer module under `/opt/lilith-authority-dev/current/`.
+
+  Anything else is `MB11_CURRENT_STOP`. It never consumes the `mb11-start` marker.
+- **Unchanged.** The `gate` / `post` / `start` behaviour, `GO_LINES`, the bundle order, every reused pin,
+  `mb12_readiness_inputs.py` (`d325d07f…`) and the W11 verifier.
+- **Tests.** `test_b1b3e_mb11_operator` adds `CurrentTests` (exact, seven STOP classes, not received) and extends the
+  evidence and BOOT-loader tests with the `current` form.
+
+```text
+CURRENT observation = a readiness INPUT;  != readiness;  != a gate;  != a go
+```
