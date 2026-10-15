@@ -5,7 +5,7 @@ Record: docs/architecture/slice-15b2b-b1b3e-mb12-prb2-proof-producers.md.
 DESIGN / SOURCE ONLY. Running either form live needs a separate owner authorization.
 
 Preflight §19 E-22 is "secret hygiene: journal, transcript, and publication scans clean for every PR-1B credential
-ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". Three forms, one marker set:
+ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". Four forms, one marker set:
 
 - `journal` (root, DEV): parses one read-only `journalctl --no-pager -o export` stream entry by entry (text and
   binary fields), scans every byte, and reports per retained boot (`_BOOT_ID`) its oldest and newest entry. It prints
@@ -14,6 +14,9 @@ ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". T
   identifier, text/binary, armour role, verdict COMPLETE_PEM_BLOCK / HEADER_OR_COMMAND_TEXT / UNKNOWN). Never a
   value, byte, offset or surrounding text; journal strings only through an allow-list. FAIL unless every counted
   match lies inside one field value. It never changes a `journal` FAIL.
+- `purpose` (root, DEV): only the three attributed sudo sessions (journalctl boot / unit / time filters). Per session,
+  closed enums of command STRUCTURE and a verdict LITERAL_PATTERN_SEARCH / EXPOSED_KEY_EVIDENCE / UNKNOWN. Never a
+  value, pattern, path or argument. FAIL on any unexpected entry, missing session or count mismatch.
 - `prove <scope.json>` (owner, off-host): scans the closed scope of `CEREMONIES` (OD-M12-7, PROPOSED): each ceremony's
   transcripts and its named publication (pinned by the canonical record where the record gives a full SHA-256), the
   canonical record must exist, and every DEV ceremony window must lie inside ONE retained boot of a `journal`
@@ -29,6 +32,7 @@ encodings are OUTSIDE the contract. Output never contains a matched byte, an off
 
     sudo /usr/bin/python3 -I -B - journal < mb12_secret_hygiene_proof.py        (DEV, root)
     sudo /usr/bin/python3 -I -B - attribute < mb12_secret_hygiene_proof.py      (DEV, root)
+    sudo /usr/bin/python3 -I -B - purpose < mb12_secret_hygiene_proof.py        (DEV, root)
     python3 mb12_secret_hygiene_proof.py prove <scope.json>                      (off-host)
 
 Last lines: `JOURNAL_SECRET_SCAN=PASS firstRealtimeUs=<a> lastRealtimeUs=<b>` / `…=FAIL`, and
@@ -249,8 +253,8 @@ class _Journalctl:
     """`journalctl -o export` as a reader whose `finish` fails unless the process exited 0 (a stream cut short at an
     entry boundary must not read as a complete journal)."""
 
-    def __init__(self) -> None:
-        self.process = subprocess.Popen([JOURNALCTL, "--no-pager", "-o", "export"], env=FIXED_ENV,
+    def __init__(self, filters: tuple[str, ...] = ()) -> None:
+        self.process = subprocess.Popen([JOURNALCTL, "--no-pager", "-o", "export", *filters], env=FIXED_ENV,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         assert self.process.stdout is not None
         self.readline, self.read = self.process.stdout.readline, self.process.stdout.read
@@ -430,6 +434,136 @@ def journal_attribute(*, stream: Callable[[], BinaryIO] = _journal_stream, euid:
     return True
 
 
+# ------------------------------------------------------------------ purpose ---
+# `purpose` (root, DEV): the three sudo sessions the 2026-10-15 attribution found (boot 24d1771d…, 2026-09-27), read
+# through journalctl's own boot / unit / time filters, never the whole journal. Per session it reports command
+# STRUCTURE only, as closed enums: the program, whether the sudo MESSAGE and every `_CMDLINE` agree, the file operand
+# class, marker counts, and whether anything key-like is present. journald joins argv with spaces, so arguments are
+# not reconstructed: anything outside the closed shapes is UNKNOWN. It never changes a `journal` FAIL.
+PURPOSE_BOOT = "24d1771de1b54e5f816dda08ad8b367a"
+PURPOSE_SESSIONS = {"session-3837.scope": 1790493545688402,        # attribution anchors (first match, realtime us)
+                    "session-3845.scope": 1790493771742151,
+                    "session-3850.scope": 1790493936317730}
+PURPOSE_SLACK_US = 30_000_000                          # every entry of a session within +-30 s of its anchor
+PURPOSE_EXPECTED = {"markerFields": 4, "messageFields": 1, "cmdlineFields": 3}   # per session, from the attribution
+PUBLICATION_PATH = b"/root/b1b3d-l2b-publication.json"              # L2b.2 runbook publication file
+_PROGRAMS = {b"grep": "GREP", b"egrep": "GREP", b"fgrep": "GREP", b"zgrep": "GREP", b"journalctl": "JOURNALCTL",
+             b"sh": "SHELL", b"bash": "SHELL", b"dash": "SHELL"}
+PURPOSE_VERDICTS = ("LITERAL_PATTERN_SEARCH", "EXPOSED_KEY_EVIDENCE", "UNKNOWN")
+
+
+def purpose_filters() -> tuple[str, ...]:
+    low = min(PURPOSE_SESSIONS.values()) - PURPOSE_SLACK_US
+    high = max(PURPOSE_SESSIONS.values()) + PURPOSE_SLACK_US
+    return ("-b", PURPOSE_BOOT, "--since", f"@{low // 1_000_000}", "--until", f"@{high // 1_000_000 + 1}",
+            *(f"_SYSTEMD_UNIT={unit}" for unit in PURPOSE_SESSIONS))
+
+
+def _program(words: list[bytes]) -> tuple[str, int]:
+    """(program class, index of the program word) after an optional leading `sudo` and its options."""
+    index = 0
+    if words and words[0].rsplit(b"/", 1)[-1] == b"sudo":
+        index = 1
+        while index < len(words) and words[index].startswith(b"-"):
+            index += 1
+    if index >= len(words):
+        return "NONE", index
+    name = words[index].rsplit(b"/", 1)[-1]
+    return _PROGRAMS.get(name, "PYTHON" if name.startswith(b"python") else "OTHER"), index
+
+
+def _session_verdict(fields: list[tuple[bytes, bytes, bool]]) -> dict[str, Any]:
+    """Closed facts for one session's entries: never a value, only enums and counts."""
+    marker_fields = [(name, value) for name, value, binary in fields if not binary and _PEM in value]
+    messages = [value for name, value in marker_fields if name == b"MESSAGE"]
+    cmdlines = [value for name, value in marker_fields if name == b"_CMDLINE"]
+    every = [value for _name, value, _binary in fields]
+    other = sum(len(_positions(value, marker)) for value in every for cls, markers in MARKERS.items()
+                if cls != PEM_CLASS for marker in markers)
+    pem_block = any(classify_pem(value, i + len(_PEM))[1] == "COMPLETE_PEM_BLOCK"
+                    for value in every for i in _positions(value, _PEM))
+    key_like = any(_longest_run(value) >= MIN_KEY_BODY for name, value, binary in fields
+                   if name in (b"MESSAGE", b"_CMDLINE"))                      # command text only
+    facts = {"markerFields": len(marker_fields), "markers": sum(v.count(_PEM) for _n, v in marker_fields),
+             "messageFields": len(messages), "cmdlineFields": len(cmdlines), "program": "NONE", "grepOption": "NO",
+             "operand": "NONE", "cmdlineConsistent": "NO", "pemBlock": "YES" if pem_block else "NO",
+             "keyLikeRun": "YES" if key_like else "NO", "otherMarkers": "YES" if other else "NO"}
+    if len(messages) == 1 and b"COMMAND=" in messages[0] and cmdlines:
+        command = messages[0].rsplit(b"COMMAND=", 1)[1].split(b" ")
+        program, at = _program(command)
+        cl_words = cmdlines[0].split(b" ")
+        cl_program, cl_at = _program(cl_words)
+        facts["program"] = program
+        facts["cmdlineConsistent"] = "YES" if (len(set(cmdlines)) == 1 and cl_program == program
+                                               and cl_words[cl_at + 1:] == command[at + 1:]) else "NO"
+        rest = command[at + 1:]
+        facts["grepOption"] = "YES" if any(w in (b"-g", b"--grep") or w.startswith(b"--grep=") for w in rest) else "NO"
+        last = rest[-1] if rest else b""
+        facts["operand"] = ("NONE" if not rest or _PEM in last else "PUBLICATION_JSON" if last == PUBLICATION_PATH
+                            else "ROOT_PATH" if last.startswith(b"/root/") else "OTHER")
+    if facts["pemBlock"] == "YES" or facts["otherMarkers"] == "YES":
+        verdict = "EXPOSED_KEY_EVIDENCE"
+    elif (facts["keyLikeRun"] == "NO" and facts["markers"] == facts["markerFields"]
+          and facts["cmdlineConsistent"] == "YES"
+          and all(facts[k] == v for k, v in PURPOSE_EXPECTED.items())
+          and (facts["program"] == "GREP" or (facts["program"] == "JOURNALCTL" and facts["grepOption"] == "YES"))):
+        verdict = "LITERAL_PATTERN_SEARCH"
+    else:
+        verdict = "UNKNOWN"
+    return {**facts, "verdict": verdict}
+
+
+def journal_purpose(*, stream: Callable[[], BinaryIO] | None = None, euid: Callable[[], int] = os.geteuid,
+                    say: Callable[[str], None] = print) -> bool:
+    if euid() != 0:
+        say("PURPOSE_VERIFICATION=FAIL reason=NOT_ROOT")
+        return False
+    scanner, sessions, failures = Scanner(), {unit: [] for unit in PURPOSE_SESSIONS}, []
+    entries = 0
+
+    def on_entry(boot: str, realtime: int, fields: list) -> None:
+        nonlocal entries
+        entries += 1
+        units = [value for name, value, binary in fields if name == b"_SYSTEMD_UNIT" and not binary]
+        unit = units[0].decode("ascii", "replace") if len(units) == 1 else None
+        if boot != PURPOSE_BOOT or unit not in sessions \
+                or abs(realtime - PURPOSE_SESSIONS[unit]) > PURPOSE_SLACK_US:
+            failures.append("UNEXPECTED_ENTRY")
+            return
+        sessions[unit].extend(fields)
+
+    try:
+        reader = (stream or (lambda: _Journalctl(purpose_filters())))()
+        parse_export(reader, scanner, on_entry)
+        finish = getattr(reader, "finish", None)
+        if finish is not None:
+            finish()
+    except (JournalError, OSError, struct.error) as exc:
+        reason = exc.args[0] if isinstance(exc, JournalError) else "JOURNAL_UNREADABLE"
+        say(f"PURPOSE_VERIFICATION=FAIL reason={reason}")
+        return False
+    say(f"PURPOSE: boot={PURPOSE_BOOT} sessions={len(PURPOSE_SESSIONS)} entries={entries} bytes={scanner.size} "
+        f"sha256={scanner.digest.hexdigest()}")
+    results = {}
+    for unit, fields in sessions.items():
+        if not fields:
+            failures.append("SESSION_NOT_FOUND")
+            continue
+        results[unit] = facts = _session_verdict(fields)
+        say(f"SESSION: unit={unit} " + " ".join(f"{k}={v}" for k, v in facts.items()))
+    if sum(f["markers"] for f in results.values()) != scanner.counts[PEM_CLASS]:
+        failures.append("COUNTS_INCONSISTENT")
+    say("NONCLAIM: purpose verification never changes JOURNAL_SECRET_SCAN=FAIL; it reports command structure, "
+        "not intent")
+    if failures:
+        say("PURPOSE_VERIFICATION=FAIL reason=" + ",".join(sorted(set(failures))))
+        return False
+    tally = {v: sum(1 for f in results.values() if f["verdict"] == v) for v in PURPOSE_VERDICTS}
+    say(f"PURPOSE_VERIFICATION=COMPLETE literal={tally['LITERAL_PATTERN_SEARCH']} "
+        f"exposed={tally['EXPOSED_KEY_EVIDENCE']} unknown={tally['UNKNOWN']}")
+    return True
+
+
 def parse_journal_transcript(data: bytes) -> list[tuple[str, int, int]] | None:
     """The boots of an exact `journal` PASS transcript, or None."""
     try:
@@ -588,6 +722,8 @@ def main(argv: list[str]) -> int:
         return 0 if journal_scan() else 1
     if argv == ["attribute"]:
         return 0 if journal_attribute() else 1
+    if argv == ["purpose"]:
+        return 0 if journal_purpose() else 1
     if len(argv) == 2 and argv[0] == "prove":
         try:
             raw = Path(argv[1]).read_bytes()

@@ -434,6 +434,135 @@ class JournalAttributionTests(unittest.TestCase):
         self.assertEqual([s[:2] for s in seen], [(BOOT_A, 10), (BOOT_A, 20), (BOOT_B, 30)])
 
 
+PUB = SH.PUBLICATION_PATH
+PATTERN = b"BEGIN [A-Z ]*" + PEM_TAIL                   # a search pattern: the marker without its armour prefix
+PURPOSE_LINE = re.compile(
+    r"(PURPOSE: boot=[0-9a-f]{32} sessions=3 entries=\d+ bytes=\d+ sha256=[0-9a-f]{64}"
+    r"|SESSION: unit=session-38(?:37|45|50)\.scope markerFields=\d+ markers=\d+ messageFields=\d+ cmdlineFields=\d+ "
+    r"program=(?:GREP|JOURNALCTL|SHELL|PYTHON|OTHER|NONE) grepOption=(?:YES|NO) "
+    r"operand=(?:NONE|PUBLICATION_JSON|ROOT_PATH|OTHER) cmdlineConsistent=(?:YES|NO) pemBlock=(?:YES|NO) "
+    r"keyLikeRun=(?:YES|NO) otherMarkers=(?:YES|NO) verdict=(?:LITERAL_PATTERN_SEARCH|EXPOSED_KEY_EVIDENCE|UNKNOWN)"
+    r"|NONCLAIM: purpose verification never changes JOURNAL_SECRET_SCAN=FAIL; it reports command structure, not intent"
+    r"|PURPOSE_VERIFICATION=(?:COMPLETE literal=\d+ exposed=\d+ unknown=\d+|FAIL reason=[A-Z_,]+))\Z")
+
+
+def sudo_session(unit, words, *, cmdline=None, boot=SH.PURPOSE_BOOT, at=None):
+    """The attributed shape: the sudo command entry (MESSAGE + _CMDLINE) and two pam entries (_CMDLINE only)."""
+    t = SH.PURPOSE_SESSIONS[unit] if at is None else at
+    argv = b" ".join(words)
+    message = b"ravi : TTY=pts/0 ; PWD=/home/ravi ; USER=root ; COMMAND=/usr/bin/" + argv
+    line = cmdline if cmdline is not None else b"sudo " + argv
+    meta = ((b"_SYSTEMD_UNIT", unit.encode(), False), (b"SYSLOG_IDENTIFIER", b"sudo", False))
+    return [att_entry(t, (b"MESSAGE", message, False), (b"_CMDLINE", line, False), *meta, boot=boot),
+            att_entry(t + 1_300, (b"MESSAGE", b"pam_unix(sudo:session): session opened for user root", False),
+                      (b"_CMDLINE", line, False), *meta, boot=boot),
+            att_entry(t + 5_000, (b"MESSAGE", b"pam_unix(sudo:session): session closed for user root", False),
+                      (b"_CMDLINE", line, False), *meta, boot=boot)]
+
+
+GREP_PUB = [b"grep", b"-c", b"-E", PATTERN, PUB]
+
+
+def purpose(*sessions):
+    data = export(*(entry for session in sessions for entry in session))
+    return capture(SH.journal_purpose, stream=lambda: _Reader(data), euid=lambda: 0)
+
+
+def session_line(raw, unit):
+    return next(l for l in raw.decode().splitlines() if l.startswith(f"SESSION: unit={unit} "))
+
+
+class JournalPurposeTests(unittest.TestCase):
+    UNITS = list(SH.PURPOSE_SESSIONS)
+
+    def assertShaped(self, raw):
+        for line in raw.decode("ascii").splitlines():
+            self.assertRegex(line, PURPOSE_LINE)
+
+    def test_three_literal_pattern_searches(self):
+        ok, raw = purpose(*(sudo_session(u, GREP_PUB) for u in self.UNITS))
+        self.assertTrue(ok, raw)
+        for unit in self.UNITS:
+            self.assertTrue(session_line(raw, unit).endswith(
+                "markerFields=4 markers=4 messageFields=1 cmdlineFields=3 program=GREP grepOption=NO "
+                "operand=PUBLICATION_JSON cmdlineConsistent=YES pemBlock=NO keyLikeRun=NO otherMarkers=NO "
+                "verdict=LITERAL_PATTERN_SEARCH"), raw)
+        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=3 exposed=0 unknown=0\n"))
+        for leaked in (b"grep ", b"/root/", b"BEGIN", PEM_TAIL, b"ravi", b"COMMAND=", b"pam_unix"):
+            self.assertNotIn(leaked, raw)
+        self.assertShaped(raw)
+
+    def test_exposed_key_evidence(self):
+        block = b"'" + PEM_BEGIN + b"\\n" + base64.b64encode(pkcs8_der()) + b"\\n" + PEM_END + b"'"
+        ok, raw = purpose(sudo_session(self.UNITS[0], [b"printf", block]),
+                          sudo_session(self.UNITS[1], [b"grep", b"-c", base64.b64encode(pkcs8_der()) + b"x", PATTERN,
+                                                       PUB]),
+                          sudo_session(self.UNITS[2], GREP_PUB))
+        self.assertTrue(ok, raw)
+        self.assertIn("pemBlock=YES", session_line(raw, self.UNITS[0]))
+        self.assertIn("otherMarkers=YES", session_line(raw, self.UNITS[1]))
+        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=1 exposed=2 unknown=0\n"), raw)
+        self.assertNotIn(base64.b64encode(pkcs8_der())[:20], raw)
+        self.assertShaped(raw)
+
+    def test_shapes_outside_the_closed_contract_are_unknown(self):
+        key_like = base64.b64encode(bytes(range(48)))
+        cases = {
+            "shell wrapper": ([b"sh", b"-c", b"journalctl | grep -c " + PATTERN], None, "UNKNOWN"),
+            "journalctl --grep": ([b"journalctl", b"--grep", PATTERN], None, "LITERAL_PATTERN_SEARCH"),
+            "other program": ([b"cat", PATTERN, PUB], None, "UNKNOWN"),
+            "inconsistent cmdline": (GREP_PUB, b"sudo grep -c " + PATTERN + b" /root/other", "UNKNOWN"),
+            "key-like argument": ([b"grep", b"-c", key_like, PATTERN, PUB], None, "UNKNOWN"),
+            "two markers in one field": ([b"grep", b"-e", PATTERN, b"-e", PATTERN, PUB], None, "UNKNOWN"),
+        }
+        for name, (words, cmdline, verdict) in cases.items():
+            with self.subTest(case=name):
+                ok, raw = purpose(sudo_session(self.UNITS[0], words, cmdline=cmdline),
+                                  *(sudo_session(u, GREP_PUB) for u in self.UNITS[1:]))
+                self.assertTrue(ok, raw)
+                self.assertTrue(session_line(raw, self.UNITS[0]).endswith("verdict=" + verdict), raw)
+                self.assertShaped(raw)
+
+    def test_fail_closed(self):
+        good = [sudo_session(u, GREP_PUB) for u in self.UNITS]
+        stray = sudo_session(self.UNITS[0], GREP_PUB)[0].replace(b"session-3837.scope", b"session-9999.scope")
+        cases = {
+            "UNEXPECTED_ENTRY": [*good, [stray]],
+            "UNEXPECTED_ENTRY ": [*good, sudo_session(self.UNITS[0], GREP_PUB,
+                                                      at=SH.PURPOSE_SESSIONS[self.UNITS[0]] + 31_000_000)],
+            "UNEXPECTED_ENTRY  ": [*good[1:], sudo_session(self.UNITS[0], GREP_PUB, boot=BOOT_A)],
+            "SESSION_NOT_FOUND": good[1:],
+        }
+        for reason, sessions in cases.items():
+            with self.subTest(reason=reason):
+                ok, raw = purpose(*sessions)
+                self.assertFalse(ok)
+                final = raw.decode().splitlines()[-1]
+                self.assertTrue(final.startswith("PURPOSE_VERIFICATION=FAIL reason="), raw)
+                self.assertIn(reason.strip(), final.split("=", 2)[2].split(","))
+                self.assertShaped(raw)
+        for reason, data in {"JOURNAL_TRUNCATED": export(*good[0])[:-1], "JOURNAL_MALFORMED": b"\n"}.items():
+            ok, raw = capture(SH.journal_purpose, stream=lambda d=data: _Reader(d), euid=lambda: 0)
+            self.assertEqual(raw, f"PURPOSE_VERIFICATION=FAIL reason={reason}\n".encode())
+        ok, raw = capture(SH.journal_purpose, stream=lambda: _Reader(export(*good[0]), fail_finish=True),
+                          euid=lambda: 0)
+        self.assertEqual(raw, b"PURPOSE_VERIFICATION=FAIL reason=JOURNAL_UNREADABLE\n")
+        ok, raw = capture(SH.journal_purpose, stream=lambda: _Reader(b""), euid=lambda: 1000)
+        self.assertEqual(raw, b"PURPOSE_VERIFICATION=FAIL reason=NOT_ROOT\n")
+
+    def test_journal_read_is_bounded_by_journalctl_filters(self):
+        filters = SH.purpose_filters()
+        self.assertEqual(filters[:2], ("-b", SH.PURPOSE_BOOT))
+        self.assertEqual(filters[2:6], ("--since", "@1790493515", "--until", "@1790493967"))
+        self.assertEqual(filters[6:], tuple(f"_SYSTEMD_UNIT={u}" for u in self.UNITS))
+        self.assertEqual(SH.PURPOSE_SESSIONS, {"session-3837.scope": 1790493545688402,
+                                               "session-3845.scope": 1790493771742151,
+                                               "session-3850.scope": 1790493936317730})
+        with mock.patch.object(SH.subprocess, "Popen") as popen:
+            SH._Journalctl(filters)
+        self.assertEqual(popen.call_args.args[0], [SH.JOURNALCTL, "--no-pager", "-o", "export", *filters])
+
+
 class SecretScopeTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

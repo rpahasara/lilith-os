@@ -337,3 +337,24 @@ owner authorization. Pin cascade (supersedes §12):
 | `mb12_secret_hygiene_proof.py` | `8cedb1d0bb940da0a2c674ce08e1044264d11c0bd41b313c5f314e8345f39270` |
 | `mb12_readiness_inputs.py` | `eed5cfe5909285a680a132b9f69447c0b7a2d86f611599c2b67639240329767e` |
 | `mb11_operator.py` | `88ba2b803cd634711d81ba9c7a5af060e3e2eab6ae901274d2a9dc55a7a49c9e` |
+
+## 14. Addendum (2026-10-16): E-22 session purpose form — re-pin only
+
+The owner-authorized `attribute` run (2026-10-15T17:54–18:02Z, evidence `lilith-mb12-attribute-0420ca6`, `SHA256SUMS`
+`dce427ad3c57b677a2cfe33d0cf2d8d414cd67d35b06ffe41150d66c55ae6091`) placed all 12 `PEM_PRIVATE_KEY` matches in three
+`sudo` sessions of boot `24d1771d…` (2026-09-27 07:19:05 / 07:22:51 / 07:25:36Z), each verdict `UNKNOWN`. Off-host
+records (ceremony documents, session logs, shell histories) could not verify the commands. E-22 stays FAIL.
+
+`mb12_secret_hygiene_proof.py` gains one read-only root form, `purpose`. It reads only those three session scopes, through
+journalctl's own `-b`, `--since`/`--until` and `_SYSTEMD_UNIT` filters (never the whole journal), and reports per session
+closed enums of command STRUCTURE only: program class, `--grep` option, operand class, MESSAGE/`_CMDLINE` agreement,
+marker counts, complete-PEM / key-like / other-marker presence, and a verdict `LITERAL_PATTERN_SEARCH` /
+`EXPOSED_KEY_EVIDENCE` / `UNKNOWN`. It never emits a value, pattern, path or argument, and FAILs on any unexpected
+entry, missing session or count mismatch. No verdict changes the scan FAIL. Running `purpose` needs its own owner
+authorization. Pin cascade (supersedes §13):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `d5b9a4384d390e7227013977970a39048cdbae4432f05cc17ca671893ff2ec7b` |
+| `mb12_readiness_inputs.py` | `97b53546f7b25c30dc460fd0e9f0b2178a91ff575419e38e1d8f37e478e102fc` |
+| `mb11_operator.py` | `fecfa36747f4ac3b47b4cd59e396ffff9b43127a8c878f36f7f7d7e9c7a042da` |
