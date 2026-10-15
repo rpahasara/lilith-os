@@ -126,3 +126,63 @@ HOLD = INITIAL_CUSTODY HELD;  HOLD-RELEASE ELIGIBILITY = READY;  FULL READINESS 
 M-B12 = NOT PASSED (package NOT_READY, §3);  REGISTRY_EFFECTIVE = NO;  AUTHORITY_ACTIVE = NO;  ISSUANCE = NONE
 FIRST_MEMORY_READY = NOT REACHED;  PROD = NOT AUTHORIZED
 ```
+
+## 8. Addendum (2026-10-15): first post-start preservation and OD-M11-9
+
+**Status: OD-M11-9 ACCEPTED by the owner on 2026-10-15, for the running signer only (§8.3, verbatim). Nothing else is
+accepted or authorized by this addendum.**
+
+### 8.1 Preservation after the PR #200 deploy (read-only; no DEV write)
+
+| Item | Value |
+| --- | --- |
+| deploy | run `38690242990`, head `0bf0b8f5c0560308f0bce139debda9078104725c` (PR #200 merge), success, completed 2026-10-15T06:09:40Z; the latest `deploy-dev` run |
+| deploy log | 399908 B, SHA-256 `323ff1a8edf45b71eb67a83973b1c4faa0f4201cff55847e40efee777e95a2e3` (owner copy = a fresh `gh run view --log`, byte-identical) |
+| W11 phase (independent) | owner-authorized `mb11_operator observe` (`43c2a6bf…`) once, 2026-10-15T06:34:41Z (after the deploy): `MB11_OBSERVE_W11_1_EXACT`, reasons `[]`, `kActLoadCount` 1, `OBSERVE.json` `e7fedd6dfe36ac45c986d37e88475a0a859dd353941d17ea89e39f0920e8b341`, `remote.out` = `ff9c8ce7…` (byte-identical to the accepted POST11), rc 0, stderr empty |
+| still exact at that time | signer `c7ba0fb7e2d84a0eb02a04ef0e83f67a` / 84806 / NRestarts 0; HEALTH key `dd13a1fb…` = B3; witness `90b28f9d…` / 69238, W10_1, HELD `c713ea1d…`; ledger DB `fae62c87…`; boundary reasons `[]`; ELIGIBILITY READY, FULL only `CEREMONY_HOLD:CEREMONY_HOLD_HELD`; authority, registry, issuance disabled |
+| DR-5 | `mb11_dr5_target.py` (`775f43e84e1e58c2c9d1e8b4f2f32dc955462d034963b74761a133003a16daf3`) `compare W11_1_SIGNER_STARTED_EXACT <log>` → `EQUAL`, target `SIGNER_RUNNING_WITNESS_RUNNING_HELD`, allowed 0, fail 0, OLD-release lines 0, unequal `[]`; output SHA-256 `2b36271ad4c8a77f0ad5b763e894c2fe99aae044dc44c2fe6fcdd96b529112d4` (owner run, independently reproduced off-host) |
+
+Observed sets = the derived pins: result set 194 / `ff2468f09fb6721de776c857e096fe485b2399e70fa6c5d37877179c4de47509`,
+DR-5 block 155 / `4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64`, pre-deploy block 29 /
+`f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae`.
+
+### 8.2 The derivation contract held
+
+The design (§8 of the design record; `mb11_dr5_target` docstring) predicted that a running signer replaces exactly one
+line, `DEFERRED_UNTIL_OBJECT_EXISTS: /run/credentials/lilith-authority-dev.service (later step)`, by
+`DENIED: test -w`, `-r`, `-x` of that path (+2 in the result set and DR-5 block; pre-deploy block unchanged), on the
+owner-accepted `WITNESS_RUNNING_HELD_E19` base (192 / 153 / 29). The pre-start deploy `38677320395` log has the one
+deferred line; the post-start deploy `38690242990` log has exactly the three `DENIED` lines, and nothing else differs
+from the derived text.
+
+Not covered: `W11_1S_STOPPED_AFTER_FIRST_LOAD` (equal to the `WITNESS_RUNNING_HELD_E19` text under a distinct name). No
+stopped-after-load state has been observed and no stop is authorized (OD-M11-4).
+
+### 8.3 Owner decision (ACCEPTED 2026-10-15)
+
+The owner accepted OD-M11-9 "exactly as proposed in the receipt §8.3 text". The accepted text, unchanged:
+
+> I accept OD-M11-9 for the running signer only: `SIGNER_RUNNING_WITNESS_RUNNING_HELD` (result set 194
+> `ff2468f0…`, DR-5 block 155 `4337f769…`, pre-deploy block 29 `f5087042…`), derived by `mb11_dr5_target.py`
+> `775f43e8…` on the accepted `WITNESS_RUNNING_HELD_E19` base, is the DR-5 baseline for phase
+> `W11_1_SIGNER_STARTED_EXACT`. Basis: deploy `38690242990` (main `0bf0b8f`, log `323ff1a8…`) compared EQUAL with 0
+> allowed, 0 failures and 0 OLD-release lines, and the independent observe `01-POST11` at 2026-10-15T06:34:41Z
+> returned `MB11_OBSERVE_W11_1_EXACT` for signer `c7ba0fb7…` / 84806. `W11_1S_STOPPED_AFTER_FIRST_LOAD` stays derived
+> and not accepted. This is a preservation baseline only: it authorizes no stop, restart, hold release, authority,
+> M-B12 step, First Memory or PROD.
+
+`mb11_dr5_target.py` is not edited: its `targetAccepted: false` output field stays a tool constant (the file is pinned
+by `mb11_operator.TOOL_PINS` and `e19_completion.MB11_REPINNED_SHA256`). The acceptance lives in this record.
+
+### 8.4 Evidence (owner-local)
+
+`C:\Users\edufo\lilith-mb11-od-m11-9-0bf0b8f` (`SHA256SUMS` `12d76f11aca4c19800866300dbdacd0b2f4b7cd678d835190780316da5f5b0c5`):
+run metadata, the re-fetched log, the reproduced compare, `PROVENANCE.md`, and the digests of `observe/01-POST11` in
+the original workdir (`lilith-mb11-w11-gate-4e58310`, not modified). Routine preservation from now on:
+`mb11_operator observe` + `mb11_dr5_target compare W11_1_SIGNER_STARTED_EXACT <log>`, each owner-authorized.
+
+```text
+OD-M11-9 = ACCEPTED (running signer only): W11_1 DR-5 baseline = SIGNER_RUNNING_WITNESS_RUNNING_HELD 194/155/29
+W11_1S_STOPPED_AFTER_FIRST_LOAD = DERIVED, NOT ACCEPTED;  OD-M11-4 (stop) = NOT ACCEPTED
+M-B12 = NOT PASSED;  HOLD = HELD;  AUTHORITY / REGISTRY / ISSUANCE = DISABLED;  FIRST_MEMORY_READY = NOT REACHED
+```

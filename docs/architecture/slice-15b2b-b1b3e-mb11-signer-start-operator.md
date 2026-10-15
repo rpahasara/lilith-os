@@ -300,3 +300,19 @@ own owner authorization.
 ```text
 observe W11_1 exact = an input to the W11 DR-5 compare;  != owner acceptance of the W11 targets (OD-M11-9);  != M-B12
 ```
+
+## 12. Addendum (2026-10-15): E-22 producer stdin fix — re-pin only
+
+The one owner-authorized E-22 journal scan (2026-10-15T10:41Z, evidence `lilith-mb12-hygiene-0bf0b8f`) STOPPED before
+reading any journal: `mb12_secret_hygiene_proof.py` died at import (`IndexError`) because CPython sets
+`__file__ = "<stdin>"` for `python3 -`, and its `REPO` line then resolved `parents[3]` of a shallow working directory.
+The producer now treats `"<stdin>"` (or an unset `__file__`) as "no repository"; `test_b1b3e_mb12_prb2_proof_producers`
+streams every producer through real CPython from a shallow cwd. Nothing else changed in any form. Pin cascade:
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `3a039a96c0a051aaa635d06879729a33978600551cbdf564ae778e81704b1355` |
+| `mb12_readiness_inputs.py` | `4839c8fe3f2b059df99bd0063c98529808dc30cc00c2ff8872e825f1a2aef308` |
+| `mb11_operator.py` | `1602d5dcd20a7f523b66690bf1d6ed85e27b6435efd6e2c705f48885e51339bb` |
+
+These rows supersede §11. A new scan needs its own owner authorization.
