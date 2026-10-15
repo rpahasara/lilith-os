@@ -265,3 +265,38 @@ freshness bound for M-B12 DEV evidence and follows the PR #198 deployment (`3861
 ```text
 CURRENT observation = a readiness INPUT;  != readiness;  != a gate;  != a go
 ```
+
+## 11. Addendum (2026-10-15): after the accepted start — the read-only `observe` form and the re-pin
+
+The start ran once and was owner-accepted ([acceptance receipt](slice-15b2b-b1b3e-mb11-signer-start-acceptance.md)).
+The `mb11-start` attempt is consumed. Two source changes follow, and neither authorizes anything:
+
+- **`observe <repo> <workdir>` (new, read-only DEV).** After the start, `gate` correctly STOPs (`PHASE:W11_1…`), so
+  no reviewed path re-observed the started signer. The routine post-deploy W11 DR-5 compare (`mb11_dr5_target compare
+  <verified-w11-phase> <log>`) needs an independently verified phase. `observe` provides it:
+  - it requires the consumed marker and exactly one `NN-START` step whose `START.json` reached W11_1 with one load and
+    whose `postSha256` equals the saved `post.out`, bound to the latest gate;
+  - it rebuilds the **identical** POST11 document (same gate baseline, same envelope) and refuses before any DEV
+    contact unless its digest equals the accepted `post.out` `evidenceSha256`;
+  - it runs ONE `post` bundle: the W11 judgement plus **one HEALTH query of the running signer** (OD-M11-5 frame);
+  - `MB11_OBSERVE_W11_1_EXACT` requires W11_1 with reasons `[]`, one load with HEALTH, the accepted signer
+    InvocationID / MainPID / NRestarts and HEALTH key, W10_1 with the accepted witness, the effective boundary and
+    authority disabled. Anything else is `MB11_OBSERVE_STOP` (owner adjudication; no stop, restart or repair);
+  - it writes `observe/NN-POST11/{remote.*, OBSERVE.json}` and never the marker, a gate or a step.
+- **Re-pin.** Recording M-B11 in the E-22 scope changed `mb12_secret_hygiene_proof.py`, and with it the
+  `PRODUCER_SCRIPT_SHA256` pin in `mb12_readiness_inputs.py`, which this operator pins.
+
+These rows supersede §6:
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb11_operator.py` | `43c2a6bfbcf16a4035d8c8c999193ab8279acdccbcc7f22486131fd2a8f62ac4` |
+| `mb12_readiness_inputs.py` | `a1c68c7e054d3f7cb2d5368e8772bbeb19d977e7552a5d770c4f0461696b0435` |
+
+Tests: `test_b1b3e_mb11_operator.ObserveTests` (exact repeat of the accepted POST11; refusal without the one reached
+start or with tampered evidence, before DEV contact; five STOP classes; not received). Running `observe` live needs its
+own owner authorization.
+
+```text
+observe W11_1 exact = an input to the W11 DR-5 compare;  != owner acceptance of the W11 targets (OD-M11-9);  != M-B12
+```

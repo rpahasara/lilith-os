@@ -143,7 +143,8 @@ CEREMONIES: Mapping[str, CeremonyV1] = {
     "M-B9b": CeremonyV1("DEV", "K-WIT signing the V2 genesis", "slice-15b2b-b1b3e-mb9-package-b-completion.md",
                         "GENESIS_CHAIN_1", "252c32204bebf3fa1ca0981d8791115e2abb6cd8ddb0925285c64213317cfb99",
                         ("2026-10-09T04:59:49Z", None)),      # the record gives the marker, not the end
-    "M-B11": CeremonyV1("DEV", "first K-ACT load (signer start)", None, None, None, (None, None)),   # not occurred
+    "M-B11": CeremonyV1("DEV", "first K-ACT load (signer start)", "slice-15b2b-b1b3e-mb11-signer-start-acceptance.md",
+                        None, None, ("2026-10-15T05:13:15Z", "2026-10-15T05:13:29Z")),  # marker to POST11 record
 }
 # Scope questions left open on purpose (never silently included or excluded).
 UNRESOLVED_SCOPE: Mapping[str, str] = {

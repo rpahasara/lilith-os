@@ -171,16 +171,13 @@ def covering_journal(**windows):
     return journal_transcript(entry(low), entry(high))[1]
 
 
-# TEST_ONLY ceremony table: the real names and venues, records that exist in this repository, and SYNTHETIC windows
-# for the ceremonies whose real window is unrecorded. M-B11 has NOT occurred; its entry here is synthetic.
-SYNTHETIC_M_B11 = ("2026-10-12T13:00:00Z", "2026-10-12T13:20:00Z")
+# TEST_ONLY ceremony table: the real names and venues, records that exist in this repository, and a SYNTHETIC window
+# for the one ceremony whose real window is unrecorded (the M-B9b end). M-B11 uses its real recorded row.
 TEST_CEREMONIES = {
     **SH.CEREMONIES,
     "M-B9b": SH.CeremonyV1("DEV", "K-WIT signing the V2 genesis", "slice-15b2b-b1b3e-mb9-package-b-completion.md",
                            "GENESIS_CHAIN_1", SH.CEREMONIES["M-B9b"].publication_sha256,
                            ("2026-10-09T04:59:49Z", "2026-10-09T05:10:00Z")),          # synthetic end
-    "M-B11": SH.CeremonyV1("DEV", "first K-ACT load (SYNTHETIC)", "slice-15b2b-b1b3e-mb11-signer-start-design.md",
-                           None, None, SYNTHETIC_M_B11),
 }
 DEV_WINDOWS = {n: c.window for n, c in TEST_CEREMONIES.items() if c.venue == "DEV"}
 
@@ -338,14 +335,22 @@ class SecretScopeTests(unittest.TestCase):
             self.assertIn(f"OFFHOST: {name} S25 (no DEV journal)", lines)
 
     def test_the_real_scope_fails_closed_today(self):
-        """M-B11 has not occurred and has no record; M-B9b's end is unrecorded; the K-ACT L2b question is open."""
+        """M-B9b's end is unrecorded and the K-ACT L2b question is open; M-B11 is recorded (acceptance receipt)."""
         ok, raw = capture(SH.prove, self.scope(ceremonies=SH.CEREMONIES), read=self.read)
         self.assertFalse(ok)
-        for line in ("FAIL: SCOPE_DECISION_UNRESOLVED B1B3D-L2b", "FAIL: CEREMONY_RECORD_ABSENT M-B11",
-                     "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B11"):
+        for line in ("FAIL: SCOPE_DECISION_UNRESOLVED B1B3D-L2b", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b"):
             self.assertIn(line.encode(), raw)
-        self.assertEqual(SH.CEREMONIES["M-B11"].record, None)
-        self.assertEqual(SH.CEREMONIES["M-B11"].window, (None, None))
+        for line in ("FAIL: CEREMONY_RECORD_ABSENT", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B11"):
+            self.assertNotIn(line.encode(), raw)
+
+    def test_m_b11_row_is_the_accepted_start(self):
+        spec = SH.CEREMONIES["M-B11"]
+        self.assertEqual((spec.venue, spec.publication, spec.publication_sha256), ("DEV", None, None))
+        self.assertEqual(spec.window, ("2026-10-15T05:13:15Z", "2026-10-15T05:13:29Z"))
+        record = (ROOT / "docs/architecture" / spec.record).read_text("utf-8")
+        for value in spec.window + ("ff9c8ce79147d61c01c4c4bf52f97b411e06fc1a1981989ad17e722b617b36d5",
+                                    "W11_1_SIGNER_STARTED_EXACT"):
+            self.assertIn(value, record)
 
     def test_omitting_m_b3_m_b9a_or_m_b9b_fails(self):
         for name in ("M-B3", "M-B9a", "M-B9b", "M-B1", "M-B2", "M-B11"):
@@ -378,10 +383,10 @@ class SecretScopeTests(unittest.TestCase):
         self.assertIn(b"FAIL: JOURNAL_DOES_NOT_COVER M-B2", raw)
 
     def test_endpoints_alone_never_prove_coverage_across_a_boot_gap(self):
-        start, end = US(SYNTHETIC_M_B11[0]), US(SYNTHETIC_M_B11[1])
+        start, end = US(DEV_WINDOWS["M-B11"][0]), US(DEV_WINDOWS["M-B11"][1])
         low = US(DEV_WINDOWS["M-B2"][0]) - 1
-        _ok, split = journal_transcript(entry(low, BOOT_A), entry(start + 60_000_000, BOOT_A),
-                                        entry(start + 120_000_000, BOOT_B), entry(end + 1, BOOT_B))
+        _ok, split = journal_transcript(entry(low, BOOT_A), entry(start + 5_000_000, BOOT_A),
+                                        entry(start + 10_000_000, BOOT_B), entry(end + 1, BOOT_B))
         ok, raw = self.prove(self.scope(journal=split))                            # M-B11 spans the boot boundary
         self.assertFalse(ok)
         self.assertIn(b"FAIL: JOURNAL_DOES_NOT_COVER M-B11", raw)

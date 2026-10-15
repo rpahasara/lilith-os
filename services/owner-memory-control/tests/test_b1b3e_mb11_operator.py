@@ -377,6 +377,69 @@ class StartTests(OperatorCase):
         self.assertEqual(self.dev.health_calls, 0)
 
 
+class ObserveTests(OperatorCase):
+    def started(self) -> bytes:
+        self.gate()
+        self.assertEqual(self.start()["result"], "MB11_START_REACHED_" + OP.W11_1)
+        return self.marker().read_bytes()
+
+    def observe(self) -> dict:
+        return self.op.observe(ROOT, self.work)
+
+    def test_observe_repeats_the_accepted_post11_read_only(self):
+        marker = self.started()
+        report = self.observe()
+        self.assertEqual(report["result"], "MB11_OBSERVE_W11_1_EXACT", report["reasons"])
+        self.assertEqual((report["observe"], report["phase"], report["kActLoadCount"]), ("01-POST11", OP.W11_1, 1))
+        post = json.loads((self.work / OP.STEP_DIR / "01-START" / "post.out").read_bytes())
+        self.assertEqual(report["evidenceSha256"], post["evidenceSha256"])        # the identical POST11 document
+        self.assertEqual(self.dev.mutations, [OP.START_SIGNER_COMMAND])          # no second start, no stop
+        self.assertEqual(self.dev.remote_forms, ["gate", "gate", "post", "post"])
+        self.assertEqual(self.dev.health_calls, 2)
+        self.assertEqual(self.marker().read_bytes(), marker)
+        self.assertTrue((self.work / OP.OBSERVE_DIR / "01-POST11" / OP.OBSERVE_FILE).is_file())
+
+    def test_observe_is_refused_without_the_one_reached_start(self):
+        self.gate()
+        with self.assertRaises(OP.Stop) as caught:
+            self.observe()
+        self.assertEqual(caught.exception.code, "START_NOT_CONSUMED")
+        self.setUp()
+        self.started()
+        post = self.work / OP.STEP_DIR / "01-START" / "post.out"
+        post.write_bytes(post.read_bytes().replace(b"W11_1", b"W11_X"))
+        with self.assertRaises(OP.Stop) as caught:
+            self.observe()
+        self.assertEqual(caught.exception.code, "START_NOT_THE_REACHED_W11_1")
+        self.assertEqual(self.dev.remote_forms, ["gate", "gate", "post"])        # refused before any DEV contact
+
+    def test_any_drift_from_the_accepted_start_is_a_stop(self):
+        def restarted(d):
+            d.units_now[W.SIGNER_SERVICE].update(InvocationID="b" * 32, NRestarts="1")
+            d.invocations = d.invocations + [{"id": "b" * 32, "credentials": W.LOADED}]
+        cases = {"restarted": restarted,
+                 "key": lambda d: setattr(d, "health_value", T.good_health(publicKeySha256="e" * 64)),
+                 "boundary": lambda d: setattr(d, "boundary", ["EFFECTIVE_RESTART_NOT_NO"]),
+                 "ledger": lambda d: d.root.joinpath("var/lib/lilith-authority-dev", W.LEDGER_NAME)
+                 .write_bytes(b"changed"),
+                 "witness": lambda d: setattr(d, "witness", ("f" * 32, "1"))}
+        for name, change in cases.items():
+            with self.subTest(case=name):
+                self.setUp()
+                self.started()
+                change(self.dev)
+                report = self.observe()
+                self.assertEqual(report["result"], "MB11_OBSERVE_STOP", name)
+                self.assertNotEqual(report["reasons"], [])
+                self.assertEqual(self.dev.mutations, [OP.START_SIGNER_COMMAND])
+
+    def test_a_lost_observation_is_not_received(self):
+        self.started()
+        self.dev.plink = lambda command, payload: self.dev.done(code=None)
+        report = self.observe()
+        self.assertEqual((report["result"], report["reasons"]), ("MB11_OBSERVE_STOP", ["OBSERVE_NOT_RECEIVED"]))
+
+
 @unittest.skipUnless(HAVE_JCS, "mb12_readiness_inputs needs rfc8785")
 class CurrentTests(OperatorCase):
     def current(self) -> dict:
