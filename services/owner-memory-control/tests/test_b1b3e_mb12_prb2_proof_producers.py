@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -754,9 +755,20 @@ class SourceGuardTests(unittest.TestCase):
 
     def test_streamed_producers_need_no_file_context(self):
         for name in self.PRODUCERS:
-            namespace = {"__name__": "streamed"}
-            exec(compile((TOOLS / name).read_text(encoding="utf-8"), "<stdin>", "exec"), namespace)   # no __file__
-            self.assertIn("main", namespace, name)
+            for namespace in ({"__name__": "streamed"}, {"__name__": "streamed", "__file__": "<stdin>"}):
+                exec(compile((TOOLS / name).read_text(encoding="utf-8"), "<stdin>", "exec"), namespace)
+                self.assertIn("main", namespace, name)
+                self.assertIsNone(namespace.get("REPO"), name)               # streamed: never a repository
+
+    def test_producers_import_when_streamed_by_real_cpython_from_a_shallow_cwd(self):
+        """`sudo python3 -I -B - <form> < producer`: CPython sets __file__ = '<stdin>' (the 2026-10-15 E-22 STOP: the
+        hygiene producer died at import with IndexError from a shallow cwd). No form argument = usage, exit 2."""
+        for name in self.PRODUCERS:
+            with self.subTest(name=name):
+                done = subprocess.run([sys.executable, "-I", "-B", "-"], input=(TOOLS / name).read_bytes(),
+                                      capture_output=True, cwd=Path(tempfile.gettempdir()).anchor, timeout=60)
+                self.assertNotIn(b"Traceback", done.stderr, done.stderr)
+                self.assertEqual(done.returncode, 2, done.stderr)
 
     def test_release_tree_and_pins_untouched(self):
         import release_file_set

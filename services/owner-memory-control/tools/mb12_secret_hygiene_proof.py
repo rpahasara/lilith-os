@@ -45,8 +45,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, NamedTuple
 
-# The repository root (off-host `prove`); streamed on DEV over stdin there is no `__file__` and no repository.
-REPO = Path(__file__).resolve().parents[3] if "__file__" in globals() else None
+# The repository root (off-host `prove`). Streamed on DEV (`python3 - journal`) CPython sets `__file__` to "<stdin>"
+# (or leaves it unset when exec'd): there is no repository then.
+REPO = Path(__file__).resolve().parents[3] if globals().get("__file__", "<stdin>") != "<stdin>" else None
 JOURNALCTL = "/usr/bin/journalctl"
 FIXED_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "HOME": "/nonexistent"}
 CHUNK = 1 << 20
