@@ -5,11 +5,15 @@ Record: docs/architecture/slice-15b2b-b1b3e-mb12-prb2-proof-producers.md.
 DESIGN / SOURCE ONLY. Running either form live needs a separate owner authorization.
 
 Preflight §19 E-22 is "secret hygiene: journal, transcript, and publication scans clean for every PR-1B credential
-ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". Two forms, one marker set:
+ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". Three forms, one marker set:
 
 - `journal` (root, DEV): parses one read-only `journalctl --no-pager -o export` stream entry by entry (text and
   binary fields), scans every byte, and reports per retained boot (`_BOOT_ID`) its oldest and newest entry. It prints
   counts, digests and timestamps only.
+- `attribute` (root, DEV): the same read, plus WHERE each counted marker is (boot, realtime, field name, unit, syslog
+  identifier, text/binary, armour role, verdict COMPLETE_PEM_BLOCK / HEADER_OR_COMMAND_TEXT / UNKNOWN). Never a
+  value, byte, offset or surrounding text; journal strings only through an allow-list. FAIL unless every counted
+  match lies inside one field value. It never changes a `journal` FAIL.
 - `prove <scope.json>` (owner, off-host): scans the closed scope of `CEREMONIES` (OD-M12-7, PROPOSED): each ceremony's
   transcripts and its named publication (pinned by the canonical record where the record gives a full SHA-256), the
   canonical record must exist, and every DEV ceremony window must lie inside ONE retained boot of a `journal`
@@ -24,6 +28,7 @@ marker in the scanned scope", never "no secret ever leaked". Bare 32-byte seeds,
 encodings are OUTSIDE the contract. Output never contains a matched byte, an offset, a path or key material.
 
     sudo /usr/bin/python3 -I -B - journal < mb12_secret_hygiene_proof.py        (DEV, root)
+    sudo /usr/bin/python3 -I -B - attribute < mb12_secret_hygiene_proof.py      (DEV, root)
     python3 mb12_secret_hygiene_proof.py prove <scope.json>                      (off-host)
 
 Last lines: `JOURNAL_SECRET_SCAN=PASS firstRealtimeUs=<a> lastRealtimeUs=<b>` / `…=FAIL`, and
@@ -190,11 +195,14 @@ class _Tee:
         return b"".join(data)
 
 
-def parse_export(raw: BinaryIO, scanner: Scanner) -> dict[str, list[int]]:
+def parse_export(raw: BinaryIO, scanner: Scanner,
+                 on_entry: Callable[[str, int, list], None] | None = None) -> dict[str, list[int]]:
     """{boot_id: [first_us, last_us, entries]} from the journal export format (systemd JOURNAL_EXPORT_FORMATS):
     `NAME=value\\n` text fields, `NAME\\n<le64 size><data>\\n` binary fields, an empty line ends an entry. Every
-    entry needs `__REALTIME_TIMESTAMP` and `_BOOT_ID`; anything else malformed is refused."""
-    tee, boots, fields = _Tee(raw, scanner), {}, {}
+    entry needs `__REALTIME_TIMESTAMP` and `_BOOT_ID`; anything else malformed is refused. `on_entry` (the
+    `attribute` form only) receives (boot, realtime_us, [(name, value, is_binary), ...]) per complete entry; without
+    it nothing is retained and the scan is unchanged."""
+    tee, boots, fields, collected = _Tee(raw, scanner), {}, {}, []
     while True:
         line = tee.readline(MAX_FIELD_BYTES + 2)
         if line == b"":
@@ -212,6 +220,9 @@ def parse_export(raw: BinaryIO, scanner: Scanner) -> dict[str, list[int]]:
             value = int(realtime)
             span = boots.setdefault(boot, [value, value, 0])
             span[0], span[1], span[2] = min(span[0], value), max(span[1], value), span[2] + 1
+            if on_entry is not None:
+                on_entry(boot, value, collected)
+                collected = []
             fields = {}
             continue
         if b"=" in line:
@@ -220,14 +231,18 @@ def parse_export(raw: BinaryIO, scanner: Scanner) -> dict[str, list[int]]:
                 fields[name.decode("ascii", "replace")] = value.decode("ascii", "replace")
             else:
                 fields.setdefault("_", "")
+            if on_entry is not None:
+                collected.append((name, value, False))
             continue
         size = struct.unpack("<Q", tee.read(8))[0]
         if size > MAX_FIELD_BYTES:
             raise JournalError("JOURNAL_FIELD_TOO_LARGE")
-        tee.read(size)
+        data = tee.read(size)
         if tee.read(1) != b"\n":
             raise JournalError("JOURNAL_MALFORMED")
         fields.setdefault("_", "")
+        if on_entry is not None:
+            collected.append((line[:-1], data, True))
 
 
 class _Journalctl:
@@ -284,6 +299,135 @@ def journal_scan(*, stream: Callable[[], BinaryIO] = _journal_stream, euid: Call
     say("JOURNAL_SECRET_SCAN=FAIL" if failures else f"JOURNAL_SECRET_SCAN=PASS firstRealtimeUs={first} "
         f"lastRealtimeUs={last}")
     return not failures
+
+
+# --------------------------------------------------------------- attribution ---
+# `attribute` (root, DEV): WHERE the scan's markers are, never WHAT. Per match it emits the boot, realtime, field
+# name, `_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, text/binary, armour role and a verdict. Never a value, a byte, an offset
+# or surrounding text; a journal-controlled string is emitted only if it matches a strict allow-list, else `UNSAFE`.
+# It never turns a scan FAIL into a PASS: the verdicts are heuristics for owner adjudication.
+MAX_ATTRIBUTED = 64
+PEM_CLASS = "PEM_PRIVATE_KEY"
+MIN_KEY_BODY = 40                                  # base64 characters; an Ed25519 PKCS#8 PEM body is 64
+_PEM = MARKERS[PEM_CLASS][0]                       # assembled above: this source never contains a marker itself
+_ARMOUR = re.compile(rb"-----(BEGIN|END) ((?:[A-Z0-9]+ )*)" + re.escape(_PEM))
+_B64_RUN = re.compile(rb"[A-Za-z0-9+/=]+")
+_NEWLINES = re.compile(rb"\r|\n|\\r|\\n")          # real line breaks and their escaped spellings
+_SAFE_FIELD = re.compile(rb"[A-Z0-9_]{1,64}\Z")
+_SAFE_META = re.compile(rb"[A-Za-z0-9@._:+\-]{1,128}\Z")
+VERDICTS = ("COMPLETE_PEM_BLOCK", "HEADER_OR_COMMAND_TEXT", "UNKNOWN")
+
+
+def _safe(value: bytes | None, pattern: re.Pattern) -> str:
+    if value is None:
+        return "NONE"
+    return value.decode("ascii") if pattern.fullmatch(value) else "UNSAFE"
+
+
+def _positions(value: bytes, marker: bytes) -> list[int]:
+    found, start = [], 0
+    while (index := value.find(marker, start)) != -1:
+        found.append(index)
+        start = index + 1
+    return found
+
+
+def _longest_run(data: bytes) -> int:
+    return max((len(run) for run in _B64_RUN.findall(_NEWLINES.sub(b"", data))), default=0)
+
+
+def classify_pem(value: bytes, end: int) -> tuple[str, str]:
+    """(role, verdict) of the PEM marker ending at `end` inside one field value.
+    COMPLETE_PEM_BLOCK: a BEGIN/END pair of one type encloses a base64 body of >= MIN_KEY_BODY characters.
+    HEADER_OR_COMMAND_TEXT: the armour sits inside other text, unpaired or paired around non-key text, with no
+    key-like base64 run beside it. UNKNOWN: anything else (no armour, a lone armour line that could be one line of a
+    key logged line by line, a short or key-like body)."""
+    armour = next((m for m in _ARMOUR.finditer(value) if m.end() == end), None)
+    if armour is None:
+        return "OTHER", "UNKNOWN"
+    role, kind = armour.group(1).decode("ascii"), armour.group(2)
+    if role == "BEGIN":
+        close = re.compile(rb"-----END " + re.escape(kind) + re.escape(_PEM)).search(value, end)
+        body = value[end:close.start()] if close else None
+        beside = _NEWLINES.sub(b"", value[end:end + 4096])
+        adjacent = len(re.match(rb"[A-Za-z0-9+/=]*", beside).group(0))
+    else:
+        opens = list(re.compile(rb"-----BEGIN " + re.escape(kind) + re.escape(_PEM)).finditer(value, 0, armour.start()))
+        body = value[opens[-1].end():armour.start()] if opens else None
+        beside = _NEWLINES.sub(b"", value[max(0, armour.start() - 4096):armour.start()])
+        adjacent = len(re.search(rb"[A-Za-z0-9+/=]*\Z", beside).group(0))
+    if body is not None:
+        cleaned = _NEWLINES.sub(b"", body)
+        if re.fullmatch(rb"[A-Za-z0-9+/=]+", cleaned):
+            return role, "COMPLETE_PEM_BLOCK" if len(cleaned) >= MIN_KEY_BODY else "UNKNOWN"
+        return role, "UNKNOWN" if _longest_run(body) >= MIN_KEY_BODY else "HEADER_OR_COMMAND_TEXT"
+    if adjacent >= MIN_KEY_BODY or value.strip(b" \t\r\n'\"") == armour.group(0):
+        return role, "UNKNOWN"
+    return role, "HEADER_OR_COMMAND_TEXT"
+
+
+def journal_attribute(*, stream: Callable[[], BinaryIO] = _journal_stream, euid: Callable[[], int] = os.geteuid,
+                      say: Callable[[str], None] = print) -> bool:
+    """Re-read the journal once; attribute every marker the scanner counts to (entry, field), fail closed unless
+    every counted match is inside one field value."""
+    if euid() != 0:
+        say("JOURNAL_MARKER_ATTRIBUTION=FAIL reason=NOT_ROOT")
+        return False
+    scanner, found = Scanner(), []
+
+    def on_entry(boot: str, realtime: int, fields: list) -> None:
+        meta: dict[bytes, bytes | None] = {b"_SYSTEMD_UNIT": None, b"SYSLOG_IDENTIFIER": None}
+        for name, value, binary in fields:
+            if name in meta and meta[name] is None:
+                meta[name] = None if binary else value
+        for name, value, binary in fields:
+            for cls, markers in MARKERS.items():
+                for marker in markers:
+                    positions = _positions(value, marker)
+                    for index in positions:
+                        role, verdict = (classify_pem(value, index + len(marker)) if cls == PEM_CLASS
+                                         else ("OTHER", "UNKNOWN"))
+                        found.append((cls, boot, realtime, _safe(name, _SAFE_FIELD),
+                                      _safe(meta[b"_SYSTEMD_UNIT"], _SAFE_META),
+                                      _safe(meta[b"SYSLOG_IDENTIFIER"], _SAFE_META),
+                                      "BINARY" if binary else "TEXT", role, verdict, len(positions)))
+
+    try:
+        reader = stream()
+        boots = parse_export(reader, scanner, on_entry)
+        finish = getattr(reader, "finish", None)
+        if finish is not None:
+            finish()
+    except (JournalError, OSError, struct.error) as exc:
+        reason = exc.args[0] if isinstance(exc, JournalError) else "JOURNAL_UNREADABLE"
+        say(f"JOURNAL_MARKER_ATTRIBUTION=FAIL reason={reason}")
+        return False
+    entries = sum(s[2] for s in boots.values())
+    say(f"JOURNAL: entries={entries} bytes={scanner.size} sha256={scanner.digest.hexdigest()} boots={len(boots)}")
+    for n, (cls, boot, realtime, field, unit, ident, kind, role, verdict, in_field) in \
+            enumerate(found[:MAX_ATTRIBUTED], 1):
+        say(f"MATCH: n={n} class={cls} boot={boot} realtimeUs={realtime} field={field} unit={unit} "
+            f"identifier={ident} kind={kind} role={role} verdict={verdict} inField={in_field}")
+    failures = []
+    for cls in MARKERS:
+        stream_count, in_field = scanner.counts[cls], sum(1 for item in found if item[0] == cls)
+        if stream_count or in_field:
+            say(f"COUNTS: class={cls} stream={stream_count} inField={in_field} boundary={stream_count - in_field}")
+        if in_field > stream_count:
+            failures.append("COUNTS_INCONSISTENT")
+        elif in_field < stream_count:
+            failures.append("UNATTRIBUTED_STREAM_MATCHES")
+    if not boots:
+        failures.append("JOURNAL_EMPTY")
+    if len(found) > MAX_ATTRIBUTED:
+        failures.append("TOO_MANY_MATCHES")
+    say("SUMMARY: " + " ".join(f"{v}={sum(1 for item in found if item[8] == v)}" for v in VERDICTS))
+    say("NONCLAIM: attribution never changes JOURNAL_SECRET_SCAN=FAIL; verdicts are heuristics over bytes kept on DEV")
+    if failures:
+        say("JOURNAL_MARKER_ATTRIBUTION=FAIL reason=" + ",".join(sorted(set(failures))))
+        return False
+    say(f"JOURNAL_MARKER_ATTRIBUTION=COMPLETE matches={len(found)}")
+    return True
 
 
 def parse_journal_transcript(data: bytes) -> list[tuple[str, int, int]] | None:
@@ -442,6 +586,8 @@ def prove(raw_scope: bytes, *, read: Callable[[str, str], "bytes | None"] = _rea
 def main(argv: list[str]) -> int:
     if argv == ["journal"]:
         return 0 if journal_scan() else 1
+    if argv == ["attribute"]:
+        return 0 if journal_attribute() else 1
     if len(argv) == 2 and argv[0] == "prove":
         try:
             raw = Path(argv[1]).read_bytes()

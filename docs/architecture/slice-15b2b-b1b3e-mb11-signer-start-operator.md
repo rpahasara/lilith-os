@@ -316,3 +316,24 @@ streams every producer through real CPython from a shallow cwd. Nothing else cha
 | `mb11_operator.py` | `1602d5dcd20a7f523b66690bf1d6ed85e27b6435efd6e2c705f48885e51339bb` |
 
 These rows supersede §11. A new scan needs its own owner authorization.
+
+## 13. Addendum (2026-10-15): E-22 marker attribution form — re-pin only
+
+The corrected E-22 journal scan (owner-authorized, 2026-10-15T16:43–16:47Z, evidence `lilith-mb12-hygiene-f619a07`,
+`SHA256SUMS` `0c236f8635222556c00d9a38b731459e033903747e39bc6c05f44c8ab08ea2e3`) completed with
+`JOURNAL_SECRET_SCAN=FAIL`: `PEM_PRIVATE_KEY` count 12, 712019 entries, stream SHA-256
+`332015ac0e21406db69a3158b36bd5d1538f0bbef3722c4d7c0cbd8bbb794c38`. That result stands and E-22 stays FAIL.
+
+`mb12_secret_hygiene_proof.py` gains one read-only root form, `attribute`: the same journal read, plus per counted
+match its boot, realtime, field name, `_SYSTEMD_UNIT`, `SYSLOG_IDENTIFIER`, text/binary, armour role and a heuristic
+verdict (`COMPLETE_PEM_BLOCK` / `HEADER_OR_COMMAND_TEXT` / `UNKNOWN`). It never emits a value, byte, offset or
+surrounding text, passes journal strings only through an allow-list (else `UNSAFE`), bounds output to 64 matches, and
+FAILs unless every counted match lies inside one field value. `journal` and `prove` are unchanged. No verdict changes
+the scan FAIL; resolving the finding is a separate security and owner decision. Running `attribute` needs its own
+owner authorization. Pin cascade (supersedes §12):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `8cedb1d0bb940da0a2c674ce08e1044264d11c0bd41b313c5f314e8345f39270` |
+| `mb12_readiness_inputs.py` | `eed5cfe5909285a680a132b9f69447c0b7a2d86f611599c2b67639240329767e` |
+| `mb11_operator.py` | `88ba2b803cd634711d81ba9c7a5af060e3e2eab6ae901274d2a9dc55a7a49c9e` |
