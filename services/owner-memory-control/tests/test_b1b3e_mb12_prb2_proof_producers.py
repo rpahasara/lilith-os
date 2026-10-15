@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -275,6 +276,162 @@ class JournalScanTests(unittest.TestCase):
                        text.replace(f"BOOT: {BOOT_B} firstRealtimeUs=30", f"BOOT: {BOOT_B} firstRealtimeUs=40"),
                        "JOURNAL_SECRET_SCAN=PASS firstRealtimeUs=1 lastRealtimeUs=9\n"):
             self.assertIsNone(SH.parse_journal_transcript(forged.encode()))
+
+
+PEM_TAIL = b"PRIVATE" + b" KEY-----"                    # assembled: no marker literal in this source
+PEM_BEGIN, PEM_END = b"-----BEGIN " + PEM_TAIL, b"-----END " + PEM_TAIL
+
+
+def att_entry(realtime_us, *fields, boot=BOOT_A):
+    """One export entry; `fields` = (name, value, binary)."""
+    out = b"__REALTIME_TIMESTAMP=%d\n_BOOT_ID=%s\n" % (realtime_us, boot.encode())
+    for name, value, binary in fields:
+        out += (name + b"\n" + len(value).to_bytes(8, "little") + value + b"\n") if binary else name + b"=" + value + b"\n"
+    return out + b"\n"
+
+
+def attribution(*entries, **kwargs):
+    return capture(SH.journal_attribute, stream=lambda: _Reader(export(*entries)), euid=lambda: 0, **kwargs)
+
+
+def match_lines(raw):
+    return [line for line in raw.decode().splitlines() if line.startswith("MATCH: ")]
+
+
+SUDO = ((b"_SYSTEMD_UNIT", b"session-7.scope", False), (b"SYSLOG_IDENTIFIER", b"sudo", False))
+LINE = re.compile(r"(JOURNAL: entries=\d+ bytes=\d+ sha256=[0-9a-f]{64} boots=\d+"
+                  r"|MATCH: n=\d+ class=[A-Z0-9_]+ boot=[0-9a-f]{32} realtimeUs=\d+ field=(?:[A-Z0-9_]+|UNSAFE) "
+                  r"unit=(?:[A-Za-z0-9@._:+\-]+) identifier=(?:[A-Za-z0-9@._:+\-]+) kind=(?:TEXT|BINARY) "
+                  r"role=(?:BEGIN|END|OTHER) verdict=(?:COMPLETE_PEM_BLOCK|HEADER_OR_COMMAND_TEXT|UNKNOWN) inField=\d+"
+                  r"|COUNTS: class=[A-Z0-9_]+ stream=\d+ inField=\d+ boundary=-?\d+"
+                  r"|SUMMARY: COMPLETE_PEM_BLOCK=\d+ HEADER_OR_COMMAND_TEXT=\d+ UNKNOWN=\d+"
+                  r"|NONCLAIM: attribution never changes JOURNAL_SECRET_SCAN=FAIL; verdicts are heuristics over bytes "
+                  r"kept on DEV"
+                  r"|JOURNAL_MARKER_ATTRIBUTION=(?:COMPLETE matches=\d+|FAIL reason=[A-Z_,]+))\Z")
+
+
+class JournalAttributionTests(unittest.TestCase):
+    def assertShaped(self, raw):
+        for line in raw.decode("ascii").splitlines():
+            self.assertRegex(line, LINE)
+
+    def test_benign_literal_marker_in_logged_command_text(self):
+        command = b"ravi : TTY=pts/0 ; PWD=/home/x ; USER=root ; COMMAND=/usr/bin/grep -c -e " + PEM_BEGIN + b" /etc/x"
+        entries = (att_entry(10), att_entry(20, (b"MESSAGE", command, False), *SUDO))
+        ok, raw = attribution(*entries)
+        self.assertTrue(ok, raw)
+        self.assertEqual(match_lines(raw), [
+            f"MATCH: n=1 class=PEM_PRIVATE_KEY boot={BOOT_A} realtimeUs=20 field=MESSAGE unit=session-7.scope "
+            "identifier=sudo kind=TEXT role=BEGIN verdict=HEADER_OR_COMMAND_TEXT inField=1"])
+        self.assertIn(b"COUNTS: class=PEM_PRIVATE_KEY stream=1 inField=1 boundary=0", raw)
+        self.assertTrue(raw.endswith(b"JOURNAL_MARKER_ATTRIBUTION=COMPLETE matches=1\n"))
+        for leaked in (b"COMMAND=", b"grep", b"/etc/x", b"ravi", b"BEGIN " + PEM_TAIL):
+            self.assertNotIn(leaked, raw)
+        self.assertShaped(raw)
+        ok, scan = journal_transcript(*entries)                          # the scan's own verdict is unchanged
+        self.assertFalse(ok)
+        self.assertIn(b"FAIL: PRIVATE_MATERIAL_MARKER class=PEM_PRIVATE_KEY count=1", scan)
+
+    def test_complete_pem_block_in_a_binary_field(self):
+        body = base64.b64encode(pkcs8_der())
+        block = PEM_BEGIN + b"\n" + body + b"\n" + PEM_END + b"\n"
+        ok, raw = attribution(att_entry(30, (b"MESSAGE", block, True), (b"SYSLOG_IDENTIFIER", b"leaky", False)))
+        self.assertTrue(ok, raw)
+        pem = [line for line in match_lines(raw) if "class=PEM_PRIVATE_KEY" in line]
+        self.assertEqual([("role=BEGIN" in l, "role=END" in l) for l in pem], [(True, False), (False, True)])
+        self.assertTrue(all("kind=BINARY" in l and "verdict=COMPLETE_PEM_BLOCK inField=2" in l
+                            and "unit=NONE identifier=leaky" in l for l in pem))
+        self.assertIn("class=ED25519_PKCS8_BASE64", "\n".join(match_lines(raw)))          # other classes: UNKNOWN
+        self.assertIn(b"SUMMARY: COMPLETE_PEM_BLOCK=2 HEADER_OR_COMMAND_TEXT=0 UNKNOWN=1", raw)
+        self.assertNotIn(body[:24], raw)
+        self.assertShaped(raw)
+
+    def test_ambiguous_shapes_are_unknown_and_paired_command_text_is_not(self):
+        key_like = base64.b64encode(bytes(range(48)))                     # 64 base64 characters, no END
+        cases = {
+            "lone armour line": (PEM_BEGIN, ["UNKNOWN"]),
+            "quoted lone line": (b"'" + PEM_END + b"'", ["UNKNOWN"]),
+            "unpaired key-like run": (b"x=" + PEM_BEGIN + b"\\n" + key_like, ["UNKNOWN"]),
+            "short base64 body": (PEM_BEGIN + b"QUJD" + PEM_END, ["UNKNOWN", "UNKNOWN"]),
+            "paired command text": (b"grep -e '" + PEM_BEGIN + b"' -e '" + PEM_END + b"' f",
+                                    ["HEADER_OR_COMMAND_TEXT", "HEADER_OR_COMMAND_TEXT"]),
+            "escaped-newline block": (b"printf '" + PEM_BEGIN + b"\\n" + base64.b64encode(pkcs8_der()) + b"\\n" +
+                                      PEM_END + b"'", ["COMPLETE_PEM_BLOCK", "COMPLETE_PEM_BLOCK"]),
+        }
+        for name, (value, verdicts) in cases.items():
+            with self.subTest(case=name):
+                ok, raw = attribution(att_entry(40, (b"MESSAGE", value, False)))
+                self.assertTrue(ok, raw)
+                pem = [l for l in match_lines(raw) if "class=PEM_PRIVATE_KEY" in l]
+                self.assertEqual([l.split("verdict=")[1].split()[0] for l in pem], verdicts)
+                self.assertShaped(raw)
+
+    def test_repeated_matches_in_one_field_are_each_reported(self):
+        value = b" ; ".join([b"echo " + PEM_BEGIN] * 3)
+        ok, raw = attribution(att_entry(50, (b"MESSAGE", value, False), *SUDO))
+        self.assertTrue(ok, raw)
+        lines = match_lines(raw)
+        self.assertEqual([l.split()[1] for l in lines], ["n=1", "n=2", "n=3"])
+        self.assertTrue(all(l.endswith("inField=3") for l in lines))
+        self.assertIn(b"COUNTS: class=PEM_PRIVATE_KEY stream=3 inField=3 boundary=0", raw)
+
+    def test_unsafe_journal_strings_never_reach_the_output(self):
+        ok, raw = attribution(att_entry(60, (b"Bad.Name", b"x " + PEM_BEGIN, False),
+                                        (b"_SYSTEMD_UNIT", b"evil\x1b[31m;rm -rf /", False),
+                                        (b"SYSLOG_IDENTIFIER", b"bin\x00ident", True)))
+        self.assertTrue(ok, raw)
+        self.assertIn("field=UNSAFE unit=UNSAFE identifier=NONE", match_lines(raw)[0])
+        for leaked in (b"Bad.Name", b"evil", b"\x1b", b"rm -rf", b"bin\x00", b"\x00ident"):
+            self.assertNotIn(leaked, raw)
+        self.assertShaped(raw)
+
+    def test_chunk_straddling_match_is_in_field_and_counts_fail_closed(self):
+        filler = b"z" * (SH.CHUNK - 5)
+        ok, raw = attribution(att_entry(70, (b"MESSAGE", filler + PEM_BEGIN + b" tail", True)))
+        self.assertTrue(ok, raw)                                          # the scanner's chunk split is not a field
+        self.assertIn(b"COUNTS: class=PEM_PRIVATE_KEY stream=1 inField=1 boundary=0", raw)
+        entries = att_entry(71, (b"MESSAGE", b"x " + PEM_BEGIN, False))
+        with mock.patch.object(SH, "_positions", lambda value, marker: []):
+            ok, raw = attribution(entries)
+        self.assertFalse(ok)
+        self.assertTrue(raw.endswith(b"JOURNAL_MARKER_ATTRIBUTION=FAIL reason=UNATTRIBUTED_STREAM_MATCHES\n"), raw)
+        real = SH._positions
+        with mock.patch.object(SH, "_positions", lambda value, marker: real(value, marker) * 2):
+            ok, raw = attribution(entries)
+        self.assertFalse(ok)
+        self.assertIn(b"reason=COUNTS_INCONSISTENT", raw)
+
+    def test_bounded_output_and_every_failure_is_closed(self):
+        value = b" ".join([b"echo " + PEM_BEGIN] * 3)
+        with mock.patch.object(SH, "MAX_ATTRIBUTED", 2):
+            ok, raw = attribution(att_entry(80, (b"MESSAGE", value, False)))
+        self.assertFalse(ok)
+        self.assertEqual(len(match_lines(raw)), 2)
+        self.assertTrue(raw.endswith(b"reason=TOO_MANY_MATCHES\n"), raw)
+        cases = {"JOURNAL_TRUNCATED": export(entry(10))[:-1], "JOURNAL_ENTRY_MALFORMED": b"MESSAGE=x\n\n",
+                 "JOURNAL_MALFORMED": b"\n"}
+        for reason, data in cases.items():
+            with self.subTest(reason=reason):
+                ok, raw = capture(SH.journal_attribute, stream=lambda d=data: _Reader(d), euid=lambda: 0)
+                self.assertFalse(ok)
+                self.assertEqual(raw, f"JOURNAL_MARKER_ATTRIBUTION=FAIL reason={reason}\n".encode())
+        ok, raw = capture(SH.journal_attribute, stream=lambda: _Reader(export(entry(1)), fail_finish=True),
+                          euid=lambda: 0)
+        self.assertEqual(raw, b"JOURNAL_MARKER_ATTRIBUTION=FAIL reason=JOURNAL_UNREADABLE\n")
+        ok, raw = capture(SH.journal_attribute, stream=lambda: _Reader(b""), euid=lambda: 0)
+        self.assertTrue(raw.endswith(b"reason=JOURNAL_EMPTY\n"))
+        ok, raw = capture(SH.journal_attribute, stream=lambda: _Reader(export(entry(1))), euid=lambda: 1000)
+        self.assertEqual(raw, b"JOURNAL_MARKER_ATTRIBUTION=FAIL reason=NOT_ROOT\n")
+
+    def test_scan_form_is_unchanged_by_the_hook(self):
+        data = export(entry(10, BOOT_A), att_entry(20, (b"MESSAGE", b"x " + PEM_BEGIN, False)),
+                      entry(30, BOOT_B, binary=b"\x00\x01"))
+        plain, hooked = SH.Scanner(), SH.Scanner()
+        seen = []
+        self.assertEqual(SH.parse_export(io.BytesIO(data), plain),
+                         SH.parse_export(io.BytesIO(data), hooked, lambda b, t, f: seen.append((b, t, len(f)))))
+        self.assertEqual((plain.counts, plain.digest.hexdigest()), (hooked.counts, hooked.digest.hexdigest()))
+        self.assertEqual([s[:2] for s in seen], [(BOOT_A, 10), (BOOT_A, 20), (BOOT_B, 30)])
 
 
 class SecretScopeTests(unittest.TestCase):
