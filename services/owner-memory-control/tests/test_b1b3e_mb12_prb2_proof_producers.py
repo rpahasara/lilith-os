@@ -479,15 +479,15 @@ class JournalPurposeTests(unittest.TestCase):
         for line in raw.decode("ascii").splitlines():
             self.assertRegex(line, PURPOSE_LINE)
 
-    def test_three_literal_pattern_searches(self):
+    def test_grep_sessions_keep_structural_facts_but_stay_unknown(self):
         ok, raw = purpose(*(sudo_session(u, GREP_PUB) for u in self.UNITS))
         self.assertTrue(ok, raw)
         for unit in self.UNITS:
             self.assertTrue(session_line(raw, unit).endswith(
                 "markerFields=4 markers=4 messageFields=1 cmdlineFields=3 program=GREP grepOption=NO "
-                "patternArgument=YES operand=PUBLICATION_JSON cmdlineConsistent=YES pemBlock=NO keyLikeRun=NO "
-                "otherMarkers=NO verdict=LITERAL_PATTERN_SEARCH"), raw)
-        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=3 exposed=0 unknown=0\n"))
+                "patternArgument=NO operand=PUBLICATION_JSON cmdlineConsistent=YES pemBlock=NO keyLikeRun=NO "
+                "otherMarkers=NO verdict=UNKNOWN"), raw)
+        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=0 exposed=0 unknown=3\n"))
         for leaked in (b"grep ", b"/root/", b"BEGIN", PEM_TAIL, b"ravi", b"COMMAND=", b"pam_unix"):
             self.assertNotIn(leaked, raw)
         self.assertShaped(raw)
@@ -498,18 +498,42 @@ class JournalPurposeTests(unittest.TestCase):
                           *(sudo_session(u, GREP_PUB) for u in self.UNITS[1:]))
         self.assertTrue(ok, raw)
         self.assertIn("otherMarkers=YES", session_line(raw, self.UNITS[0]))
-        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=2 exposed=1 unknown=0\n"), raw)
+        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=0 exposed=1 unknown=2\n"), raw)
         self.assertNotIn(base64.b64encode(pkcs8_der())[:20], raw)
         self.assertShaped(raw)
 
-    def test_marker_must_sit_in_a_recognized_pattern_argument(self):
+    def test_joined_argv_cannot_establish_the_pattern_boundary(self):
+        # Two different argv vectors that journald records as the SAME text: one quoted pattern, or a one-word pattern
+        # followed by extra file operands. Neither may be LITERAL; the marker (it contains a space) always spans words.
+        quoted = [b"grep", b"-c", b"-e", PATTERN, PUB]
+        split = [b"grep", b"-c", b"-e"] + PATTERN.split(b" ") + [PUB]
+        self.assertEqual(b" ".join(quoted), b" ".join(split))
+        self.assertIn(b" ", SH._PEM)
+        for words in (quoted, split):
+            self.assertFalse(SH.pattern_argument("GREP", b" ".join(words[1:]).split(b" ")))
+        ok, raw = purpose(sudo_session(self.UNITS[0], quoted), *(sudo_session(u, GREP_PUB) for u in self.UNITS[1:]))
+        self.assertTrue(ok, raw)
+        self.assertIn("patternArgument=NO", session_line(raw, self.UNITS[0]))
+        self.assertTrue(session_line(raw, self.UNITS[0]).endswith("verdict=UNKNOWN"))
+        # The rule itself: with a space-free stand-in marker, only a ONE-word region has an established boundary.
+        with mock.patch.object(SH, "_PEM", b"XKEYX"):
+            accepted = {(b"-c", b"-e", b"XKEYX", PUB), (b"-c", b"--", b"-XKEYX", PUB), (b"-c", b"XKEYX", PUB)}
+            for rest in accepted:
+                self.assertTrue(SH.pattern_argument("GREP", list(rest)), rest)
+            self.assertTrue(SH.pattern_argument("JOURNALCTL", [b"--no-pager", b"--grep", b"XKEYX"]))
+            self.assertTrue(SH.pattern_argument("JOURNALCTL", [b"--since=today", b"--grep=XKEYX"]))
+            for rest in ([b"-c", b"XKEYX", b"more", PUB], [b"-c", b"-e", b"XKEYX", b"more", PUB],
+                         [b"-c", b"-e", b"a", b"b", b"-e", b"XKEYX", PUB], [b"--grep", b"XKEYX", b"more"]):
+                program = "JOURNALCTL" if rest[0] == b"--grep" else "GREP"
+                self.assertFalse(SH.pattern_argument(program, rest), rest)
+
+    def test_other_shapes_are_unknown(self):
         key_like = base64.b64encode(bytes(range(48)))
         cases = {
-            "-e shape": ([b"grep", b"-c", b"-e", PATTERN, b"-e", b"OPENSSH", PUB], None, "LITERAL_PATTERN_SEARCH"),
-            "-- then dash pattern": ([b"grep", b"-c", b"--", b"-----" + PATTERN, PUB], None, "LITERAL_PATTERN_SEARCH"),
-            "journalctl --grep": ([b"journalctl", b"--no-pager", b"--grep", PATTERN], None, "LITERAL_PATTERN_SEARCH"),
-            "journalctl --grep=": ([b"journalctl", b"--since=today", b"--grep=" + PATTERN], None,
-                                   "LITERAL_PATTERN_SEARCH"),
+            "-e shape": ([b"grep", b"-c", b"-e", PATTERN, b"-e", b"OPENSSH", PUB], None, "UNKNOWN"),
+            "-- then dash pattern": ([b"grep", b"-c", b"--", b"-----" + PATTERN, PUB], None, "UNKNOWN"),
+            "journalctl --grep": ([b"journalctl", b"--no-pager", b"--grep", PATTERN], None, "UNKNOWN"),
+            "journalctl --grep=": ([b"journalctl", b"--since=today", b"--grep=" + PATTERN], None, "UNKNOWN"),
             "dash pattern without --": ([b"grep", b"-c", b"-----" + PATTERN, PUB], None, "UNKNOWN"),
             "no operand": ([b"grep", b"-c", PATTERN], None, "UNKNOWN"),
             "valued option": ([b"grep", b"-m", b"1", PATTERN, PUB], None, "UNKNOWN"),

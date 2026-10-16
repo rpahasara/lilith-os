@@ -350,15 +350,19 @@ journalctl's own `-b`, `--since`/`--until` and `_SYSTEMD_UNIT` filters (never th
 closed enums of command STRUCTURE only: program class, `--grep` option, whether the single marker lies inside a
 recognized search-pattern argument (`patternArgument`), operand class, MESSAGE/`_CMDLINE` agreement, marker counts,
 complete-PEM / key-like / other-marker presence, and a verdict `LITERAL_PATTERN_SEARCH` / `EXPOSED_KEY_EVIDENCE` /
-`UNKNOWN`. `LITERAL_PATTERN_SEARCH` needs `patternArgument=YES`: a closed grep shape (`[flags] [--] PATTERN… /OPERAND`
-or `[flags] (-e PATTERN…)+ /OPERAND`) or journalctl `--grep`/`-g`/`--grep=`; any other option, ambiguous region or
-position is `UNKNOWN`. The attribution's historical counts are required exactly (3 sessions, each 1 marker-bearing
+`UNKNOWN`. `LITERAL_PATTERN_SEARCH` needs `patternArgument=YES`: a closed grep shape (`[flags] [--] PATTERN /OPERAND`
+or `[flags] (-e PATTERN)+ /OPERAND`) or journalctl `--grep`/`-g`/`--grep=`, where every pattern region is exactly one
+joined word. journald joins argv with spaces, so a multi-word region cannot be told apart from a pattern plus further
+operands; any such region, other option or position is `UNKNOWN`. The PEM marker contains a space, so for it the
+argument boundary is never established: `patternArgument` is always `NO` and the verdict for these sessions can only
+be `EXPOSED_KEY_EVIDENCE` or `UNKNOWN` (with the structural facts). The attribution's historical counts are required
+exactly (3 sessions, each 1 marker-bearing
 MESSAGE + 3 marker-bearing `_CMDLINE`, 4 markers; 12 overall), else `FAIL reason=HISTORICAL_COUNT_MISMATCH`. It never
 emits a value, pattern, path or argument, and FAILs on any unexpected entry, missing session or count mismatch. No
 verdict changes the scan FAIL. Running `purpose` needs its own owner authorization. Pin cascade (supersedes §13):
 
 | Tool | SHA-256 |
 | --- | --- |
-| `mb12_secret_hygiene_proof.py` | `d7af957707c47a23cab8ce81084d03226072153e341231abbd49b8cd253e609f` |
-| `mb12_readiness_inputs.py` | `f3c5d59e30aa063bec941cb9f701dc860b9a2e3535bc192aa758248e13ab28eb` |
-| `mb11_operator.py` | `ec4ba45e7f86f3a164ab852589ea87268f4aac2cc494741d0293349e14b7d3c1` |
+| `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
+| `mb12_readiness_inputs.py` | `9272b49004fb914820b609052b327703cd8ac51a4b86ca61a69f3737a6e9998d` |
+| `mb11_operator.py` | `c8ecfd43511f4fa9683aa444fc9b44a739930007f708fee06b11aa7a3201b2a5` |

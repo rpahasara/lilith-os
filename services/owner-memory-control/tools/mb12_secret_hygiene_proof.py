@@ -481,10 +481,13 @@ def _one_marker_in(regions: list[list[bytes]], rest: list[bytes]) -> bool:
 
 def pattern_argument(program: str, rest: list[bytes]) -> bool:
     """True only when the command's single PEM marker lies inside a recognized search-pattern argument of a closed
-    shape. journald joins argv with spaces, so a pattern region runs to the next separator; every word that could also
-    be an option, an operand or an unknown token makes the shape ambiguous (False). Values are never returned.
-    grep:       [flags] PATTERN... /OPERAND        or   [flags] (-e PATTERN...)+ /OPERAND   ([flags] [--] also)
-    journalctl: [flags | --opt=value] (--grep | -g) PATTERN...   or   [...] --grep=PATTERN..."""
+    shape whose argv boundary is ESTABLISHED. journald joins argv with spaces, so a region of several words could be
+    one quoted pattern or a pattern plus further operands: only a region of exactly ONE word has a known boundary.
+    Every multi-word region, option, operand or unknown token is ambiguous (False). Values are never returned.
+    grep:       [flags] [--] PATTERN /OPERAND      or   [flags] (-e PATTERN)+ /OPERAND
+    journalctl: [flags | --opt=value] (--grep | -g) PATTERN   or   [...] --grep=PATTERN
+    Consequence: the PEM marker contains a space, so it can never lie in one joined word; for it this is always False
+    and LITERAL_PATTERN_SEARCH is unreachable (UNKNOWN), by design."""
     if program == "GREP":
         if len(rest) < 2 or not rest[-1].startswith(b"/") or _PEM in rest[-1]:
             return False
@@ -511,7 +514,7 @@ def pattern_argument(program: str, rest: list[bytes]) -> bool:
             if any(_grep_flag(w) or w in (b"-e", b"--") or w.startswith(b"/") for w in region):
                 return False
             regions = [region]
-        return all(regions) and _one_marker_in(regions, rest)
+        return all(len(region) == 1 for region in regions) and _one_marker_in(regions, rest)
     if program == "JOURNALCTL":
         grips = [n for n, w in enumerate(rest) if w in (b"--grep", b"-g") or w.startswith(b"--grep=")]
         if len(grips) != 1 or not all(_journal_option(w) for w in rest[:grips[0]]):
@@ -519,7 +522,7 @@ def pattern_argument(program: str, rest: list[bytes]) -> bool:
         g = grips[0]
         inline = rest[g][len(b"--grep="):] if rest[g].startswith(b"--grep=") else None
         region = ([inline] if inline else []) + rest[g + 1:]
-        if not region or any(_journal_option(w) or w in (b"--grep", b"-g") for w in region):
+        if len(region) != 1 or _journal_option(region[0]) or region[0] in (b"--grep", b"-g"):
             return False
         return _one_marker_in([region], rest)
     return False
