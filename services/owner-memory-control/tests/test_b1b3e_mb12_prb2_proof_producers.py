@@ -63,6 +63,13 @@ def os_read(**overrides):
     return lambda path: files.get(path)
 
 
+# OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
+OD_M12_6_TRANSCRIPTS = {
+    "SIGNER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
+    "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
+    "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
+}
+
 class OsDenialTests(unittest.TestCase):
     def prove(self, run=None, read=None, euid=0, phase="UNIT"):
         return capture(OS.prove, phase, run=run or os_run(), read=read or os_read(), euid=lambda: euid)
@@ -978,7 +985,7 @@ class BuilderAdmissionTests(unittest.TestCase):
             relative = producer.split(":")[0]
             self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(),
                              RI.PRODUCER_SCRIPT_SHA256[relative])
-        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})
+        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
 
     def test_os_denial_admission(self):
         good = OS.expected_pass(OS.DROPINS_NONE)
@@ -1066,7 +1073,7 @@ class DevFailsClosedTests(unittest.TestCase):
         with self.assertRaises(RI.Refused) as caught:
             RI.build({}, environment="dev")
         self.assertEqual(caught.exception.reason, "INPUT_MALFORMED")      # OD-M12-3 accepted; still fail-closed
-        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})
+        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
         self.assertEqual(dict(PS.ACCEPTED_BASELINES), {})
         self.assertTrue(SH.UNRESOLVED_SCOPE)
 
