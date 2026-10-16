@@ -445,11 +445,84 @@ PURPOSE_SESSIONS = {"session-3837.scope": 1790493545688402,        # attribution
                     "session-3845.scope": 1790493771742151,
                     "session-3850.scope": 1790493936317730}
 PURPOSE_SLACK_US = 30_000_000                          # every entry of a session within +-30 s of its anchor
-PURPOSE_EXPECTED = {"markerFields": 4, "messageFields": 1, "cmdlineFields": 3}   # per session, from the attribution
+# The attribution's exact historical counts: anything else FAILs, never COMPLETE.
+PURPOSE_EXPECTED = {"markerFields": 4, "markers": 4, "messageFields": 1, "cmdlineFields": 3}   # per session
+PURPOSE_TOTAL_MARKERS = 12
 PUBLICATION_PATH = b"/root/b1b3d-l2b-publication.json"              # L2b.2 runbook publication file
 _PROGRAMS = {b"grep": "GREP", b"egrep": "GREP", b"fgrep": "GREP", b"zgrep": "GREP", b"journalctl": "JOURNALCTL",
              b"sh": "SHELL", b"bash": "SHELL", b"dash": "SHELL"}
 PURPOSE_VERDICTS = ("LITERAL_PATTERN_SEARCH", "EXPOSED_KEY_EVIDENCE", "UNKNOWN")
+# The closed option sets of a recognized search shape. Only `-e` (grep) and `--grep`/`-g` (journalctl) take a value;
+# any other option, an attached `-e<x>`, `-f`, `--regexp=` or a valued option with a separate value is UNKNOWN.
+_GREP_SHORT = frozenset(b"cEFGPiylnqsvwxHhoaIUZz")
+_GREP_LONG = frozenset({b"--count", b"--extended-regexp", b"--fixed-strings", b"--basic-regexp", b"--perl-regexp",
+                        b"--ignore-case", b"--no-ignore-case", b"--quiet", b"--silent", b"--files-with-matches",
+                        b"--files-without-match", b"--line-number", b"--no-messages", b"--invert-match",
+                        b"--word-regexp", b"--line-regexp", b"--with-filename", b"--no-filename", b"--only-matching",
+                        b"--text", b"--null"})
+_JOURNAL_FLAGS = frozenset({b"--no-pager", b"-q", b"--quiet", b"-a", b"--all", b"-r", b"--reverse", b"-m", b"--merge",
+                            b"--utc", b"-x", b"--catalog", b"-b"})
+_JOURNAL_VALUED = (b"--since=", b"--until=", b"--unit=", b"--boot=", b"--output=", b"--case-sensitive=")
+
+
+def _grep_flag(word: bytes) -> bool:
+    return word in _GREP_LONG or (len(word) > 1 and word[:1] == b"-" and word[1:2] != b"-"
+                                  and all(c in _GREP_SHORT for c in word[1:]))
+
+
+def _journal_option(word: bytes) -> bool:
+    return word in _JOURNAL_FLAGS or word.startswith(_JOURNAL_VALUED)
+
+
+def _one_marker_in(regions: list[list[bytes]], rest: list[bytes]) -> bool:
+    return (b" ".join(rest).count(_PEM) == 1
+            and sum(b" ".join(region).count(_PEM) for region in regions) == 1)
+
+
+def pattern_argument(program: str, rest: list[bytes]) -> bool:
+    """True only when the command's single PEM marker lies inside a recognized search-pattern argument of a closed
+    shape. journald joins argv with spaces, so a pattern region runs to the next separator; every word that could also
+    be an option, an operand or an unknown token makes the shape ambiguous (False). Values are never returned.
+    grep:       [flags] PATTERN... /OPERAND        or   [flags] (-e PATTERN...)+ /OPERAND   ([flags] [--] also)
+    journalctl: [flags | --opt=value] (--grep | -g) PATTERN...   or   [...] --grep=PATTERN..."""
+    if program == "GREP":
+        if len(rest) < 2 or not rest[-1].startswith(b"/") or _PEM in rest[-1]:
+            return False
+        body, i = rest[:-1], 0
+        while i < len(body) and _grep_flag(body[i]):
+            i += 1
+        if i < len(body) and body[i] == b"-e":
+            regions, current = [], None
+            for word in body[i:]:
+                if word == b"-e":
+                    if current is not None:
+                        regions.append(current)
+                    current = []
+                elif _grep_flag(word) or word == b"--" or word.startswith(b"/"):
+                    return False
+                else:
+                    current.append(word)
+            regions.append(current)
+        else:
+            dashed = i < len(body) and body[i] == b"--"
+            region = body[i + 1:] if dashed else body[i:]
+            if not region or (not dashed and region[0].startswith(b"-")):
+                return False
+            if any(_grep_flag(w) or w in (b"-e", b"--") or w.startswith(b"/") for w in region):
+                return False
+            regions = [region]
+        return all(regions) and _one_marker_in(regions, rest)
+    if program == "JOURNALCTL":
+        grips = [n for n, w in enumerate(rest) if w in (b"--grep", b"-g") or w.startswith(b"--grep=")]
+        if len(grips) != 1 or not all(_journal_option(w) for w in rest[:grips[0]]):
+            return False
+        g = grips[0]
+        inline = rest[g][len(b"--grep="):] if rest[g].startswith(b"--grep=") else None
+        region = ([inline] if inline else []) + rest[g + 1:]
+        if not region or any(_journal_option(w) or w in (b"--grep", b"-g") for w in region):
+            return False
+        return _one_marker_in([region], rest)
+    return False
 
 
 def purpose_filters() -> tuple[str, ...]:
@@ -486,7 +559,8 @@ def _session_verdict(fields: list[tuple[bytes, bytes, bool]]) -> dict[str, Any]:
                    if name in (b"MESSAGE", b"_CMDLINE"))                      # command text only
     facts = {"markerFields": len(marker_fields), "markers": sum(v.count(_PEM) for _n, v in marker_fields),
              "messageFields": len(messages), "cmdlineFields": len(cmdlines), "program": "NONE", "grepOption": "NO",
-             "operand": "NONE", "cmdlineConsistent": "NO", "pemBlock": "YES" if pem_block else "NO",
+             "patternArgument": "NO", "operand": "NONE", "cmdlineConsistent": "NO",
+             "pemBlock": "YES" if pem_block else "NO",
              "keyLikeRun": "YES" if key_like else "NO", "otherMarkers": "YES" if other else "NO"}
     if len(messages) == 1 and b"COMMAND=" in messages[0] and cmdlines:
         command = messages[0].rsplit(b"COMMAND=", 1)[1].split(b" ")
@@ -498,15 +572,14 @@ def _session_verdict(fields: list[tuple[bytes, bytes, bool]]) -> dict[str, Any]:
                                                and cl_words[cl_at + 1:] == command[at + 1:]) else "NO"
         rest = command[at + 1:]
         facts["grepOption"] = "YES" if any(w in (b"-g", b"--grep") or w.startswith(b"--grep=") for w in rest) else "NO"
+        facts["patternArgument"] = "YES" if pattern_argument(program, rest) else "NO"
         last = rest[-1] if rest else b""
         facts["operand"] = ("NONE" if not rest or _PEM in last else "PUBLICATION_JSON" if last == PUBLICATION_PATH
                             else "ROOT_PATH" if last.startswith(b"/root/") else "OTHER")
     if facts["pemBlock"] == "YES" or facts["otherMarkers"] == "YES":
         verdict = "EXPOSED_KEY_EVIDENCE"
-    elif (facts["keyLikeRun"] == "NO" and facts["markers"] == facts["markerFields"]
-          and facts["cmdlineConsistent"] == "YES"
-          and all(facts[k] == v for k, v in PURPOSE_EXPECTED.items())
-          and (facts["program"] == "GREP" or (facts["program"] == "JOURNALCTL" and facts["grepOption"] == "YES"))):
+    elif (facts["keyLikeRun"] == "NO" and facts["patternArgument"] == "YES" and facts["cmdlineConsistent"] == "YES"
+          and all(facts[k] == v for k, v in PURPOSE_EXPECTED.items())):
         verdict = "LITERAL_PATTERN_SEARCH"
     else:
         verdict = "UNKNOWN"
@@ -551,8 +624,12 @@ def journal_purpose(*, stream: Callable[[], BinaryIO] | None = None, euid: Calla
             continue
         results[unit] = facts = _session_verdict(fields)
         say(f"SESSION: unit={unit} " + " ".join(f"{k}={v}" for k, v in facts.items()))
+        if any(facts[k] != v for k, v in PURPOSE_EXPECTED.items()):
+            failures.append("HISTORICAL_COUNT_MISMATCH")
     if sum(f["markers"] for f in results.values()) != scanner.counts[PEM_CLASS]:
         failures.append("COUNTS_INCONSISTENT")
+    if scanner.counts[PEM_CLASS] != PURPOSE_TOTAL_MARKERS:
+        failures.append("HISTORICAL_COUNT_MISMATCH")
     say("NONCLAIM: purpose verification never changes JOURNAL_SECRET_SCAN=FAIL; it reports command structure, "
         "not intent")
     if failures:

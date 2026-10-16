@@ -439,7 +439,7 @@ PATTERN = b"BEGIN [A-Z ]*" + PEM_TAIL                   # a search pattern: the 
 PURPOSE_LINE = re.compile(
     r"(PURPOSE: boot=[0-9a-f]{32} sessions=3 entries=\d+ bytes=\d+ sha256=[0-9a-f]{64}"
     r"|SESSION: unit=session-38(?:37|45|50)\.scope markerFields=\d+ markers=\d+ messageFields=\d+ cmdlineFields=\d+ "
-    r"program=(?:GREP|JOURNALCTL|SHELL|PYTHON|OTHER|NONE) grepOption=(?:YES|NO) "
+    r"program=(?:GREP|JOURNALCTL|SHELL|PYTHON|OTHER|NONE) grepOption=(?:YES|NO) patternArgument=(?:YES|NO) "
     r"operand=(?:NONE|PUBLICATION_JSON|ROOT_PATH|OTHER) cmdlineConsistent=(?:YES|NO) pemBlock=(?:YES|NO) "
     r"keyLikeRun=(?:YES|NO) otherMarkers=(?:YES|NO) verdict=(?:LITERAL_PATTERN_SEARCH|EXPOSED_KEY_EVIDENCE|UNKNOWN)"
     r"|NONCLAIM: purpose verification never changes JOURNAL_SECRET_SCAN=FAIL; it reports command structure, not intent"
@@ -485,35 +485,44 @@ class JournalPurposeTests(unittest.TestCase):
         for unit in self.UNITS:
             self.assertTrue(session_line(raw, unit).endswith(
                 "markerFields=4 markers=4 messageFields=1 cmdlineFields=3 program=GREP grepOption=NO "
-                "operand=PUBLICATION_JSON cmdlineConsistent=YES pemBlock=NO keyLikeRun=NO otherMarkers=NO "
-                "verdict=LITERAL_PATTERN_SEARCH"), raw)
+                "patternArgument=YES operand=PUBLICATION_JSON cmdlineConsistent=YES pemBlock=NO keyLikeRun=NO "
+                "otherMarkers=NO verdict=LITERAL_PATTERN_SEARCH"), raw)
         self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=3 exposed=0 unknown=0\n"))
         for leaked in (b"grep ", b"/root/", b"BEGIN", PEM_TAIL, b"ravi", b"COMMAND=", b"pam_unix"):
             self.assertNotIn(leaked, raw)
         self.assertShaped(raw)
 
     def test_exposed_key_evidence(self):
-        block = b"'" + PEM_BEGIN + b"\\n" + base64.b64encode(pkcs8_der()) + b"\\n" + PEM_END + b"'"
-        ok, raw = purpose(sudo_session(self.UNITS[0], [b"printf", block]),
-                          sudo_session(self.UNITS[1], [b"grep", b"-c", base64.b64encode(pkcs8_der()) + b"x", PATTERN,
+        ok, raw = purpose(sudo_session(self.UNITS[0], [b"grep", b"-c", base64.b64encode(pkcs8_der()) + b"x", PATTERN,
                                                        PUB]),
-                          sudo_session(self.UNITS[2], GREP_PUB))
+                          *(sudo_session(u, GREP_PUB) for u in self.UNITS[1:]))
         self.assertTrue(ok, raw)
-        self.assertIn("pemBlock=YES", session_line(raw, self.UNITS[0]))
-        self.assertIn("otherMarkers=YES", session_line(raw, self.UNITS[1]))
-        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=1 exposed=2 unknown=0\n"), raw)
+        self.assertIn("otherMarkers=YES", session_line(raw, self.UNITS[0]))
+        self.assertTrue(raw.endswith(b"PURPOSE_VERIFICATION=COMPLETE literal=2 exposed=1 unknown=0\n"), raw)
         self.assertNotIn(base64.b64encode(pkcs8_der())[:20], raw)
         self.assertShaped(raw)
 
-    def test_shapes_outside_the_closed_contract_are_unknown(self):
+    def test_marker_must_sit_in_a_recognized_pattern_argument(self):
         key_like = base64.b64encode(bytes(range(48)))
         cases = {
+            "-e shape": ([b"grep", b"-c", b"-e", PATTERN, b"-e", b"OPENSSH", PUB], None, "LITERAL_PATTERN_SEARCH"),
+            "-- then dash pattern": ([b"grep", b"-c", b"--", b"-----" + PATTERN, PUB], None, "LITERAL_PATTERN_SEARCH"),
+            "journalctl --grep": ([b"journalctl", b"--no-pager", b"--grep", PATTERN], None, "LITERAL_PATTERN_SEARCH"),
+            "journalctl --grep=": ([b"journalctl", b"--since=today", b"--grep=" + PATTERN], None,
+                                   "LITERAL_PATTERN_SEARCH"),
+            "dash pattern without --": ([b"grep", b"-c", b"-----" + PATTERN, PUB], None, "UNKNOWN"),
+            "no operand": ([b"grep", b"-c", PATTERN], None, "UNKNOWN"),
+            "valued option": ([b"grep", b"-m", b"1", PATTERN, PUB], None, "UNKNOWN"),
+            "pattern file": ([b"grep", b"-f", b"/root/p", PATTERN, PUB], None, "UNKNOWN"),
+            "attached -e": ([b"grep", b"-ce" + PATTERN, PUB], None, "UNKNOWN"),
+            "path inside region": ([b"grep", b"-c", PATTERN, b"/root/a", PUB], None, "UNKNOWN"),
+            "marker in operand": ([b"grep", b"-c", b"x", b"/root/" + PATTERN], None, "UNKNOWN"),
+            "journalctl valued -u": ([b"journalctl", b"-u", b"x", b"--grep", PATTERN], None, "UNKNOWN"),
+            "journalctl option after pattern": ([b"journalctl", b"--grep", PATTERN, b"--utc"], None, "UNKNOWN"),
             "shell wrapper": ([b"sh", b"-c", b"journalctl | grep -c " + PATTERN], None, "UNKNOWN"),
-            "journalctl --grep": ([b"journalctl", b"--grep", PATTERN], None, "LITERAL_PATTERN_SEARCH"),
             "other program": ([b"cat", PATTERN, PUB], None, "UNKNOWN"),
             "inconsistent cmdline": (GREP_PUB, b"sudo grep -c " + PATTERN + b" /root/other", "UNKNOWN"),
             "key-like argument": ([b"grep", b"-c", key_like, PATTERN, PUB], None, "UNKNOWN"),
-            "two markers in one field": ([b"grep", b"-e", PATTERN, b"-e", PATTERN, PUB], None, "UNKNOWN"),
         }
         for name, (words, cmdline, verdict) in cases.items():
             with self.subTest(case=name):
@@ -532,6 +541,17 @@ class JournalPurposeTests(unittest.TestCase):
                                                       at=SH.PURPOSE_SESSIONS[self.UNITS[0]] + 31_000_000)],
             "UNEXPECTED_ENTRY  ": [*good[1:], sudo_session(self.UNITS[0], GREP_PUB, boot=BOOT_A)],
             "SESSION_NOT_FOUND": good[1:],
+            "HISTORICAL_COUNT_MISMATCH": [sudo_session(self.UNITS[0], [b"grep", b"-e", PATTERN, b"-e", PATTERN, PUB]),
+                                          *good[1:]],                       # two markers per field: 8 in the session
+            "HISTORICAL_COUNT_MISMATCH ": [sudo_session(self.UNITS[0], GREP_PUB, cmdline=b"sudo grep -c x " + PUB),
+                                           *good[1:]],                      # _CMDLINE without the marker: 1 in session
+            "HISTORICAL_COUNT_MISMATCH  ": [sudo_session(self.UNITS[0], [b"printf", b"'" + PEM_BEGIN + b"\\n" +
+                                                                         base64.b64encode(pkcs8_der()) + b"\\n" +
+                                                                         PEM_END + b"'"]), *good[1:]],   # PEM block
+            "HISTORICAL_COUNT_MISMATCH   ": [*good, [att_entry(SH.PURPOSE_SESSIONS[self.UNITS[2]] + 9_000,
+                                                               (b"MESSAGE", b"x " + PATTERN, False),
+                                                               (b"_SYSTEMD_UNIT", self.UNITS[2].encode(), False),
+                                                               boot=SH.PURPOSE_BOOT)]],     # a 13th marker
         }
         for reason, sessions in cases.items():
             with self.subTest(reason=reason):
