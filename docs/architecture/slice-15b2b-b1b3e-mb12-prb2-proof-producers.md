@@ -226,3 +226,77 @@ POST-#186 M-B10 PRESERVATION (DR-5 W10_1 EQUAL, HOST POST) = OUTSTANDING;  OCT-6
 OD-M11-12 … 15, OD-M12-1 … 8 = PROPOSED;  RELEASE aee323e / PINS / WITNESS / HELD = UNCHANGED
 SIGNER START / K-ACT LOAD / AUTHORITY / FIRST MEMORY / PROD = NOT AUTHORIZED
 ```
+
+## 10. Addendum (2026-10-17): M-B12 status checkpoint
+
+Consolidated record of the M-B12 developments since §9. Earlier sections are unchanged and keep their historical meaning.
+This addendum records evidence and dispositions; it makes **no new owner acceptance** and claims no unresolved proof.
+Evidence directories are owner-laptop paths under `C:\Users\edufo\`; each is sealed by its `SHA256SUMS`.
+
+### 10.1 E-22 secret hygiene: investigation closed, FAIL stands
+
+| Step | Evidence (`SHA256SUMS`) | Result |
+| --- | --- | --- |
+| journal scan (`mb12_secret_hygiene_proof.py journal`, 2026-10-15 16:43–16:47Z) | `lilith-mb12-hygiene-f619a07` (`0c236f8635222556c00d9a38b731459e033903747e39bc6c05f44c8ab08ea2e3`) | `JOURNAL_SECRET_SCAN=FAIL`, `PEM_PRIVATE_KEY` count 12 (transcript `e1d70588…`) |
+| marker attribution (`attribute`, 2026-10-15 17:54–18:02Z) | `lilith-mb12-attribute-0420ca6` (`dce427ad3c57b677a2cfe33d0cf2d8d414cd67d35b06ffe41150d66c55ae6091`) | all 12 in closed boot `24d1771d…`, three `sudo` sessions (`session-3837/3845/3850.scope`, 2026-09-27 07:19–07:26Z), 4 per session, role `OTHER`, verdict `UNKNOWN` ×12 |
+| session purpose (`purpose`, 2026-10-16 13:14Z, PR #204 form) | `lilith-mb12-purpose-ef64037` (`8bda5cbb5684eb08d133a4d4b062503c6a9bb27e7dd6f05641ad408f1d62d310`) | `PURPOSE_VERIFICATION=COMPLETE literal=0 exposed=0 unknown=3`; bounded stream 14 entries / `31be8203…` |
+
+Per session the purpose form found `program=GREP`, `operand=PUBLICATION_JSON` (`/root/b1b3d-l2b-publication.json`),
+`pemBlock=NO`, `keyLikeRun=NO`, `otherMarkers=NO`, `patternArgument=NO` (unreachable for the PEM marker by design, §14
+of the operator record), `cmdlineConsistent=NO`, verdict `UNKNOWN`.
+
+**Disposition (owner, 2026-10-16): technical investigation CLOSED.** The structure is strongly consistent with an
+owner-run grep of the L2b publication file for the PEM marker during the L2b.2 post-keygen checks, but that explanation
+is **not verified**. No additional key indicator was found. The original `JOURNAL_SECRET_SCAN=FAIL` remains
+authoritative, no exception is granted, and **E-22 stays BLOCKED**. Changing E-22 needs an explicit owner decision on
+its scope (OD-M12-7). Local assessment: `lilith-mb12-e22-assessment-ef64037\ASSESSMENT.md`
+(`8b1a175920b2ff9e4f1cd576f32487d07a38e8c8c9a064dd5199e92fc9329e6d`). No further investigation tooling or scans.
+
+### 10.2 E-07 / E-09 denial proofs and OD-M12-6
+
+One owner-authorized read-only `e07` run (2026-10-16T15:40Z, main `ef640377`, deploy `38854041173`; evidence
+`lilith-mb12-e07-ef64037`, `SHA256SUMS` `29c5a575ca7950207cbbc242c4f149ea70dd7d75753bbc168970a0ec33ca1674`) gave
+`AUTHORITY_CUSTODY_DENIAL_PROOF=PASS phase=P1B-12` (143 DENIED incl. the 9 signer-namespace rows; 0 allowed) and
+`OS_DENIAL_PROOF=PASS`. **OD-M12-6** (owner-accepted 2026-10-16) and the three transcript pins are recorded in
+`slice-15b2b-b1b3e-mb11-signer-start-operator.md` §15, merged by PR #205 (`5994f6a5`). That record is authoritative;
+it is not repeated here. The P1B-12 and namespace rows that §9 lists as NOT PERFORMED are now performed for this
+transcript.
+
+### 10.3 E-09 broker preservation (owner-accepted 2026-10-17)
+
+One owner-authorized read-only `verify_broker_dev_current_incarnation.py preservation` run (2026-10-17T08:28Z, deploy
+`39013841952`; evidence `lilith-mb12-broker-pres-5994f6a`, `SHA256SUMS`
+`8772d463f02a7415eb04e69f4f4b66451f94b2c6f52e4d8138662ab3f8c94ec5`) gave `BROKER_PRESERVATION=PASS`, `failures` `[]`,
+transcript `79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40`. The owner accepted that transcript, for
+that proof name only, under OD-M12-6; the record and pin are `slice-15b2b-b1b3e-mb11-signer-start-operator.md` §16.
+E-09 now has both halves pinned (`BROKER_DENIAL` §15, `BROKER_PRESERVATION` §16).
+
+### 10.4 M-B11 preservation checkpoint (after PR #205)
+
+Deploy `39013841952` (main `5994f6a53bbf7cc3c7d53abe87e17552d6f9fb1b`, success 2026-10-17T07:35:28Z): local W11 DR-5
+compare `W11_1_SIGNER_STARTED_EXACT` → `EQUAL` (194 / 155 / 29 lines, fail 0; evidence `lilith-mb11-pr205-dr5-5994f6a`,
+`009f9c5616723e55a125bae6ace364d92b468d4d5b2d2598435ea9dbf7485ede`). One owner-authorized `mb11_operator observe`
+(07:53:17–07:53:36Z) → `observe/05-POST11` `MB11_OBSERVE_W11_1_EXACT`, `kActLoadCount` 1, reasons `[]`, remote output
+`ff9c8ce79147d61c01c4c4bf52f97b411e06fc1a1981989ad17e722b617b36d5` = the accepted POST11 (evidence
+`lilith-mb11-observe05-5994f6a`, `42cdd0192c4a449e6b0288394093985113e0348078aaeefbfceb4cd6b66ef792`). `01`–`04-POST11` and
+the start seal are unchanged. Routine checkpoints after this one are kept as evidence only, not as repository records.
+
+### 10.5 Remaining requirements
+
+| Item | Status | Needs |
+| --- | --- | --- |
+| E-08 `DEPLOYER_DENIAL` | no admissible transcript: `deploy-dev.yml` tees the DR-5 stdout to `${RUNNER_TEMP}/authority-boundary.txt` but does not retain it; the GitHub log is not producer bytes | a reviewed retention of that file on a routine deploy, then an OD-M12-6 pin |
+| E-20 PR-2 inventory | not collected; `DEV_ACCEPTED_INVENTORIES = {}` | a fresh inventory under the OD-M12-3 cutoff and an owner acceptance by digest (OD-M12-2) |
+| E-21 PR-3 off-host material | not confirmed; `DEV_ACCEPTED_CANDIDATES = {}` | the owner off-host material and confirmation by candidate digest (OD-M12-4) |
+| E-22 `SECRET_HYGIENE` | BLOCKED (§10.1) | owner decision on scope (OD-M12-7) |
+| E-23 `PRESERVATION_SET` | no accepted baseline | OD-M12-8 |
+
+Open owner decisions: OD-M12-1, OD-M12-2, OD-M12-4, OD-M12-7, OD-M12-8, OD-M11-12; OD-M11-14 for the three names not
+covered by §15 / §16.
+
+```text
+E-07 SIGNER/OS_DENIAL, E-09 BROKER_DENIAL + BROKER_PRESERVATION = TRANSCRIPTS PINNED (OD-M12-6, §15 / §16)
+E-08 = NO BYTE-EXACT TRANSCRIPT;  E-20 / E-21 / E-23 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
+M-B11 = W11_1 PRESERVED (05-POST11 EXACT, DR-5 EQUAL at 39013841952);  M-B12 = NOT PASSED;  CUSTODY = HELD
+AUTHORITY / FIRST MEMORY / PROD = NOT AUTHORIZED
+```

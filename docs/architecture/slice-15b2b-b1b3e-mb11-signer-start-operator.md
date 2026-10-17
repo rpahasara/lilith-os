@@ -404,3 +404,26 @@ cascade (supersedes §14):
 | `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
 | `mb12_readiness_inputs.py` | `67f78851287773a3c9ccce478cec6ee5fb707ef3d9ebc00955bfa69e818a3238` |
 | `mb11_operator.py` | `e667487150987e0b3439dbb27af50e19920510ca7dfda7b63f5136770c7b4baa` |
+
+## 16. Addendum (2026-10-17): E-09 BROKER_PRESERVATION transcript accepted under OD-M12-6
+
+**Owner decision (2026-10-17):** under the OD-M12-6 mechanism (§15, unchanged), the owner accepts exactly one
+`BROKER_PRESERVATION` transcript, for that proof name only. This grants no authority, custody release or package
+readiness. The OD-M11-14 mapping is accepted for `BROKER_PRESERVATION` as well; `DEPLOYER_DENIAL`, `SECRET_HYGIENE` and
+`PRESERVATION_SET` stay PROPOSED and unpinned.
+
+| Field | Value |
+| --- | --- |
+| producer | `scripts/verify_broker_dev_current_incarnation.py:preservation` (`b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf`) |
+| run | one owner-authorized read-only run, 2026-10-17T08:28:00–08:28:53Z (main `5994f6a5`, deploy `39013841952`), streamed hash-gated over the existing route; remote exit 0, stderr empty |
+| transcript | `79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40`, 10 302 bytes, `BROKER_PRESERVATION=PASS`, `failures` `[]`; contract PASS |
+| evidence | `lilith-mb12-broker-pres-5994f6a`, `SHA256SUMS` `8772d463f02a7415eb04e69f4f4b66451f94b2c6f52e4d8138662ab3f8c94ec5` (re-verified locally before this record) |
+
+The transcript is byte-identical to the broker `preservation` output of the 2026-10-15 host U5 POST (before the signer
+start): broker state is unchanged across the M-B11 start. Pin cascade (supersedes §15):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
+| `mb12_readiness_inputs.py` | `74c2af17248abc56a15f9d4695b62480a1c783835f368128228aea195f91002c` |
+| `mb11_operator.py` | `9d73888f8e817bcb0685746b026ce39b45fd0a1e398079732288921563acfdbd` |

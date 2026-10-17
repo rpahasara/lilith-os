@@ -102,6 +102,7 @@ OD_M12_6_TRANSCRIPTS = {
     "SIGNER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
+    "BROKER_PRESERVATION": frozenset({"79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"}),
 }
 
 class Pr2InventoryTests(unittest.TestCase):
