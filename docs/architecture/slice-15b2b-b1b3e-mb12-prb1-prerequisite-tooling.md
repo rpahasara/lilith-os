@@ -419,3 +419,37 @@ E-20 INVENTORY = CLASSIFIED PASS (61d92686…), NOT OWNER-ACCEPTED;  DEV_ACCEPTE
 OD-M12-4 / OD-M12-7 / OD-M12-8 = PROPOSED;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
 M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 16. Addendum (2026-10-17): E-20 PR-2 inventory owner-accepted
+
+**Owner decision (2026-10-17):** the E-20 PR-2 inventory `61d9268613c13354c0184a30909a21f4cd2f8db20424bcb10f6f2e51168d46cf`
+(§15.2) is accepted under OD-M12-2. The acceptance became conditional on a local re-verification, which passed
+before this record. It takes effect when this record and its source pin are merged.
+
+| Item | Value |
+| --- | --- |
+| owner acceptance record | `lilith-mb12-e20-acceptance-3c01e24\OWNER-ACCEPTANCE-RECORD.txt`, SHA-256 `6a3dd81b80453b805ac46ae058dd4ea56c22c32855909a82ec5027b8ee894682` (the owner decision verbatim, its scope, the bound evidence hashes; never self-referential) |
+| acceptance document | `LILITH_PR2_INVENTORY_OWNER_ACCEPTANCE` v1, `dev`, `acceptedInventoryDigest` as above, `acceptanceRecordSha256` `6a3dd81b…`, `acceptedAt` `2026-10-17T10:00:14Z` (after the window end `09:44:11Z`); `acceptance.json` `335c57375b2dd2aebca2775fc518a970e689b233be27d723e1815d8eebc52952` |
+| acceptance evidence | `SHA256SUMS` `54c124584e8160c910687c2fb3492d68e1d9b2996362b4295bb15e7f8b4d0b82` |
+| re-verification | 20/20: both manifests and every file (`1b317f81…`, `a430504f…`); digest recomputed independently with the domain-separated JCS; eight kinds, counts, hashes and window; K-ACT / K-WIT identities and the host-key relationship; classification PASS |
+| C-4 | `slice-15b2b-b1b3e-mb2-kwit-completion.md` at `3c01e243` hashes to `8ee13904c9d7c306502cf6625c064636c2fda90594a90052ac1c90f6aaf7497f`, and it records the K-WIT crash-window C-4 `KNOWN_CUSTODY_DEBT` "until a later accepted record". The inventory names it as a carried debt only; the debt is **not** resolved |
+| scope | DEV project `lilith-agent-260823-27389`, provider listings only. The inventory carries no other-project data; the collector's existing incidental listing of the owner's other projects (§15.1) stays in the private evidence |
+| freshness | the inventory window `2026-10-17T09:38:16Z`–`09:44:11Z`; nothing later |
+
+Source pin: `mb12_pr2_inventory.DEV_ACCEPTED_INVENTORIES = {61d92686… → 6a3dd81b…}` (exactly one entry);
+`mb12_pr2_inventory.py` `49d46b9c…` → `0d089c5835506d8541bd041242a7cbc6216558e195e10b700c19647be268403f`. No other tool pins
+this file, and `mb12_readiness_inputs.py` (`74c2af17…`) and `mb11_operator.py` (`9d73888f…`) are unchanged. Under
+the DEV trust, `package_input(inventory, acceptance)` returns `status=ACCEPTED` with `recordSha256` `61d92686…`,
+`artefactClasses [NO_SNAPSHOTS]` and `namedDebts [C-4]`. It refuses a different digest, an unpinned inventory, a
+modified acceptance record SHA, a missing acceptance, an acceptance before the window end, a stale window and a
+caller-supplied DEV trust.
+
+**Not established:** host-level custody or host-local backup absence; whole-host rollback protection; freshness
+after `09:44:11Z`; any authority or custody release. E-20 is one input of the PR-1 package, and accepting it is not
+readiness-package acceptance or M-B12 PASS.
+
+```text
+E-20 = OWNER-ACCEPTED (61d92686… → 6a3dd81b…), EFFECTIVE ON MERGE;  C-4 = STILL RECORDED
+E-08 / E-21 / E-23 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
+M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```

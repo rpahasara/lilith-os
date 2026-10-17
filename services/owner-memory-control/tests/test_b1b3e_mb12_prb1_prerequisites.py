@@ -98,6 +98,9 @@ def live_inventory(**kwargs):
 
 
 # OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
+# E-20 (owner-accepted 2026-10-17): the only DEV PR-2 inventory an owner record has established.
+E20_ACCEPTED_INVENTORIES = {"61d9268613c13354c0184a30909a21f4cd2f8db20424bcb10f6f2e51168d46cf":
+                            "6a3dd81b80453b805ac46ae058dd4ea56c22c32855909a82ec5027b8ee894682"}
 OD_M12_6_TRANSCRIPTS = {
     "SIGNER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
@@ -224,7 +227,7 @@ class ForgeryPr2Tests(unittest.TestCase):
             I2.package_input(document, acceptance(digest, record=H("forged record")), environment="test",
                              trust=pr2_trust(digest))
         self.assertEqual(caught.exception.reason, "OWNER_ACCEPTANCE_NOT_ESTABLISHED")
-        self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), {})
+        self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), E20_ACCEPTED_INVENTORIES)
 
     def test_blocker3_not_before_and_expected_keys_are_required(self):
         document, digest = live_inventory()
@@ -870,7 +873,7 @@ class SourceGuardTests(unittest.TestCase):
 
     def test_dev_trust_pins_are_empty_until_owner_records_exist(self):
         self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)          # OD-M12-3, owner-accepted 2026-10-15
-        self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), {})
+        self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), E20_ACCEPTED_INVENTORIES)
         self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), {})
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
 
