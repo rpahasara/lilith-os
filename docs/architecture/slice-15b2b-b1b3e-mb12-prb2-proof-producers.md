@@ -262,7 +262,16 @@ One owner-authorized read-only `e07` run (2026-10-16T15:40Z, main `ef640377`, de
 it is not repeated here. The P1B-12 and namespace rows that §9 lists as NOT PERFORMED are now performed for this
 transcript.
 
-### 10.3 M-B11 preservation checkpoint (after PR #205)
+### 10.3 E-09 broker preservation (owner-accepted 2026-10-17)
+
+One owner-authorized read-only `verify_broker_dev_current_incarnation.py preservation` run (2026-10-17T08:28Z, deploy
+`39013841952`; evidence `lilith-mb12-broker-pres-5994f6a`, `SHA256SUMS`
+`8772d463f02a7415eb04e69f4f4b66451f94b2c6f52e4d8138662ab3f8c94ec5`) gave `BROKER_PRESERVATION=PASS`, `failures` `[]`,
+transcript `79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40`. The owner accepted that transcript, for
+that proof name only, under OD-M12-6; the record and pin are `slice-15b2b-b1b3e-mb11-signer-start-operator.md` §16.
+E-09 now has both halves pinned (`BROKER_DENIAL` §15, `BROKER_PRESERVATION` §16).
+
+### 10.4 M-B11 preservation checkpoint (after PR #205)
 
 Deploy `39013841952` (main `5994f6a53bbf7cc3c7d53abe87e17552d6f9fb1b`, success 2026-10-17T07:35:28Z): local W11 DR-5
 compare `W11_1_SIGNER_STARTED_EXACT` → `EQUAL` (194 / 155 / 29 lines, fail 0; evidence `lilith-mb11-pr205-dr5-5994f6a`,
@@ -272,22 +281,21 @@ compare `W11_1_SIGNER_STARTED_EXACT` → `EQUAL` (194 / 155 / 29 lines, fail 0; 
 `lilith-mb11-observe05-5994f6a`, `42cdd0192c4a449e6b0288394093985113e0348078aaeefbfceb4cd6b66ef792`). `01`–`04-POST11` and
 the start seal are unchanged. Routine checkpoints after this one are kept as evidence only, not as repository records.
 
-### 10.4 Remaining requirements
+### 10.5 Remaining requirements
 
 | Item | Status | Needs |
 | --- | --- | --- |
 | E-08 `DEPLOYER_DENIAL` | no admissible transcript: `deploy-dev.yml` tees the DR-5 stdout to `${RUNNER_TEMP}/authority-boundary.txt` but does not retain it; the GitHub log is not producer bytes | a reviewed retention of that file on a routine deploy, then an OD-M12-6 pin |
-| E-09 `BROKER_PRESERVATION` | producer `verify_broker_dev_current_incarnation.py preservation` (`b90ed6ef…`) and contract exist; no transcript pinned | one owner-authorized read-only run on the existing streamed route, then an OD-M12-6 pin |
 | E-20 PR-2 inventory | not collected; `DEV_ACCEPTED_INVENTORIES = {}` | a fresh inventory under the OD-M12-3 cutoff and an owner acceptance by digest (OD-M12-2) |
 | E-21 PR-3 off-host material | not confirmed; `DEV_ACCEPTED_CANDIDATES = {}` | the owner off-host material and confirmation by candidate digest (OD-M12-4) |
 | E-22 `SECRET_HYGIENE` | BLOCKED (§10.1) | owner decision on scope (OD-M12-7) |
 | E-23 `PRESERVATION_SET` | no accepted baseline | OD-M12-8 |
 
-Open owner decisions: OD-M12-1, OD-M12-2, OD-M12-4, OD-M12-7, OD-M12-8, OD-M11-12; OD-M11-14 for the four names not
-covered by §15.
+Open owner decisions: OD-M12-1, OD-M12-2, OD-M12-4, OD-M12-7, OD-M12-8, OD-M11-12; OD-M11-14 for the three names not
+covered by §15 / §16.
 
 ```text
-E-07 SIGNER/OS_DENIAL, E-09 BROKER_DENIAL = TRANSCRIPTS PINNED (OD-M12-6, §15);  E-09 BROKER_PRESERVATION = OPEN
+E-07 SIGNER/OS_DENIAL, E-09 BROKER_DENIAL + BROKER_PRESERVATION = TRANSCRIPTS PINNED (OD-M12-6, §15 / §16)
 E-08 = NO BYTE-EXACT TRANSCRIPT;  E-20 / E-21 / E-23 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
 M-B11 = W11_1 PRESERVED (05-POST11 EXACT, DR-5 EQUAL at 39013841952);  M-B12 = NOT PASSED;  CUSTODY = HELD
 AUTHORITY / FIRST MEMORY / PROD = NOT AUTHORIZED
