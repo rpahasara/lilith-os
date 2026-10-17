@@ -18,8 +18,8 @@ forms:
   recorded as `refused` (never truncated); a refused member is never EQUAL. The broker state files are metadata only
   (§23); absent members are recorded ABSENT. It prints one canonical JSON observation: evidence, never a proof.
 - `compare <baseline.json> <observation.json>` (owner, off-host): member-by-member equality against a BASELINE
-  observation that the owner accepted and that is pinned by its SHA-256 in `ACCEPTED_BASELINES` (EMPTY: no baseline
-  is accepted, so compare FAILS `BASELINE_NOT_ESTABLISHED` today). A PASS transcript is exactly `expected_pass(…)`.
+  observation that the owner accepted and that is pinned by its SHA-256 in `ACCEPTED_BASELINES` (OD-M12-8: one DEV
+  baseline; any other baseline FAILS `BASELINE_NOT_ESTABLISHED`). A PASS transcript is exactly `expected_pass(…)`.
 
 What this proof is NOT (each is a separate judgement with its own producer):
 
@@ -83,8 +83,13 @@ EXCLUDED_PREFIXES = ("/etc/credstore", "/etc/lilith-authority", "/var/lib/lilith
 LIMITS = {"maxFileBytes": 64 * 1024 * 1024, "maxTreeEntries": 65536, "maxTreeBytes": 1024 * 1024 * 1024,
           "maxDepth": 32}
 CHUNK = 1 << 20
-# Owner-accepted baseline observations: SHA-256 of the exact observation bytes -> the acceptance record SHA-256. EMPTY.
-ACCEPTED_BASELINES: Mapping[str, str] = {}
+# Owner-accepted baseline observations: SHA-256 of the exact observation bytes -> the acceptance record SHA-256.
+# E-23 (OD-M12-8, owner-accepted 2026-10-17T10:53:18Z; record slice-15b2b-b1b3e-mb12-prb2-proof-producers.md §11.3):
+# the root observe of 2026-10-17T10:38:08Z (evidence lilith-mb12-e23-baseline-c149c0c).
+ACCEPTED_BASELINES: Mapping[str, str] = {
+    "019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5":
+        "d4359c02c8953208c4e629b5df5d0120a4385d73741a61998de8749a60c8b47e",
+}
 NONCLAIM = ("NONCLAIM: DR-5 equality, HELD / custody / CURRENT / witness / ledger preservation and broker continuity "
             "are not judged here")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")

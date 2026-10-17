@@ -348,9 +348,28 @@ a merged change pins it. E-23 then still needs a later, independent `observe` (s
 after a later routine deploy) and an off-host `compare` PASS, whose transcript is admitted under OD-M12-6. No
 `compare` has been run, and no later observation exists.
 
+### 11.3 E-23 baseline owner-accepted (2026-10-17)
+
+**Owner decision (2026-10-17T10:53:18Z):** "I accept E-23 baseline observation
+`019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5` under OD-M12-8." The evidence was re-verified
+before recording (`SHA256SUMS` `1698571b…`, observation bytes `019e0117…`, local verification PASS). Owner acceptance
+record: `lilith-mb12-e23-acceptance-c149c0c\OWNER-ACCEPTANCE-RECORD.txt`, SHA-256
+`d4359c02c8953208c4e629b5df5d0120a4385d73741a61998de8749a60c8b47e` (`SHA256SUMS` `1822674b…`; the decision verbatim,
+its scope and the bound evidence; never self-referential).
+
+Source pin: `mb12_preservation_set_proof.ACCEPTED_BASELINES = {019e0117… → d4359c02…}` (exactly one entry). Pin
+cascade: `mb12_preservation_set_proof.py` `79f47ae8…` → `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0`,
+re-pinned in `mb12_readiness_inputs.PRODUCER_SCRIPT_SHA256`; `mb12_readiness_inputs.py` `74c2af17…` →
+`73d68e618f9cfd03485573489c16c239d9c525a751853490173a3af412d7f799`; `mb11_operator.py` `9d73888f…` →
+`a8efd3130828cb0d0d81d7af2c57ddabf8b5eef1efc1f4d528af11498749ddfd` (operator record §17). It takes effect on merge.
+
+This is the E-23 baseline only, not a `PRESERVATION_SET` proof. E-23 still needs one later, independent root `observe`
+(strictly after `2026-10-17T10:38:08Z`, normally after the next routine deploy) and an off-host
+`compare <baseline> <observation>` PASS. Its transcript must then be pinned under OD-M12-6 before E-23 is admitted.
+
 ```text
-OD-M12-8 = ACCEPTED (amended prerequisite);  E-23 BASELINE CANDIDATE = 019e0117… ELIGIBLE, NOT ACCEPTED
-ACCEPTED_BASELINES = {};  E-23 COMPARE = NOT RUN;  E-07 / E-09 / E-20 = ACCEPTED (pins unchanged)
+OD-M12-8 = ACCEPTED (amended prerequisite);  E-23 BASELINE = 019e0117… OWNER-ACCEPTED (→ d4359c02…), EFFECTIVE ON MERGE
+E-23 COMPARE = NOT RUN (needs a later observe);  E-07 / E-09 / E-20 = ACCEPTED (pins unchanged)
 E-08 / E-21 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
 M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
