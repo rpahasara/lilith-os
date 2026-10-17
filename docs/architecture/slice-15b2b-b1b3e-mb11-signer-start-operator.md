@@ -440,3 +440,16 @@ pins, and so the readiness and operator pins. No operator behaviour changes. Pin
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `73d68e618f9cfd03485573489c16c239d9c525a751853490173a3af412d7f799` |
 | `mb11_operator.py` | `a8efd3130828cb0d0d81d7af2c57ddabf8b5eef1efc1f4d528af11498749ddfd` |
+
+## 18. Addendum (2026-10-17): E-23 `PRESERVATION_SET` transcript pin — re-pin only
+
+The owner accepted the E-23 transcript `4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e` under OD-M12-6
+(record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §12). `DEV_ACCEPTED_PROOF_TRANSCRIPTS` gains
+`PRESERVATION_SET`, which changes `mb12_readiness_inputs.py` and so the operator pin. The preservation producer and
+its baseline are unchanged. Pin cascade (supersedes §17):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `78fba8af76e8c45e1ff103a2de45f790fe6eb2ae6d59ed017fb92edd2fb8fbd6` |
+| `mb11_operator.py` | `a6660d093744ab82cb5040b09102cc765620c3a92da0db59e47e4ccb7ce7b185` |

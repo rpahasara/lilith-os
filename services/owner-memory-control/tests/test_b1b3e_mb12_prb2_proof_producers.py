@@ -72,6 +72,7 @@ OD_M12_6_TRANSCRIPTS = {
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
     "BROKER_PRESERVATION": frozenset({"79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"}),
+    "PRESERVATION_SET": frozenset({"4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e"}),
 }
 
 class OsDenialTests(unittest.TestCase):
