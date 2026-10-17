@@ -1037,6 +1037,15 @@ One logical transition per row. PRE always includes: the preservation set
 > genesis-pin copy and the authorization-register copy, and requires `status P1B-6`. See the
 > [M-B6 remediation record](slice-15b2b-b1b3e-mb6-ledger-remediation.md) §11.
 
+> **Amendment (2026-10-17, OD-M11-12, owner-accepted; the table above is unchanged).** The M-B12 row's pass
+> criterion "eligibility READY; package digest" means: the complete PR-1 package E-01 … E-24 is **READY** under the
+> release verifier, over one complete hold observation and the captured HEALTH bound to the observed signer
+> InvocationID, with every input established by merged owner records. Its digest is the M-B12 output. E-17
+> `HOLD_RELEASE_ELIGIBILITY` READY alone is not M-B12 PASS. A NOT_READY package is recorded as `M-B12 NOT PASSED`,
+> and M-B13 does not start. The completed, owner-accepted M-B11 signer start is not reinterpreted. Verifier
+> semantics are unchanged. See the
+> [M-B12 PR-B1 record](slice-15b2b-b1b3e-mb12-prb1-prerequisite-tooling.md) §18.
+
 ## 28. Future phases
 
 Derived from §12–§20. The B1b-3d §23 L3a–L4 order is re-derived for V2 (PC-2).
