@@ -348,3 +348,74 @@ the regression test uses the same input.
 | 4 | `ADMIN_ACTIVITY_CREATE_CALLS` count 3 with zero artefacts classified `NO_SNAPSHOTS` and was ACCEPTED | `UNKNOWN_PROVENANCE` for every key; classification FAIL | `test_blocker4_admin_create_calls_without_artefacts_are_unknown_provenance` |
 | 5 | a caller window 2016 → 2036 admitted 2017 evidence | the window's lower bound is the trust cutoff; DEV cutoff undecided → refused | `test_blocker5_caller_window_cannot_reach_before_the_cutoff`, `ForgeryPr2Tests.test_blocker5_inventory_before_the_accepted_cutoff_is_stale`, `test_dev_builds_are_refused_until_the_owner_pins_exist` |
 | minor | an empty-material artefact classified `SAFE_RETAINED_CIPHERTEXT` | refused (`INVENTORY_ARTEFACT_MATERIAL_EMPTY`) | `test_minor_empty_material_is_refused` |
+
+## 15. Addendum (2026-10-17): OD-M12-1 and OD-M12-2 accepted; one E-20 inventory collected and classified
+
+Earlier sections keep their historical meaning. This addendum supersedes the §10 / §13 status of OD-M12-1 and
+OD-M12-2 only. It is authenticated as an owner record once reviewed and merged.
+
+**OD-M12-1 ACCEPTED (owner, 2026-10-17).** The pinned M-B12 prerequisite tooling is accepted as designed, with its
+schemas, producer contracts, trust boundaries and fail-closed behaviour unchanged: `mb12_pr2_inventory.py`
+(`49d46b9ca166bae853653300cdd174d2b7ddb0025e72a80123b408cbc7055008`), `mb12_pr3_material.py`
+(`cac0634bd15fff548822cead4a1bc1e587b015f0f668230365886f1200cc0774`) and `mb12_readiness_inputs.py`
+(`74c2af17248abc56a15f9d4695b62480a1c783835f368128228aea195f91002c`), at main `3c01e243`. This accepts no particular
+PR-2 inventory, PR-3 material or readiness package.
+
+**OD-M12-2 ACCEPTED (owner, 2026-10-17).** The E-20 inventory identity is
+`recordSha256 = SHA-256("LILITH_PR2_SNAPSHOT_INVENTORY_V1\0" ‖ JCS(inventory))` (`mb12_pr2_inventory.inventory_digest`,
+unchanged). The owner PR-2 acceptance must name that exact digest.
+
+### 15.1 E-20 collection (one owner-authorized provider-only batch)
+
+The historical PR-2 collector (`cloud_collect.sh`, `e04ff9c3…`, sealed in the 2026-09-29 PR-2 revalidation evidence,
+`SHA256SUMS` `67eb9a16…`) was reused with exactly two changes: the output directory and the Admin Activity start
+`2026-10-14T18:27:00Z` (OD-M12-3). An independent static preflight passed (read-only verbs only, closed stdin, no host
+transport, project `lilith-agent-260823-27389`). One run, 2026-10-17T09:38:16Z–09:44:11Z: 31 read-only provider calls
+(describe / list / get-iam-policy / Admin Activity read), every stderr empty, no DEV host contact. Evidence
+`lilith-mb12-e20-pr2-3c01e24`, `SHA256SUMS` `1b317f81daa0831c64012e1f4d25562ea7b586dae7080d9d2da6e1bb099dd894` (provider
+dumps stay in the private evidence directory).
+
+| Kind | Source listing | Count | Complete |
+| --- | --- | --- | --- |
+| `DISK_SNAPSHOTS` | `compute snapshots list` | 0 | yes |
+| `INSTANT_SNAPSHOTS` | `compute instant-snapshots list` | 0 | yes |
+| `IMAGES` | `compute images list --no-standard-images` | 0 | yes |
+| `MACHINE_IMAGES` | `compute machine-images list` | 0 | yes |
+| `SNAPSHOT_SCHEDULES` | `compute resource-policies list` | 0 | yes |
+| `BACKUP_DR` | enabled services (`backupdr.googleapis.com` not enabled) | 0 | yes |
+| `BUCKETS` | `storage buckets list` | 0 | yes |
+| `ADMIN_ACTIVITY_CREATE_CALLS` | Admin Activity since the cutoff (108 entries, all `iam.serviceAccounts.actAs`) | 0 | yes |
+
+The whole-life compute Admin Activity listing is byte-identical to 2026-09-29 and has no snapshot, image or
+machine-image create call. Of the other projects visible to the owner account, only `au4-vault` has compute enabled,
+with no snapshot, image, machine image or instant snapshot.
+
+### 15.2 Local inventory and classification (classification ≠ acceptance)
+
+One `LILITH_PR2_SNAPSHOT_INVENTORY` V1 document (`LIVE_OBSERVATION`, `dev`) was assembled from the sealed listings only:
+window `2026-10-17T09:38:16Z`–`09:44:11Z`; keys K-ACT `dd13a1fb…` and K-WIT `5d778701…` sealed under the host key (no
+public identity); no artefacts (every listing is empty); carried debt `C-4` (role K-WIT, `recordSha256` = SHA-256 of
+`slice-15b2b-b1b3e-mb2-kwit-completion.md` at `3c01e243`, `8ee13904c9d7c306502cf6625c064636c2fda90594a90052ac1c90f6aaf7497f`);
+`privateEvidenceSha256` = the collection `SHA256SUMS` digest. The pinned `classify` under the DEV trust values gives:
+
+```text
+classification = PASS;  reasons = []
+inventoryDigest = 61d9268613c13354c0184a30909a21f4cd2f8db20424bcb10f6f2e51168d46cf
+keyClasses = K_ACT NO_SNAPSHOTS, K_WIT NO_SNAPSHOTS, HOST_KEY NO_SNAPSHOTS;  namedDebts = [C-4]
+```
+
+Limitations: this is a provider listing. It establishes no host-level custody state and no provenance beyond the
+listed kinds, scope and Admin Activity retention (`wholeHostRollbackProtected: false`). `BACKUP_DR` is shown absent by
+service enablement, not by a vault listing. Inventory files: `inventory\` (`SHA256SUMS`
+`a430504f28dc5ddefc983eaa30997cb4a7b40325e4517b6031b57f4d32c43ee1`).
+
+**Not done:** E-20 is NOT accepted. `DEV_ACCEPTED_INVENTORIES` stays `{}`. Admission needs a separate owner PR-2
+acceptance naming digest `61d92686…` (dated at or after `2026-10-17T09:44:11Z`), then a merged record pinning that
+digest to the acceptance record SHA-256. The inventory is fresh only up to its window end.
+
+```text
+OD-M12-1 = ACCEPTED;  OD-M12-2 = ACCEPTED;  OD-M12-3 = ACCEPTED;  OD-M12-6 = ACCEPTED (operator record §15 / §16)
+E-20 INVENTORY = CLASSIFIED PASS (61d92686…), NOT OWNER-ACCEPTED;  DEV_ACCEPTED_INVENTORIES = {}
+OD-M12-4 / OD-M12-7 / OD-M12-8 = PROPOSED;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
+M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```
