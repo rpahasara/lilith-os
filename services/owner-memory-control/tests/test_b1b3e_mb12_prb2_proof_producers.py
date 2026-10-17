@@ -64,6 +64,9 @@ def os_read(**overrides):
 
 
 # OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
+# E-23 (OD-M12-8, owner-accepted 2026-10-17): the only DEV preservation-set baseline.
+E23_ACCEPTED_BASELINES = {"019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5":
+                          "d4359c02c8953208c4e629b5df5d0120a4385d73741a61998de8749a60c8b47e"}
 OD_M12_6_TRANSCRIPTS = {
     "SIGNER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
@@ -804,7 +807,7 @@ class PreservationSetTests(unittest.TestCase):
         installer = (ROOT / "scripts/dev_deployer/install_dev_deployer_boundary.sh").read_text(encoding="utf-8")
         for name in ("B1C_HELPER", "B1C_LIBRARY", "B1C_VERIFIER", "B1C_SUDOERS", "API_UNIT"):
             self.assertIn(dict((n, p) for n, p, _f in PS.MEMBERS)[name], installer, name)
-        self.assertEqual(dict(PS.ACCEPTED_BASELINES), {})
+        self.assertEqual(dict(PS.ACCEPTED_BASELINES), E23_ACCEPTED_BASELINES)
 
     def test_routine_helper_never_writes_the_api_unit(self):
         helper = (ROOT / "scripts/dev_deployer/lilith-dev-deploy").read_text(encoding="utf-8")
@@ -1075,7 +1078,7 @@ class DevFailsClosedTests(unittest.TestCase):
             RI.build({}, environment="dev")
         self.assertEqual(caught.exception.reason, "INPUT_MALFORMED")      # OD-M12-3 accepted; still fail-closed
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
-        self.assertEqual(dict(PS.ACCEPTED_BASELINES), {})
+        self.assertEqual(dict(PS.ACCEPTED_BASELINES), E23_ACCEPTED_BASELINES)
         self.assertTrue(SH.UNRESOLVED_SCOPE)
 
 

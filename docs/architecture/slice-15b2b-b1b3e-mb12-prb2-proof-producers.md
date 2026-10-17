@@ -300,3 +300,76 @@ E-08 = NO BYTE-EXACT TRANSCRIPT;  E-20 / E-21 / E-23 = OPEN;  E-22 = BLOCKED (JO
 M-B11 = W11_1 PRESERVED (05-POST11 EXACT, DR-5 EQUAL at 39013841952);  M-B12 = NOT PASSED;  CUSTODY = HELD
 AUTHORITY / FIRST MEMORY / PROD = NOT AUTHORIZED
 ```
+
+## 11. Addendum (2026-10-17): OD-M12-8 accepted with one amendment; first E-23 baseline candidate
+
+Earlier sections keep their historical meaning; this addendum supersedes the §6 / §9 / §10.5 status of OD-M12-8 only.
+It is an established owner decision once reviewed and merged.
+
+**OD-M12-8 ACCEPTED (owner, 2026-10-17)** as proposed in §6, with only the historical-state prerequisite amended. The
+text "(DR-5 `W10_1` EQUAL and a host POST)" is replaced by:
+
+> (on DEV's current accepted phase: DR-5 `W11_1_SIGNER_STARTED_EXACT` EQUAL on the immediately preceding successful
+> routine deployment, followed by one exact `mb11_operator observe`; the M-B10 preservation history remains
+> established by the accepted E-19 U5 and W11_0 records)
+
+Everything else stands: exactly the 22 B1b-3d §23 members of `mb12_preservation_set_proof.MEMBERS`, the producer and its
+`LIMITS`, the authority / custody / credential exclusions, exactly one independently verified baseline pinned in
+`ACCEPTED_BASELINES` only by a merged owner record, a later observation strictly after the baseline, and any
+re-baseline only by its own accepted owner record. **Why:** PR #186 / #187 merged on 2026-10-12. E-19 then replaced the
+release and M-B11 started the signer, so a `W10_1` DR-5 text and the stopped-signer host POST no longer exist. The
+M-B10 HELD preservation after #186 / #187 is carried by accepted records: the E-19 U5 host POSTs and DR-5 EQUAL
+(`slice-15b2b-b1b3e-e19-completion-record.md`, owner-accepted in `slice-15b2b-b1b3e-e19-completion-acceptance.md`) and the 2026-10-15 03:54:40Z W11_0 gate (`w10PhaseDirect`
+`W10_1_HELD_EXACT`; `slice-15b2b-b1b3e-mb11-signer-start-acceptance.md` §2). Those records are referenced, not rewritten.
+
+### 11.1 Amended prerequisite, met (2026-10-17)
+
+| Step | Evidence (`SHA256SUMS`) | Result |
+| --- | --- | --- |
+| routine deploy `39024555994` (main `c149c0cb`, PR #207) | `lilith-mb11-pr207-dr5-c149c0c` (`c498141e5023379af86c7c38ce30735a0bc0dd2f0d25965ac086f4f3e9cefb57`) | local DR-5 `W11_1_SIGNER_STARTED_EXACT` EQUAL, 194 / 155 / 29, 0 failures |
+| one owner-authorized `mb11_operator observe`, 10:35:19–10:35:38Z | `lilith-mb11-observe06-c149c0c` (`7fcddacd6314a82d13857cc3da8fad35752e75bddca94a8e7248d835b52fde51`) | `06-POST11` `MB11_OBSERVE_W11_1_EXACT`, K-ACT load count 1, reasons `[]`, output `ff9c8ce7…` = the accepted POST11 |
+
+### 11.2 First E-23 baseline candidate (NOT accepted)
+
+One owner-authorized root read-only `mb12_preservation_set_proof.py observe` (producer `79f47ae8…`, readiness-pinned),
+streamed hash-gated over the existing route, 2026-10-17T10:37:49Z: rc 0, stderr empty, no other DEV operation.
+
+| Item | Value |
+| --- | --- |
+| observation SHA-256 | `019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5` (485 064 bytes, `observedAt` `2026-10-17T10:38:08Z`) |
+| members | 22, exact order, all complete (no `refused`); the broker DBs are metadata only |
+| absent | `STAGE3_AUTHORIZATION_USED`, `STAGE3_ARM`, `STAGE3_GUARD`, `STAGE3_ACTIVATION_READY`: the unused / un-armed Stage III runtime paths (§3.3) |
+| bounds | largest member `BROKER_RELEASES`: 3 212 entries, 2 822 files, 74 184 653 bytes (limits 65 536 / 1 GiB / 64 MiB per file); selector → `releases/817a83e44cec8965479fd97fc30b7a0b3ae49ab2` |
+| evidence | `lilith-mb12-e23-baseline-c149c0c`, `SHA256SUMS` `1698571bd852b5f69ac9e327a84fb4c270c0cdd4b20a15e53d446c1c1ae07714` (original stdout bytes, preflight, driver, independent local verification 12/12) |
+
+The candidate is **eligible** for owner acceptance: canonical, exact members, within bounds, no refusal and expected
+absences only. It is **not** a baseline. `ACCEPTED_BASELINES` stays `{}` until an owner record names this SHA-256 and
+a merged change pins it. E-23 then still needs a later, independent `observe` (strictly after `10:38:08Z`, normally
+after a later routine deploy) and an off-host `compare` PASS, whose transcript is admitted under OD-M12-6. No
+`compare` has been run, and no later observation exists.
+
+### 11.3 E-23 baseline owner-accepted (2026-10-17)
+
+**Owner decision (2026-10-17T10:53:18Z):** "I accept E-23 baseline observation
+`019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5` under OD-M12-8." The evidence was re-verified
+before recording (`SHA256SUMS` `1698571b…`, observation bytes `019e0117…`, local verification PASS). Owner acceptance
+record: `lilith-mb12-e23-acceptance-c149c0c\OWNER-ACCEPTANCE-RECORD.txt`, SHA-256
+`d4359c02c8953208c4e629b5df5d0120a4385d73741a61998de8749a60c8b47e` (`SHA256SUMS` `1822674b…`; the decision verbatim,
+its scope and the bound evidence; never self-referential).
+
+Source pin: `mb12_preservation_set_proof.ACCEPTED_BASELINES = {019e0117… → d4359c02…}` (exactly one entry). Pin
+cascade: `mb12_preservation_set_proof.py` `79f47ae8…` → `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0`,
+re-pinned in `mb12_readiness_inputs.PRODUCER_SCRIPT_SHA256`; `mb12_readiness_inputs.py` `74c2af17…` →
+`73d68e618f9cfd03485573489c16c239d9c525a751853490173a3af412d7f799`; `mb11_operator.py` `9d73888f…` →
+`a8efd3130828cb0d0d81d7af2c57ddabf8b5eef1efc1f4d528af11498749ddfd` (operator record §17). It takes effect on merge.
+
+This is the E-23 baseline only, not a `PRESERVATION_SET` proof. E-23 still needs one later, independent root `observe`
+(strictly after `2026-10-17T10:38:08Z`, normally after the next routine deploy) and an off-host
+`compare <baseline> <observation>` PASS. Its transcript must then be pinned under OD-M12-6 before E-23 is admitted.
+
+```text
+OD-M12-8 = ACCEPTED (amended prerequisite);  E-23 BASELINE = 019e0117… OWNER-ACCEPTED (→ d4359c02…), EFFECTIVE ON MERGE
+E-23 COMPARE = NOT RUN (needs a later observe);  E-07 / E-09 / E-20 = ACCEPTED (pins unchanged)
+E-08 / E-21 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
+M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```

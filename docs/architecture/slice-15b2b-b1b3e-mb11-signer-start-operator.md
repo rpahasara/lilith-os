@@ -427,3 +427,16 @@ start): broker state is unchanged across the M-B11 start. Pin cascade (supersede
 | `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
 | `mb12_readiness_inputs.py` | `74c2af17248abc56a15f9d4695b62480a1c783835f368128228aea195f91002c` |
 | `mb11_operator.py` | `9d73888f8e817bcb0685746b026ce39b45fd0a1e398079732288921563acfdbd` |
+
+## 17. Addendum (2026-10-17): E-23 baseline pin — re-pin only
+
+The owner accepted the E-23 preservation-set baseline `019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5`
+under OD-M12-8 (record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §11.3). `ACCEPTED_BASELINES` in the producer
+now holds that one entry. This changes the producer's SHA-256, which `mb12_readiness_inputs.PRODUCER_SCRIPT_SHA256`
+pins, and so the readiness and operator pins. No operator behaviour changes. Pin cascade (supersedes §16):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `73d68e618f9cfd03485573489c16c239d9c525a751853490173a3af412d7f799` |
+| `mb11_operator.py` | `a8efd3130828cb0d0d81d7af2c57ddabf8b5eef1efc1f4d528af11498749ddfd` |
