@@ -17,9 +17,10 @@ confirmation of this exact candidate digest is ESTABLISHED. A SYNTHETIC_FIXTURE 
 
 Owner-confirmation trust boundary. A caller-supplied confirmation document is never evidence of an owner decision by
 itself (DEV_SYNTHETIC owner acts are unsigned). Its only established binding is a merged owner record pinned in
-source: `DEV_ACCEPTED_CANDIDATES` (candidate digest -> confirmation record SHA-256), which is EMPTY, so every DEV
-package input is REFUSED. `package_input` assembles the candidate itself from the owner inputs; it never takes an
-assembled object. DEV expectations and pins cannot be overridden; TEST must pass an explicit `Pr3TrustV1`.
+source: `DEV_ACCEPTED_CANDIDATES` (candidate digest -> confirmation record SHA-256; one E-21 entry, OD-M12-4), so
+every other DEV package input is REFUSED. `package_input` assembles the candidate itself from the owner inputs; it
+never takes an assembled object. DEV expectations and pins cannot be overridden; TEST must pass an explicit
+`Pr3TrustV1`.
 
 E-25 … E-28 (owner freshness, record 1, P3-3 storage, envelope 1) are NOT bound here: the verifier input has no field
 for them (OD-M11-13). `offhost_reproduction` is the RR-38 B comparison of this material with a PR-1 package.
@@ -89,7 +90,12 @@ DEV_EXPECTED = {
 }
 EXPECTED_FIELDS = frozenset(DEV_EXPECTED)
 # Owner PR-3 confirmations established by a merged owner record: candidate digest -> confirmation record SHA-256.
-DEV_ACCEPTED_CANDIDATES: Mapping[str, str] = {}
+# E-21 (OD-M12-4, owner-confirmed 2026-10-17T16:33:23Z; record slice-15b2b-b1b3e-mb12-prb1-prerequisite-tooling.md
+# §17): the seven owner-retained public sources (evidence lilith-mb12-e21-candidate-b3aa16c).
+DEV_ACCEPTED_CANDIDATES: Mapping[str, str] = {
+    "5d7a4e2bc530c3c04ac99b3494ae417e3042475cd246f917853174340389d842":
+        "108b2ae2befbe12a5e153d50002b39e52d36c14d1abed2115afd3698845af0ab",
+}
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 NONCLAIMS = ("candidate assembled != PR-3 full material accepted", "register entry != authorization",
@@ -253,7 +259,9 @@ def package_input(inputs: Any, confirmation: Any, *, environment: str, trust: Pr
                   ) -> dict[str, Any]:
     """The E-21 `offHostMaterial` verifier input: assembled here from the owner inputs, and only when the owner's
     confirmation of exactly that candidate digest is established by `trust.accepted_candidates`."""
-    trust = trust_for(environment, trust)
+    resolved = trust_for(environment, trust)
+    # The caller's own value goes to `assemble`, which resolves it the same way: on DEV it must stay None (a resolved
+    # Pr3TrustV1 passed back in would be refused as a caller override, so no DEV input could ever be PRESENT).
     assembled = assemble(inputs, environment=environment, trust=trust)
     candidate = assembled["candidate"]
     _need(candidate["evidenceClass"] == OWNER_RETAINED, "SYNTHETIC_FIXTURE_NOT_PACKAGE_INPUT")
@@ -267,7 +275,7 @@ def package_input(inputs: Any, confirmation: Any, *, environment: str, trust: Pr
           "OWNER_CONFIRMATION_MALFORMED")
     _need(confirmation["confirmedCandidateDigest"] == assembled["candidateDigest"],
           "OWNER_CONFIRMATION_DIGEST_MISMATCH")
-    _need(trust.accepted_candidates.get(assembled["candidateDigest"]) == confirmation["confirmationRecordSha256"],
+    _need(resolved.accepted_candidates.get(assembled["candidateDigest"]) == confirmation["confirmationRecordSha256"],
           "OWNER_CONFIRMATION_NOT_ESTABLISHED")
     return dict(candidate["material"])
 

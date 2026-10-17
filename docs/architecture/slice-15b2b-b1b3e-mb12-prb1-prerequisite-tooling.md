@@ -453,3 +453,45 @@ E-20 = OWNER-ACCEPTED (61d92686… → 6a3dd81b…), EFFECTIVE ON MERGE;  C-4 = 
 E-08 / E-21 / E-23 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
 M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 17. Addendum (2026-10-17): OD-M12-4 accepted; E-21 PR-3 material confirmed
+
+**OD-M12-4 ACCEPTED (owner, 2026-10-17)** as proposed in §10. The PR-3 owner confirmation names the exact candidate
+digest; `registerSha256` is the SHA-256 of the original authorization-register bytes; the confirmation is established
+only by this reviewed, merged record and its `DEV_ACCEPTED_CANDIDATES` pin. The owner confirmed exactly one E-21
+candidate. That confirmation is limited to the seven owner-retained public sources below. It is **not** a custody release,
+authority activation, readiness-package acceptance or First Memory authorization.
+
+| Item | Value |
+| --- | --- |
+| candidate digest | `5d7a4e2bc530c3c04ac99b3494ae417e3042475cd246f917853174340389d842` (`LILITH_PR3_OFFHOST_MATERIAL_CANDIDATE` v1, `dev`, `OWNER_RETAINED_PUBLIC_BYTES`; re-derived independently as SHA-256(domain ‖ JCS)) |
+| confirmation record | `lilith-mb12-e21-confirmation-b3aa16c\OWNER-CONFIRMATION-RECORD.txt`, SHA-256 `108b2ae2befbe12a5e153d50002b39e52d36c14d1abed2115afd3698845af0ab` (owner decision verbatim, sources, scope, nonclaims); `confirmation.json` `884b75aa…` (`confirmedAt` `2026-10-17T16:33:23Z`); `SHA256SUMS` `0e4b70e7…` |
+| candidate evidence | `lilith-mb12-e21-candidate-b3aa16c`, `SHA256SUMS` `a2cab6e3bf5b0bd2431afcf410b90756cd9c7a9c96fce78601c5c87b6e68a060` (tool `mb12_pr3_material.py` `cac0634b…` at `b3aa16ce`, one `candidate` run rc 0; an earlier invocation failed at import and ran no candidate operation, and its output is kept) |
+| sources (SHA-256) | K-ACT publication `d7647976…`; K-WIT publication `9e9dd078…` (key `5d778701…`); registry-root anchor `bc5f00a7…` (K-ROOT `cb36daf1…`); Registry V1 `46b0bfc5…` (head `fa662721…` v1, signature verified); genesis pin `35747736…` (`ac892dc2…`); authorization register `8d5ab875…` (no authorization; genesis head only); successor ceremony register `06c4d067…` (owner-created, `ceremonies: []`, WSL `/root/lilith-owner-material/e21/`, root `0600`) |
+| material | `status PRESENT`, `registerSha256` `8d5ab875…`, `authorizationIds []`, `burnedOrdinals []`, release `ba943e1a…` / manifest `b8393015…` |
+
+Source pin: `mb12_pr3_material.DEV_ACCEPTED_CANDIDATES = {5d7a4e2b… → 108b2ae2…}` (exactly one entry). **Defect fix in
+the same change:** `package_input` resolved the DEV trust and then passed the resolved object into `assemble`, which
+refused it as a caller override (`DEV_TRUST_NOT_OVERRIDABLE`). So no DEV PR-3 input, the readiness builder's included,
+could ever be `PRESENT`; the synthetic tests only exercised `test`. Now the caller's own value goes to `assemble` and
+the resolved trust is used for the pin check. Caller-supplied DEV trust is still refused, and a regression test covers
+the DEV path. `mb12_pr3_material.py` `cac0634b…` → `5691237294bd953d10de429d86954d5d4d548e9c76bbe26480518401f4a931d7`.
+No tool pins this file, so no operator cascade follows. Under the DEV trust, the confirmed input is `PRESENT`. A wrong
+digest, a modified record SHA, a missing confirmation, a synthetic fixture, a changed source and a caller trust are each
+refused. No DEV readiness package builds.
+
+### 17.1 Owner freshness: actual state (E-25 … E-28 remain OD-M11-13)
+
+- Replica A, in the original WSL distribution at `/root/lilith-owner-freshness/owner-primary-dev-synthetic-01`,
+  holds Package C record 1 `77752db1…` (file `830bf494…`) with `REPLICA.json` `fbdd045c…`. Its acceptance store holds
+  envelope 1 `95da36cd…` (file `43166b80…`, `ACCEPTANCE.json` `ced439e9…`). All are byte-identical to
+  `slice-15b2b-b1b3e-pkgc-completion.md` (C2, C4A). The P3-3 record's "0 records" describes the state before Package C.
+- Replica B: the accepted Package C evidence (C3, C4B) and the M-B10 package observation show the matching record 1
+  (byte-identical) and envelope 1. Replica B was **not** newly inspected in this batch.
+- A current freshness judgement at package time, and binding E-25 … E-28 into the package, remain OD-M11-13. No
+  replica or acceptance store was written.
+
+```text
+E-21 = CONFIRMED (5d7a4e2b… → 108b2ae2…), EFFECTIVE ON MERGE;  OD-M12-4 = ACCEPTED
+E-25 … E-28 = NOT BOUND (OD-M11-13);  M-B12 = NOT PASSED;  CUSTODY = HELD
+```
