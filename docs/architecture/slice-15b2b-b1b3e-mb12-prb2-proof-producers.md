@@ -373,3 +373,31 @@ E-23 COMPARE = NOT RUN (needs a later observe);  E-07 / E-09 / E-20 = ACCEPTED (
 E-08 / E-21 = OPEN;  E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative)
 M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 12. Addendum (2026-10-17): E-23 `PRESERVATION_SET` transcript accepted under OD-M12-6
+
+**Owner decision (2026-10-17):** under OD-M12-6, the owner accepts exactly one `PRESERVATION_SET` transcript,
+`4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e`, conditional on a final local verification, which
+passed (18/18) before this record. The OD-M11-14 mapping is accepted for `PRESERVATION_SET` only. `DEPLOYER_DENIAL` and
+`SECRET_HYGIENE` stay PROPOSED and unpinned. The decision grants no authority or custody release, and does not
+complete M-B12.
+
+| Item | Value |
+| --- | --- |
+| producer | `mb12_preservation_set_proof.py:compare` (`8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0`, main `c2cbb2d9`; byte-identical copy run in WSL, so LF stdout is exact) |
+| baseline | `019e0117baaa7bd920b78047fb0ddcb6c49318bfd3a2d30d9dd134b98f78a0b5` (`2026-10-17T10:38:08Z`; pinned → `d4359c02…`, §11.3); evidence `lilith-mb12-e23-baseline-c149c0c` (`SHA256SUMS` `1698571b…`) |
+| later observation | `5218f4af2e726cbdf5de8e7163059336f282c21739b88bf0459421408e6cca67` (`2026-10-17T11:15:43Z`, one owner-authorized root `observe` after deploy `39027536040`, DR-5 W11_1 EQUAL `0837d255…`); evidence `lilith-mb12-e23-observe-c2cbb2d` (`SHA256SUMS` `45aff903857f63c91944eca0403ce4510db80bf2d6a6db75e7d40373ec97d16f`) |
+| transcript | 1 941 bytes: 22 `EQUAL` lines, `PRESERVATION_SET_PROOF=PASS`; exit 0, stderr empty (from the preserved `compare.rc` / `compare.err`); byte-identical to `expected_pass(…)`; `mb12_readiness_inputs.CONTRACTS` → `PASS` |
+| evidence | `lilith-e23-compare-c2cbb2d`, `SHA256SUMS` `fc4d53913f35de77a71eb3ab9e60f7b5166bcdaa7e4980b5788dce869b7e8ce6` |
+
+Source pin: `mb12_readiness_inputs.DEV_ACCEPTED_PROOF_TRANSCRIPTS["PRESERVATION_SET"] = {4692f3ba…}`. The four earlier
+bindings are unchanged. The baseline and the producer are unchanged. Pin cascade: operator record §18.
+
+Still outstanding (separate, unchanged): E-08 `DEPLOYER_DENIAL` (no byte-exact transcript retained), E-22
+`SECRET_HYGIENE` (BLOCKED; `JOURNAL_SECRET_SCAN=FAIL` authoritative; OD-M12-7), E-21 (PR-3 material confirmation,
+OD-M12-4) and E-25 … E-28 (OD-M11-13). E-23 PASS is not package READY.
+
+```text
+E-07 / E-09 / E-20 / E-23 = OWNER-ACCEPTED EVIDENCE PINNED;  E-08 / E-21 = OPEN;  E-22 = BLOCKED
+M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```
