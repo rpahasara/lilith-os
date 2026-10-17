@@ -366,3 +366,41 @@ verdict changes the scan FAIL. Running `purpose` needs its own owner authorizati
 | `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
 | `mb12_readiness_inputs.py` | `9272b49004fb914820b609052b327703cd8ac51a4b86ca61a69f3737a6e9998d` |
 | `mb11_operator.py` | `c8ecfd43511f4fa9683aa444fc9b44a739930007f708fee06b11aa7a3201b2a5` |
+
+## 15. Addendum (2026-10-16): OD-M12-6 owner decision — three proof transcripts pinned
+
+**OD-M12-6 ACCEPTED by the owner (2026-10-16).** A DEV proof transcript is admitted as a package input only when it is
+the producer's own stdout bytes from one owner-authorized run of the producer pinned in
+`mb12_readiness_inputs.PRODUCER_SCRIPT_SHA256`, satisfies that producer's existing contract
+(`mb12_readiness_inputs.CONTRACTS`), and its SHA-256 is listed under the proof name in `DEV_ACCEPTED_PROOF_TRANSCRIPTS`
+by a reviewed, merged owner record (this addendum). No other signature system is introduced. The OD-M11-14 producer
+mapping is accepted for `SIGNER_DENIAL`, `BROKER_DENIAL` and `OS_DENIAL` only; the other four names stay PROPOSED.
+
+Evidence: one owner-authorized read-only `mb12_dev_reads.py e07 RUN` (2026-10-16T15:40Z, main `ef640377`, deploy
+`38854041173`), evidence `lilith-mb12-e07-ef64037`, `SHA256SUMS`
+`29c5a575ca7950207cbbc242c4f149ea70dd7d75753bbc168970a0ec33ca1674`. Both remote calls rc 0, stderr empty; no denial
+probe obtained access.
+
+| Proof | Producer (script SHA-256) | Transcript SHA-256 | Contract |
+| --- | --- | --- | --- |
+| `SIGNER_DENIAL` (E-07) | `scripts/authority_custody_denial_proof.py:P1B-12` (`f4e39c81…`) | `92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1` | PASS; 9 956 B, 144 lines, exit 0, byte-equal to the rebuilt PASS (134 principal + 9 signer-namespace DENIED) |
+| `BROKER_DENIAL` (E-09) | the same P1B-12 transcript | `92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1` | PASS (the broker is an outsider in every row) |
+| `OS_DENIAL` (E-07) | `services/owner-memory-control/tools/mb12_os_denial_proof.py:UNIT` (`e6754228…`) | `3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a` | PASS; 762 B, exit 0, P1B-10R drop-in state |
+
+**Still pending (not pinned):**
+
+- `DEPLOYER_DENIAL` (E-08): no admissible transcript. `deploy-dev.yml` tees the DR-5 stdout to
+  `${RUNNER_TEMP}/authority-boundary.txt` but does not retain it; the GitHub log interleaves gcloud stderr and timestamps,
+  so the producer's exact bytes are not recoverable. A reconstruction is not admitted.
+- `BROKER_PRESERVATION` (E-09 second half): no transcript bound. E-09 stays incomplete.
+- `SECRET_HYGIENE` (E-22): BLOCKED; the original `JOURNAL_SECRET_SCAN=FAIL` remains authoritative.
+- `PRESERVATION_SET` (E-23): waits on OD-M12-8.
+
+A pinned transcript is not package READY, and E-17 READY is not M-B12 PASS. M-B12 NOT PASSED; custody HELD. Pin
+cascade (supersedes §14):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a` |
+| `mb12_readiness_inputs.py` | `67f78851287773a3c9ccce478cec6ee5fb707ef3d9ebc00955bfa69e818a3238` |
+| `mb11_operator.py` | `e667487150987e0b3439dbb27af50e19920510ca7dfda7b63f5136770c7b4baa` |

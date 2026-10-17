@@ -22,8 +22,9 @@ Fail-closed rules (never a default, never a synthetic PASS):
   bytes must satisfy that producer's exact terminal contract (phase, final line, exit status; for the custody denial
   proof the complete expected PASS transcript is rebuilt from the script's own rows), the result and transcript digest
   are DERIVED here, and the digest must be ESTABLISHED by the trust's accepted-transcript pins (DEV:
-  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`, EMPTY). `OS_DENIAL`, `SECRET_HYGIENE`, `PRESERVATION_SET` have the PR-B2
-  producers (`mb12_os_denial_proof`, `mb12_secret_hygiene_proof`, `mb12_preservation_set_proof`) with exact contracts;
+  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`; OD-M12-6 pins SIGNER_DENIAL, BROKER_DENIAL and OS_DENIAL only). `OS_DENIAL`,
+  `SECRET_HYGIENE`, `PRESERVATION_SET` have the PR-B2 producers (`mb12_os_denial_proof`, `mb12_secret_hygiene_proof`,
+  `mb12_preservation_set_proof`) with exact contracts;
   a missing proof stays missing (NOT_READY downstream);
 - PR-2 / PR-3 enter only through `mb12_pr2_inventory.package_input` / `mb12_pr3_material.package_input`, called here on
   the canonical inventory + acceptance / owner inputs + confirmation; a package object is never accepted. Both refuse
@@ -115,8 +116,18 @@ PRODUCER_SCRIPT_SHA256 = {
     "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "cf2369ffcb90d440d9f99d3133f770029492be5fdfeb14bb88d89bed8d5b6a2a",
     "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "79f47ae8f25e5d20f0066485196e910f78e3949c03dc97bebfbbf84681e485f8",
 }
-# Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s. EMPTY.
-DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {}
+# Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s.
+# OD-M12-6 (owner-accepted 2026-10-16; docs/architecture/slice-15b2b-b1b3e-mb11-signer-start-operator.md §15):
+# the one owner-authorized `e07` run of 2026-10-16T15:40Z (evidence lilith-mb12-e07-ef64037). One P1B-12
+# transcript serves SIGNER_DENIAL and BROKER_DENIAL (OD-M11-14 mapping, accepted for these names only).
+# DEPLOYER_DENIAL, BROKER_PRESERVATION, SECRET_HYGIENE and PRESERVATION_SET stay unpinned.
+_P1B12_TRANSCRIPT = "92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"
+_OS_DENIAL_TRANSCRIPT = "3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"
+DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {
+    "SIGNER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
+    "BROKER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
+    "OS_DENIAL": frozenset({_OS_DENIAL_TRANSCRIPT}),
+}
 
 # The accepted DEV records (public values only).
 DEV_PINS = {

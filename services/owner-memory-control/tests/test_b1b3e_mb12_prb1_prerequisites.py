@@ -97,6 +97,13 @@ def live_inventory(**kwargs):
     return document, I2.inventory_digest(document)
 
 
+# OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
+OD_M12_6_TRANSCRIPTS = {
+    "SIGNER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
+    "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
+    "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
+}
+
 class Pr2InventoryTests(unittest.TestCase):
     def classify(self, document, **kwargs):
         return I2.classify(document, environment=document["environment"], expected_keys=KEYS, **kwargs)
@@ -711,7 +718,7 @@ class ReadinessInputTests(unittest.TestCase):
             with self.assertRaises(RI.Refused) as caught:
                 RI.expected_custody_denial_pass("P1B-12")
         self.assertEqual(caught.exception.reason, "PRODUCER_SCRIPT_NOT_PINNED")
-        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})
+        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
 
     def test_blocker5_caller_window_cannot_reach_before_the_cutoff(self):
         wide = {"notBefore": "2016-01-01T00:00:00Z", "notAfter": "2036-01-01T00:00:00Z"}   # accepted at 64df007
@@ -864,7 +871,7 @@ class SourceGuardTests(unittest.TestCase):
         self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)          # OD-M12-3, owner-accepted 2026-10-15
         self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), {})
         self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), {})
-        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), {})
+        self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
 
     def test_proof_producers_are_the_recorded_mapping_and_pinned_scripts(self):
         self.assertEqual(tuple(RI.PROPOSED_PROOF_PRODUCERS), PA.REQUIRED_PROOFS)
