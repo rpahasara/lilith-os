@@ -98,6 +98,9 @@ def live_inventory(**kwargs):
 
 
 # OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
+# E-21 (OD-M12-4, owner-confirmed 2026-10-17): the only DEV PR-3 candidate an owner record has established.
+E21_ACCEPTED_CANDIDATES = {"5d7a4e2bc530c3c04ac99b3494ae417e3042475cd246f917853174340389d842":
+                           "108b2ae2befbe12a5e153d50002b39e52d36c14d1abed2115afd3698845af0ab"}
 # E-20 (owner-accepted 2026-10-17): the only DEV PR-2 inventory an owner record has established.
 E20_ACCEPTED_INVENTORIES = {"61d9268613c13354c0184a30909a21f4cd2f8db20424bcb10f6f2e51168d46cf":
                             "6a3dd81b80453b805ac46ae058dd4ea56c22c32855909a82ec5027b8ee894682"}
@@ -436,7 +439,7 @@ class Pr3MaterialTests(unittest.TestCase):
         with self.assertRaises(M3.Refused) as caught:
             M3.package_input(pr3_inputs(self.X, self.host), confirmation(digest), environment="test")
         self.assertEqual(caught.exception.reason, "TRUST_REQUIRED")
-        self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), {})
+        self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), E21_ACCEPTED_CANDIDATES)
 
     def test_dev_expectations_name_the_accepted_records(self):
         self.assertEqual(M3.DEV_EXPECTED["registryHead"]["registryVersion"], 1)
@@ -851,6 +854,27 @@ class OdM12_3ReadinessTests(ReadinessInputTests):
 
 # --------------------------------------------------------------- source guards ---
 
+class OdM12_4DevPathTests(unittest.TestCase):
+    """E-21 (OD-M12-4): on DEV the caller's trust (None) reaches `assemble`; a resolved trust is never passed back."""
+
+    def assembled(self, digest):
+        return {"candidate": {"evidenceClass": M3.OWNER_RETAINED, "material": {"status": "PRESENT"}},
+                "candidateDigest": digest}
+
+    def test_dev_package_input_passes_the_callers_trust_and_needs_the_pin(self):
+        digest, record = H("dev candidate"), H("dev confirmation record")
+        owner = confirmation(digest, environment="dev", record=record)
+        with mock.patch.object(M3, "assemble", return_value=self.assembled(digest)) as stub,                 mock.patch.dict(M3.DEV_ACCEPTED_CANDIDATES, {digest: record}, clear=True):
+            self.assertEqual(M3.package_input({}, owner, environment="dev"), {"status": "PRESENT"})
+            self.assertIsNone(stub.call_args.kwargs["trust"])
+            with self.assertRaises(M3.Refused) as caught:
+                M3.package_input({}, confirmation(digest, environment="dev", record=H("x")), environment="dev")
+            self.assertEqual(caught.exception.reason, "OWNER_CONFIRMATION_NOT_ESTABLISHED")
+            with self.assertRaises(M3.Refused) as caught:
+                M3.package_input({}, owner, environment="dev", trust=M3.trust_for("dev", None))
+            self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")
+
+
 class SourceGuardTests(unittest.TestCase):
     SOURCES = ("mb12_pr2_inventory.py", "mb12_pr3_material.py", "mb12_readiness_inputs.py")
 
@@ -875,7 +899,7 @@ class SourceGuardTests(unittest.TestCase):
     def test_dev_trust_pins_are_empty_until_owner_records_exist(self):
         self.assertEqual(I2.DEV_FRESHNESS_NOT_BEFORE, OD_M12_3_CUTOFF)          # OD-M12-3, owner-accepted 2026-10-15
         self.assertEqual(dict(I2.DEV_ACCEPTED_INVENTORIES), E20_ACCEPTED_INVENTORIES)
-        self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), {})
+        self.assertEqual(dict(M3.DEV_ACCEPTED_CANDIDATES), E21_ACCEPTED_CANDIDATES)
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
 
     def test_proof_producers_are_the_recorded_mapping_and_pinned_scripts(self):

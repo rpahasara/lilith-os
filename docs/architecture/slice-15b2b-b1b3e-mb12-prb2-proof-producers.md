@@ -401,3 +401,18 @@ OD-M12-4) and E-25 … E-28 (OD-M11-13). E-23 PASS is not package READY.
 E-07 / E-09 / E-20 / E-23 = OWNER-ACCEPTED EVIDENCE PINNED;  E-08 / E-21 = OPEN;  E-22 = BLOCKED
 M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 13. Addendum (2026-10-17): OD-M12-7 ceremony scope — B1b-3d L2b included; E-22 stays BLOCKED
+
+**OD-M12-7 scope decision (owner, 2026-10-17):** B1b-3d L2b (K-ACT generation) is **included** in the E-22 ceremony
+scope, because it handled private credential material. This is a scope decision only:
+
+- the original `JOURNAL_SECRET_SCAN=FAIL` (12 `PEM_PRIVATE_KEY` markers, §10.1) remains authoritative; the three
+  `sudo` / `GREP` sessions remain `UNKNOWN`;
+- **no** security exception, waiver, journal deletion, remediation or successor ceremony is approved;
+- **E-22 remains BLOCKED.** Including L2b places those markers inside the scope; it does not make the scan PASS.
+
+The producer is unchanged. `mb12_secret_hygiene_proof.UNRESOLVED_SCOPE` still names L2b, and `prove` still FAILS. Any
+later change that encodes this decision must keep complete coverage of L2b's window and the outstanding FAIL; it must
+never turn the recorded FAIL into a PASS. The security disposition, meaning an explicit exception or a remediation, is a
+separate owner decision that has not been taken.
