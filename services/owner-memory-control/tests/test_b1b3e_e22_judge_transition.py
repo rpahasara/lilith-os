@@ -118,6 +118,79 @@ class ReleaseAndDeltaTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "INSTALLED_MODULE_PIN_UNEXPECTED")
 
 
+def inspection(source: str, *, judge: bytes, installed: bool = False, **changes) -> dict:
+    """A synthetic build inspection of the real payload map (the attest tool's identity shape)."""
+    import json
+    files = {member: {"sha256": sha(data), "size": len(data), "installMode": "0644"}
+             for member, data in RFS.runtime_payloads(ROOT).items()}
+    files[J.PR1_ACCEPTANCE_MEMBER] = {"sha256": sha(judge), "size": len(judge), "installMode": "0644"}
+    identity = {
+        "sourceCommit": source, "releaseRole": "lilith-authority-dev",
+        "archive": {"sha256": J.OLD_ARCHIVE_SHA256 if installed else sha(b"new archive " + source.encode())},
+        "manifest": {"sha256": J.OLD_MANIFEST_SHA256 if installed else sha(b"new manifest " + source.encode())},
+        "payload": files, "unitDigests": {"assets/unit": "1" * 64}, "cliDigests": {"cli/x": "2" * 64},
+        "hostTargets": {"/usr/local/sbin/x": {"member": "cli/x"}}, "dependencyInventory": {"sha256": "3" * 64},
+        "runtimeDigests": {"authority": sha(judge), "witness": "4" * 64, "rootTooling": "5" * 64},
+        "tarMembers": [{"name": name} for name in sorted(files)],
+    }
+    for key, value in changes.items():
+        identity[key] = value
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return {"inspectionType": J.INSPECTION_TYPE, "schemaVersion": 1, "identity": identity,
+            "identitySha256": sha(canonical)}
+
+
+class BuildGateTests(unittest.TestCase):
+    NEW_SOURCE = "f" * 40
+
+    def setUp(self):
+        self.source = (ROOT / J.PR1_ACCEPTANCE_SOURCE).read_bytes()
+        self.installed = inspection(J.OLD_RELEASE, judge=E19_BYTES, installed=True)
+
+    def test_a_one_member_build_passes(self):
+        self.assertEqual(J.check_inspection_delta(inspection(self.NEW_SOURCE, judge=self.source), self.installed), [])
+
+    def test_every_other_difference_fails(self):
+        base = inspection(self.NEW_SOURCE, judge=self.source)
+        other = dict(base["identity"]["payload"])
+        member = next(m for m in sorted(other) if m != J.PR1_ACCEPTANCE_MEMBER)
+        cases = {
+            "judge unchanged": (inspection(self.NEW_SOURCE, judge=E19_BYTES), "PAYLOAD_DELTA_NOT_EXACT"),
+            "another member": (inspection(self.NEW_SOURCE, judge=self.source,
+                                          payload={**other, member: {**other[member], "sha256": "0" * 64}}),
+                               "PAYLOAD_DELTA_NOT_EXACT"),
+            "extra member": (inspection(self.NEW_SOURCE, judge=self.source,
+                                        payload={**other, "lilith_owner_memory/extra.py": other[member]}),
+                             "PAYLOAD_FILE_SET"),
+            "unit changed": (inspection(self.NEW_SOURCE, judge=self.source, unitDigests={"assets/unit": "9" * 64}),
+                             "IDENTITY_CHANGED:unitDigests"),
+            "root tooling changed": (inspection(self.NEW_SOURCE, judge=self.source, runtimeDigests={
+                "authority": "a" * 64, "witness": "4" * 64, "rootTooling": "b" * 64}),
+                "RUNTIME_DIGEST_CHANGED:rootTooling"),
+            "source is the installed commit": (inspection(J.OLD_RELEASE, judge=self.source),
+                                               "NEW_SOURCE_COMMIT_INVALID"),
+        }
+        for label, (candidate, failure) in cases.items():
+            with self.subTest(label=label):
+                failures = J.check_inspection_delta(candidate, self.installed)
+                self.assertTrue(any(f.startswith(failure) for f in failures), failures)
+
+    def test_the_installed_side_is_bound_to_the_e19_build(self):
+        other = inspection(J.OLD_RELEASE, judge=E19_BYTES)                     # not the pinned E-19 archive
+        self.assertIn("INSTALLED_INSPECTION_NOT_THE_E19_BUILD",
+                      J.check_inspection_delta(inspection(self.NEW_SOURCE, judge=self.source), other))
+        tampered = dict(self.installed, identitySha256="0" * 64)
+        with self.assertRaises(J.Refused) as caught:
+            J.check_inspection_delta(inspection(self.NEW_SOURCE, judge=self.source), tampered)
+        self.assertEqual(caught.exception.reason, "INSPECTION_IDENTITY_DIGEST")
+        self.assertEqual((J.OLD_ARCHIVE_SHA256, J.OLD_MANIFEST_SHA256),
+                         (E19.NEW_RELEASE_ATTESTATION["archiveSha256"], E19.NEW_MANIFEST_SHA256))
+
+    def test_cli_form(self):
+        self.assertEqual(J.main([]), 2)
+        self.assertEqual(J.main(["check-build", "/nonexistent/a.json", "/nonexistent/b.json"]), 1)
+
+
 class PhaseTests(unittest.TestCase):
     def test_no_unit_runs_across_the_select_or_from_a_retired_tree(self):
         for phase, (releases, selector, signer, witness) in J.PHASE_STATE.items():
