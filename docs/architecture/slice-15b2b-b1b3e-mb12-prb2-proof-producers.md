@@ -434,3 +434,58 @@ it grants no readiness PASS, signer operation, authority, custody release or Fir
 
 Pin: `DEV_ACCEPTED_PROOF_TRANSCRIPTS["DEPLOYER_DENIAL"] = {4337f769…}`. Six proof names are now pinned; `SECRET_HYGIENE`
 is not (E-22 BLOCKED). Pin cascade: operator record §19.
+
+## 15. Addendum (2026-10-18): E-22 adjudication design direction; control-side scope slice; DR-5 log-key fix
+
+**Owner decision (2026-10-18): design direction approved, not implemented.** E-22 will be resolved, if at all, by an
+explicit owner risk adjudication: a distinct verifier status `OWNER_RISK_ADJUDICATED`, **never** `PASS`. It requires
+a release change, because `pr1_acceptance.py` is release content (`release_file_set.SHARED_HASHES`), E-22 accepts only
+a `PASS` proof, and `release_decision` refuses `PACKAGE_NOT_READY`. Why K-ACT rotation does not fix E-22: the `journal`
+form scans every retained boot, and the 12 markers are in retained boot `24d1771d`, so the scan stays FAIL whatever the
+key. Design (for a later, separately authorized release slice):
+
+- **Release (`pr1_acceptance`).** E-22 is satisfied by `PASS`, or by `OWNER_RISK_ADJUDICATED` only when all hold:
+  - the admitted `SECRET_HYGIENE` transcript is the producer's genuine FAIL;
+  - an adjudication object names that transcript digest and its exact failure set (the journal markers only:
+    class, count, boot, sessions);
+  - the adjudication digest is inside the package digest, and the check result and package record show
+    `OWNER_RISK_ADJUDICATED`.
+  Every other check and `release_decision` are unchanged. M-B13 owner acceptance names that package digest, so the
+  owner re-sees the adjudication.
+- **Control side.** The readiness builder admits an adjudication only when a merged owner record pins its digest (the
+  §2a pattern). Unpinned, malformed or broader adjudications are refused.
+- **Swap cost.** The release carries both the signer and the witness. A swap through the E-19 maintenance contract
+  ends the signer incarnation and the witness incarnation: a **second K-ACT load**, a new witness incarnation and
+  K-WIT load, a new W11 / POST11 acceptance, and re-derived DR-5 targets. It also re-pins the operator, readiness
+  `DEV_PINS` and the PR-3 `DEV_EXPECTED` release values; the E-21 candidate digest changes and needs re-confirmation.
+  M-B12 evidence is recollected in one freshness window.
+- **Residual risk the owner would accept.** Marker text remains in the retained journal of boot `24d1771d`: three sudo
+  `grep` sessions over the public L2b publication, purpose UNKNOWN×3. No PEM block, key body or other marker was
+  found, and every attributed marker is in a MESSAGE or `_CMDLINE` field (command text, not command output). The
+  commands' purpose is unproven.
+
+**Control-side slice (this change; no release, no live step).** `mb12_secret_hygiene_proof.py`:
+- `B1B3D-L2b` is added to `CEREMONIES` (OD-M12-7, §13), with record `slice-15b2b-b1b3d-live-closure.md`. That record
+  states no window and no full publication SHA-256, so both stay unrecorded and `prove` FAILS
+  `CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b` until an owner record states the window.
+- `UNRESOLVED_SCOPE` is now `{}`.
+- `prove` now reads boots from an exact `journal` FAIL transcript. It judges coverage and restates the counted markers
+  (`FAIL: JOURNAL_MARKER class=… count=…`), while `FAIL: JOURNAL_SCAN_NOT_PASS` and the final FAIL remain. A FAIL is
+  never reported as a PASS.
+- E-22 still cannot PASS: L2b and the M-B9b end are unrecorded, and the builder's closure check refuses any PASS.
+- Pins: hygiene `cf2369ff…` → `8394ed7f85ec43f57a166a6a383b7d06ceb1171987e0646179ee4796ce572d77`, cascade in the
+  operator record §20.
+
+**DR-5 log-key fix.** Deploy `39103467403` (`b5ea1d03`) compared **DRIFT**: result-set 196 vs the accepted 194. The DR-5
+block (155) and the predeploy block (29) were identical, and the result-set minus two lines equals the EQUAL baseline
+(evidence `lilith-mb11-pr212-dr5-b5ea1d0`, `SHA256SUMS` `c52c7034…`, `drift-diagnosis.txt`). The two lines were the
+E-08 record step's `AUTHORITY_BOUNDARY_STDOUT_SHA256=` / `_BYTES=` keys. They start with the accepted extraction prefix
+`AUTHORITY_`. That result stays DRIFT; it is not reclassified. The keys are now `E08_STDOUT_SHA256=` / `E08_STDOUT_BYTES=`
+(PR-B1 §18 named the old keys), and a test refuses any echoed key that starts with a DR-5 prefix. The proof stdout is
+unchanged: the same run logged the accepted E-08 digest `4337f769…` / 10 260 bytes. The accepted baseline and
+targets are untouched. The next deploy after this change must compare EQUAL.
+
+```text
+E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative; UNKNOWN x3);  ADJUDICATION = DESIGN APPROVED, NOT IMPLEMENTED
+NO RELEASE BUILD / SWAP / SIGNER OR WITNESS RESTART AUTHORIZED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOADS = 1
+```

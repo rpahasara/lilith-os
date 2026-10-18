@@ -142,6 +142,11 @@ class CeremonyV1(NamedTuple):
 
 
 CEREMONIES: Mapping[str, CeremonyV1] = {
+    # OD-M12-7 (owner, 2026-10-17; PR-B2 record §13): L2b is included. Its canonical record gives no ceremony window
+    # and no full publication SHA-256, so both stay unrecorded: `prove` FAILS (CEREMONY_WINDOW_NOT_RECORDED) until an
+    # owner record states the window. Nothing is inferred from the attribution or the journal.
+    "B1B3D-L2b": CeremonyV1("DEV", "K-ACT generation and publication (B1b-3d L2b.2)",
+                            "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None, (None, None)),
     "M-B1": CeremonyV1("S25", "K-ROOT generation and publication", "slice-15b2b-b1b3e-mb1-kroot-completion.md",
                        "K_ROOT_PUBLIC_EXPORT", "740cf10ab9042b95eef192af6ca9e63b661cf91af3a36fe5d0aafbd2b3547db5", None),
     "M-B2": CeremonyV1("DEV", "K-WIT generation and publication", "slice-15b2b-b1b3e-mb2-kwit-completion.md",
@@ -156,10 +161,9 @@ CEREMONIES: Mapping[str, CeremonyV1] = {
     "M-B11": CeremonyV1("DEV", "first K-ACT load (signer start)", "slice-15b2b-b1b3e-mb11-signer-start-acceptance.md",
                         None, None, ("2026-10-15T05:13:15Z", "2026-10-15T05:13:29Z")),  # marker to POST11 record
 }
-# Scope questions left open on purpose (never silently included or excluded).
-UNRESOLVED_SCOPE: Mapping[str, str] = {
-    "B1B3D-L2b": "K-ACT generation (B1b-3d L2b, before PR-1B): include, cite, or exclude is OD-M12-7",
-}
+# Scope questions left open on purpose (never silently included or excluded). OD-M12-7 decided B1B3D-L2b: included
+# (CEREMONIES above). No question is open; an open one would FAIL `prove` again.
+UNRESOLVED_SCOPE: Mapping[str, str] = {}
 SCOPE_TYPE = "LILITH_MB12_SECRET_HYGIENE_SCOPE"
 SCOPE_FIELDS = frozenset({"scopeType", "schemaVersion", "environment", "ceremonies", "journalScan"})
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -644,6 +648,33 @@ def journal_purpose(*, stream: Callable[[], BinaryIO] | None = None, euid: Calla
     return True
 
 
+def parse_journal_fail_transcript(data: bytes) -> tuple[list[tuple[str, int, int]], list[tuple[str, int]]] | None:
+    """The boots and marker counts of an exact `journal` FAIL transcript whose only failures are counted markers, or
+    None. Coverage can then still be judged; the FAIL itself is never changed or hidden."""
+    try:
+        lines = data.decode("ascii").split("\n")
+    except UnicodeDecodeError:
+        return None
+    if len(lines) < 5 or lines[-1] != "" or lines[-2] != "JOURNAL_SECRET_SCAN=FAIL":
+        return None
+    head = re.fullmatch(r"JOURNAL: entries=([1-9]\d*) bytes=\d+ sha256=[0-9a-f]{64} firstRealtimeUs=(\d+) "
+                        r"lastRealtimeUs=(\d+) boots=([1-9]\d*)", lines[0])
+    if head is None:
+        return None
+    count = int(head.group(4))
+    boots = [_BOOT.fullmatch(line) for line in lines[1:1 + count]]
+    marks = [re.fullmatch(r"FAIL: PRIVATE_MATERIAL_MARKER class=([A-Z0-9_]+) count=([1-9]\d*)", line)
+             for line in lines[1 + count:-2]]
+    if not boots or any(b is None for b in boots) or not marks or any(m is None for m in marks):
+        return None
+    spans = [(b.group(1), int(b.group(2)), int(b.group(3))) for b in boots]
+    if sum(int(b.group(4)) for b in boots) != int(head.group(1)) or len({s[0] for s in spans}) != len(spans) \
+            or any(low > high for _b, low, high in spans) or spans != sorted(spans, key=lambda s: (s[1], s[0])) \
+            or (min(s[1] for s in spans), max(s[2] for s in spans)) != (int(head.group(2)), int(head.group(3))):
+        return None
+    return spans, [(m.group(1), int(m.group(2))) for m in marks]
+
+
 def parse_journal_transcript(data: bytes) -> list[tuple[str, int, int]] | None:
     """The boots of an exact `journal` PASS transcript, or None."""
     try:
@@ -758,6 +789,12 @@ def prove(raw_scope: bytes, *, read: Callable[[str, str], "bytes | None"] = _rea
     boots = None if journal is None or scan_bytes(journal).hits() else parse_journal_transcript(journal)
     if boots is None:
         failures.append("FAIL: JOURNAL_SCAN_NOT_PASS")
+        # A FAIL scan stays a FAIL. Its boots still let coverage be judged, and its counted markers are restated
+        # (class and count only), so an owner adjudication can name exactly what failed.
+        failed = None if journal is None or scan_bytes(journal).hits() else parse_journal_fail_transcript(journal)
+        if failed is not None:
+            boots = failed[0]
+            failures += [f"FAIL: JOURNAL_MARKER class={name} count={count}" for name, count in failed[1]]
     for entry in scope["ceremonies"]:
         name, spec = entry["ceremony"], ceremonies[entry["ceremony"]]
         if spec.record is None or repo is None or not (repo / "docs/architecture" / spec.record).is_file():

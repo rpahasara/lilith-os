@@ -164,9 +164,17 @@ class PrCiDevSeparationTests(unittest.TestCase):
         self.assertIn('[[ "${digest}" =~ ^[0-9a-f]{64}$ ]]', record)
         self.assertIn('[[ "${bytes}" =~ ^[1-9][0-9]*$ ]]', record)
         self.assertEqual(record.count("exit 1"), 2)
-        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=${digest}"', record)
-        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=${bytes}"', record)
-        self.assertNotIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=$(', record)
+        self.assertIn('echo "E08_STDOUT_SHA256=${digest}"', record)
+        self.assertIn('echo "E08_STDOUT_BYTES=${bytes}"', record)
+        self.assertNotIn('echo "E08_STDOUT_SHA256=$(', record)
+        # DR-5 extraction (mb9_dr5_target.extract, accepted byte-for-byte) keeps every log line starting with one of
+        # its PREFIXES: no echoed key of this step may, or the result-set drifts (run 39103467403: 196 vs 194).
+        import re as _re
+        import sys as _sys
+        _sys.path.insert(0, str(ROOT / "services/owner-memory-control/tools"))
+        import mb9_dr5_target as _T9
+        for key in _re.findall(r'echo "([A-Za-z0-9_]+)[=:]', record):
+            self.assertFalse(key.startswith(_T9.PREFIXES), key)
         for writer in ("> \"${file}\"", ">> \"${file}\"", "sed -i", "tee", "dos2unix", "tr "):
             self.assertNotIn(writer, record)
         self.assertIn("        uses: actions/upload-artifact@v4\n", retain)

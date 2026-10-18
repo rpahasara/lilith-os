@@ -186,10 +186,13 @@ def covering_journal(**windows):
     return journal_transcript(entry(low), entry(high))[1]
 
 
-# TEST_ONLY ceremony table: the real names and venues, records that exist in this repository, and a SYNTHETIC window
-# for the one ceremony whose real window is unrecorded (the M-B9b end). M-B11 uses its real recorded row.
+# TEST_ONLY ceremony table: the real names and venues, records that exist in this repository, and SYNTHETIC windows
+# for the ceremonies whose real window is unrecorded (B1b-3d L2b, the M-B9b end). M-B11 uses its real recorded row.
 TEST_CEREMONIES = {
     **SH.CEREMONIES,
+    "B1B3D-L2b": SH.CeremonyV1("DEV", "K-ACT generation and publication (B1b-3d L2b.2)",
+                               "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None,
+                               ("2026-09-27T07:10:00Z", "2026-09-27T07:30:00Z")),          # synthetic window
     "M-B9b": SH.CeremonyV1("DEV", "K-WIT signing the V2 genesis", "slice-15b2b-b1b3e-mb9-package-b-completion.md",
                            "GENESIS_CHAIN_1", SH.CEREMONIES["M-B9b"].publication_sha256,
                            ("2026-10-09T04:59:49Z", "2026-10-09T05:10:00Z")),          # synthetic end
@@ -672,18 +675,19 @@ class SecretScopeTests(unittest.TestCase):
         self.assertNotIn(str(self.root).encode(), raw)
         lines = raw.decode().splitlines()
         self.assertEqual(lines[0], f"SCOPE: sha256={SH.scope_digest(raw_scope)} ceremonies="
-                                   "M-B1,M-B2,M-B3,M-B9a,M-B9b,M-B11")
-        for name in ("M-B2", "M-B9a", "M-B9b", "M-B11"):
+                                   "B1B3D-L2b,M-B1,M-B2,M-B3,M-B9a,M-B9b,M-B11")
+        for name in ("B1B3D-L2b", "M-B2", "M-B9a", "M-B9b", "M-B11"):
             self.assertTrue(any(line.startswith(f"COVERED: {name} boot=") for line in lines), name)
         for name in ("M-B1", "M-B3"):
             self.assertIn(f"OFFHOST: {name} S25 (no DEV journal)", lines)
 
     def test_the_real_scope_fails_closed_today(self):
-        """M-B9b's end is unrecorded and the K-ACT L2b question is open; M-B11 is recorded (acceptance receipt)."""
+        """L2b is included (OD-M12-7) but its window and the M-B9b end are unrecorded; M-B11 is recorded."""
         ok, raw = capture(SH.prove, self.scope(ceremonies=SH.CEREMONIES), read=self.read)
         self.assertFalse(ok)
-        for line in ("FAIL: SCOPE_DECISION_UNRESOLVED B1B3D-L2b", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b"):
+        for line in ("FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b"):
             self.assertIn(line.encode(), raw)
+        self.assertNotIn(b"SCOPE_DECISION_UNRESOLVED", raw)
         for line in ("FAIL: CEREMONY_RECORD_ABSENT", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B11"):
             self.assertNotIn(line.encode(), raw)
 
@@ -722,7 +726,8 @@ class SecretScopeTests(unittest.TestCase):
         self.assertIn(b"FAIL: JOURNAL_DOES_NOT_COVER M-B11", raw)
 
     def test_journal_oldest_entry_after_m_b2_fails(self):
-        late = {name: window for name, window in DEV_WINDOWS.items() if name != "M-B2"}
+        # The journal starts after M-B2 (L2b, earlier still, is left out too, or its window would reach back).
+        late = {name: window for name, window in DEV_WINDOWS.items() if name not in ("B1B3D-L2b", "M-B2")}
         ok, raw = self.prove(self.scope(journal=covering_journal(**late)))
         self.assertIn(b"FAIL: JOURNAL_DOES_NOT_COVER M-B2", raw)
 
@@ -746,7 +751,7 @@ class SecretScopeTests(unittest.TestCase):
         self.assertIn(b"class=ED25519_PKCS8_BASE64", raw)
         self.assertNotIn(base64.b64encode(b"x" + der), raw)
         doc = json.loads(self.scope())
-        doc["ceremonies"][0]["items"][0]["sha256"] = H("other")
+        next(c for c in doc["ceremonies"] if c["ceremony"] == "M-B1")["items"][0]["sha256"] = H("other")
         ok, raw = self.prove(json.dumps(doc).encode())
         self.assertIn(b"FAIL: ITEM_UNREADABLE_OR_DIGEST_MISMATCH M-B1 TRANSCRIPT", raw)
         ok, raw = self.prove(b'{"scopeType": 1, "scopeType": 2}')
@@ -775,7 +780,35 @@ class SecretScopeTests(unittest.TestCase):
                         if instant:
                             self.assertIn(instant, text)
         self.assertEqual([n for n, c in SH.CEREMONIES.items() if c.venue == "S25"], ["M-B1", "M-B3"])
-        self.assertIn("B1B3D-L2b", SH.UNRESOLVED_SCOPE)
+        # OD-M12-7: L2b included, record = the B1b-3d live closure, window and publication pin unrecorded.
+        self.assertEqual(dict(SH.UNRESOLVED_SCOPE), {})
+        l2b = SH.CEREMONIES["B1B3D-L2b"]
+        self.assertEqual((l2b.venue, l2b.record, l2b.publication, l2b.publication_sha256, l2b.window),
+                         ("DEV", "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None, (None, None)))
+
+    def test_a_fail_scan_stays_fail_but_still_judges_coverage_and_names_the_markers(self):
+        windows = {n: w for n, w in DEV_WINDOWS.items()}
+        low = min(US(w[0]) for w in windows.values()) - 3_600_000_000
+        high = max(US(w[1]) for w in windows.values()) + 3_600_000_000
+        marker = b"-----" + b"BEGIN " + PEM_TAIL
+        ok_scan, failed = journal_transcript(entry(low), entry(low + 1, message=b"grep '" + marker + b"' f"),
+                                             entry(high))
+        self.assertFalse(ok_scan)
+        self.assertIsNotNone(SH.parse_journal_fail_transcript(failed))
+        self.assertIsNone(SH.parse_journal_transcript(failed))
+        ok, raw = self.prove(self.scope(journal=failed))
+        self.assertFalse(ok)
+        lines = raw.decode().splitlines()
+        self.assertIn("FAIL: JOURNAL_SCAN_NOT_PASS", lines)
+        self.assertIn("FAIL: JOURNAL_MARKER class=PEM_PRIVATE_KEY count=1", lines)
+        for name in windows:
+            self.assertTrue(any(line.startswith(f"COVERED: {name} boot=") for line in lines), name)
+        self.assertFalse(any(line.startswith("FAIL: JOURNAL_DOES_NOT_COVER") for line in lines))
+        self.assertFalse(any(line.startswith("JOURNAL_SCAN:") for line in lines))      # never reported as PASS
+        self.assertTrue(lines[-1].startswith("SECRET_HYGIENE_PROOF=FAIL scope="))
+        # A malformed FAIL transcript gives no coverage at all.
+        broken = failed.replace(b"JOURNAL_SECRET_SCAN=FAIL", b"JOURNAL_SECRET_SCAN=FAILED")
+        self.assertIsNone(SH.parse_journal_fail_transcript(broken))
 
 
 # --------------------------------------------------------- PRESERVATION_SET ---
@@ -1081,7 +1114,10 @@ class DevFailsClosedTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "INPUT_MALFORMED")      # OD-M12-3 accepted; still fail-closed
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
         self.assertEqual(dict(PS.ACCEPTED_BASELINES), E23_ACCEPTED_BASELINES)
-        self.assertTrue(SH.UNRESOLVED_SCOPE)
+        # E-22 cannot PASS: the real scope has unrecorded windows (L2b, the M-B9b end), so the builder's closure
+        # check refuses any PASS transcript, and SECRET_HYGIENE is not pinned.
+        self.assertTrue(any(c.venue == "DEV" and (not c.window or None in c.window) for c in SH.CEREMONIES.values()))
+        self.assertNotIn("SECRET_HYGIENE", RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS)
 
 
 class SourceGuardTests(unittest.TestCase):

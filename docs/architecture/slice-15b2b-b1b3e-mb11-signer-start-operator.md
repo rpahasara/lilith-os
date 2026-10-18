@@ -465,3 +465,16 @@ That changes `mb12_readiness_inputs.py` and so the operator pin. Pin cascade (su
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `c97fcbcec059416486ce7fa0721909db9bcd543e50d121f544dd5b4a4bf00dfe` |
 | `mb11_operator.py` | `8bc1aca41721cad48c415e6b94a333f5117988be47ce3b0487d251e5b338ba37` |
+
+## 20. Addendum (2026-10-18): E-22 control-side scope slice — re-pin only
+
+`mb12_secret_hygiene_proof.py` now includes B1b-3d L2b (window unrecorded) and judges coverage from a FAIL scan
+(record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §15). Its readiness pin changes, and so do the readiness and
+operator pins. No operator behaviour changes. Pin cascade (supersedes §19):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `8394ed7f85ec43f57a166a6a383b7d06ceb1171987e0646179ee4796ce572d77` |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `86bb674a236ed3a848acb37db8d6c7cf623eca90dd29a0d0baf678ec40653265` |
+| `mb11_operator.py` | `e5b0d6e391c18b195bb0e6f6bc59c6cfc01768ac5418b99882f8df0b1bfb6d56` |
