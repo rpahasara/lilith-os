@@ -186,18 +186,44 @@ def covering_journal(**windows):
     return journal_transcript(entry(low), entry(high))[1]
 
 
-# TEST_ONLY ceremony table: the real names and venues, records that exist in this repository, and SYNTHETIC windows
-# for the ceremonies whose real window is unrecorded (B1b-3d L2b, the M-B9b end). M-B11 uses its real recorded row.
+# TEST_ONLY ceremony table: the real names, venues, records and pins, and a SYNTHETIC window for the one ceremony whose
+# real window is unrecorded (B1b-3d L2b). Every other row is the real one. Used with an empty TRANSCRIPT_NOT_RETAINED.
 TEST_CEREMONIES = {
     **SH.CEREMONIES,
     "B1B3D-L2b": SH.CeremonyV1("DEV", "K-ACT generation and publication (B1b-3d L2b.2)",
-                               "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None,
+                               "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION",
+                               SH.CEREMONIES["B1B3D-L2b"].publication_sha256,
                                ("2026-09-27T07:10:00Z", "2026-09-27T07:30:00Z")),          # synthetic window
-    "M-B9b": SH.CeremonyV1("DEV", "K-WIT signing the V2 genesis", "slice-15b2b-b1b3e-mb9-package-b-completion.md",
-                           "GENESIS_CHAIN_1", SH.CEREMONIES["M-B9b"].publication_sha256,
-                           ("2026-10-09T04:59:49Z", "2026-10-09T05:10:00Z")),          # synthetic end
 }
 DEV_WINDOWS = {n: c.window for n, c in TEST_CEREMONIES.items() if c.venue == "DEV"}
+
+# OD-M12-9 (PR-B2 record §16) provenance values.
+L2B_PUBLICATION = "d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032"        # M-B3 completion record
+STATE_TXT_SHA256 = "612b88a721c6b1cbedc783b468df8da947ca9523668e1af6e198d80ba91211ce"       # Package B seq-3 state.txt
+PACKAGE_B_SEQ3_SUMS = "7e45706f74f8d8faefbd648d0a91329e859ef9ba227f9ed9d546cb57377a6bf6"    # its final SHA256SUMS
+# The only table values not taken from the ceremony's canonical record.
+OD_M12_9_ADOPTED = {"B1B3D-L2b": (L2B_PUBLICATION,), "M-B9b": ("2026-10-09T04:59:44Z", "2026-10-09T04:59:59Z")}
+# The genuine 2026-10-15 `journal` FAIL transcript (evidence lilith-mb12-hygiene-f619a07, B-HYGIENE.out): counts,
+# digests and timestamps only. It is restated byte for byte and bound by its SHA-256; it is never altered.
+REAL_JOURNAL_FAIL = (
+    b"JOURNAL: entries=712019 bytes=791653220 sha256=332015ac0e21406db69a3158b36bd5d1538f0bbef3722c4d7c0cbd8bbb794c38"
+    b" firstRealtimeUs=1789322319069344 lastRealtimeUs=1792082817867434 boots=3\n"
+    b"BOOT: 24d1771de1b54e5f816dda08ad8b367a firstRealtimeUs=1789322319069344 lastRealtimeUs=1790672449937963"
+    b" entries=380255\n"
+    b"BOOT: eea461c360f04b108ee9556dcef19711 firstRealtimeUs=1790672461822035 lastRealtimeUs=1791538291835104"
+    b" entries=207059\n"
+    b"BOOT: cb0d71da32a7402bb85e5748da012bff firstRealtimeUs=1791538302619235 lastRealtimeUs=1792082817867434"
+    b" entries=124705\n"
+    b"FAIL: PRIVATE_MATERIAL_MARKER class=PEM_PRIVATE_KEY count=12\n"
+    b"JOURNAL_SECRET_SCAN=FAIL\n")
+REAL_JOURNAL_FAIL_SHA256 = "e1d70588e94705007492d6ad1b4daa227fcafa85e8a4961e5f42b2139866ccc5"
+# The exact failure set OD-M12-9 prepares for owner adjudication, in `prove` order. Any other line is outside it.
+OD_M12_9_FAILURES = (
+    "FAIL: JOURNAL_SCAN_NOT_PASS",
+    "FAIL: JOURNAL_MARKER class=PEM_PRIVATE_KEY count=12",
+    "FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b",
+    "FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b",
+)
 
 
 class SecretScannerTests(unittest.TestCase):
@@ -636,13 +662,15 @@ class SecretScopeTests(unittest.TestCase):
         path.write_bytes(data)
         return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest()}
 
-    def scope(self, *, ceremonies=TEST_CEREMONIES, drop=(), publications=None, journal=None, leak=None):
+    def scope(self, *, ceremonies=TEST_CEREMONIES, drop=(), publications=None, journal=None, leak=None,
+              no_transcript=()):
         entries = []
         for name, spec in ceremonies.items():
             if name in drop:
                 continue
-            items = [{"role": "TRANSCRIPT", "kind": None, **self.file(f"{name}-t", b"TEST_ONLY transcript " +
-                                                                      name.encode() + (leak or b""))}]
+            items = [] if name in no_transcript else [
+                {"role": "TRANSCRIPT", "kind": None, **self.file(f"{name}-t", b"TEST_ONLY transcript " +
+                                                                 name.encode() + (leak or b""))}]
             if spec.publication:
                 data = (publications or {}).get(name, b"TEST_ONLY publication " + name.encode())
                 item = {"role": "PUBLICATION", "kind": spec.publication, **self.file(f"{name}-p", data)}
@@ -666,7 +694,13 @@ class SecretScopeTests(unittest.TestCase):
     def prove(self, raw, **kwargs):
         kwargs.setdefault("ceremonies", TEST_CEREMONIES)
         kwargs.setdefault("unresolved", {})
+        kwargs.setdefault("not_retained", {})
         return capture(SH.prove, raw, read=self.read, **kwargs)
+
+    def real_prove(self, journal=None):
+        """The REAL ceremony table and TRANSCRIPT_NOT_RETAINED (OD-M12-9): no L2b transcript item is listed."""
+        return capture(SH.prove, self.scope(ceremonies=SH.CEREMONIES, journal=journal,
+                                            no_transcript=tuple(SH.TRANSCRIPT_NOT_RETAINED)), read=self.read)
 
     def test_closed_synthetic_scope_passes_without_printing_paths(self):
         raw_scope = self.scope()
@@ -682,14 +716,19 @@ class SecretScopeTests(unittest.TestCase):
             self.assertIn(f"OFFHOST: {name} S25 (no DEV journal)", lines)
 
     def test_the_real_scope_fails_closed_today(self):
-        """L2b is included (OD-M12-7) but its window and the M-B9b end are unrecorded; M-B11 is recorded."""
-        ok, raw = capture(SH.prove, self.scope(ceremonies=SH.CEREMONIES), read=self.read)
+        """L2b is included (OD-M12-7); its window is unrecorded and its transcript not retained (OD-M12-9). The M-B9b
+        bracket and M-B11 are recorded."""
+        ok, raw = self.real_prove()
         self.assertFalse(ok)
-        for line in ("FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b"):
+        for line in ("FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b", "FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b"):
             self.assertIn(line.encode(), raw)
         self.assertNotIn(b"SCOPE_DECISION_UNRESOLVED", raw)
-        for line in ("FAIL: CEREMONY_RECORD_ABSENT", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B11"):
+        for line in ("FAIL: CEREMONY_RECORD_ABSENT", "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B11",
+                     "FAIL: CEREMONY_WINDOW_NOT_RECORDED M-B9b"):
             self.assertNotIn(line.encode(), raw)
+        # Listing an L2b transcript the owner record says was not retained contradicts the record: refused.
+        ok, raw = capture(SH.prove, self.scope(ceremonies=SH.CEREMONIES), read=self.read)
+        self.assertEqual(raw, b"SECRET_HYGIENE_PROOF=FAIL reason=SCOPE_TRANSCRIPT_NOT_RETAINED_CONTRADICTED\n")
 
     def test_m_b11_row_is_the_accepted_start(self):
         spec = SH.CEREMONIES["M-B11"]
@@ -774,17 +813,72 @@ class SecretScopeTests(unittest.TestCase):
             with self.subTest(name=name):
                 if spec.record:
                     text = (records / spec.record).read_text(encoding="utf-8")
-                    if spec.publication_sha256:
+                    adopted = OD_M12_9_ADOPTED.get(name, ())       # cited from their own sources (test below)
+                    if spec.publication_sha256 and spec.publication_sha256 not in adopted:
                         self.assertIn(spec.publication_sha256, text)
                     for instant in (spec.window or ()):
-                        if instant:
+                        if instant and instant not in adopted:
                             self.assertIn(instant, text)
         self.assertEqual([n for n, c in SH.CEREMONIES.items() if c.venue == "S25"], ["M-B1", "M-B3"])
-        # OD-M12-7: L2b included, record = the B1b-3d live closure, window and publication pin unrecorded.
+        # OD-M12-7: L2b included, record = the B1b-3d live closure, window unrecorded (pin: OD-M12-9, test below).
         self.assertEqual(dict(SH.UNRESOLVED_SCOPE), {})
         l2b = SH.CEREMONIES["B1B3D-L2b"]
         self.assertEqual((l2b.venue, l2b.record, l2b.publication, l2b.publication_sha256, l2b.window),
-                         ("DEV", "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None, (None, None)))
+                         ("DEV", "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", L2B_PUBLICATION,
+                          (None, None)))
+
+    def test_values_adopted_by_od_m12_9_keep_their_provenance(self):
+        """OD-M12-9 adopts two values from sources other than the canonical record, and cites them: the L2b
+        publication pin from the M-B3 completion record, the M-B9b bracket from the sealed Package B state.txt."""
+        records = ROOT / "docs/architecture"
+        od = (records / "slice-15b2b-b1b3e-mb12-prb2-proof-producers.md").read_text(encoding="utf-8")
+        section = od[od.index("## 16. Addendum"):]
+        self.assertIn(L2B_PUBLICATION, (records / "slice-15b2b-b1b3e-mb3-registry-sign-completion.md")
+                      .read_text(encoding="utf-8"))
+        self.assertNotIn(L2B_PUBLICATION, (records / "slice-15b2b-b1b3d-live-closure.md").read_text(encoding="utf-8"))
+        mb9b = SH.CEREMONIES["M-B9b"]
+        self.assertEqual(mb9b.window, ("2026-10-09T04:59:44Z", "2026-10-09T04:59:59Z"))
+        for value in (L2B_PUBLICATION, *mb9b.window, STATE_TXT_SHA256, PACKAGE_B_SEQ3_SUMS, "MB9B_INVOKE_START",
+                      "MB9B_INVOKE_END", REAL_JOURNAL_FAIL_SHA256, *OD_M12_9_FAILURES):
+            self.assertIn(value, section)
+        for value in ("JOURNAL_SECRET_SCAN=FAIL", "UNKNOWN", "never `PASS`"):
+            self.assertIn(value, section)
+        # The bracket contains the host marker the Package B record gives.
+        self.assertIn("04:59:49Z", (records / mb9b.record).read_text(encoding="utf-8"))
+        self.assertTrue(US(mb9b.window[0]) <= US("2026-10-09T04:59:49Z") <= US(mb9b.window[1]))
+
+    def test_real_journal_fail_gives_exactly_the_od_m12_9_failure_set(self):
+        """The REAL 2026-10-15 journal FAIL transcript with the REAL table: every DEV window with a recorded bracket
+        lies inside one retained boot, and the proof FAILS on exactly the four historical lines OD-M12-9 names."""
+        self.assertEqual(hashlib.sha256(REAL_JOURNAL_FAIL).hexdigest(), REAL_JOURNAL_FAIL_SHA256)
+        ok, raw = self.real_prove(journal=REAL_JOURNAL_FAIL)
+        self.assertFalse(ok)
+        lines = raw.decode().splitlines()
+        self.assertEqual([line for line in lines if line.startswith("FAIL: ")], list(OD_M12_9_FAILURES))
+        boots = {"M-B2": "eea461c3", "M-B9a": "eea461c3", "M-B9b": "eea461c3", "M-B11": "cb0d71da"}
+        for name, boot in boots.items():
+            self.assertTrue(any(line.startswith(f"COVERED: {name} boot={boot}") for line in lines), name)
+        self.assertFalse(any(line.startswith("COVERED: B1B3D-L2b") for line in lines))     # never inferred
+        for name in ("M-B1", "M-B3"):
+            self.assertIn(f"OFFHOST: {name} S25 (no DEV journal)", lines)
+        self.assertFalse(any(line.startswith("JOURNAL_SCAN:") for line in lines))          # never reported as PASS
+        self.assertTrue(lines[-1].startswith("SECRET_HYGIENE_PROOF=FAIL scope="))
+
+    def test_a_missing_transcript_never_passes(self):
+        """Everything else clean and covered (TEST window for L2b): the not-retained transcript alone still FAILS."""
+        ok, raw = self.prove(self.scope(no_transcript=("B1B3D-L2b",)), not_retained={"B1B3D-L2b": "OD-M12-9"})
+        self.assertFalse(ok)
+        lines = raw.decode().splitlines()
+        self.assertEqual([line for line in lines if line.startswith("FAIL: ")],
+                         ["FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b"])
+        self.assertTrue(lines[-1].startswith("SECRET_HYGIENE_PROOF=FAIL scope="))
+        # A ceremony NOT recorded as not retained still needs a transcript: the whole scope is refused.
+        for name in ("M-B1", "M-B2", "M-B3", "M-B9a", "M-B9b", "M-B11", "B1B3D-L2b"):
+            with self.subTest(name=name):
+                ok, raw = self.prove(self.scope(no_transcript=(name,)), not_retained={})
+                self.assertEqual(raw, b"SECRET_HYGIENE_PROOF=FAIL reason=SCOPE_TRANSCRIPT_MISSING\n")
+        # The real record names exactly L2b, nothing broader.
+        self.assertEqual(dict(SH.TRANSCRIPT_NOT_RETAINED), {"B1B3D-L2b": "OD-M12-9"})
 
     def test_a_fail_scan_stays_fail_but_still_judges_coverage_and_names_the_markers(self):
         windows = {n: w for n, w in DEV_WINDOWS.items()}
@@ -987,7 +1081,7 @@ def patched_producers(real):
         if relative.endswith("mb12_preservation_set_proof.py"):
             module.ACCEPTED_BASELINES = ACCEPTED
         if relative.endswith("mb12_secret_hygiene_proof.py"):          # TEST_ONLY: a closed scope
-            module.CEREMONIES, module.UNRESOLVED_SCOPE = TEST_CEREMONIES, {}
+            module.CEREMONIES, module.UNRESOLVED_SCOPE, module.TRANSCRIPT_NOT_RETAINED = TEST_CEREMONIES, {}, {}
         return module
     return patched
 
@@ -1059,6 +1153,30 @@ class BuilderAdmissionTests(unittest.TestCase):
             self.refused("TRANSCRIPT_CONTRACT", "SECRET_HYGIENE", b"SECRET_HYGIENE_PROOF=PASS scope=" +
                          H("x").encode() + b"\n", 0)
             self.refused("TRANSCRIPT_CONTRACT", "SECRET_HYGIENE", b"SECRET_HYGIENE_PROOF=FAIL reason=USAGE\n", 1)
+
+    def test_secret_hygiene_pass_refused_while_a_transcript_is_not_retained(self):
+        good = self.secret_transcript()
+
+        def not_retained(real):
+            def patched(relative):
+                module = patched_producers(real)(relative)
+                if relative.endswith("mb12_secret_hygiene_proof.py"):
+                    module.TRANSCRIPT_NOT_RETAINED = {"B1B3D-L2b": "OD-M12-9"}
+                return module
+            return patched
+
+        with mock.patch.object(RI, "_producer_module", side_effect=not_retained(RI._producer_module)):
+            self.refused("TRANSCRIPT_CONTRACT", "SECRET_HYGIENE", good, 0)
+
+    def test_the_real_od_m12_9_fail_is_admitted_only_as_fail(self):
+        test = SecretScopeTests("test_real_journal_fail_gives_exactly_the_od_m12_9_failure_set")
+        test.setUp()
+        try:
+            _ok, raw = test.real_prove(journal=REAL_JOURNAL_FAIL)
+        finally:
+            test.tearDown()
+        self.assertEqual(self.admit("SECRET_HYGIENE", raw, 1)["result"], PA.FAIL)
+        self.refused("TRANSCRIPT_CONTRACT", "SECRET_HYGIENE", raw, 0)          # a FAIL is never admitted as PASS
 
     def test_preservation_set_admission(self):
         _ok, good = capture(PS.compare, BASELINE, LATER, accepted=ACCEPTED)

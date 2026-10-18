@@ -489,3 +489,112 @@ targets are untouched. The next deploy after this change must compare EQUAL.
 E-22 = BLOCKED (JOURNAL_SECRET_SCAN=FAIL authoritative; UNKNOWN x3);  ADJUDICATION = DESIGN APPROVED, NOT IMPLEMENTED
 NO RELEASE BUILD / SWAP / SIGNER OR WITNESS RESTART AUTHORIZED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOADS = 1
 ```
+
+## 16. Addendum (2026-10-18): OD-M12-9 — the missing B1b-3d L2b transcript; M-B9b bracket and L2b publication pin
+
+**Owner decision (2026-10-18):** "I accept OD-M12-9 as proposed (decision only). Prepare the control-side slice for
+review; no release, swap or live step." OD-M12-9 is the narrow handling of one historical evidence gap in the
+test-only DEV_SYNTHETIC environment. Its terms are those stated in this section; the owner confirms them by reviewing
+and merging this record. It is **not** an E-22 exception, waiver or risk acceptance. It grants no release, swap,
+restart, key load, custody release, authority or First Memory write.
+
+### 16.1 What was searched, and what was found
+
+One focused read-only search of the retained owner-local evidence (2026-10-18; no DEV contact) for a byte-exact
+B1b-3d L2b ceremony transcript:
+
+- the B1b-3d evidence directories (`lilith-b1b3d-s1-9ac7de2…`, `…-r2`) hold the S-1 / S-2 / L1b.1 transcripts only;
+- `lilith-b1b3d-l2-runbook-control.md` is the pre-execution runbook (`NOTHING EXECUTED`), not output;
+- no other owner-local file dates from the ceremony period (2026-09-27 11:30 to 2026-09-28 06:00 local);
+- `lilith-b1b3e-pr1a-aee323e…\ma7\post-statusL2b2.out` (2026-09-28) is a later PR-1A status read (exit 1, three
+  `UNEXPECTED_PRESENT` failures), not the L2b ceremony transcript. It is **not** a substitute.
+
+**Result: no byte-exact L2b ceremony transcript is retained.** It stays UNVERIFIED. No transcript is reconstructed.
+
+### 16.2 The accepted L2b closure is unchanged
+
+`slice-15b2b-b1b3d-live-closure.md` (CLOSED 2026-09-27) is not edited. Its claims stand as historical statements:
+L2b.1 / L2b.2 PASS, the installer `result=PASS stage=L2b.2 failures=[]`, the credential blob `6a61c350…`, and the
+"publication private-key-pattern scan: PASS" and "journal private-key-pattern scan around the ceremony: PASS". Those
+two scans name no window, no transcript and no digest, so E-22 does not count them as coverage or as a clean scan.
+The closure's NOT_PROVEN list (zeroization, remanence, RAM plaintext, privileged inspection, rollback) is unchanged.
+
+### 16.3 Values adopted, with provenance
+
+| Value | Adopted | Source (checked 2026-10-18) | Limit |
+| --- | --- | --- | --- |
+| M-B9b window | `2026-10-09T04:59:44Z` – `2026-10-09T04:59:59Z` | `MB9B_INVOKE_START` / `MB9B_INVOKE_END` in `lilith-packageb-seq3\state.txt` (SHA-256 `612b88a721c6b1cbedc783b468df8da947ca9523668e1af6e198d80ba91211ce`, listed in the final `SHA256SUMS` `7e45706f74f8d8faefbd648d0a91329e859ef9ba227f9ed9d546cb57377a6bf6`) | operator (laptop) clock bracket of the one invocation, **not** a host-recorded ceremony end; it contains the host marker `mb9b` `04:59:49Z` of the Package B record; the 4.5 h margin to the end of boot `eea461c3` makes any plausible clock offset immaterial to coverage |
+| L2b publication pin | `d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032` | `slice-15b2b-b1b3e-mb3-registry-sign-completion.md` (fresh read-only capture of the host's L2b.2 publication file, 744 bytes, 2026-10-06); also E-19 `PRESERVED_PINS`; the bytes are in the M-B3 export (`c4ea3d66…`, member `lilith-mb3/inputs/kact-publication.json`) | the closure itself records no publication digest; the pin proves the file's later bytes, not their state on 2026-09-27 |
+
+No L2b window is adopted. The journal boot `24d1771d` (2026-09-13 → 2026-09-29) and the closure date are consistent
+with L2b having run in that boot, but that is inference and is not used.
+
+### 16.4 Producer change (`mb12_secret_hygiene_proof.py`)
+
+- `TRANSCRIPT_NOT_RETAINED = {"B1B3D-L2b": "OD-M12-9"}`. For that ceremony the scope lists **no** `TRANSCRIPT` item
+  (listing one is refused, `SCOPE_TRANSCRIPT_NOT_RETAINED_CONTRADICTED`), and `prove` prints
+  `FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b` instead of refusing the whole scope, so every other check still
+  runs. Any other ceremony without a transcript is still refused (`SCOPE_TRANSCRIPT_MISSING`).
+- `CEREMONIES["M-B9b"].window` = the §16.3 bracket; `CEREMONIES["B1B3D-L2b"].publication_sha256` = the §16.3 pin. The
+  L2b window stays `(None, None)`.
+- The readiness builder's PASS closure check also refuses a PASS while `TRANSCRIPT_NOT_RETAINED` is non-empty.
+
+A PASS stays impossible: `prove` FAILS on the L2b lines, and the builder refuses any PASS under the real table.
+
+### 16.5 The exact failure set prepared for owner adjudication
+
+With the genuine 2026-10-15 `journal` FAIL transcript (`e1d70588e94705007492d6ad1b4daa227fcafa85e8a4961e5f42b2139866ccc5`,
+boots `24d1771d` / `eea461c3` / `cb0d71da`) and the real table, `prove` gives (tested) `COVERED` for M-B2, M-B9a and
+M-B9b in boot `eea461c3` and M-B11 in boot `cb0d71da`, `OFFHOST` for M-B1 and M-B3, and exactly these FAIL lines:
+
+```text
+FAIL: JOURNAL_SCAN_NOT_PASS
+FAIL: JOURNAL_MARKER class=PEM_PRIVATE_KEY count=12
+FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b
+FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b
+```
+
+**How this was demonstrated (clarification, owner review 2026-10-18).** The test used the genuine historical `journal`
+FAIL transcript (`e1d70588…`, restated byte for byte) with the real ceremony table, but **synthetic, clean TEST_ONLY
+fixtures** for every other scope item (the six ceremonies' transcripts and the publications, the pinned ones as
+stand-ins under their recorded digests). The actual complete off-host scope (real transcripts and publication bytes)
+has **not** been assembled, scanned or verified; whether it reproduces exactly these four lines is unknown until it is.
+
+The original `JOURNAL_SECRET_SCAN=FAIL` remains authoritative: 12 `PEM_PRIVATE_KEY` markers in boot `24d1771d`,
+three sudo `GREP` sessions over `/root/b1b3d-l2b-publication.json` (2026-09-27 07:19–07:26Z), purpose `UNKNOWN` ×3
+(§10.1). An E-22 `OWNER_RISK_ADJUDICATED` result (§15), if the owner later grants it, is never `PASS` and requires all
+of:
+
+1. the admitted `SECRET_HYGIENE` transcript is a genuine `prove` FAIL (exit 1) under the pinned producer;
+2. its FAIL lines equal **exactly** the four lines above, in that order; any other FAIL line (an item marker, a
+   publication mismatch, `JOURNAL_DOES_NOT_COVER`, a changed count, class or boot, a new marker, another missing
+   window or transcript) is outside the adjudication and refuses it;
+3. the adjudication object names that transcript's SHA-256 and the four lines, and a merged owner record pins the
+   adjudication digest (control side); the adjudication digest is inside the package digest (release side, §15);
+4. the owner's separate risk acceptance names this residual risk: K-ACT `test-only.dev-synthetic.actor.b1b3d.1`
+   (DEV_SYNTHETIC only) may have been exposed during or around L2b without E-22 detecting it. It does not carry over
+   to any other key, ceremony, environment or PROD.
+
+### 16.6 What remains (not done here)
+
+- **Scope assembly, not run.** One off-host scope manifest with at least one byte-exact transcript for each of M-B1,
+  M-B2, M-B3, M-B9a, M-B9b and M-B11 and the six named publications. A local read-only pre-scan of the candidate
+  evidence directories with this producer's scanner found no marker in any ceremony output (two hits only in copied
+  repository source, `memory_broker_validation.py` and its test, which are not scope items). This is not a proof.
+- **Builder adjudication admission** (§15 control side) and the `SECRET_HYGIENE` OD-M11-14 mapping / OD-M12-6 pin.
+- **Release change** (§15): `pr1_acceptance` E-22 `OWNER_RISK_ADJUDICATED`, `SHARED_HASHES`, build, attestation and an
+  E-19-contract swap (second K-ACT load, new witness incarnation and K-WIT load, W11 / POST11, DR-5 re-derivation,
+  re-pins, E-21 re-confirmation, M-B12 evidence recollected in one freshness window).
+- **Post-swap reproduction.** The fresh root `journal` scan must reproduce exactly the §16.5 set: boot `24d1771d`
+  still retained with the same 12 markers, and boots `eea461c3` / `cb0d71da` still retained. Journald rotation can
+  break either; if the set differs, STOP for a new owner decision.
+- **Open owner question.** Whether the swap's own K-ACT / K-WIT loads join the E-22 ceremony scope (OD-M12-7 lists
+  PR-1B ceremonies only). It must be decided before any adjudication is bound; this record does not decide it.
+
+```text
+OD-M12-9 = RECORDED (decision only);  L2b TRANSCRIPT = NOT RETAINED, UNVERIFIED;  L2b WINDOW = NOT RECORDED
+M-B9b WINDOW = OPERATOR-CLOCK BRACKET 04:59:44Z–04:59:59Z;  L2b PUBLICATION PIN = d7647976… (M-B3 record)
+JOURNAL_SECRET_SCAN=FAIL AUTHORITATIVE (12 MARKERS, UNKNOWN x3);  SECRET_HYGIENE = FAIL;  NOT ADJUDICATED
+E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+NO RELEASE BUILD / SWAP / RESTART / KEY LOAD / FIRST MEMORY AUTHORIZED
+```
