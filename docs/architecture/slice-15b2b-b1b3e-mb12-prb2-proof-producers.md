@@ -554,6 +554,12 @@ FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b
 FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b
 ```
 
+**How this was demonstrated (clarification, owner review 2026-10-18).** The test used the genuine historical `journal`
+FAIL transcript (`e1d70588…`, restated byte for byte) with the real ceremony table, but **synthetic, clean TEST_ONLY
+fixtures** for every other scope item (the six ceremonies' transcripts and the publications, the pinned ones as
+stand-ins under their recorded digests). The actual complete off-host scope (real transcripts and publication bytes)
+has **not** been assembled, scanned or verified; whether it reproduces exactly these four lines is unknown until it is.
+
 The original `JOURNAL_SECRET_SCAN=FAIL` remains authoritative: 12 `PEM_PRIVATE_KEY` markers in boot `24d1771d`,
 three sudo `GREP` sessions over `/root/b1b3d-l2b-publication.json` (2026-09-27 07:19–07:26Z), purpose `UNKNOWN` ×3
 (§10.1). An E-22 `OWNER_RISK_ADJUDICATED` result (§15), if the owner later grants it, is never `PASS` and requires all
