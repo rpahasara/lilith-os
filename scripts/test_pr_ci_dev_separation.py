@@ -155,9 +155,20 @@ class PrCiDevSeparationTests(unittest.TestCase):
             for forbidden in ("always()", "failure()", "continue-on-error", "github.sha", "sudo", "gcloud",
                               "compute ssh", "secrets.", "permissions"):
                 self.assertNotIn(forbidden, body)
-        self.assertIn('test -f "${file}" && ! test -L "${file}"', record)
-        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=$(sha256sum "${file}" | cut -c1-64)"', record)
-        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=$(wc -c < "${file}")"', record)
+        # Fail closed: strict shell, explicit exit for a missing / non-regular / symlinked file, checked assignments
+        # validated before printing (never a command substitution inside echo), and no rewrite of the file.
+        self.assertIn("          set -euo pipefail\n", record)
+        self.assertIn('if [ -L "${file}" ] || [ ! -f "${file}" ]; then', record)
+        self.assertIn('digest="$(sha256sum -- "${file}" | cut -c1-64)"', record)
+        self.assertIn('bytes="$(wc -c < "${file}")"', record)
+        self.assertIn('[[ "${digest}" =~ ^[0-9a-f]{64}$ ]]', record)
+        self.assertIn('[[ "${bytes}" =~ ^[1-9][0-9]*$ ]]', record)
+        self.assertEqual(record.count("exit 1"), 2)
+        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=${digest}"', record)
+        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=${bytes}"', record)
+        self.assertNotIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=$(', record)
+        for writer in ("> \"${file}\"", ">> \"${file}\"", "sed -i", "tee", "dos2unix", "tr "):
+            self.assertNotIn(writer, record)
         self.assertIn("        uses: actions/upload-artifact@v4\n", retain)
         self.assertIn("name: authority-boundary-${{ steps.classify.outputs.candidate_sha }}-${{ github.run_id }}\n",
                       retain)

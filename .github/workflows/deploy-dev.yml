@@ -365,11 +365,20 @@ jobs:
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           file="${RUNNER_TEMP}/authority-boundary.txt"
-          test -f "${file}" && ! test -L "${file}"
-          echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=$(sha256sum "${file}" | cut -c1-64)"
-          echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=$(wc -c < "${file}")"
+          if [ -L "${file}" ] || [ ! -f "${file}" ]; then
+            echo "AUTHORITY_BOUNDARY_STDOUT_INVALID: missing, not a regular file, or a symlink" >&2
+            exit 1
+          fi
+          digest="$(sha256sum -- "${file}" | cut -c1-64)"
+          bytes="$(wc -c < "${file}")"
+          if ! [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || ! [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "AUTHORITY_BOUNDARY_STDOUT_INVALID: digest or byte count" >&2
+            exit 1
+          fi
+          echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=${digest}"
+          echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=${bytes}"
 
       - name: Retain the exact authority-boundary proof stdout
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
