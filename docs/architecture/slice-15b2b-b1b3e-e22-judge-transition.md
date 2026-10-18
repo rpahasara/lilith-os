@@ -1,6 +1,7 @@
 # Slice 15B2b-B1b-3e M-B12 — OD-M12-11 and the One-Member Judge Transition Contract (`UPGRADE_E22_JUDGE_DEV_SYNTHETIC`)
 
-Status: OD-M12-11 OWNER-ACCEPTED (decision only); transition contract PROPOSED, REPOSITORY ONLY
+Status: OD-M12-11 PROPOSED (decision only) until the owner confirms it by merging this record; transition contract
+PROPOSED, REPOSITORY ONLY
 Environment: DEV_SYNTHETIC
 Date: 2026-10-18
 Base: main `6a06ed3bacb2cfced5427d8e3e0795a2f802bbef` (PR #215, OD-M12-10 merged)
@@ -26,7 +27,8 @@ K-WIT, changes custody, HELD or the ledger, writes a replica or First Memory, or
 contract slice for review; no build, swap or live step."
 
 Disclosure: the written recommendation did not reach the owner before that answer. It is stated in full here for the
-first time, and the owner confirms it by reviewing and merging this record. Until then this section reads as PROPOSED.
+first time. **Status: PROPOSED, decision only, until the owner confirms it by merging this record.** The merge
+confirms the decision only; it authorizes no build, stage, select, restart, credential load or custody change.
 
 The rule (`e22_judge_upgrade.OD_M12_11_RULE`):
 
@@ -87,7 +89,7 @@ Retention note: the OD-M12-10 admission needs boot `24d1771d` (and `eea461c3` fo
 post-transition read. Journald rotation removes the oldest boot first, so delay works against this path.
 
 ```text
-OD-M12-11 = OWNER-ACCEPTED (DECISION ONLY; CONFIRMED ON MERGE);  UPGRADE_E22_JUDGE_DEV_SYNTHETIC = PROPOSED, SOURCE ONLY
+OD-M12-11 = PROPOSED (DECISION ONLY) UNTIL CONFIRMED BY OWNER MERGE;  UPGRADE_E22_JUDGE_DEV_SYNTHETIC = PROPOSED, SOURCE ONLY
 NEW RELEASE = NOT BUILT / NOT ATTESTED / NOT PINNED;  BUILD / STAGE / SELECT / RESTART / KEY LOAD = NOT AUTHORIZED
 E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```

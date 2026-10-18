@@ -39,6 +39,14 @@ def installed_pins() -> dict[str, str]:
     return E19.new_release_module_pins({**M6.RELEASE_MODULES, **M6.PROVISION_MODULES})
 
 
+def installed_payload_pins() -> dict[str, str]:
+    """The COMPLETE installed payload map (member -> SHA-256): the repository payload with the judge at its installed
+    E-19 bytes. Its module members are exactly the accepted installed module pins (checked below)."""
+    pins = {member: sha(data) for member, data in RFS.runtime_payloads(ROOT).items()}
+    pins[J.PR1_ACCEPTANCE_MEMBER] = sha(E19_BYTES)
+    return pins
+
+
 class ReleaseAndDeltaTests(unittest.TestCase):
     def test_old_is_the_installed_e19_release_and_new_is_unpinned(self):
         self.assertEqual((J.OLD_RELEASE, J.OLD_MANIFEST_SHA256),
@@ -71,11 +79,13 @@ class ReleaseAndDeltaTests(unittest.TestCase):
         pins = installed_pins()
         expected = J.new_release_module_pins(pins)
         self.assertEqual({member for member in pins if pins[member] != expected[member]}, {J.PR1_ACCEPTANCE_MEMBER})
-        J.check_payload(payloads, pins)                                           # the merged tree is the candidate
+        complete = installed_payload_pins()
+        self.assertEqual({member: complete[member] for member in pins}, pins)     # the accepted module pins
+        J.check_payload(payloads, complete)                                       # the merged tree is the candidate
 
     def test_any_other_payload_is_refused(self):
         payloads = RFS.runtime_payloads(ROOT)
-        pins = installed_pins()
+        pins = installed_payload_pins()
         other = next(member for member in sorted(pins) if member != J.PR1_ACCEPTANCE_MEMBER)
         cases = {
             "another member changed": {**payloads, other: payloads[other] + b"\n"},
@@ -91,6 +101,18 @@ class ReleaseAndDeltaTests(unittest.TestCase):
         with self.assertRaises(J.Refused) as caught:
             J.check_payload(missing, pins)
         self.assertEqual(caught.exception.reason, "PAYLOAD_MEMBER_MISSING")
+
+    def test_an_unexpected_extra_member_is_refused(self):
+        payloads = RFS.runtime_payloads(ROOT)
+        pins = installed_payload_pins()
+        for extra in ("lilith_owner_memory/extra.py", "lilith_authority_dev/__pycache__/x.pyc", "assets/extra"):
+            with self.subTest(extra=extra), self.assertRaises(J.Refused) as caught:
+                J.check_payload({**payloads, extra: b""}, pins)
+            self.assertEqual((caught.exception.reason, caught.exception.detail), ("PAYLOAD_MEMBER_UNEXPECTED", extra))
+        # Judged against an incomplete installed map, the merged payload's other members are extras too: refused.
+        with self.assertRaises(J.Refused) as caught:
+            J.check_payload(payloads, installed_pins())
+        self.assertEqual(caught.exception.reason, "PAYLOAD_MEMBER_UNEXPECTED")
         with self.assertRaises(J.Refused) as caught:
             J.new_release_module_pins({**pins, J.PR1_ACCEPTANCE_MEMBER: "0" * 64})
         self.assertEqual(caught.exception.reason, "INSTALLED_MODULE_PIN_UNEXPECTED")
@@ -142,6 +164,9 @@ class OdM1211Tests(unittest.TestCase):
         for needle in ("OD-M12-11", "I accept OD-M12-11 as recommended (decision only)", J.MODE,
                        J.PR1_ACCEPTANCE_NEW_SHA256, J.PR1_ACCEPTANCE_OLD_SHA256, "NOT AUTHORIZED"):
             self.assertIn(needle, text)
+        # Proposed (decision only) until the owner confirms it by merging; never stated as accepted.
+        self.assertIn("Status: OD-M12-11 PROPOSED (decision only) until the owner confirms it by merging", text)
+        self.assertNotIn("OWNER-ACCEPTED", text)
 
 
 if __name__ == "__main__":

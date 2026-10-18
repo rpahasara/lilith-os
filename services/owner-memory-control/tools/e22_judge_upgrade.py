@@ -22,10 +22,10 @@ or from a retired tree, so both stop before the select and start again from NEW:
     V6 signer running         2 releases, current -> NEW, ONE new signer incarnation (one K-ACT load, the second) from NEW
     V7 OLD retired            1 release (NEW), both accepted replacement incarnations running from NEW
 
-OD-M12-11 (owner-accepted 2026-10-18, record §2) binds the two load events (V5, V6): each records its own window and
-retains its transcript; the post-transition `journal` and `attribute` reads follow the last of them, in the same boot,
-and must show exactly the historical 12 attributed matches (the OD-M12-10 admission). The loads never inherit the
-OD-M12-10 risk acceptance.
+OD-M12-11 (PROPOSED, decision only, until the owner confirms it by merging record §2) binds the two load events
+(V5, V6): each records its own window and retains its transcript; the post-transition `journal` and `attribute` reads
+follow the last of them, in the same boot, and must show exactly the historical 12 attributed matches (the OD-M12-10
+admission). The loads never inherit the OD-M12-10 risk acceptance.
 
     restart != preservation;  one start go != one credential load (counted, never inferred)
     technical phase != owner acceptance;  NEW is unpinned until a merged owner record names the attested build
@@ -193,9 +193,12 @@ def new_release_module_pins(installed_pins: Mapping[str, str]) -> dict[str, str]
 
 
 def check_payload(payloads: Mapping[str, bytes], installed_pins: Mapping[str, str]) -> None:
-    """A candidate NEW payload (member -> bytes) is admissible only if it differs from the installed module map in
-    exactly the one member, with exactly the pinned bytes, and adds or drops no pinned member."""
+    """A candidate NEW payload (member -> bytes) is admissible only if it differs from the installed payload in
+    exactly the one member, with exactly the pinned bytes. `installed_pins` is the COMPLETE installed payload map
+    (member -> SHA-256): a member it does not name is an unexpected extra and is refused, as is a missing one."""
     expected = new_release_module_pins(installed_pins)
+    extra = sorted(set(payloads) - set(expected))
+    _need(not extra, "PAYLOAD_MEMBER_UNEXPECTED", ",".join(extra))
     for member, pin in sorted(expected.items()):
         _need(member in payloads, "PAYLOAD_MEMBER_MISSING", member)
         _need(_sha(payloads[member]) == pin, "PAYLOAD_DELTA_NOT_EXACT", member)
