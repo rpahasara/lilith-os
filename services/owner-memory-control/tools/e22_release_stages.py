@@ -65,6 +65,11 @@ STOP_RETIRED_TREE = "VS_UNIT_ON_RETIRED_RELEASE"
 STOP_TRANSITIONAL = "VS_UNIT_TRANSITIONAL"
 STOP_RESTARTED = "VS_ENDING_INCARNATION_CHANGED"
 STOP_INCONSISTENT = "VS_LAYOUT_INCONSISTENT"
+# The installer `status --expect P1B-10` predates the signer start (M-B11): it reports the running signer's own facts
+# as failures. Exactly these, and only while the signer is RUNNING, are the accepted state (V0, V1, V6, V7; the
+# signer itself is judged by W11). Any other installer failure stays a STOP.
+SIGNER_RUNNING_INSTALLER_FAILURES = frozenset({"UNEXPECTED_PRESENT:/run/credentials/" + SIGNER_SERVICE,
+                                               "UNIT_ACTIVE:" + SIGNER_SERVICE, "UNIT_ACTIVE:" + SIGNER_SOCKET})
 
 Status = Callable[..., dict]
 
@@ -127,16 +132,18 @@ def e22_status(system: I.System, old: str, new: str, *, status: Status = I.statu
         failures += delta_failures(S19.manifest_files(system, old), S19.manifest_files(system, new))
     if state == RETIRED and (S19.manifest_files(system, new) or {}).get(DELTA_MEMBER) != DELTA_NEW_SHA256:
         failures.append("E22_NEW_RELEASE_NOT_THE_JUDGE_PAYLOAD")
+    units = S19.unit_facts(system)
+    signer, witness = signer_state(units), S19.witness_state(units)
     installer = None
     if state != INCONSISTENT:
         selected = target.split("/", 1)[1]
         report = status(system, INSTALLED_STAGE, selected)
         allowed = {"RELEASE_SET"} if state in TWO_RELEASE_STATES else set()
+        if signer == "RUNNING":
+            allowed |= SIGNER_RUNNING_INSTALLER_FAILURES
         installer = {"stage": INSTALLED_STAGE, "releaseSha": selected, "result": report["result"],
                      "failures": list(report["failures"])}
         failures += ["INSTALLER:" + failure for failure in report["failures"] if failure not in allowed]
-    units = S19.unit_facts(system)
-    signer, witness = signer_state(units), S19.witness_state(units)
     report = {"schemaVersion": 1, "mode": MODE, "oldRelease": old, "newRelease": new, "state": state,
               "releaseEntries": entries, "currentTarget": target, "installerStatus": installer,
               "signer": signer, "witness": witness, "units": units,

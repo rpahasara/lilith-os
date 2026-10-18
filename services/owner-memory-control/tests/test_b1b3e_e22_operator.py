@@ -11,7 +11,9 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +39,7 @@ import mb6_operator as M6  # noqa: E402
 import test_b1b3e_mb11_signer_start as T  # noqa: E402  (helpers only: exact HEALTH / readiness / unit facts)
 
 S22 = OP.stages_module()
+HAVE_DEPS = all(importlib.util.find_spec(m) is not None for m in ("rfc8785", "cryptography"))
 OLD, NEW, MANIFEST = J.OLD_RELEASE, "e22" + "1" * 37, "9" * 64
 ENDING_SIGNER, ENDING_WITNESS = J.ENDING_SIGNER_INCARNATION, J.ENDING_WITNESS_INCARNATION
 NEW_WITNESS, NEW_SIGNER = ("6" * 32, "4343"), ("5" * 32, "4242")
@@ -470,6 +473,21 @@ class LoadCountTests(Case):
                 self.assertEqual(post["result"], "E22_WITNESS_POST_STOP", name)
                 with self.assertRaises(OP.Stop):
                     self.op.render(ROOT, self.work, "ACCEPT_WITNESS")
+
+
+class ImportPathTests(unittest.TestCase):
+    @unittest.skipUnless(HAVE_DEPS, "the owner-inputs reader needs rfc8785 and cryptography")
+    def test_the_owner_inputs_reader_loads_without_pythonpath(self):
+        """The first live `v0` failed here (ModuleNotFoundError: lilith_memory) with only the tools dir on the path."""
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        outside = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep)      # third-party deps only
+                   if p and ROOT not in Path(p).resolve().parents and Path(p).resolve() != ROOT]
+        code = ("import sys, e22_operator as O; O.Operator().readiness_tool(); "
+                "print(sys.path.index(str(O.HERE)) < sys.path.index(str(O.HERE.parents[1] / 'core-api')))")
+        with tempfile.TemporaryDirectory() as cwd:
+            out = subprocess.run([sys.executable, "-B", "-c", code], cwd=cwd, env={**env, "PYTHONPATH": os.pathsep.join([str(TOOLS), *outside])},
+                                 capture_output=True, text=True, timeout=120)
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, "True"), out.stderr[-2000:])
 
 
 class RemoteAndPinTests(unittest.TestCase):

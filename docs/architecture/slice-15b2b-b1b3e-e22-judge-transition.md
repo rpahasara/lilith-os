@@ -240,3 +240,33 @@ E-22 OPERATOR (V0 … V7, OD-M12-11 WINDOWS, POSTS, ACCEPTANCES) = SOURCE ONLY; 
 BUILD / STAGE / SELECT / RETIRE / UNIT STOP-START / KEY LOAD = NOT AUTHORIZED
 E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 7. Addendum (2026-10-18): two V0 blockers found by the first read-only `v0` (source fix)
+
+The first live `v0` (control `4873a9f`; evidence `C:\Users\edufo\lilith-e22-transfer-v0-4873a9f`, seal
+`SHA256SUMS.seal-2-v0` `13a8dc73…`) stopped before any W11 read. The host was exactly V0: one release `ba943e1`,
+`current -> releases/ba943e1`, signer `c7ba0fb7…` / 84806, witness `90b28f9d…` / 69238.
+
+1. **`e22-status` reported `VS_LAYOUT_INCONSISTENT`.** It judges the layout with the installer's
+   `status --expect P1B-10`, which predates the signer start (M-B11). That check reports the running signer's own facts
+   as failures: `UNEXPECTED_PRESENT:/run/credentials/lilith-authority-dev.service` and `UNIT_ACTIVE` for the service
+   and the socket. `e22_status` now admits exactly these three
+   (`e22_release_stages.SIGNER_RUNNING_INSTALLER_FAILURES`) and only while the signer is RUNNING. Every other installer
+   failure stays a STOP, and the report still records the installer's failures unchanged. The signer itself remains
+   judged by W11. The earlier tests used a fake installer `status`. The new tests:
+   - run the real installer `status` on the synthetic root, signer running and stopped, and require the difference to
+     be exactly this set;
+   - replay the retained DEV report: V0 only while the signer runs; any extra failure is a STOP.
+2. **The local owner-inputs reader failed** with `ModuleNotFoundError: lilith_memory`. `e22_operator` now appends
+   `services/core-api` and `services/owner-memory-control` of its own checkout to `sys.path`, keeping the tools
+   directory first (the `mb6_expected_ledger_head` pattern). A subprocess test with only the tools directory on the
+   path reproduces the live failure against the old operator and passes with the fix.
+
+Pin chain: `e22_operator.TOOL_PINS[STAGES]` = `97359e84c89e3e70fd0bcb3d49de1bdc996d04b5233b807adf74b506c06050d2`.
+The contract, the remote and every other pin are unchanged. The transferred archive and builder stamp on DEV are
+unaffected.
+
+```text
+V0 = NOT YET EXACT (re-run after this fix merges, from a clean control checkout at the merge);  NOTHING MUTATED
+E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```
