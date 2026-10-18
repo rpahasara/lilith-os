@@ -40,7 +40,8 @@ from pathlib import Path
 from typing import Mapping
 
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
+# Never put the remote cwd on sys.path under the mb6 BOOT loader (`e22_operator` bundles this module to DEV).
+if not str(globals().get("__file__", "")).startswith("<mb6-bundle:") and str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import e19_p1b10_upgrade as E19  # noqa: E402
