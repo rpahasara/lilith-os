@@ -416,3 +416,21 @@ The producer is unchanged. `mb12_secret_hygiene_proof.UNRESOLVED_SCOPE` still na
 later change that encodes this decision must keep complete coverage of L2b's window and the outstanding FAIL; it must
 never turn the recorded FAIL into a PASS. The security disposition, meaning an explicit exception or a remediation, is a
 separate owner decision that has not been taken.
+
+## 14. Addendum (2026-10-18): E-08 `DEPLOYER_DENIAL` transcript accepted under OD-M12-6
+
+**Owner decision (2026-10-18):** under OD-M12-6, the owner accepts exactly one `DEPLOYER_DENIAL` transcript, and the
+OD-M11-14 mapping for `DEPLOYER_DENIAL` only (`scripts/deployer_authority_boundary_proof.sh:DR-5`, `9b569f9b…`). The
+`/etc/passwd` occurrence is a path in a denial verdict, not a credential. The acceptance is limited to E-08 evidence:
+it grants no readiness PASS, signer operation, authority, custody release or First Memory write.
+
+| Item | Value |
+| --- | --- |
+| transcript | `4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64`, 10 260 bytes, 155 lines, LF only (equal to the accepted W11 DR-5 block) |
+| source | protected-main `deploy-dev` run `39100360778` (`e6401448`, `DEPLOY_REQUIRED`, success), artifact `12125829855` `authority-boundary-e6401448…-39100360778` (§18 of the PR-B1 record); the same run logged the identical `AUTHORITY_BOUNDARY_STDOUT_SHA256` / `_BYTES` |
+| contract | `_deployer_boundary` → `PASS`, `maturity=P1A-9`; final `AUTHORITY_BOUNDARY_PROOF=PASS maturity=L1c.3` |
+| evidence | `lilith-mb12-e08-artifact-e640144`, `SHA256SUMS` `ae0153d04b7897062e4fa3c9b0d2c2dd728724ea44fc5762301a442ecdb54751` |
+| owner record | `lilith-mb12-e08-acceptance-e640144\OWNER-ACCEPTANCE-RECORD.txt`, SHA-256 `7c7fc26c5929e6ed817918d85d47bd1d583c349b416b9abf2ef226287e662acf` (`acceptedAt` `2026-10-18T05:34:33Z`) |
+
+Pin: `DEV_ACCEPTED_PROOF_TRANSCRIPTS["DEPLOYER_DENIAL"] = {4337f769…}`. Six proof names are now pinned; `SECRET_HYGIENE`
+is not (E-22 BLOCKED). Pin cascade: operator record §19.

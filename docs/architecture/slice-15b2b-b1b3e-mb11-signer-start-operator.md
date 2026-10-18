@@ -453,3 +453,15 @@ its baseline are unchanged. Pin cascade (supersedes §17):
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `78fba8af76e8c45e1ff103a2de45f790fe6eb2ae6d59ed017fb92edd2fb8fbd6` |
 | `mb11_operator.py` | `a6660d093744ab82cb5040b09102cc765620c3a92da0db59e47e4ccb7ce7b185` |
+
+## 19. Addendum (2026-10-18): E-08 `DEPLOYER_DENIAL` transcript pin — re-pin only
+
+The owner accepted the E-08 transcript `4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64` under OD-M12-6
+(record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §14). `DEV_ACCEPTED_PROOF_TRANSCRIPTS` gains `DEPLOYER_DENIAL`.
+That changes `mb12_readiness_inputs.py` and so the operator pin. Pin cascade (supersedes §18):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `c97fcbcec059416486ce7fa0721909db9bcd543e50d121f544dd5b4a4bf00dfe` |
+| `mb11_operator.py` | `8bc1aca41721cad48c415e6b94a333f5117988be47ce3b0487d251e5b338ba37` |
