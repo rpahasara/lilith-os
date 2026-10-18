@@ -22,7 +22,8 @@ ceremony"; B1b-3d L2b STOPs on "any private-key pattern in output or journal". F
   canonical record must exist, and every DEV ceremony window must lie inside ONE retained boot of a `journal`
   transcript (so the journal covers it continuously within that boot, and its newest entry is after the ceremony end).
   S25 / off-host ceremonies have no DEV journal requirement. A scope decision left open (`UNRESOLVED_SCOPE`), an
-  unrecorded ceremony window, or an absent record FAILS: no PASS is produced by default.
+  unrecorded ceremony window, an absent record, or a ceremony transcript an owner record states was not retained
+  (`TRANSCRIPT_NOT_RETAINED`, OD-M12-9) FAILS: no PASS is produced by default.
 
 Detection contract (nonclaims): the markers are PEM / OpenSSH private-key armour (`install_authority_dev`
 FORBIDDEN_MARKERS / the test markers) and the fixed Ed25519 PKCS#8 DER prefix the keygen emits, as raw bytes, hex
@@ -142,11 +143,13 @@ class CeremonyV1(NamedTuple):
 
 
 CEREMONIES: Mapping[str, CeremonyV1] = {
-    # OD-M12-7 (owner, 2026-10-17; PR-B2 record §13): L2b is included. Its canonical record gives no ceremony window
-    # and no full publication SHA-256, so both stay unrecorded: `prove` FAILS (CEREMONY_WINDOW_NOT_RECORDED) until an
-    # owner record states the window. Nothing is inferred from the attribution or the journal.
+    # OD-M12-7 (owner, 2026-10-17; PR-B2 record §13): L2b is included. Its canonical record gives no ceremony window,
+    # so the window stays unrecorded and `prove` FAILS (CEREMONY_WINDOW_NOT_RECORDED). Nothing is inferred from the
+    # attribution or the journal. OD-M12-9 (PR-B2 record §16): the publication pin is the accepted K-ACT publication
+    # capture of the M-B3 completion record (the same host file, read 2026-10-06), not a value of the L2b closure.
     "B1B3D-L2b": CeremonyV1("DEV", "K-ACT generation and publication (B1b-3d L2b.2)",
-                            "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION", None, (None, None)),
+                            "slice-15b2b-b1b3d-live-closure.md", "K_ACT_PUBLICATION",
+                            "d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032", (None, None)),
     "M-B1": CeremonyV1("S25", "K-ROOT generation and publication", "slice-15b2b-b1b3e-mb1-kroot-completion.md",
                        "K_ROOT_PUBLIC_EXPORT", "740cf10ab9042b95eef192af6ca9e63b661cf91af3a36fe5d0aafbd2b3547db5", None),
     "M-B2": CeremonyV1("DEV", "K-WIT generation and publication", "slice-15b2b-b1b3e-mb2-kwit-completion.md",
@@ -157,13 +160,21 @@ CEREMONIES: Mapping[str, CeremonyV1] = {
                         None, None, ("2026-10-09T04:44:18Z", "2026-10-09T04:59:49Z")),
     "M-B9b": CeremonyV1("DEV", "K-WIT signing the V2 genesis", "slice-15b2b-b1b3e-mb9-package-b-completion.md",
                         "GENESIS_CHAIN_1", "252c32204bebf3fa1ca0981d8791115e2abb6cd8ddb0925285c64213317cfb99",
-                        ("2026-10-09T04:59:49Z", None)),      # the record gives the marker, not the end
+                        # OD-M12-9: the operator-clock invocation bracket MB9B_INVOKE_START / MB9B_INVOKE_END of
+                        # the sealed Package B sequence-3 state.txt (laptop clock, not host-recorded); it contains
+                        # the host marker `mb9b` 04:59:49Z of the record.
+                        ("2026-10-09T04:59:44Z", "2026-10-09T04:59:59Z")),
     "M-B11": CeremonyV1("DEV", "first K-ACT load (signer start)", "slice-15b2b-b1b3e-mb11-signer-start-acceptance.md",
                         None, None, ("2026-10-15T05:13:15Z", "2026-10-15T05:13:29Z")),  # marker to POST11 record
 }
 # Scope questions left open on purpose (never silently included or excluded). OD-M12-7 decided B1B3D-L2b: included
 # (CEREMONIES above). No question is open; an open one would FAIL `prove` again.
 UNRESOLVED_SCOPE: Mapping[str, str] = {}
+# Ceremonies whose transcript an owner record states was NOT retained: ceremony -> owner decision. The scope then lists
+# no TRANSCRIPT item for it, and `prove` prints an explicit FAIL (CEREMONY_TRANSCRIPT_NOT_RETAINED) instead of
+# refusing the whole scope, so every other check still runs. It is never a PASS and never satisfied by a substitute.
+# OD-M12-9 (owner, 2026-10-18; PR-B2 record §16): no byte-exact B1b-3d L2b ceremony transcript is retained.
+TRANSCRIPT_NOT_RETAINED: Mapping[str, str] = {"B1B3D-L2b": "OD-M12-9"}
 SCOPE_TYPE = "LILITH_MB12_SECRET_HYGIENE_SCOPE"
 SCOPE_FIELDS = frozenset({"scopeType", "schemaVersion", "environment", "ceremonies", "journalScan"})
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -714,7 +725,8 @@ def scope_digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def parse_scope(raw: bytes, ceremonies: Mapping[str, CeremonyV1] = CEREMONIES) -> dict[str, Any]:
+def parse_scope(raw: bytes, ceremonies: Mapping[str, CeremonyV1] = CEREMONIES,
+                not_retained: Mapping[str, str] = TRANSCRIPT_NOT_RETAINED) -> dict[str, Any]:
     def no_duplicates(pairs):
         keys = [k for k, _ in pairs]
         _need(len(keys) == len(set(keys)), "SCOPE_DUPLICATE_KEY")
@@ -747,7 +759,10 @@ def parse_scope(raw: bytes, ceremonies: Mapping[str, CeremonyV1] = CEREMONIES) -
                 publications += 1
             else:
                 raise ScopeError("SCOPE_ITEM_NOT_IN_CONTRACT")
-        _need(transcripts >= 1, "SCOPE_TRANSCRIPT_MISSING")
+        if entry["ceremony"] in not_retained:
+            _need(transcripts == 0, "SCOPE_TRANSCRIPT_NOT_RETAINED_CONTRADICTED")
+        else:
+            _need(transcripts >= 1, "SCOPE_TRANSCRIPT_MISSING")
         _need(publications == (1 if spec.publication else 0), "SCOPE_PUBLICATION_NOT_EXACT")
     return doc
 
@@ -776,9 +791,10 @@ def _read_bound(path: str, sha256: str) -> bytes | None:
 
 def prove(raw_scope: bytes, *, read: Callable[[str, str], "bytes | None"] = _read_bound,
           say: Callable[[str], None] = print, ceremonies: Mapping[str, CeremonyV1] = CEREMONIES,
-          unresolved: Mapping[str, str] = UNRESOLVED_SCOPE, repo: Path | None = REPO) -> bool:
+          unresolved: Mapping[str, str] = UNRESOLVED_SCOPE, repo: Path | None = REPO,
+          not_retained: Mapping[str, str] = TRANSCRIPT_NOT_RETAINED) -> bool:
     try:
-        scope = parse_scope(raw_scope, ceremonies)
+        scope = parse_scope(raw_scope, ceremonies, not_retained)
     except ScopeError as exc:
         say(f"SECRET_HYGIENE_PROOF=FAIL reason={exc.args[0]}")
         return False
@@ -799,6 +815,8 @@ def prove(raw_scope: bytes, *, read: Callable[[str, str], "bytes | None"] = _rea
         name, spec = entry["ceremony"], ceremonies[entry["ceremony"]]
         if spec.record is None or repo is None or not (repo / "docs/architecture" / spec.record).is_file():
             failures.append(f"FAIL: CEREMONY_RECORD_ABSENT {name}")
+        if name in not_retained:
+            failures.append(f"FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED {name}")
         for item in entry["items"]:
             label = item["role"] if item["kind"] is None else f"{item['role']}:{item['kind']}"
             if item["kind"] is not None and spec.publication_sha256 is not None \

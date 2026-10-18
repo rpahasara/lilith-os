@@ -114,7 +114,7 @@ PRODUCER_SCRIPT_SHA256 = {
     "scripts/verify_broker_dev_current_incarnation.py":
         "b90ed6efa203f7aade5519120e1658b866aa9f0d4f559e6ac39fcc51573ebfcf",
     "services/owner-memory-control/tools/mb12_os_denial_proof.py": "e67542287f869e6d8e56ee30321593424e41c964e682e5326fd8dc15a6fd8ef3",
-    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "8394ed7f85ec43f57a166a6a383b7d06ceb1171987e0646179ee4796ce572d77",
+    "services/owner-memory-control/tools/mb12_secret_hygiene_proof.py": "83b275b480f31e88596e7ba13251987c581e3477a61ba3d75cd094d470889bb7",
     "services/owner-memory-control/tools/mb12_preservation_set_proof.py": "8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0",
 }
 # Producer transcripts established by a merged owner record: proof name -> accepted transcript SHA-256s.
@@ -349,9 +349,10 @@ def _secret_hygiene(raw: bytes, exit_code: int) -> tuple[str, str | None]:
     digest = scope.group(1)
     if exit_code != 0:
         return _fail_contract(lines, exit_code, rf"SECRET_HYGIENE_PROOF=FAIL scope={digest}", "SECRET_HYGIENE FAIL")
-    # A PASS is admissible only when the producer's own (pinned) scope is closed: no open scope decision, every
-    # canonical record named, every DEV window recorded.
-    _need(not module.UNRESOLVED_SCOPE and all(c.record for c in ceremonies.values())
+    # A PASS is admissible only when the producer's own (pinned) scope is closed: no open scope decision, no
+    # ceremony transcript recorded as not retained (OD-M12-9), every canonical record named, every DEV window recorded.
+    _need(not module.UNRESOLVED_SCOPE and not module.TRANSCRIPT_NOT_RETAINED
+          and all(c.record for c in ceremonies.values())
           and all(c.venue == "S25" or (c.window and None not in c.window) for c in ceremonies.values()),
           "TRANSCRIPT_CONTRACT", "SECRET_HYGIENE producer scope not closed")
     _need(len(lines) >= 3 and lines[-1] == f"SECRET_HYGIENE_PROOF=PASS scope={digest}"

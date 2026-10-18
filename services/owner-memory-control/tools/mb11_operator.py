@@ -65,7 +65,7 @@ TOOL_PINS = {
     W11_DR5_TARGET: "775f43e84e1e58c2c9d1e8b4f2f32dc955462d034963b74761a133003a16daf3",
     REMOTE: "04461ffe4d30d443c49e5ef2d314972fda41a0b3b8dda1765609fb64c1cad72f",
     E19_OPERATOR: "b98328162b72795de0579d5e7abb58ff55f1bd7498e53b8699d91af5d453c1dd",
-    READINESS_INPUTS: "86bb674a236ed3a848acb37db8d6c7cf623eca90dd29a0d0baf678ec40653265",
+    READINESS_INPUTS: "133f296b00f44a58f8891e0554a06825e897e30f8c3e63d607c54a3e5bef289f",
     E19_RECORD: "31bc707ebc9b58b376d233a30594eaa0e1f4d3b32444b172c741dbaeec66b3b8",
 }
 # The W10 chain, the restart-boundary tools, the W11 verifier, then the generated evidence and the remote tail.

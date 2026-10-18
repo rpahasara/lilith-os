@@ -478,3 +478,17 @@ operator pins. No operator behaviour changes. Pin cascade (supersedes §19):
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `86bb674a236ed3a848acb37db8d6c7cf623eca90dd29a0d0baf678ec40653265` |
 | `mb11_operator.py` | `e5b0d6e391c18b195bb0e6f6bc59c6cfc01768ac5418b99882f8df0b1bfb6d56` |
+
+## 21. Addendum (2026-10-18): OD-M12-9 — re-pin only
+
+`mb12_secret_hygiene_proof.py` records the missing B1b-3d L2b transcript as an explicit FAIL, adopts the M-B9b
+operator-clock bracket and the L2b publication pin, and the readiness builder refuses a SECRET_HYGIENE PASS while a
+transcript is recorded as not retained (record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §16). No operator
+behaviour changes. Pin cascade (supersedes §20):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `83b275b480f31e88596e7ba13251987c581e3477a61ba3d75cd094d470889bb7` |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `133f296b00f44a58f8891e0554a06825e897e30f8c3e63d607c54a3e5bef289f` |
+| `mb11_operator.py` | `953267118c24dab864e94f9b6eb9e0e4ae71b7d542fb0efeec09535fb576cc8c` |
