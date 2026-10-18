@@ -22,8 +22,8 @@ Fail-closed rules (never a default, never a synthetic PASS):
   bytes must satisfy that producer's exact terminal contract (phase, final line, exit status; for the custody denial
   proof the complete expected PASS transcript is rebuilt from the script's own rows), the result and transcript digest
   are DERIVED here, and the digest must be ESTABLISHED by the trust's accepted-transcript pins (DEV:
-  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`; OD-M12-6 pins SIGNER_DENIAL, BROKER_DENIAL, OS_DENIAL, BROKER_PRESERVATION and
-  PRESERVATION_SET only). `OS_DENIAL`,
+  `DEV_ACCEPTED_PROOF_TRANSCRIPTS`; OD-M12-6 pins SIGNER_DENIAL, BROKER_DENIAL, OS_DENIAL, BROKER_PRESERVATION,
+  PRESERVATION_SET and DEPLOYER_DENIAL; SECRET_HYGIENE is unpinned). `OS_DENIAL`,
   `SECRET_HYGIENE`, `PRESERVATION_SET` have the PR-B2 producers (`mb12_os_denial_proof`, `mb12_secret_hygiene_proof`,
   `mb12_preservation_set_proof`) with exact contracts;
   a missing proof stays missing (NOT_READY downstream);
@@ -125,17 +125,21 @@ PRODUCER_SCRIPT_SHA256 = {
 # owner-accepted under OD-M12-6 for this transcript only (operator record §16).
 # PRESERVATION_SET: the E-23 compare of baseline 019e0117 vs the 2026-10-17T11:15:43Z observation (evidence
 # lilith-e23-compare-c2cbb2d), owner-accepted under OD-M12-6 for this transcript only (operator record §18).
-# DEPLOYER_DENIAL and SECRET_HYGIENE stay unpinned.
+# DEPLOYER_DENIAL: the exact DR-5 stdout retained as artifact 12125829855 of protected-main run 39100360778
+# (e6401448; evidence lilith-mb12-e08-artifact-e640144), owner-accepted under OD-M12-6 for this transcript only
+# (operator record §19). SECRET_HYGIENE stays unpinned (E-22 BLOCKED).
 _P1B12_TRANSCRIPT = "92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"
 _OS_DENIAL_TRANSCRIPT = "3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"
 _BROKER_PRESERVATION_TRANSCRIPT = "79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"
 _PRESERVATION_SET_TRANSCRIPT = "4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e"
+_DEPLOYER_DENIAL_TRANSCRIPT = "4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"
 DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {
     "SIGNER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
     "BROKER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
     "OS_DENIAL": frozenset({_OS_DENIAL_TRANSCRIPT}),
     "BROKER_PRESERVATION": frozenset({_BROKER_PRESERVATION_TRANSCRIPT}),
     "PRESERVATION_SET": frozenset({_PRESERVATION_SET_TRANSCRIPT}),
+    "DEPLOYER_DENIAL": frozenset({_DEPLOYER_DENIAL_TRANSCRIPT}),
 }
 
 # The accepted DEV records (public values only).
