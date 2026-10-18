@@ -76,6 +76,11 @@ class PrCiDevSeparationTests(unittest.TestCase):
         "Prove the routine DEV deployer has no root, broker, or Stage III reach",
         "Prove the routine DEV deployer has no authority-custody reach",
     )
+    # M-B12 E-08: retain the exact DR-5 stdout (runner-only; no DEV contact), only after the proof step succeeds.
+    RETENTION_STEPS = (
+        "Record the exact authority-boundary proof stdout",
+        "Retain the exact authority-boundary proof stdout",
+    )
     DEPLOY_ONLY_STEPS = (
         "Build deterministic exact-SHA Core API bundle",
         "Detect broker component from exact candidate SHA",
@@ -124,7 +129,8 @@ class PrCiDevSeparationTests(unittest.TestCase):
         reachable = {name for name, body in steps.items()
                      if "CONTROL_ONLY_NO_DEPLOY'" in body.split("\n        uses:", 1)[0].split("\n        shell:", 1)[0]
                      and "outputs.mode ==" in body}
-        self.assertEqual(reachable, set(self.LIVE_PROOF_STEPS) | {"Validate control-only candidate on the ephemeral runner"})
+        self.assertEqual(reachable, set(self.LIVE_PROOF_STEPS) | set(self.RETENTION_STEPS)
+                         | {"Validate control-only candidate on the ephemeral runner"})
         order = [job(DEPLOY, "deploy").index(f"      - name: {name}\n") for name in self.LIVE_PROOF_STEPS]
         self.assertEqual(order, sorted(order))
         self.assertLess(order[-1], job(DEPLOY, "deploy").index("      - name: Package exact-SHA bundle for the fixed DEV helper\n"))
@@ -135,6 +141,42 @@ class PrCiDevSeparationTests(unittest.TestCase):
             with self.subTest(job=name):
                 guard = job(DEPLOY, name).split("    runs-on:", 1)[0]
                 self.assertIn("needs.deploy.outputs.mode == 'BROKER_CANDIDATE_VALIDATE_ONLY'", guard)
+
+    def test_e08_retention_keeps_only_the_exact_proof_stdout_after_the_proof(self):
+        source = job(DEPLOY, "deploy")
+        steps = self.steps(source)
+        proof = source.index("      - name: Prove the routine DEV deployer has no authority-custody reach\n")
+        positions = [source.index(f"      - name: {name}\n") for name in self.RETENTION_STEPS]
+        self.assertTrue(proof < positions[0] < positions[1]
+                        < source.index("      - name: Package exact-SHA bundle for the fixed DEV helper\n"))
+        record, retain = (steps[name] for name in self.RETENTION_STEPS)
+        for body in (record, retain):
+            self.assertIn(f"        if: {self.BOTH}\n", body)      # implicit success(): only after a passing proof
+            for forbidden in ("always()", "failure()", "continue-on-error", "github.sha", "sudo", "gcloud",
+                              "compute ssh", "secrets.", "permissions"):
+                self.assertNotIn(forbidden, body)
+        # Fail closed: strict shell, explicit exit for a missing / non-regular / symlinked file, checked assignments
+        # validated before printing (never a command substitution inside echo), and no rewrite of the file.
+        self.assertIn("          set -euo pipefail\n", record)
+        self.assertIn('if [ -L "${file}" ] || [ ! -f "${file}" ]; then', record)
+        self.assertIn('digest="$(sha256sum -- "${file}" | cut -c1-64)"', record)
+        self.assertIn('bytes="$(wc -c < "${file}")"', record)
+        self.assertIn('[[ "${digest}" =~ ^[0-9a-f]{64}$ ]]', record)
+        self.assertIn('[[ "${bytes}" =~ ^[1-9][0-9]*$ ]]', record)
+        self.assertEqual(record.count("exit 1"), 2)
+        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=${digest}"', record)
+        self.assertIn('echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=${bytes}"', record)
+        self.assertNotIn('echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=$(', record)
+        for writer in ("> \"${file}\"", ">> \"${file}\"", "sed -i", "tee", "dos2unix", "tr "):
+            self.assertNotIn(writer, record)
+        self.assertIn("        uses: actions/upload-artifact@v4\n", retain)
+        self.assertIn("name: authority-boundary-${{ steps.classify.outputs.candidate_sha }}-${{ github.run_id }}\n",
+                      retain)
+        self.assertIn("path: ${{ runner.temp }}/authority-boundary.txt\n", retain)
+        self.assertIn("if-no-files-found: error\n", retain)
+        self.assertIn("retention-days: 7\n", retain)
+        self.assertEqual(DEPLOY.count("upload-artifact"), 1)
+        self.assertEqual(DEPLOY.count("authority-boundary.txt"), 5)   # tee, 2x tail, record file=, upload path
 
     def test_control_only_success_reports_no_mutation_and_is_not_a_deployment(self):
         steps = self.steps(job(DEPLOY, "deploy"))

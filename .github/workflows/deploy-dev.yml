@@ -358,6 +358,37 @@ jobs:
           tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" | grep -Eq '^AUTHORITY_BOUNDARY_PROOF=PASS maturity=(PRE_L1A|L1a|L1b\.1|L1b\.2|L1c\.1|L1c\.3)$'
           tail -n 1 "${RUNNER_TEMP}/authority-boundary.txt" >> "${GITHUB_STEP_SUMMARY}"
 
+      # 15B2b-B1b-3e M-B12 E-08: keep the exact DR-5 producer stdout (the bytes `tee` wrote, no log
+      # reconstruction) as a short-lived artifact named by the validated candidate SHA and this run. Runs only
+      # after the proof step succeeded (implicit success()); read-only on the runner; no new permission.
+      - name: Record the exact authority-boundary proof stdout
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/authority-boundary.txt"
+          if [ -L "${file}" ] || [ ! -f "${file}" ]; then
+            echo "AUTHORITY_BOUNDARY_STDOUT_INVALID: missing, not a regular file, or a symlink" >&2
+            exit 1
+          fi
+          digest="$(sha256sum -- "${file}" | cut -c1-64)"
+          bytes="$(wc -c < "${file}")"
+          if ! [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || ! [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "AUTHORITY_BOUNDARY_STDOUT_INVALID: digest or byte count" >&2
+            exit 1
+          fi
+          echo "AUTHORITY_BOUNDARY_STDOUT_SHA256=${digest}"
+          echo "AUTHORITY_BOUNDARY_STDOUT_BYTES=${bytes}"
+
+      - name: Retain the exact authority-boundary proof stdout
+        if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED' || steps.classify.outputs.mode == 'CONTROL_ONLY_NO_DEPLOY'
+        uses: actions/upload-artifact@v4
+        with:
+          name: authority-boundary-${{ steps.classify.outputs.candidate_sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/authority-boundary.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Package exact-SHA bundle for the fixed DEV helper
         if: steps.classify.outputs.mode == 'DEPLOY_REQUIRED'
         shell: bash

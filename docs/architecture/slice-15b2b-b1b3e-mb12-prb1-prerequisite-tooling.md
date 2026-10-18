@@ -495,3 +495,34 @@ refused. No DEV readiness package builds.
 E-21 = CONFIRMED (5d7a4e2b… → 108b2ae2…), EFFECTIVE ON MERGE;  OD-M12-4 = ACCEPTED
 E-25 … E-28 = NOT BOUND (OD-M11-13);  M-B12 = NOT PASSED;  CUSTODY = HELD
 ```
+
+## 18. Addendum (2026-10-17): OD-M11-12 accepted; E-08 stdout retention
+
+**OD-M11-12 ACCEPTED (owner, 2026-10-17)**, part (b) of §9. **M-B12 PASS** requires the complete PR-1 package
+E-01 … E-24 to be READY under the release verifier, with every input authenticated (§2a) and one complete hold
+observation and HEALTH capture bound to the observed signer InvocationID. **E-17** (`HOLD_RELEASE_ELIGIBILITY`)
+READY is a narrower result and never counts as M-B12 PASS. A NOT_READY package is `M-B12 NOT PASSED`, and M-B13
+does not start. Recorded as an explicit amendment note under preflight §27 (the M-B12 row text is unchanged). Parts
+(a) and (c) are historical: START_SIGNER occurred and was owner-accepted (M-B11), and this decision does not
+reinterpret it. Verifier semantics are unchanged. **OD-M11-13** remains as already accepted on 2026-10-13
+(`slice-15b2b-b1b3e-e19-transition-implementation.md`): the owner-side route. E-25 … E-28 are bound to the exact PR-1
+package digest at M-B13, with no release-verifier extension.
+
+**E-08 retention (owner-approved 2026-10-17).** The owner acknowledged the limited added exposure to repository readers
+and `actions:read` tokens. `deploy-dev.yml` now keeps the exact DR-5 producer stdout that the proof step already
+`tee`s to `${RUNNER_TEMP}/authority-boundary.txt`. Two runner-only steps run after that step:
+- one checks the file is regular and not a symlink, and logs `AUTHORITY_BOUNDARY_STDOUT_SHA256` and
+  `AUTHORITY_BOUNDARY_STDOUT_BYTES`;
+- one uploads only that file (`actions/upload-artifact@v4`, `if-no-files-found: error`, `retention-days: 7`) as
+  `authority-boundary-<validated candidate SHA>-<run id>`.
+
+Both use the proof step's condition (`DEPLOY_REQUIRED` or `CONTROL_ONLY_NO_DEPLOY`), with the implicit `success()`,
+so a failed proof is never uploaded. The proof, IAP route, permissions, classification and deployment are unchanged.
+The file holds only the producer's fixed verdict lines (paths, account names, maturity), which already appear in the run
+log. No transcript is accepted here. `DEPLOYER_DENIAL` stays unpinned until the first artifact's bytes are verified
+against the logged SHA-256 and accepted by the owner under OD-M12-6.
+
+```text
+OD-M11-12 = ACCEPTED (package E-01..E-24 READY);  OD-M11-13 = ACCEPTED 2026-10-13 (owner-side, at M-B13)
+E-08 RETENTION = IMPLEMENTED (no artifact yet);  E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD
+```
