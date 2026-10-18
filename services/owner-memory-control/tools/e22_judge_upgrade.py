@@ -55,8 +55,21 @@ STATUS = "PROPOSED_NOT_ACCEPTED"
 OLD_RELEASE = E19.NEW_RELEASE
 OLD_MANIFEST_SHA256 = E19.NEW_MANIFEST_SHA256
 OLD_ARCHIVE_SHA256 = E19.NEW_RELEASE_ATTESTATION["archiveSha256"]
-NEW_RELEASE: str | None = None
-NEW_MANIFEST_SHA256: str | None = None
+# The owner-authorized pin of the independently attested build (record slice-15b2b-b1b3e-e22-new-release-pin.md).
+# NEW_RELEASE is the SOURCE commit the archive was built from (the PR #219 merge), never the commit carrying this pin.
+NEW_RELEASE: str | None = "129f2bed617334be61dcac5204cd409946a7a566"
+NEW_MANIFEST_SHA256: str | None = "fc7dbf08bb5b8260716a762fd2fbccdb44fbf0e438e2e21d0cfddcd6f1a3348a"
+# Build provenance (a record only; `e22-stage` verifies the archive by its builder stamp and NEW_MANIFEST_SHA256).
+NEW_RELEASE_ATTESTATION = {
+    "archiveSha256": "baa317262896061626e6bf17151c95eea990beb01b707ffbabb7f68f3465daab",
+    "archiveByteSize": 5356341,
+    "builderStampSha256": "2c6f36ec13df2a8781821671d1ede5db9af2f1a709e8b57c6ab93565789efaaa",
+    "attestationDigest": "bc7ca22f820ed8684c74fb0333a161f64e91ebbf1d18e56524294c3afa9d7fde",
+    "buildRecipeSha256": "3ff8ce72da5fba99db4546ff66ac238c042abe784fbe949aaef7ac9394e75b54",
+    "authorityReleaseDigest": "cfb6db8f8461f68f903141acdd4729d232dfb528d13d8bddcf9683dc8ded9d8d",
+    "identitySha256": "aaf183ac4cf7ce28ae1354fc4428e2152f1de9bf1482784f6778f8bf871c9b17",
+    "evidenceManifestSha256": "caa63c9bc63d3990f2dee81288e1db56f56e757fcb95f083c1c336cd863e1670",
+}
 # The incarnations the transition ends (accepted records): the M-B11 signer (start acceptance §2) and the E-19 U5
 # replacement witness (E-19 completion record). A replacement is a different InvocationID running from NEW.
 ENDING_SIGNER_INCARNATION = ("c7ba0fb7e2d84a0eb02a04ef0e83f67a", "84806")
@@ -237,6 +250,20 @@ OD_M12_11_RULE = (
     "transcript; the post-transition journal and attribute reads follow the last load, in the same boot as its window, "
     "and must show exactly the historical 12 attributed matches (the OD-M12-10 admission); no new marker; the loads "
     "do not join the E-22 CEREMONIES table and never inherit the OD-M12-10 risk acceptance")
+
+
+# The post-V7 W11 DR-5 target: the M-B11 `SIGNER_RUNNING_WITNESS_RUNNING_HELD` texts (mb11_dr5_target, pinned) moved
+# from OLD to NEW by the E-19 contract's exact `derive_release_swap`. V1 … V6 (two releases or a stopped unit) have NO
+# target. Derived and pinned, not accepted; tests re-derive it.
+NEW_DR5_TARGETS_STATUS = "DERIVED_PINNED_NOT_ACCEPTED"
+NEW_DR5_SOURCES = {"SIGNER_RUNNING_WITNESS_RUNNING_HELD_E22": "SIGNER_RUNNING_WITNESS_RUNNING_HELD"}
+NEW_DR5_TARGETS: Mapping[str, Mapping[str, tuple[int, str]]] = {
+    "SIGNER_RUNNING_WITNESS_RUNNING_HELD_E22": {
+        "result-set": (194, "a0ebd54d75f3f453970957454b00baf6767e64a8bb910f02344fbc72b46104ed"),
+        "dr5-block": (155, "7fe21378bb97f57aed3a6c60f6fc216e08d646f9da42d9c35feb7509f5468f1c"),
+        "predeploy-block": (29, "f50870420c10149914b8d2a02116708ec89ea5a8f746a847fbe88df058f54cae"),
+    },
+}
 
 
 def check_phase_order(observed: list[str]) -> None:

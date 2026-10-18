@@ -403,7 +403,9 @@ class StopTests(Case):
             self.op.render(ROOT, self.work, "SIGNER_STOP")
 
     def test_new_release_not_established_refuses_every_dev_form(self):
-        op = FakeOperator().attach(self.dev)                               # the merged contract: NEW is None
+        op = FakeOperator(new_release=None, new_manifest=None).attach(self.dev)
+        self.assertEqual((FakeOperator().new_release, FakeOperator().new_manifest),
+                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))                 # the merged pins (the attested NEW)
         for call in (lambda: op.status(ROOT, self.work, "N"), lambda: op.v0(ROOT, self.work)):
             with self.assertRaises(OP.Stop) as caught:
                 call()

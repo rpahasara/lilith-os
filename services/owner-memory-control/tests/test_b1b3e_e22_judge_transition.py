@@ -48,12 +48,15 @@ def installed_payload_pins() -> dict[str, str]:
 
 
 class ReleaseAndDeltaTests(unittest.TestCase):
-    def test_old_is_the_installed_e19_release_and_new_is_unpinned(self):
+    def test_old_is_the_installed_e19_release_and_new_is_the_attested_build(self):
+        # The installed-release bindings stay on OLD until the post-V7 re-pin (record e22-new-release-pin §5).
         self.assertEqual((J.OLD_RELEASE, J.OLD_MANIFEST_SHA256),
                          (RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]))
         self.assertEqual(J.OLD_RELEASE, "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb")
-        self.assertIsNone(J.NEW_RELEASE)
-        self.assertIsNone(J.NEW_MANIFEST_SHA256)
+        self.assertEqual(J.NEW_RELEASE, "129f2bed617334be61dcac5204cd409946a7a566")       # the PR #219 merge
+        self.assertEqual(J.NEW_MANIFEST_SHA256, "fc7dbf08bb5b8260716a762fd2fbccdb44fbf0e438e2e21d0cfddcd6f1a3348a")
+        self.assertEqual(J.NEW_RELEASE_ATTESTATION["archiveSha256"],
+                         "baa317262896061626e6bf17151c95eea990beb01b707ffbabb7f68f3465daab")
         self.assertEqual(J.STATUS, "PROPOSED_NOT_ACCEPTED")
 
     def test_the_delta_is_the_merged_judge_over_the_installed_bytes(self):
@@ -141,7 +144,7 @@ def inspection(source: str, *, judge: bytes, installed: bool = False, **changes)
 
 
 class BuildGateTests(unittest.TestCase):
-    NEW_SOURCE = "f" * 40
+    NEW_SOURCE = J.NEW_RELEASE                                     # the pinned NEW source commit
 
     def setUp(self):
         self.source = (ROOT / J.PR1_ACCEPTANCE_SOURCE).read_bytes()
@@ -244,3 +247,44 @@ class OdM1211Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NewReleasePinTests(unittest.TestCase):
+    PIN_RECORD = ROOT / "docs/architecture/slice-15b2b-b1b3e-e22-new-release-pin.md"
+
+    def test_the_post_v7_target_is_the_swap_of_the_mb11_running_signer_texts(self):
+        import mb11_dr5_target as D11
+        import mb9_dr5_target as T9
+        import test_b1b3e_mb11_signer_start as T11
+
+        self.assertEqual(J.NEW_DR5_TARGETS_STATUS, "DERIVED_PINNED_NOT_ACCEPTED")
+        self.assertEqual(set(J.NEW_DR5_TARGETS), set(J.NEW_DR5_SOURCES))
+        texts = D11.derive(T11.accepted_sets(), T11.SCRIPT)["targets"]
+        for target, source in J.NEW_DR5_SOURCES.items():
+            self.assertEqual(source, D11.RUNNING_SIGNER_HELD)
+            swapped = E19.derive_release_swap(texts[source]["texts"], old=J.OLD_RELEASE, new=J.NEW_RELEASE)
+            for name in T9.SETS:
+                with self.subTest(target=target, name=name):
+                    self.assertEqual((len(swapped[name]), T9.digest(swapped[name])), J.NEW_DR5_TARGETS[target][name])
+                    self.assertFalse(any(J.OLD_RELEASE in line for line in swapped[name]))
+                    T9._invariants(name, swapped[name])
+                    # the accepted W11 target is unchanged and differs exactly where a release line moved
+                    self.assertEqual(J.NEW_DR5_TARGETS[target][name] == D11.TARGETS[source][name],
+                                     name == "predeploy-block")
+        self.assertNotIn(J.NEW_DR5_TARGETS, list(D11.PHASE_TARGETS.values()))   # no routine compare selects it yet
+
+    def test_the_pin_record_states_every_pin_and_runs_nothing(self):
+        import e22_operator as OP
+
+        text = self.PIN_RECORD.read_text(encoding="utf-8")
+        for value in (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256, *map(str, J.NEW_RELEASE_ATTESTATION.values()),
+                      OP.TOOL_PINS[OP.CONTRACT]):
+            self.assertIn(f"`{value}`", text)
+        for target, sets in J.NEW_DR5_TARGETS.items():
+            self.assertIn(f"`{target}`", text)
+            for _lines, digest in sets.values():
+                self.assertIn(f"`{digest}`", text)
+        state = text.split("## 7. State", 1)[1]
+        for line in ("LIVE_MUTATION = NONE", "DEV_CONTACT = NONE", "INSTALLED = ba943e1",
+                     "NEW_DR5_TARGETS = DERIVED_PINNED_NOT_ACCEPTED"):
+            self.assertIn(line, state)
