@@ -52,7 +52,7 @@ import importlib.util
 import json
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping
@@ -79,6 +79,7 @@ ENVELOPE_FIELDS = frozenset({"envelopeType", "schemaVersion", "environment", "in
 BUILD_TYPE = "LILITH_MB12_READINESS_BUILD_INPUTS"
 BUILD_FIELDS = frozenset({"buildType", "schemaVersion", "environment", "window", "release", "current", "kActPublication",
                           "kWitPublication", "proofs", "activation", "pr2", "pr3"})
+E22_BUILD_FIELD = "e22Adjudication"                    # optional (OD-M12-10): absent = no adjudication offered
 MAX_ENVELOPE = 256 * 1024                                # = lilith_authority_root.cli.MAX_INPUT
 MAX_TRANSCRIPT = 1024 * 1024
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -168,6 +169,65 @@ KNOWN_PACKAGE_DEFECTS = (
 E19_DEFECTIVE_RELEASES = frozenset({"aee323e94412accbe321bc84eae78c5b8cf95afc"})
 
 
+# --------------------------------------------- E-22 owner risk adjudication ---
+# OD-M12-10 (owner, 2026-10-18; record slice-15b2b-b1b3e-mb12-prb2-proof-producers.md §17): a limited acceptance of the
+# historical E-22 uncertainty for the DEV_SYNTHETIC K-ACT only. The object binds the verified evidence of the genuine
+# off-host proof (evidence lilith-mb12-e22-realscope-f6e79eb). A later SECRET_HYGIENE FAIL qualifies only if its own
+# transcript body (items, coverage, off-host lines and the four FAIL lines), its journal boot and markers, and a
+# fresh marker attribution all equal what was approved here; four matching text lines alone never qualify.
+E22_ADJUDICATION_V1: Mapping[str, Any] = {
+    "adjudicationType": "LILITH_MB12_E22_OWNER_RISK_ADJUDICATION",
+    "schemaVersion": 1,
+    "decision": "OD-M12-10",
+    "decidedOn": "2026-10-18",
+    "environment": SC.ENVIRONMENT,
+    "custodyProfile": SC.PROFILE,
+    "keyId": PA.E22_ADJUDICATION_KEY_ID,
+    "proof": "SECRET_HYGIENE",
+    "producerSha256": "83b275b480f31e88596e7ba13251987c581e3477a61ba3d75cd094d470889bb7",
+    "failures": list(PA.E22_ADJUDICATED_FAILURES),
+    # SHA-256 of the approved transcript lines between the SCOPE line and the final line (ITEM, OFFHOST, COVERED and
+    # the four FAIL lines, in order), each followed by LF.
+    "approvedBodySha256": "6f7c86839d7f98bd5ffe790d8958d795248f6b1b0d26f13b0027031ddab1ec03",
+    "journal": {
+        "bootLine": "BOOT: 24d1771de1b54e5f816dda08ad8b367a firstRealtimeUs=1789322319069344 "
+                    "lastRealtimeUs=1790672449937963 entries=380255",
+        "markers": [["PEM_PRIVATE_KEY", 12]],
+    },
+    # SHA-256 of the `attribute` transcript after its first (JOURNAL) line: the 12 MATCH lines (boot 24d1771d,
+    # sudo sessions 3837 / 3845 / 3850, MESSAGE / _CMDLINE, verdict UNKNOWN), COUNTS, SUMMARY, NONCLAIM and final line.
+    "attribution": {"bodySha256": "4c293fd887f026e2051c6e0083e994ee97fc1ca338d5a9b18b86077a23e5d9f0", "matches": 12},
+    "evidence": {
+        "proofTranscriptSha256": "46a3c6414e6cf52d73cef5a2d768d9dae11134dee359eba6a9edc4a778f774fc",
+        "scopeSha256": "cd073c96adfcddbe644c40b522239670ab37f622c73c18fb797940cbdf023feb",
+        "proofEvidenceSums": "b355f75a2d93a4a46fec5fc9f425d9ae09a68ec9373b40d70515301484440788",
+        "journalTranscriptSha256": "e1d70588e94705007492d6ad1b4daa227fcafa85e8a4961e5f42b2139866ccc5",
+        "journalEvidenceSums": "0c236f8635222556c00d9a38b731459e033903747e39bc6c05f44c8ab08ea2e3",
+        "attributionTranscriptSha256": "c4233055dd9d5ba5298558218794fcc9397692b8c01113474a3b3f15e8deb4a8",
+        "attributionEvidenceSums": "dce427ad3c57b677a2cfe33d0cf2d8d414cd67d35b06ffe41150d66c55ae6091",
+        "purposeEvidenceSums": "8bda5cbb5684eb08d133a4d4b062503c6a9bb27e7dd6f05641ad408f1d62d310",
+    },
+    "acceptedRisk": "private material exposure of the DEV_SYNTHETIC K-ACT test-only.dev-synthetic.actor.b1b3d.1 during "
+                    "or around B1b-3d L2b cannot be conclusively excluded: 12 PEM_PRIVATE_KEY markers in three sudo "
+                    "GREP sessions (purpose UNKNOWN x3); the L2b transcript was not retained; the L2b window was not "
+                    "recorded",
+    "nonclaims": [
+        "JOURNAL_SECRET_SCAN=FAIL stands; this is not a clean scan and not a PASS",
+        "no private material exposure is asserted absent",
+        "the accepted L2b closure is historical evidence of execution, not proof of complete secret hygiene",
+        "no other key, ceremony, environment, PROD or future private-material handling",
+        "no custody release, swap, restart, authority activation or First Memory",
+    ],
+}
+E22_ADJUDICATION_SHA256 = "9528f7338b0a832bb821884654b1b8e2a8c86c1b65f4bf17ea2be2a48cbe9989"
+# Adjudications accepted by a merged owner record: adjudication SHA-256 -> owner decision record SHA-256.
+# OD-M12-10 (owner decision record lilith-mb12-e22-adjudication-f6e79eb\OWNER-RISK-DECISION-RECORD.txt).
+DEV_ACCEPTED_E22_ADJUDICATIONS: Mapping[str, str] = {
+    E22_ADJUDICATION_SHA256: "56e71df1b7bf5c599c7d3f09edd5b12a37cf642c63d715b2f823f2ff92242c5a"}
+_E22_FIELDS = frozenset({"adjudicationSha256", "scope", "journalTranscript", "attributionTranscript"}) | frozenset(
+    {"observedAt", "evidenceSha256"})
+
+
 @dataclass(frozen=True)
 class ReadinessTrustV1:
     """What a build is judged against. DEV: `trust_for("dev", None)` only; never caller-supplied."""
@@ -177,6 +237,7 @@ class ReadinessTrustV1:
     accepted_proof_transcripts: Mapping[str, frozenset[str]]
     pr2: I2.Pr2TrustV1 | None
     pr3: M3.Pr3TrustV1 | None
+    accepted_e22_adjudications: Mapping[str, str] = field(default_factory=dict)
 
 
 class Refused(ValueError):
@@ -237,7 +298,7 @@ def trust_for(environment: str, trust: ReadinessTrustV1 | None) -> ReadinessTrus
         _need(trust is None, "DEV_TRUST_NOT_OVERRIDABLE")
         _need(I2.DEV_FRESHNESS_NOT_BEFORE is not None, "FRESHNESS_CUTOFF_UNDECIDED", "OD-M12-3")
         return ReadinessTrustV1(dict(DEV_PINS), I2.DEV_FRESHNESS_NOT_BEFORE, dict(DEV_ACCEPTED_PROOF_TRANSCRIPTS),
-                                None, None)
+                                None, None, dict(DEV_ACCEPTED_E22_ADJUDICATIONS))
     _need(isinstance(trust, ReadinessTrustV1) and isinstance(trust.pins, Mapping) and set(trust.pins) == PIN_FIELDS
           and isinstance(trust.accepted_proof_transcripts, Mapping), "TRUST_REQUIRED")
     _instant(trust.not_before, "trust.not_before")
@@ -425,6 +486,65 @@ def admit_proof(name: str, item: Any, trust: ReadinessTrustV1) -> dict[str, Any]
     return {"result": result, "transcriptSha256": digest, "detail": detail}
 
 
+def adjudication_digest(adjudication: Mapping[str, Any]) -> str:
+    """SHA-256(JCS(adjudication))."""
+    return _sha256(rfc8785.dumps(dict(adjudication)))
+
+
+def _body_sha256(lines: list[str]) -> str:
+    return _sha256("".join(line + "\n" for line in lines).encode("ascii"))
+
+
+def admit_e22_adjudication(item: Any, proof_item: Mapping[str, Any], admitted: Mapping[str, Any],
+                           trust: ReadinessTrustV1, *, environment: str) -> str:
+    """The SECRET_HYGIENE `detail` naming the owner adjudication (OD-M12-10), or Refused.
+
+    `admitted` is the already admitted SECRET_HYGIENE proof (producer contract and OD-M12-6 pin). The result stays FAIL;
+    the adjudication is only the reference the release judge resolves against its own pin."""
+    _need(environment == PA.E22_ADJUDICATION_ENVIRONMENT, "E22_ADJUDICATION_OUT_OF_SCOPE", str(environment))
+    item = _exact(item, _E22_FIELDS, E22_BUILD_FIELD)
+    adjudication = _hex(item["adjudicationSha256"], "e22Adjudication.adjudicationSha256")
+    _need(adjudication == adjudication_digest(E22_ADJUDICATION_V1) == E22_ADJUDICATION_SHA256,
+          "E22_ADJUDICATION_UNKNOWN")
+    _need(isinstance(trust.accepted_e22_adjudications, Mapping)
+          and trust.accepted_e22_adjudications.get(adjudication) is not None, "E22_ADJUDICATION_NOT_ACCEPTED")
+    spec = E22_ADJUDICATION_V1
+    _need(admitted.get("result") == PA.FAIL, "E22_ADJUDICATION_NOT_FOR_FAIL")
+    producer = SECRET_HYGIENE_SCOPE.split(":")[0]
+    _need(PRODUCER_SCRIPT_SHA256[producer] == spec["producerSha256"], "E22_PRODUCER_CHANGED")
+    module = _producer_module(producer)
+
+    # The proof transcript: the approved body exactly (items, coverage, off-host, the four FAIL lines).
+    lines = _lines(_b64u_decode(proof_item["transcript"], "proof SECRET_HYGIENE.transcript"))
+    head = re.fullmatch(r"SCOPE: sha256=([0-9a-f]{64}) ceremonies=\S+", lines[0])
+    _need(head is not None and lines[-1] == f"SECRET_HYGIENE_PROOF=FAIL scope={head.group(1)}",
+          "E22_TRANSCRIPT_FORM")
+    _need([line for line in lines if line.startswith("FAIL: ")] == list(spec["failures"]),
+          "E22_FAILURE_SET_MISMATCH")
+    _need(_body_sha256(lines[1:-1]) == spec["approvedBodySha256"], "E22_TRANSCRIPT_BODY_MISMATCH")
+
+    # The scope that transcript names, and the journal transcript that scope names.
+    scope_raw = _b64u_decode(item["scope"], "e22Adjudication.scope")
+    _need(_sha256(scope_raw) == head.group(1), "E22_SCOPE_NOT_THE_PROVED_SCOPE")
+    try:
+        scope = module.parse_scope(scope_raw)
+    except module.ScopeError as exc:
+        raise Refused("E22_SCOPE_MALFORMED", exc.args[0]) from exc
+    journal_raw = _b64u_decode(item["journalTranscript"], "e22Adjudication.journalTranscript")
+    _need(_sha256(journal_raw) == scope["journalScan"]["sha256"], "E22_JOURNAL_NOT_THE_SCOPE_JOURNAL")
+    failed = module.parse_journal_fail_transcript(journal_raw)
+    _need(failed is not None, "E22_JOURNAL_NOT_A_FAIL_TRANSCRIPT")
+    _need([list(mark) for mark in failed[1]] == spec["journal"]["markers"], "E22_JOURNAL_MARKERS_MISMATCH")
+    _need(spec["journal"]["bootLine"] in _lines(journal_raw), "E22_JOURNAL_BOOT_MISMATCH")
+
+    # A marker attribution: the same 12 attributed matches, sessions and verdicts as approved.
+    attribution = _lines(_b64u_decode(item["attributionTranscript"], "e22Adjudication.attributionTranscript"))
+    _need(re.fullmatch(r"JOURNAL: entries=\d+ bytes=\d+ sha256=[0-9a-f]{64} boots=\d+", attribution[0]) is not None,
+          "E22_ATTRIBUTION_FORM")
+    _need(_body_sha256(attribution[1:]) == spec["attribution"]["bodySha256"], "E22_ATTRIBUTION_MISMATCH")
+    return PA.E22_ADJUDICATION_DETAIL_PREFIX + adjudication
+
+
 # ------------------------------------------------------------------- build ---
 
 def build(build_inputs: Any, *, environment: str, trust: ReadinessTrustV1 | None = None
@@ -432,7 +552,9 @@ def build(build_inputs: Any, *, environment: str, trust: ReadinessTrustV1 | None
     """(envelope bytes, report). Refuses rather than default any field."""
     trust = trust_for(environment, trust)
     pins = trust.pins
-    doc = _exact(build_inputs, BUILD_FIELDS, "build")
+    _need(isinstance(build_inputs, Mapping) and set(build_inputs) in (BUILD_FIELDS, BUILD_FIELDS | {E22_BUILD_FIELD}),
+          "INPUT_MALFORMED", "build")
+    doc = build_inputs
     _need(doc["buildType"] == BUILD_TYPE and type(doc["schemaVersion"]) is int and doc["schemaVersion"] == 1,
           "INPUT_MALFORMED", "type")
     _need(doc["environment"] == environment, "ENVIRONMENT_MISMATCH", str(doc["environment"]))
@@ -499,6 +621,15 @@ def build(build_inputs: Any, *, environment: str, trust: ReadinessTrustV1 | None
         proofs[name] = admitted
         producers[name] = PROPOSED_PROOF_PRODUCERS[name]
     provenance["proofProducers"] = producers
+    adjudicated = E22_BUILD_FIELD in doc
+    if adjudicated:
+        _need("SECRET_HYGIENE" in proofs, "E22_ADJUDICATION_WITHOUT_PROOF")
+        item = doc[E22_BUILD_FIELD]
+        proofs["SECRET_HYGIENE"]["detail"] = admit_e22_adjudication(item, doc["proofs"]["SECRET_HYGIENE"],
+                                                                    proofs["SECRET_HYGIENE"], trust,
+                                                                    environment=environment)
+        observed(item, E22_BUILD_FIELD)
+        provenance[E22_BUILD_FIELD]["adjudicationSha256"] = item["adjudicationSha256"]
 
     # Activation (E-19): the complete host line, passed verbatim.
     activation = _exact(doc["activation"], frozenset({"stdout", "exitCode", "b1cUnchanged"}) | _OBSERVED,
@@ -551,7 +682,8 @@ def build(build_inputs: Any, *, environment: str, trust: ReadinessTrustV1 | None
     _need(len(raw) <= MAX_ENVELOPE, "ENVELOPE_TOO_LARGE")
     missing = [name for name in PA.REQUIRED_PROOFS if name not in proofs]
     defective = release["releaseSha"] in E19_DEFECTIVE_RELEASES
-    failing = [name for name, proof in proofs.items() if proof["result"] != PA.PASS]
+    failing = [name for name, proof in proofs.items()
+               if proof["result"] != PA.PASS and not (adjudicated and name == "SECRET_HYGIENE")]
     report = {"envelopeSha256": _sha256(raw), "inputsSha256": envelope["inputsSha256"],
               "expectedNotReady": sorted(
                   [f"PROOF_MISSING:{name}" for name in missing] + [f"PROOF_NOT_PASS:{name}" for name in failing]

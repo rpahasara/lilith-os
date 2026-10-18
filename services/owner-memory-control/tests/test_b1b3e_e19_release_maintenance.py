@@ -44,6 +44,11 @@ REPLACEMENT = (H32("replacement incarnation"), "48211")
 REAL_HOST_LINE = "ACTIVATION=NOT_ACCEPTED reason=GRANT_ABSENT advisoryConfigEnabled=false"
 
 
+# The installed E-19 release's `pr1_acceptance.py` (0d2e6cca). The repository judge has since moved on (OD-M12-10,
+# not built or installed), so the E-19 history is checked against these retained bytes, not the working tree.
+E19_PR1_ACCEPTANCE_BYTES = (Path(__file__).resolve().parent / "fixtures/e19_new_pr1_acceptance.py.txt").read_bytes()
+
+
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -135,20 +140,22 @@ class E19JudgeTests(unittest.TestCase):
 
 class ReleasePinTests(unittest.TestCase):
     def test_source_and_release_file_set_pins(self):
-        raw = (ROOT / E.PR1_ACCEPTANCE_SOURCE).read_bytes()
+        raw = E19_PR1_ACCEPTANCE_BYTES
         self.assertEqual(sha(raw), E.PR1_ACCEPTANCE_E19_SHA256)
-        self.assertEqual(RFS.SHARED_HASHES[E.PR1_ACCEPTANCE_SOURCE], E.PR1_ACCEPTANCE_E19_SHA256)
+        # The release file set now pins the repository judge (OD-M12-10, unbuilt), no longer the E-19 bytes.
+        self.assertEqual(RFS.SHARED_HASHES[E.PR1_ACCEPTANCE_SOURCE], sha((ROOT / E.PR1_ACCEPTANCE_SOURCE).read_bytes()))
+        self.assertNotEqual(RFS.SHARED_HASHES[E.PR1_ACCEPTANCE_SOURCE], E.PR1_ACCEPTANCE_E19_SHA256)
         self.assertEqual(sha(E.reverse_e19(raw)), E.PR1_ACCEPTANCE_OLD_SHA256)
 
     def test_reversal_refuses_anything_but_the_pinned_bytes(self):
-        raw = (ROOT / E.PR1_ACCEPTANCE_SOURCE).read_bytes()
+        raw = E19_PR1_ACCEPTANCE_BYTES
         for tampered in (raw + b"\n", raw.replace(b"GRANT_ABSENT", b"GRANT_ABSENT ", 1), b""):
             with self.subTest(size=len(tampered)), self.assertRaises(E.Refused):
                 E.reverse_e19(tampered)
 
     def test_the_new_payload_differs_from_aee323e_in_exactly_one_member(self):
         """Against the accepted aee323e module pins (mb6_operator; 38 release modules) and the CLI / unit pins."""
-        payloads = RFS.runtime_payloads(ROOT)
+        payloads = {**RFS.runtime_payloads(ROOT), E.PR1_ACCEPTANCE_MEMBER: E19_PR1_ACCEPTANCE_BYTES}
         old_pins = {**M6.RELEASE_MODULES, **M6.PROVISION_MODULES}
         new_pins = E.new_release_module_pins(old_pins)
         self.assertEqual({k for k in old_pins if old_pins[k] != new_pins[k]}, {E.PR1_ACCEPTANCE_MEMBER})

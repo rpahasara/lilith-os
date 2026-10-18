@@ -492,3 +492,16 @@ behaviour changes. Pin cascade (supersedes §20):
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `133f296b00f44a58f8891e0554a06825e897e30f8c3e63d607c54a3e5bef289f` |
 | `mb11_operator.py` | `953267118c24dab864e94f9b6eb9e0e4ae71b7d542fb0efeec09535fb576cc8c` |
+
+## 22. Addendum (2026-10-18): OD-M12-10 E-22 adjudication admission — re-pin only
+
+`mb12_readiness_inputs.py` adds the OD-M12-10 adjudication object, its owner pin and the control-side admission
+(record `slice-15b2b-b1b3e-mb12-prb2-proof-producers.md` §17). No operator behaviour changes. Pin cascade (supersedes
+§21):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_secret_hygiene_proof.py` | `83b275b480f31e88596e7ba13251987c581e3477a61ba3d75cd094d470889bb7` |
+| `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
+| `mb12_readiness_inputs.py` | `02505320362cc80f1af4d154d5ad0f1ed4a375961796593b246183ed8b7745cc` |
+| `mb11_operator.py` | `f1963897f65613f04ed6a1a6410c1691443c438a691c3a3bca0889c5f2a5fa17` |

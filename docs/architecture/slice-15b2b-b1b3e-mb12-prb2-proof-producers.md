@@ -598,3 +598,128 @@ JOURNAL_SECRET_SCAN=FAIL AUTHORITATIVE (12 MARKERS, UNKNOWN x3);  SECRET_HYGIENE
 E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 NO RELEASE BUILD / SWAP / RESTART / KEY LOAD / FIRST MEMORY AUTHORIZED
 ```
+
+## 17. Addendum (2026-10-18): OD-M12-10 — E-22 narrow owner risk adjudication (source only, not effective)
+
+### 17.1 Owner decision (verbatim)
+
+> **Owner risk decision — limited acceptance.** I accept the following residual risk ONLY for the test-only
+> DEV_SYNTHETIC K-ACT identity `test-only.dev-synthetic.actor.b1b3d.1`:
+>
+> - The historical journal contains 12 PEM marker occurrences in three GREP sessions, purpose UNKNOWN×3.
+> - The original L2b transcript was not retained.
+> - The complete L2b ceremony window was not recorded.
+> - Private material exposure during or around L2b cannot be conclusively excluded.
+>
+> The accepted L2b closure remains historical evidence of successful execution, not independent proof of complete
+> secret hygiene. This is a deliberate, narrowly scoped acceptance of historical uncertainty, NOT an assertion that the
+> journal scan passed or no private material was exposed. This acceptance does not apply to another key, ceremony,
+> environment, PROD or future private-material handling. It authorizes preparing the adjudication implementation for
+> review. It does NOT authorize making custody RELEASED, a release swap, signer/witness restart, authority activation or
+> First Memory.
+
+Owner decision record (owner-local, not in Git): `lilith-mb12-e22-adjudication-f6e79eb\OWNER-RISK-DECISION-RECORD.txt`,
+SHA-256 `56e71df1b7bf5c599c7d3f09edd5b12a37cf642c63d715b2f823f2ff92242c5a` (`SHA256SUMS`
+`34ff2610a3d0e3aae637fbf5746dac2c2fc17da3de393431f746bf6dd4ee1bfe`). It holds the decision verbatim, the adjudication
+digest, the four lines and the bound evidence. Preserved unchanged: the original `JOURNAL_SECRET_SCAN=FAIL`, boot
+`24d1771d`, the sudo sessions 3837 / 3845 / 3850, UNKNOWN×3, the L2b closure and its NOT_PROVEN list, every §16 nonclaim.
+
+### 17.2 The adjudication object
+
+`mb12_readiness_inputs.E22_ADJUDICATION_V1`, SHA-256(JCS) `9528f7338b0a832bb821884654b1b8e2a8c86c1b65f4bf17ea2be2a48cbe9989`.
+It names decision OD-M12-10, environment `dev`, profile `DEV_SYNTHETIC`, the K-ACT key id, the producer
+`83b275b4…`, and the four lines, and it binds the verified evidence of the genuine off-host proof:
+
+| Bound value | SHA-256 |
+| --- | --- |
+| approved transcript body (every line between `SCOPE:` and the final line: 19 `ITEM`, 2 `OFFHOST`, 4 `COVERED`, the 4 `FAIL`) | `6f7c86839d7f98bd5ffe790d8958d795248f6b1b0d26f13b0027031ddab1ec03` |
+| journal boot line of `24d1771d` and markers `[["PEM_PRIVATE_KEY", 12]]` | (stated literally) |
+| attribution body (the 12 `MATCH` lines, `COUNTS`, `SUMMARY`, `NONCLAIM`, final line) | `4c293fd887f026e2051c6e0083e994ee97fc1ca338d5a9b18b86077a23e5d9f0` |
+| proof transcript / scope / evidence `SHA256SUMS` | `46a3c641…` / `cd073c96…` / `b355f75a…` |
+| journal transcript / evidence | `e1d70588…` / `0c236f86…` |
+| attribution transcript / evidence; purpose evidence | `c4233055…` / `dce427ad…`; `8bda5cbb…` |
+
+Pins (both `{9528f733… → 56e71df1…}`): `mb12_readiness_inputs.DEV_ACCEPTED_E22_ADJUDICATIONS` (control) and
+`pr1_acceptance.ACCEPTED_E22_ADJUDICATIONS` (release judge). They take effect only as described in §17.5.
+
+### 17.3 Control side (`mb12_readiness_inputs`)
+
+A build may carry one optional `e22Adjudication` item (`adjudicationSha256`, `scope`, `journalTranscript`,
+`attributionTranscript`, `observedAt`, `evidenceSha256`). `admit_e22_adjudication` sets the SECRET_HYGIENE `detail` to
+`OWNER_RISK_ADJUDICATION=<adjudication>` only if all hold, else it refuses:
+
+1. the environment is `dev` (`E22_ADJUDICATION_OUT_OF_SCOPE`); the trust is the pinned DEV trust (a caller DEV trust is
+   refused) and pins this adjudication (`E22_ADJUDICATION_NOT_ACCEPTED`); the digest is the object's
+   (`E22_ADJUDICATION_UNKNOWN`);
+2. the SECRET_HYGIENE transcript is already admitted (pinned producer, exact FAIL contract, OD-M12-6 transcript pin) and
+   is a FAIL (`E22_ADJUDICATION_NOT_FOR_FAIL`); the producer is still `83b275b4…` (`E22_PRODUCER_CHANGED`);
+3. its FAIL lines are exactly the four (`E22_FAILURE_SET_MISMATCH`) and its whole body equals the approved body: the
+   same items, coverage and off-host lines (`E22_TRANSCRIPT_BODY_MISMATCH`). Four matching text lines never qualify;
+4. the scope bytes are the proved scope (`E22_SCOPE_NOT_THE_PROVED_SCOPE`) and parse under the producer contract; the
+   journal transcript is the one that scope names (`E22_JOURNAL_NOT_THE_SCOPE_JOURNAL`), a FAIL transcript with exactly
+   12 `PEM_PRIVATE_KEY` markers and the same `24d1771d` boot line (`E22_JOURNAL_MARKERS_MISMATCH`,
+   `E22_JOURNAL_BOOT_MISMATCH`);
+5. a marker attribution of the same form whose body equals the approved 12 matches, sessions and verdicts
+   (`E22_ATTRIBUTION_MISMATCH`); only its first line (journal totals) may differ.
+
+The result stays `FAIL`. No PASS transcript is inserted and the missing L2b transcript is never treated as present.
+
+### 17.4 Release side (`pr1_acceptance`, the only release payload member changed)
+
+`E22_SECRET_HYGIENE` is `PASS` for a PASS proof without detail, or the distinct status `OWNER_RISK_ADJUDICATED` (reason
+= the adjudication digest) only for a SECRET_HYGIENE **FAIL** whose detail names an adjudication in
+`ACCEPTED_E22_ADJUDICATIONS`, with environment `dev`, a DEV_SYNTHETIC profile in `dev` and the K-ACT key id. Anything
+else FAILs (`E22_ADJUDICATION_MALFORMED`, `…_NOT_FOR_FAIL`, `…_OUT_OF_SCOPE`, `…_NOT_ACCEPTED`). Only E-22 may carry that
+status; every other check stays PASS-only, so any unrelated FAIL keeps the package NOT_READY. The package records
+`checks.E22_SECRET_HYGIENE = ["OWNER_RISK_ADJUDICATED", <adjudication>]`, `evidence.secretHygieneAdjudication`
+(decision, adjudication and owner record digests, key id, transcript digest, the four lines, the nonclaim) and adds the
+nonclaim "E-22 SECRET_HYGIENE: OWNER_RISK_ADJUDICATED (OD-M12-10), NOT a clean scan: …", all inside the package digest
+the owner approves at M-B13. `release_decision` is unchanged (READY and an exactly matching digest). The root verifier
+input schema is unchanged (the reference travels in the existing proof `detail`). `release_file_set.SHARED_HASHES` pins
+the new judge `d3df4cfc…`; the E-19 history tests now read the installed E-19 bytes `0d2e6cca…` from a test fixture.
+
+### 17.5 Why it is not effective
+
+- The release judge is repository-only: not built, attested or installed. DEV still runs `ba943e1`, whose E-22 is
+  PASS-only, so a DEV package is NOT_READY on E-22 whatever the inputs.
+- `DEV_ACCEPTED_PROOF_TRANSCRIPTS` has no SECRET_HYGIENE entry, so no DEV build admits any SECRET_HYGIENE transcript,
+  and so no adjudication either. The transcript to pin is the post-transition recollection (§17.7), not `46a3c641…`.
+- OD-M12-3 freshness and every other M-B12 input still apply.
+
+### 17.6 Future credential loads (Task 4; PROPOSED, not decided)
+
+The release transition would load K-ACT a second time and start a new witness incarnation that loads K-WIT. The
+existing safeguards for those loads are the W11 / POST11 ones: the signer verifier and the `mb11_operator observe`
+exactness (`W11_1_SIGNER_STARTED_EXACT`, `kActLoadCount`, the POST11 output), the phase-bound DR-5 targets, and the
+package checks E-3 / E-6 (loaded key binding), E-4 (CURRENT preserved) and E-23 (preservation set). None of them scans
+the journal for private-key markers. OD-M12-10 does not cover these loads: its admission needs the exact 12 attributed
+matches and the exact approved body, so any new marker anywhere in the retained journal refuses it.
+
+**Proposed rule OD-M12-11 (for owner decision; not approved here):** every transition-time private-material event (the
+K-ACT reload and the K-WIT load) records its own window (operator markers) and retains its transcript; the
+post-transition `journal` and `attribute` reads are taken after the last such event, in the same boot as its window; and
+they must show exactly the historical 12 attributed matches and no new marker. Whether those events also become rows of
+the E-22 `CEREMONIES` table is a separate owner decision. Adding rows changes the producer and the approved body, so
+OD-M12-10 would then need a re-issued adjudication covering exactly the same four historical lines.
+
+### 17.7 Minimum later release-transition requirements (none authorized)
+
+1. Merge of this record and source (owner review), then a release build from the merged tree whose payload differs from
+   `ba943e1` in `lilith_owner_memory/pr1_acceptance.py` only, and its attestation.
+2. A transition contract for that one-member delta, in the E-19 pattern (stage, select, retire, two-release reads).
+3. The re-pin cascade, derived from the built release, never from this source: `mb12_readiness_inputs.DEV_PINS`
+   (`releaseSha`, `attestedManifestSha256`), the PR-3 `DEV_EXPECTED` release values and the E-21 re-confirmation, the
+   W11 DR-5 targets, the transition tool pins and the operator pins.
+4. The owner-authorized swap: signer and witness stop / start (K-ACT load 2, new witness incarnation and K-WIT load),
+   W11 / POST11 acceptance, DR-5 EQUAL, then the OD-M12-11 decision applied.
+5. M-B12 evidence recollected in one OD-M12-3 freshness window, including a post-transition `journal` → `prove` and
+   `attribute`; the SECRET_HYGIENE transcript pinned under OD-M12-6 only if the admission of §17.3 passes.
+6. The M-B13 owner acceptance of the package digest that shows `OWNER_RISK_ADJUDICATED`.
+
+```text
+OD-M12-10 = OWNER RISK DECISION RECORDED (DEV_SYNTHETIC K-ACT ONLY);  ADJUDICATION 9528f733… → OWNER RECORD 56e71df1…
+CONTROL ADMISSION + RELEASE JUDGE = SOURCE + TESTS ONLY;  NOT BUILT / ATTESTED / INSTALLED;  SECRET_HYGIENE UNPINNED
+JOURNAL_SECRET_SCAN=FAIL STANDS;  UNKNOWN x3;  L2b TRANSCRIPT NOT RETAINED;  L2b WINDOW NOT RECORDED
+OD-M12-11 (TRANSITION-TIME LOADS) = PROPOSED
+E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```

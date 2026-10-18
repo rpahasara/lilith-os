@@ -113,7 +113,7 @@ SHARED_HASHES = {
     "services/owner-memory-control/lilith_owner_memory/successor_readiness.py": "842176d06954607aed39d8988764fc253fa8bd4c41ca49fcd5e2a4532c5ecc16",
     "services/owner-memory-control/lilith_owner_memory/authority_ledger_journal.py": "f0d554c53948723c80f5cfbfd638d60855e92ddb562137370d12f9c7eeec49ce",
     "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "9a09a4726bb473067e84e7664dca49d51b90ced1e012564526bae07656d3d5fd",
-    "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py": "0d2e6ccabf916425a1dfa7dc587bfcb3d7a232eb6c52c5cd938d573199715cff",
+    "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py": "d3df4cfca975b31cbe526805d6573e7d4760ef376ad02f3cb8e0ac7cece4049b",
 }
 
 RUNTIME_SOURCE_MAP = {
