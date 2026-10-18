@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -85,6 +86,10 @@ class StageTests(unittest.TestCase):
         self.host = E22Host(self.root, self.old_payloads)
         self.system = self.host.system()
         self.archive, self.stamp, self.manifest = T19.archive_for(self.out, NEW, self.new_payloads)
+        # A synthetic archive cannot carry the attested manifest: the stages run against these synthetic pins
+        # (`PinnedReleaseTests` shows the merged pins refuse them).
+        stack.enter_context(mock.patch.object(J, "NEW_RELEASE", NEW))
+        stack.enter_context(mock.patch.object(J, "NEW_MANIFEST_SHA256", self.manifest))
 
     def status(self):
         return S.e22_status(self.system, OLD, NEW, status=self.host.status)
@@ -160,8 +165,12 @@ class StageTests(unittest.TestCase):
             with self.subTest(label=label):
                 out = Path(tempfile.mkdtemp(dir=self.out))
                 archive, stamp, manifest = T19.archive_for(out, NEW, payloads)
-                self.refused("E22_PAYLOAD_DELTA", self.stage, manifest, archive, stamp)
-        self.refused("E22_MANIFEST_NOT_THE_PINNED_MANIFEST", self.stage, "0" * 64)
+                self.refused("E22_MANIFEST_PIN_INVALID", self.stage, manifest, archive, stamp)   # not the pin
+                with mock.patch.object(J, "NEW_MANIFEST_SHA256", manifest):                  # past the pin
+                    self.refused("E22_PAYLOAD_DELTA", self.stage, manifest, archive, stamp)
+        self.refused("E22_MANIFEST_PIN_INVALID", self.stage, "0" * 64)
+        with mock.patch.object(J, "NEW_MANIFEST_SHA256", "0" * 64):                          # archive is not it
+            self.refused("E22_MANIFEST_NOT_THE_PINNED_MANIFEST", self.stage, "0" * 64)
         self.refused("E22_MANIFEST_PIN_INVALID", self.stage, "nope")
         self.assertEqual(sorted(os.listdir(self.root / "opt/lilith-authority-dev/releases")), [OLD])
         self.stage()
@@ -213,6 +222,21 @@ class StageTests(unittest.TestCase):
     def test_cli_refuses_unknown_forms(self):
         self.assertEqual(S.main(["e22-start", OLD, NEW], system=self.system), 2)
         self.assertEqual(S.main([], system=self.system), 2)
+
+
+class PinnedReleaseTests(unittest.TestCase):
+    def test_the_merged_pins_refuse_any_other_release_or_manifest(self):
+        self.assertEqual(J.NEW_RELEASE, "129f2bed617334be61dcac5204cd409946a7a566")
+        with self.assertRaises(I.InstallError) as caught:
+            S._releases(OLD, NEW)
+        self.assertEqual(caught.exception.reason, "E22_NEW_RELEASE_NOT_THE_PINNED_RELEASE")
+        S._releases(OLD, J.NEW_RELEASE)
+        with tempfile.TemporaryDirectory() as tmp:
+            host = E22Host(Path(tmp), {})
+            with self.assertRaises(I.InstallError) as caught:
+                S.stage_e22_stage(host.system(), OLD, J.NEW_RELEASE, "9" * 64, Path(tmp) / "a", Path(tmp) / "s",
+                                  status=host.status)
+        self.assertEqual(caught.exception.reason, "E22_MANIFEST_PIN_INVALID")
 
 
 class SourceTests(unittest.TestCase):
