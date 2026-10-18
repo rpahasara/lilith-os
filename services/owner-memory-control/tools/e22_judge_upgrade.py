@@ -34,6 +34,7 @@ admission). The loads never inherit the OD-M12-10 risk acceptance.
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Mapping
@@ -52,8 +53,13 @@ STATUS = "PROPOSED_NOT_ACCEPTED"
 # pins an independently attested build of the merged source (the E-19 `new-release-pin` pattern).
 OLD_RELEASE = E19.NEW_RELEASE
 OLD_MANIFEST_SHA256 = E19.NEW_MANIFEST_SHA256
+OLD_ARCHIVE_SHA256 = E19.NEW_RELEASE_ATTESTATION["archiveSha256"]
 NEW_RELEASE: str | None = None
 NEW_MANIFEST_SHA256: str | None = None
+# The incarnations the transition ends (accepted records): the M-B11 signer (start acceptance §2) and the E-19 U5
+# replacement witness (E-19 completion record). A replacement is a different InvocationID running from NEW.
+ENDING_SIGNER_INCARNATION = ("c7ba0fb7e2d84a0eb02a04ef0e83f67a", "84806")
+ENDING_WITNESS_INCARNATION = ("90b28f9d06fd48a1a1bdc3ae39474fb1", "69238")
 
 # ------------------------------------------------------------- the one-member delta ---
 PR1_ACCEPTANCE_MEMBER = E19.PR1_ACCEPTANCE_MEMBER
@@ -235,3 +241,77 @@ OD_M12_11_RULE = (
 def check_phase_order(observed: list[str]) -> None:
     """The phases a transition passed through, in order: a prefix of `PHASES`, no skip and no repeat."""
     _need(list(observed) == list(PHASES[:len(observed)]), "PHASE_OUT_OF_ORDER", ",".join(observed))
+
+
+# ------------------------------------------------------------- build-time gate ---
+# The reproducible build and attestation are the existing ceremony tools, unchanged
+# (`services/authority-dev/ceremony/build_authority_dev_release.py`, `attest_authority_dev_build.py inspect | attest |
+# check`). Their inspection documents carry the complete per-file payload map; this gate compares a NEW inspection with
+# the installed E-19 build's inspection (bound to the pinned E-19 archive and manifest) and admits only the one member.
+INSPECTION_TYPE = "LILITH_AUTHORITY_DEV_BUILD_INSPECTION"
+# Fields that must be byte-identical between the installed and the NEW build (the recipe digest may change only
+# through `release_file_set.py`, whose SHARED_HASHES pins the judge; the manifest header names the source commit).
+_UNCHANGED_IDENTITY = ("releaseRole", "unitDigests", "cliDigests", "hostTargets", "dependencyInventory")
+
+
+def _identity(inspection: Mapping) -> Mapping:
+    _need(isinstance(inspection, Mapping) and inspection.get("inspectionType") == INSPECTION_TYPE
+          and inspection.get("schemaVersion") == 1 and isinstance(inspection.get("identity"), Mapping),
+          "INSPECTION_MALFORMED")
+    identity = inspection["identity"]
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    _need(_sha(canonical) == inspection.get("identitySha256"), "INSPECTION_IDENTITY_DIGEST")
+    return identity
+
+
+def check_inspection_delta(new_inspection: Mapping, installed_inspection: Mapping) -> list[str]:
+    """Failures (empty = admissible) of a NEW build inspection against the installed E-19 build inspection."""
+    old, new = _identity(installed_inspection), _identity(new_inspection)
+    failures = []
+    if (old.get("sourceCommit"), (old.get("archive") or {}).get("sha256"), (old.get("manifest") or {}).get("sha256")) \
+            != (OLD_RELEASE, OLD_ARCHIVE_SHA256, OLD_MANIFEST_SHA256):
+        failures.append("INSTALLED_INSPECTION_NOT_THE_E19_BUILD")
+    source = new.get("sourceCommit")
+    if not isinstance(source, str) or len(source) != 40 or source == OLD_RELEASE \
+            or (NEW_RELEASE is not None and source != NEW_RELEASE):
+        failures.append("NEW_SOURCE_COMMIT_INVALID")
+    old_files, new_files = old.get("payload") or {}, new.get("payload") or {}
+    if set(old_files) != set(new_files):
+        failures.append("PAYLOAD_FILE_SET:" + ",".join(sorted(set(old_files) ^ set(new_files))[:6]))
+    changed = sorted(p for p in set(old_files) & set(new_files) if old_files[p] != new_files[p])
+    expected = {member: {**old_files.get(member, {}), "sha256": after} for member, (_b, after) in PAYLOAD_DELTA.items()}
+    if changed != sorted(PAYLOAD_DELTA) or any(
+            (old_files[m].get("sha256"), new_files[m].get("sha256")) != PAYLOAD_DELTA[m]
+            or {k: v for k, v in new_files[m].items() if k != "size"} != {
+                k: v for k, v in expected[m].items() if k != "size"} for m in changed):
+        failures.append("PAYLOAD_DELTA_NOT_EXACT:" + ",".join(changed[:6]))
+    for key in _UNCHANGED_IDENTITY:
+        if old.get(key) != new.get(key):
+            failures.append("IDENTITY_CHANGED:" + key)
+    for runtime in ("rootTooling", "witness"):
+        if (old.get("runtimeDigests") or {}).get(runtime) != (new.get("runtimeDigests") or {}).get(runtime):
+            failures.append("RUNTIME_DIGEST_CHANGED:" + runtime)
+    if [m.get("name") for m in old.get("tarMembers") or []] != [m.get("name") for m in new.get("tarMembers") or []]:
+        failures.append("TAR_MEMBER_NAMES_CHANGED")
+    return failures
+
+
+def main(argv: list[str]) -> int:
+    """`check-build <new-inspection.json> <installed-e19-inspection.json>`: local, read-only, prints one JSON result."""
+    if len(argv) != 3 or argv[0] != "check-build":
+        print("usage: e22_judge_upgrade.py check-build <new-inspection.json> <installed-e19-inspection.json>",
+              file=sys.stderr)
+        return 2
+    try:
+        documents = [json.loads(Path(path).read_bytes()) for path in argv[1:]]
+        failures = check_inspection_delta(documents[0], documents[1])
+    except (OSError, ValueError, Refused) as exc:
+        failures = ["INPUT:" + (exc.reason if isinstance(exc, Refused) else type(exc).__name__)]
+    result = {"mode": MODE, "result": "PASS" if not failures else "FAIL", "failures": failures,
+              "delta": {member: list(pins) for member, pins in PAYLOAD_DELTA.items()}}
+    print(json.dumps(result, sort_keys=True))
+    return 0 if not failures else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

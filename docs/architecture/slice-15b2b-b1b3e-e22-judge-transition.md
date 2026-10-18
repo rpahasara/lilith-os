@@ -93,3 +93,51 @@ OD-M12-11 = PROPOSED (DECISION ONLY) UNTIL CONFIRMED BY OWNER MERGE;  UPGRADE_E2
 NEW RELEASE = NOT BUILT / NOT ATTESTED / NOT PINNED;  BUILD / STAGE / SELECT / RESTART / KEY LOAD = NOT AUTHORIZED
 E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
 ```
+
+## 5. Addendum (2026-10-18): transition tooling slice and owner execution plan (source only)
+
+**Evidence.** Deploy `39123673552` (main `76653d5`, PR #217) compared W11 DR-5 `W11_1_SIGNER_STARTED_EXACT` **EQUAL**
+(194 / 155 / 29, fail 0, old-release lines 0). The only authority release the deployer sees is `releases/ba943e1…`.
+Evidence `lilith-mb11-pr217-dr5-76653d5`, `SHA256SUMS` `9c66a8933e4e9d2ab58923b882125200f17d57c5be4d0bf335c5039362d990fe`.
+
+**Added (no build, no DEV contact, no unit or credential action):**
+
+| Piece | What it does | Reuses |
+| --- | --- | --- |
+| `e22_judge_upgrade.check_inspection_delta` / `check-build` | build-time gate: a NEW build inspection against the installed E-19 build inspection (bound to archive `a4ad24e8…`, manifest `b8393015…`, source `ba943e1`). It admits exactly the judge (`0d2e6cca` → `d3df4cfc`, same install mode) and refuses any other payload, file-set, unit, CLI, host-target, dependency, root-tooling, witness-runtime or tar-member change. A local run against the real E-19 inspection binds it as installed and refuses an unchanged payload | the unchanged `attest_authority_dev_build.py` inspection format |
+| `ENDING_SIGNER_INCARNATION` / `ENDING_WITNESS_INCARNATION` | `c7ba0fb7…`/84806 (M-B11 start acceptance §2) and `90b28f9d…`/69238 (E-19 completion record) | accepted records |
+| `e22_release_stages.py` | root on DEV, each form behind its own go: `e22-status` (read-only: layout state, both units, both working trees, the V-phase or a STOP), `e22-stage` (V0 → V1), `e22-select` (V3 → V4, signer **and** witness stopped), `e22-retire-old` (V6 → V7, both named replacements running from NEW). STOPs: a unit on OLD after select, on a retired tree, transitional, an ending incarnation restarted or a new one on OLD, an inconsistent layout | `e19_release_stages` host reads (unchanged), installer `install_authority_dev.py` (unchanged) |
+
+The stop / start of units stays with the operator and the contract's reviewed commands, as in E-19. The tool never
+starts, stops or reloads a unit.
+
+**Still missing before a live swap (one more source-only slice):** the laptop operator for V0 … V7. That means the
+rendered go texts, the `O_EXCL` go markers and the pinned remote route (`e19_operator` / `mb10_operator` pattern),
+the OD-M12-11 window markers, and the replacement-signer POST and acceptance with K-ACT load count 2. The last reuses
+the M-B11 start path and W11 verifier.
+
+### Owner execution plan (nothing below is authorized)
+
+**Authorization 1 — BUILD (local only; no DEV).** After the operator slice merges, pick source commit `S` (that merge):
+
+1. Build twice with the unchanged tool, from clean checkouts of `S` with the pinned wheelhouse:
+   `build_authority_dev_release.py --candidate-sha S …` (BUILD_A Windows; BUILD_B WSL `env -i … -I -B`).
+2. `attest_authority_dev_build.py inspect` both, then `attest` (must be `REPRODUCED`), then `check`.
+3. `e22_judge_upgrade.py check-build <new inspection> <E-19 build-a/inspection-a.json>` must print `PASS`.
+4. A repository-only pin PR: `NEW_RELEASE = S`, `NEW_MANIFEST_SHA256`, the attestation record, and the derived DR-5
+   targets for the swap phases.
+
+**Authorization 2 — LIVE SWAP (DEV; one owner go per mutation, in order, each consumed once):** V0 read-only status
+and observe → STAGE → SIGNER STOP → WITNESS STOP → SELECT → WITNESS START (one K-WIT load) → witness POST and owner
+acceptance → SIGNER START (K-ACT load 2) → signer POST and owner acceptance → RETIRE. Then:
+
+- DR-5 EQUAL against the derived post-swap target;
+- the OD-M12-11 `journal` and `attribute` reads (same boot, exactly 12 attributed matches);
+- the re-pin cascade, the M-B12 recollection and the SECRET_HYGIENE pin only if the OD-M12-10 admission passes;
+- M-B13.
+
+```text
+TRANSITION TOOLING (GATE + STAGES + STATUS) = SOURCE ONLY;  OPERATOR = NOT YET;  NEW RELEASE = NOT BUILT
+BUILD / STAGE / SELECT / RETIRE / UNIT STOP-START / KEY LOAD = NOT AUTHORIZED
+E-22 = BLOCKED;  M-B12 = NOT PASSED;  CUSTODY = HELD;  K-ACT LOAD COUNT = 1
+```
