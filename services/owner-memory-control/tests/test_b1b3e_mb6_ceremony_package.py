@@ -20,6 +20,8 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
+# The installed E-19 release's `pr1_acceptance.py` (0d2e6cca); the repository judge has moved on (OD-M12-10, unbuilt).
+E19_PR1_ACCEPTANCE_BYTES = (Path(__file__).resolve().parent / "fixtures/e19_new_pr1_acceptance.py.txt").read_bytes()
 TOOLS = ROOT / "services/owner-memory-control/tools"
 ARCH = ROOT / "docs/architecture"
 PACKAGE = ARCH / "slice-15b2b-b1b3e-mb6-ceremony-package.md"
@@ -304,8 +306,8 @@ class PackageTests(unittest.TestCase):
                    "lilith_memory": "services/core-api", "lilith_recovery_witness": "services/recovery-witness"}
         for module, pin in rows.items():                                               # control bytes = the pins
             data = (ROOT / sources[module.split("/")[0]] / module).read_bytes()
-            if module == E19.PR1_ACCEPTANCE_MEMBER:          # historical aee323e pin; source carries the E-19 fix
-                data = E19.reverse_e19(data)
+            if module == E19.PR1_ACCEPTANCE_MEMBER:          # historical aee323e pin, from the E-19 bytes
+                data = E19.reverse_e19(E19_PR1_ACCEPTANCE_BYTES)
             self.assertEqual(sha(data), pin, module)
 
     def test_go_template_is_the_operator_lines(self):
@@ -447,7 +449,7 @@ class ReadinessProbeTests(unittest.TestCase):
                 shutil.copytree(ROOT / base / package, release / package,
                                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             member = release / E19.PR1_ACCEPTANCE_MEMBER        # the installed aee323e bytes, not the E-19 source
-            member.write_bytes(E19.reverse_e19(member.read_bytes()))
+            member.write_bytes(E19.reverse_e19(E19_PR1_ACCEPTANCE_BYTES))
             wrapper = Path(work) / "lilith-authority-ledger-dev"
             shutil.copyfile(ROOT / "services/authority-dev/bin/lilith-authority-ledger-dev", wrapper)
             probe = (O.READINESS_PROBE.replace("/opt/lilith-authority-dev/current", release.as_posix())

@@ -892,8 +892,9 @@ class SourceGuardTests(unittest.TestCase):
         pinned = release_file_set.SHARED_HASHES
         path = "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py"
         self.assertEqual(hashlib.sha256((ROOT / path).read_bytes()).hexdigest(), pinned[path])
-        # e0928854 (aee323e) -> the E-19 correction (test_b1b3e_e19_release_maintenance pins the exact edits).
-        self.assertEqual(pinned[path], "0d2e6ccabf916425a1dfa7dc587bfcb3d7a232eb6c52c5cd938d573199715cff")
+        # e0928854 (aee323e) -> 0d2e6cca (the E-19 correction, installed) -> the OD-M12-10 E-22 adjudication judge
+        # (repository only; not built, attested or installed).
+        self.assertEqual(pinned[path], "d3df4cfca975b31cbe526805d6573e7d4760ef376ad02f3cb8e0ac7cece4049b")
         for name in self.SOURCES:
             self.assertFalse(any(name in key for key in pinned), name)
 

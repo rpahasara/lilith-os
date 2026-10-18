@@ -505,6 +505,32 @@ REQUIRED_PROOFS = ("SIGNER_DENIAL", "DEPLOYER_DENIAL", "BROKER_DENIAL", "BROKER_
 # The deployer-observed maturity once every PR-1A object exists (DR-5 ladder).
 REQUIRED_DEPLOYER_MATURITY = "maturity=P1A-9"
 
+# E-22 owner risk adjudication (OD-M12-10; docs/architecture/slice-15b2b-b1b3e-mb12-prb2-proof-producers.md §17).
+# The ONE E-22 outcome other than PASS that the package can carry: a genuine SECRET_HYGIENE FAIL whose `detail`
+# names an owner adjudication pinned here by a reviewed, merged owner record, for the DEV_SYNTHETIC K-ACT only.
+# The control side admits that detail only for the exact historical failure set (mb12_readiness_inputs). It is
+# never PASS and never a clean scan; every other check stays PASS-only.
+OWNER_RISK_ADJUDICATED = "OWNER_RISK_ADJUDICATED"
+E22_ADJUDICATION_DETAIL_PREFIX = "OWNER_RISK_ADJUDICATION="
+E22_ADJUDICATION_KEY_ID = "test-only.dev-synthetic.actor.b1b3d.1"
+E22_ADJUDICATION_ENVIRONMENT = SC.ENVIRONMENT          # "dev": the DEV_SYNTHETIC deployment only
+E22_ADJUDICATED_FAILURES = (
+    "FAIL: JOURNAL_SCAN_NOT_PASS",
+    "FAIL: JOURNAL_MARKER class=PEM_PRIVATE_KEY count=12",
+    "FAIL: CEREMONY_TRANSCRIPT_NOT_RETAINED B1B3D-L2b",
+    "FAIL: CEREMONY_WINDOW_NOT_RECORDED B1B3D-L2b",
+)
+# adjudication SHA-256 -> the owner decision record SHA-256 that accepted it.
+ACCEPTED_E22_ADJUDICATIONS: Mapping[str, str] = {
+    "9528f7338b0a832bb821884654b1b8e2a8c86c1b65f4bf17ea2be2a48cbe9989":
+        "56e71df1b7bf5c599c7d3f09edd5b12a37cf642c63d715b2f823f2ff92242c5a",
+}
+E22_ADJUDICATION_NONCLAIM = (
+    "E-22 SECRET_HYGIENE: OWNER_RISK_ADJUDICATED (OD-M12-10), NOT a clean scan: JOURNAL_SECRET_SCAN=FAIL stands "
+    "(12 PEM_PRIVATE_KEY markers, purpose UNKNOWN x3); the B1b-3d L2b transcript was not retained and its window "
+    "not recorded; exposure of the DEV_SYNTHETIC K-ACT during or around L2b is not excluded; no other key, "
+    "ceremony, environment or PROD")
+
 PR1_NONCLAIMS = (
     "authorityGranted: false",
     "activationGranted: false",
@@ -610,6 +636,32 @@ def _proof_reason(proofs: Mapping[str, ExternalProofV1], *names: str, detail: st
     return None
 
 
+def _secret_hygiene_outcome(inputs: Pr1AcceptanceInputsV1) -> WR.CheckOutcomeV1:
+    """E-22: PASS; or OWNER_RISK_ADJUDICATED for a genuine FAIL naming a pinned adjudication, DEV_SYNTHETIC only."""
+    proofs = inputs.proofs if isinstance(inputs.proofs, Mapping) else {}
+    proof = proofs.get("SECRET_HYGIENE")
+    detail = proof.detail if isinstance(proof, ExternalProofV1) else None
+    if detail is None:
+        reason = _proof_reason(proofs, "SECRET_HYGIENE")
+        return WR.CheckOutcomeV1(PASS) if reason is None else WR.CheckOutcomeV1(FAIL, reason)
+    reason = _proof_reason(proofs, "SECRET_HYGIENE")
+    adjudication = detail[len(E22_ADJUDICATION_DETAIL_PREFIX):] if type(detail) is str else ""
+    if reason not in (None, "PROOF_NOT_PASS:SECRET_HYGIENE"):
+        return WR.CheckOutcomeV1(FAIL, reason)
+    if type(detail) is not str or not detail.startswith(E22_ADJUDICATION_DETAIL_PREFIX) \
+            or _HEX64.fullmatch(adjudication) is None:
+        return WR.CheckOutcomeV1(FAIL, "E22_ADJUDICATION_MALFORMED")
+    if proof.result != FAIL:
+        return WR.CheckOutcomeV1(FAIL, "E22_ADJUDICATION_NOT_FOR_FAIL")
+    if inputs.environment != E22_ADJUDICATION_ENVIRONMENT or not SC.is_dev_synthetic(inputs.profile) \
+            or inputs.profile.environment != E22_ADJUDICATION_ENVIRONMENT \
+            or inputs.profile.initial_key_id != E22_ADJUDICATION_KEY_ID:
+        return WR.CheckOutcomeV1(FAIL, "E22_ADJUDICATION_OUT_OF_SCOPE")
+    if adjudication not in ACCEPTED_E22_ADJUDICATIONS:
+        return WR.CheckOutcomeV1(FAIL, "E22_ADJUDICATION_NOT_ACCEPTED")
+    return WR.CheckOutcomeV1(OWNER_RISK_ADJUDICATED, adjudication)
+
+
 def _unit_reason(states: tuple[UnitStateObservationV1, ...]) -> str | None:
     by_unit = {state.unit: state for state in states if isinstance(state, UnitStateObservationV1)}
     for unit in SIGNER_UNITS + WITNESS_UNITS:
@@ -708,7 +760,13 @@ def evaluate_pr1_acceptance(inputs: Pr1AcceptanceInputsV1, *, mode: str) -> Pr1A
     record("E07_SIGNER_CUSTODY_DENIAL", _proof_reason(inputs.proofs, "SIGNER_DENIAL", "OS_DENIAL"))
     record("E08_DEPLOYER_DENIAL", _proof_reason(inputs.proofs, "DEPLOYER_DENIAL", detail=REQUIRED_DEPLOYER_MATURITY))
     record("E09_BROKER_DENIAL_PRESERVATION", _proof_reason(inputs.proofs, "BROKER_DENIAL", "BROKER_PRESERVATION"))
-    record("E22_SECRET_HYGIENE", _proof_reason(inputs.proofs, "SECRET_HYGIENE"))
+    checks["E22_SECRET_HYGIENE"] = e22 = _secret_hygiene_outcome(inputs)
+    if e22.status == OWNER_RISK_ADJUDICATED:
+        evidence["secretHygieneAdjudication"] = {
+            "status": OWNER_RISK_ADJUDICATED, "decision": "OD-M12-10", "adjudicationSha256": e22.reason,
+            "ownerRecordSha256": ACCEPTED_E22_ADJUDICATIONS[e22.reason], "keyId": E22_ADJUDICATION_KEY_ID,
+            "transcriptSha256": inputs.proofs["SECRET_HYGIENE"].transcript_sha256,
+            "failures": list(E22_ADJUDICATED_FAILURES), "nonclaim": E22_ADJUDICATION_NONCLAIM}
     record("E23_PRESERVATION_SET", _proof_reason(inputs.proofs, "PRESERVATION_SET"))
     evidence["proofs"] = {name: {"result": proof.result, "transcriptSha256": proof.transcript_sha256,
                                  "detail": proof.detail}
@@ -915,7 +973,10 @@ def _package(mode: str, environment: Any, checks: dict[str, WR.CheckOutcomeV1], 
     for name in PACKAGE_CHECKS:
         checks.setdefault(name, WR.CheckOutcomeV1(WR.NOT_EVALUATED, "PREREQUISITE_NOT_VERIFIED"))
     ordered = {name: checks[name] for name in PACKAGE_CHECKS}
-    reasons = tuple(f"{name}:{outcome.reason}" for name, outcome in ordered.items() if outcome.status != PASS)
+    # OWNER_RISK_ADJUDICATED satisfies E-22 only (OD-M12-10); it is kept distinct in the package, never shown as PASS.
+    adjudicated = ordered["E22_SECRET_HYGIENE"].status == OWNER_RISK_ADJUDICATED
+    reasons = tuple(f"{name}:{outcome.reason}" for name, outcome in ordered.items()
+                    if outcome.status != PASS and not (adjudicated and name == "E22_SECRET_HYGIENE"))
     status = READY if not reasons else NOT_READY
     package = {
         "packageType": PACKAGE_TYPE, "schemaVersion": PACKAGE_SCHEMA_VERSION, "environment": environment,
@@ -924,7 +985,7 @@ def _package(mode: str, environment: Any, checks: dict[str, WR.CheckOutcomeV1], 
         "wholeHostRollbackProtected": R.WHOLE_HOST_ROLLBACK_PROTECTED,
         "checks": {name: [outcome.status, outcome.reason] for name, outcome in ordered.items()},
         "evidence": _jsonable(evidence),
-        "nonclaims": list(PR1_NONCLAIMS),
+        "nonclaims": list(PR1_NONCLAIMS) + ([E22_ADJUDICATION_NONCLAIM] if adjudicated else []),
     }
     return Pr1AcceptanceResultV1(status, mode, reasons, ordered, package, package_digest(package), readiness)
 

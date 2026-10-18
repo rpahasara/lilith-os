@@ -26,6 +26,8 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
+# The installed E-19 release's `pr1_acceptance.py` (0d2e6cca); the repository judge has moved on (OD-M12-10, unbuilt).
+E19_PR1_ACCEPTANCE_BYTES = (HERE / "fixtures/e19_new_pr1_acceptance.py.txt").read_bytes()
 TOOLS = ROOT / "services/owner-memory-control/tools"
 for _p in (TOOLS, ROOT / "services/authority-dev/ceremony", ROOT / "services/authority-dev",
            ROOT / "services/owner-memory-control", ROOT / "services/core-api", HERE):
@@ -290,6 +292,7 @@ class InstallerStageTests(unittest.TestCase):
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.out = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.new_payloads = BUILD.build_payloads(ROOT, house)                       # the REAL E-19 payload
+        self.new_payloads[S.DELTA_MEMBER] = E19_PR1_ACCEPTANCE_BYTES               # the judge as installed at E-19
         self.assertEqual(sha(self.new_payloads[S.DELTA_MEMBER]), S.DELTA_NEW_SHA256)
         self.old_payloads = dict(self.new_payloads)
         self.old_payloads[S.DELTA_MEMBER] = E.reverse_e19(self.new_payloads[S.DELTA_MEMBER])   # = aee323e bytes
