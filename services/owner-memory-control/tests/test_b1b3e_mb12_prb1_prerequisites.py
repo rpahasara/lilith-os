@@ -452,7 +452,8 @@ class Pr3MaterialTests(unittest.TestCase):
                             ("kWitPublicKeySha256", "slice-15b2b-b1b3e-mb2-kwit-completion.md"),
                             ("genesisPinFileSha256", "slice-15b2b-b1b3e-mb7-mb8-package-a-completion.md"),
                             ("authorizationRegisterFileSha256", "slice-15b2b-b1b3e-mb7-mb8-package-a-completion.md"),
-                            ("releaseManifestSha256", "slice-15b2b-b1b3e-e19-completion-record.md")):
+                            ("releaseSha", "slice-15b2b-b1b3e-e22-new-release-pin.md"),            # E-22 V7
+                            ("releaseManifestSha256", "slice-15b2b-b1b3e-e22-new-release-pin.md")):
             with self.subTest(key=key):
                 self.assertIn(M3.DEV_EXPECTED[key], (records / record).read_text(encoding="utf-8"))
 

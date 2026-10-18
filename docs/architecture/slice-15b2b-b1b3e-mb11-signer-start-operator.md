@@ -505,3 +505,15 @@ behaviour changes. Pin cascade (supersedes §20):
 | `mb12_preservation_set_proof.py` | `8b659beed2e50de6c62464cb273f1beac3d86a764750eb422b6276f42af7dde0` |
 | `mb12_readiness_inputs.py` | `02505320362cc80f1af4d154d5ad0f1ed4a375961796593b246183ed8b7745cc` |
 | `mb11_operator.py` | `f1963897f65613f04ed6a1a6410c1691443c438a691c3a3bca0889c5f2a5fa17` |
+
+## 23. Addendum (2026-10-19): E-22 V7 installed-release re-pin — re-pin only
+
+After the E-22 transition reached V7 (record `slice-15b2b-b1b3e-e22-completion.md`), the readiness and PR-3 pins name
+the installed E-22 release `129f2bed617334be61dcac5204cd409946a7a566` (manifest `fc7dbf08…`). No operator behaviour
+changes; the M-B11 start is consumed and stays historical. Pin cascade (supersedes §22):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_readiness_inputs.py` | `229c75af41f705e62c61a0d1f3e34475879e33da6e32b666ebaeafa917e1e538` |
+| `mb12_pr3_material.py` | `12c40b58c96f2025d0bbb97015d01eea3483f3c454b8f750e51dea95475f20c7` |
+| `mb11_operator.py` | `9ba4a096cf69200ca9b6ab52dc182d41c7693871049aa88453ebd1b3f721df3d` |

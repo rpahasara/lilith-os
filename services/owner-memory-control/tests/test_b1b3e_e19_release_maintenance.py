@@ -210,13 +210,19 @@ class ReleasePinTests(unittest.TestCase):
         self.assertTrue(E.HISTORICAL_RELEASE_BINDINGS <= set(C.OLD_RELEASE_MENTIONS))
         self.assertEqual(M6.PROVISION_MODULES[E.PR1_ACCEPTANCE_MEMBER], E.PR1_ACCEPTANCE_OLD_SHA256)  # historical
         self.assertEqual(M6.RELEASE_SHA, OLD)                                                       # byte-identical
-        self.assertEqual(RI.DEV_PINS["releaseSha"], E.NEW_RELEASE)
-        self.assertEqual(RI.DEV_PINS["attestedManifestSha256"], E.NEW_MANIFEST_SHA256)
-        # NEW is named by the contract and by exactly the re-pinned current bindings.
+        # E-22 V7 (record slice-15b2b-b1b3e-e22-completion.md): the readiness and PR-3 installed-release pins moved on
+        # to the E-22 release; the M-B11 tools keep the E-19 NEW binding (the E-22 host tail binds W11 per phase).
+        import e22_judge_upgrade as J
+        moved = {"services/owner-memory-control/tools/mb12_pr3_material.py",
+                 "services/owner-memory-control/tools/mb12_readiness_inputs.py"}
+        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]),
+                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
+        # E-19 NEW is named by the contract and by exactly the re-pinned current bindings that have not moved on.
         named_new = {f"services/owner-memory-control/tools/{p.name}" for p in TOOLS.glob("*.py")
                      if E.NEW_RELEASE[:12] in p.read_text(encoding="utf-8")
                      or E.NEW_MANIFEST_SHA256[:12] in p.read_text(encoding="utf-8")}
-        self.assertEqual(named_new, set(C.REPINNED_TO_NEW) | {"services/owner-memory-control/tools/e19_p1b10_upgrade.py"})
+        self.assertEqual(named_new - {"services/owner-memory-control/tools/e22_judge_upgrade.py"},
+                         (set(C.REPINNED_TO_NEW) - moved) | {"services/owner-memory-control/tools/e19_p1b10_upgrade.py"})
 
     def test_preserved_pins_equal_the_accepted_records(self):
         import mb3_registry_ceremony as M3C

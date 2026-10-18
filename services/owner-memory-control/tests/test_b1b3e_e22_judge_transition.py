@@ -49,8 +49,8 @@ def installed_payload_pins() -> dict[str, str]:
 
 class ReleaseAndDeltaTests(unittest.TestCase):
     def test_old_is_the_installed_e19_release_and_new_is_the_attested_build(self):
-        # The installed-release bindings stay on OLD until the post-V7 re-pin (record e22-new-release-pin §5).
-        self.assertEqual((J.OLD_RELEASE, J.OLD_MANIFEST_SHA256),
+        # Re-pinned after V7 (record e22-completion): the readiness pins name the installed E-22 release.
+        self.assertEqual((J.NEW_RELEASE, J.NEW_MANIFEST_SHA256),
                          (RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]))
         self.assertEqual(J.OLD_RELEASE, "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb")
         self.assertEqual(J.NEW_RELEASE, "129f2bed617334be61dcac5204cd409946a7a566")       # the PR #219 merge
