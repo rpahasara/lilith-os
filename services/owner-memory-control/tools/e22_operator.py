@@ -50,8 +50,13 @@ from pathlib import Path
 from typing import Any, Sequence
 
 HERE = Path(__file__).resolve().parent
+# The owner-inputs reader (`mb12_readiness_inputs`, via `mb11_operator.readiness_tool`) imports `lilith_owner_memory`,
+# which imports `lilith_memory` (services/core-api): both come from this checkout, never from the environment.
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+for _path in (HERE.parents[1] / "core-api", HERE.parent):
+    if str(_path) not in sys.path:
+        sys.path.append(str(_path))
 
 import e22_judge_upgrade as J  # noqa: E402  (the merged contract; pinned below)
 import e22_transition_remote as Q  # noqa: E402  (pinned below)
@@ -75,7 +80,7 @@ TOOL_PINS = {
     **{path: X.TOOL_PINS[path] for path in (M9.INSTALLER, X.CONTRACT, X.STAGES, X.OBSERVER, *X.DENIALS.values())},
     MB11_OPERATOR: "f1963897f65613f04ed6a1a6410c1691443c438a691c3a3bca0889c5f2a5fa17",
     CONTRACT: "505966d4c065a07ab53d7b9a16875b301a04525032ac5b553f8f216f20d21ec9",
-    STAGES: "504ff1380571bff4fd9b4e7c9cc59a4467b1a5b90a8f7b948f1857c0e797a2c6",
+    STAGES: "97359e84c89e3e70fd0bcb3d49de1bdc996d04b5233b807adf74b506c06050d2",
     REMOTE: "4f1c52635021852043105431a39263c8ac2bbf68437d83ddb598f3dc8138aa93",
 }
 # The E-22 stages run with the byte-unchanged installer, the E-19 contract and stage tool (reused host reads) and the

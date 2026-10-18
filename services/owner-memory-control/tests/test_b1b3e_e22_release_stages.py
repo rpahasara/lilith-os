@@ -66,10 +66,12 @@ class E22Host(T19.StageHost):
         if os.path.lexists(link):
             link.unlink()
         os.symlink(f"{I.RELEASES}/{release}", link)
+        (self.root / "run/credentials" / S.SIGNER_SERVICE).mkdir(parents=True, exist_ok=True)   # systemd, per start
 
     def signer_stopped(self) -> None:
         self.units[S.SIGNER_SERVICE].update(ActiveState="inactive", SubState="dead", MainPID="0", InvocationID="")
         self.units[S.SIGNER_SOCKET].update(ActiveState="inactive", SubState="dead")
+        shutil.rmtree(self.root / "run/credentials" / S.SIGNER_SERVICE, ignore_errors=True)
 
 
 @unittest.skipUnless(T19.POSIX, "release trees need POSIX modes and symlinks")
@@ -222,6 +224,48 @@ class StageTests(unittest.TestCase):
     def test_cli_refuses_unknown_forms(self):
         self.assertEqual(S.main(["e22-start", OLD, NEW], system=self.system), 2)
         self.assertEqual(S.main([], system=self.system), 2)
+
+
+# The installer report retained from the first live `e22-status` (2026-10-18, evidence
+# lilith-e22-transfer-v0-4873a9f, observations/01-V0): the host was exactly V0, the report FAIL only for these.
+RETAINED_DEV_V0_INSTALLER_FAILURES = ["UNEXPECTED_PRESENT:/run/credentials/lilith-authority-dev.service",
+                                      "UNIT_ACTIVE:lilith-authority-dev.service", "UNIT_ACTIVE:lilith-authority-dev.socket"]
+
+
+@unittest.skipUnless(T19.POSIX, "release trees need POSIX modes and symlinks")
+class RunningSignerInstallerStatusTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.host = E22Host(Path(tmp.name), {"lilith_owner_memory/pr1_acceptance.py": E19_BYTES})
+        self.system = self.host.system()
+
+    def replay(self, *extra):
+        return lambda *_a: {"result": "FAIL", "failures": RETAINED_DEV_V0_INSTALLER_FAILURES + list(extra)}
+
+    def test_the_retained_dev_v0_report_is_v0_and_only_while_the_signer_runs(self):
+        report = S.e22_status(self.system, OLD, J.NEW_RELEASE, status=self.replay())
+        self.assertEqual((report["result"], report["phase"], report["failures"]), ("PASS", J.V0, []))
+        self.assertEqual(report["installerStatus"]["failures"], RETAINED_DEV_V0_INSTALLER_FAILURES)   # recorded as-is
+        self.host.signer_stopped()                                     # the same facts with the signer stopped
+        report = S.e22_status(self.system, OLD, J.NEW_RELEASE, status=self.replay())
+        self.assertEqual(report["phase"], S.STOP_INCONSISTENT)
+
+    def test_any_other_installer_failure_stays_a_stop(self):
+        for extra in ("UNIT_ACTIVE:lilith-recovery-witness.service", "CREDSTORE_NOT_EMPTY", "RELEASE_SET",
+                      "UNEXPECTED_PRESENT:/run/lilith-authority-dev/other"):
+            with self.subTest(extra=extra):
+                report = S.e22_status(self.system, OLD, J.NEW_RELEASE, status=self.replay(extra))
+                self.assertEqual(report["phase"], S.STOP_INCONSISTENT)
+                self.assertEqual(report["failures"], ["INSTALLER:" + extra])
+
+    def test_the_real_installer_status_differs_by_exactly_the_admitted_set(self):
+        running = set(I.status(self.system, S.INSTALLED_STAGE, OLD)["failures"])
+        self.host.signer_stopped()
+        stopped = set(I.status(self.system, S.INSTALLED_STAGE, OLD)["failures"])
+        self.assertEqual(running - stopped, S.SIGNER_RUNNING_INSTALLER_FAILURES)
+        self.assertEqual(stopped - running, set())
+        self.assertEqual(sorted(S.SIGNER_RUNNING_INSTALLER_FAILURES), sorted(RETAINED_DEV_V0_INSTALLER_FAILURES))
 
 
 class PinnedReleaseTests(unittest.TestCase):
