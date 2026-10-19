@@ -145,8 +145,8 @@ DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {
 
 # The accepted DEV records (public values only).
 DEV_PINS = {
-    "releaseSha": "ba943e1a188d98f4108c9eec7149c0cf1a8f68bb",                                          # E-19 U5
-    "attestedManifestSha256": "b8393015e505495a81629411a4ecd33c0c372c7b16d2761094eb4e018bc300a2",      # E-19 U5
+    "releaseSha": "129f2bed617334be61dcac5204cd409946a7a566",                                          # E-22 V7
+    "attestedManifestSha256": "fc7dbf08bb5b8260716a762fd2fbccdb44fbf0e438e2e21d0cfddcd6f1a3348a",      # E-22 V7
     "pinnedCurrentSha256": "6a61c350e848a833868f4573982fca9c75e2af79ccc9bd3716ae0303c26973f3",
     "kActPublicationFileSha256": "d76479762007afef828f3901591647dc4a2fb2205f4afac527b66d2cc9c6b032",
     "kActPublicKeySha256": "dd13a1fb302375a4e7ec81131a72920e23e365e06a0b6dc9bb7ab124dadc01ed",
