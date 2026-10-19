@@ -98,7 +98,7 @@ read-only `package` form.
 | `prepare <envelope>` | none | new workdir: `envelope.out`, `inputs.json`, `EXPECTED.json`, `PREPARED.json` |
 | `pre` | read-only | `hold observe` = expected HELD; staging path absent; signer `efbc0784…` / 128648; ONE `package` re-run = `eab79d56…`, mode `HOLD_RELEASE_ELIGIBILITY`, reasons `[]`, witness CONSISTENT, chain 1, head = genesis, package hold = HELD with listing `ee7aaa61…` |
 | `render GO` | none | the canonical go text, bound to the control, operator, `PRE.json`, input digest, expected HELD and RELEASED |
-| `release <go>` | **one write** | go = the canonical text; a fresh read-only gate (HELD exact, staging absent, signer exact); marker `mb14` (`O_EXCL`, before the invocation); ONE remote invocation (§3); then `post` |
+| `release <go>` | **one write** | go = the canonical text; a fresh read-only gate (HELD exact, staging absent, signer exact); every local transport binding (plink client pin, key, proxy) checked; marker `mb14` (`O_EXCL`, before the invocation); ONE remote invocation (§3); `ATTEMPT.json` written at once; then `post` |
 | `post` | read-only | the independent read-back (§5) |
 | `render ACCEPT` / `accept` | none | the owner's verbatim acceptance; adds the adoption line when the writer's response was not received exactly |
 | `render UNSTAGE` / `unstage` | one removal | only after a read-back found the staged document |
@@ -110,7 +110,7 @@ Owner acts, each its own text and none implied by another:
 - **UNSTAGE** permits only removing the staged document.
 
 **Fail closed.** Every outcome after the marker consumes the go: REFUSED, a non-zero exit, a traceback, a timeout,
-SSH loss or unexpected output. There is no retry and no second invocation path. The read-back decides:
+SSH loss or unexpected output. There is no retry and no second invocation path. A local transport refusal is raised before the marker, so it never consumes the go. The invocation facts (`ATTEMPT.json`) are recorded before the read-back; if the read-back cannot complete (`MB14_READBACK_NOT_COMPLETED`), a later read-only `post` re-observes, and acceptance keys off `ATTEMPT.json` and the latest read-back. Every remote root command names its program by absolute path. The read-back decides:
 
 | `release` result | Read-back | Meaning / next |
 | --- | --- | --- |
@@ -210,7 +210,7 @@ After the release these report HALT or mismatch. That is expected and is not dri
 
 ## 9. Tests
 
-`services/owner-memory-control/tests/test_b1b3e_mb14_release_initial.py` (18 tests) covers:
+`services/owner-memory-control/tests/test_b1b3e_mb14_release_initial.py` (21 tests) covers:
 
 - derivation (stdlib = contract = pins; writer rule; listings);
 - the read-back judge over the real snapshot wire form;

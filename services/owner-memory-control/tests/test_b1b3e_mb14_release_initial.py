@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -82,7 +83,7 @@ class Dev:
             return done(0, b"STAGE=present\n" if self.staged else b"STAGE=absent\n")
         if command == OP.UNITS_COMMAND:
             return done(0, self.units())
-        if command.startswith(f"sudo -n sha256sum {OP.STAGE_FILE}"):
+        if command.startswith(f"sudo -n /usr/bin/sha256sum {OP.STAGE_FILE}"):
             self.staged = False
             return done(0)
         raise AssertionError(command)
@@ -117,6 +118,11 @@ class FakeOperator(OP.Operator):
 
     def _invoke_once(self, command, stdin):
         return self.dev.invoke(command, stdin)
+
+    def plink_argv(self, command):
+        if getattr(self, "transport_error", None):
+            raise OP.Stop(self.transport_error)
+        return ["plink", command]
 
     def package(self, repo, outdir, envelope):
         outdir.mkdir(mode=0o700, parents=True)
@@ -320,7 +326,41 @@ class FlowTests(Case):
         self.assertEqual(self.op.post(ROOT, self.work)["result"], "MB14_READBACK_RELEASED_EXACT")
 
 
+class PostMarkerTests(Case):
+    def test_b1_a_local_transport_refusal_never_consumes_the_go(self):
+        self.ready()
+        self.op.transport_error = "PLINK_UNSET"
+        with self.assertRaises(OP.Stop):
+            self.op.release(ROOT, self.work, self.text("GO"))
+        self.assertFalse(self.marker().exists())
+        self.assertEqual(self.dev.releases, [])
+        self.op.transport_error = None
+        self.assertEqual(self.op.release(ROOT, self.work, self.text("GO"))["result"], "MB14_RELEASED_EXACT")
+
+    def test_b2_an_interrupted_readback_keeps_the_attempt_and_a_later_post_allows_acceptance(self):
+        self.ready()
+        real_post = self.op.post
+        self.op.post = lambda repo, workdir: (_ for _ in ()).throw(OP.Stop("GIT_FAILED"))
+        report = self.op.release(ROOT, self.work, self.text("GO"))
+        self.assertEqual(report["result"], "MB14_STOP:MB14_READBACK_NOT_COMPLETED:GIT_FAILED")
+        attempt = json.loads((self.work / OP.ATTEMPT_FILE).read_text())
+        self.assertEqual((attempt["cliExact"], attempt["code"]), (True, 0))
+        with self.assertRaises(OP.Stop):                                           # never a second attempt
+            self.op.render(ROOT, self.work, "GO")
+        self.op.post = real_post
+        self.assertEqual(self.op.post(ROOT, self.work)["result"], "MB14_READBACK_RELEASED_EXACT")
+        accept = self.text("ACCEPT")
+        self.assertNotIn(OP.ADOPTION_LINE, accept.read_text())
+        self.assertEqual(self.op.accept(ROOT, self.work, accept)["result"], "MB14_ACCEPTED")
+
+
 class PinTests(unittest.TestCase):
+    def test_root_commands_use_absolute_paths(self):
+        command, _ = OP.Operator.release_command(b"{}\n")
+        for text in (command, OP.STAGE_COMMAND):
+            for word in re.findall(r"sudo -n (\S+)", text):
+                self.assertTrue(word.startswith("/"), word)
+
     def test_tool_pins_are_the_tree_bytes(self):
         for path, pin in OP.TOOL_PINS.items():
             self.assertEqual(sha((ROOT / path).read_bytes()), pin, path)

@@ -78,13 +78,13 @@ OBSERVE_COMMAND = M10.HOLD_OBSERVE_COMMAND
 STAGE_DIR = "/run/lilith-mb14-release-initial"
 STAGE_FILE = STAGE_DIR + "/inputs.json"
 MAX_INPUT = 256 * 1024                                  # lilith_authority_root.cli.MAX_INPUT
-STAGE_COMMAND = f"sudo -n test -e {STAGE_DIR} && echo STAGE=present || echo STAGE=absent"
+STAGE_COMMAND = f"sudo -n /usr/bin/test -e {STAGE_DIR} && echo STAGE=present || echo STAGE=absent"
 UNITS_COMMAND = ("systemctl show -p Id,ActiveState,SubState,MainPID,NRestarts,InvocationID "
                  f"{E22.SIGNER_SERVICE} {E22.WITNESS_SERVICE} --no-pager")
 MARKER, UNSTAGE_MARKER = "mb14", "mb14-unstage"
 PREPARED, PRE_DIR, RELEASE_DIR, POST_DIR = "PREPARED.json", "pre", "release", "post"
 EXPECTED_FILE, ENVELOPE_FILE, INPUTS_FILE = "EXPECTED.json", "envelope.out", "inputs.json"
-ACCEPT_FILE = "MB14_ACCEPTANCE.json"
+ACCEPT_FILE, ATTEMPT_FILE = "MB14_ACCEPTANCE.json", "ATTEMPT.json"
 
 # Read-back classes (the C-19 root observer decides; ambiguous = STOP).
 RELEASED_EXACT, HELD_UNCHANGED = "RELEASED_EXACT", "HELD_UNCHANGED"
@@ -382,10 +382,10 @@ class Operator(E22.Operator):
         record, record_sha = self._latest_record(workdir, POST_DIR, "POST.json")
         _need(record is not None and record.get("hold") == RELEASED_EXACT and record.get("stage") == "ABSENT",
               "READBACK_NOT_RELEASED_EXACT")
-        release, _ = self._latest_record(workdir, RELEASE_DIR, "RELEASE.json")
-        _need(release is not None, "RELEASE_NOT_RUN")
+        _need(self._marker_exists(workdir) and (Path(workdir) / ATTEMPT_FILE).is_file(), "RELEASE_NOT_RUN")
+        attempt = self._json(Path(workdir) / ATTEMPT_FILE, "ATTEMPT_INVALID")
         return ({"name": expected["name"], "released": expected["released"]["sha256"], "readback": record_sha,
-                 "held": expected["held"]["sha256"]}, release.get("cliExact") is not True)
+                 "held": expected["held"]["sha256"]}, attempt.get("cliExact") is not True)
 
     def _unstage_values(self, workdir: Path) -> dict:
         _prepared, inputs, _expected = self._prepared(workdir)
@@ -480,12 +480,12 @@ class Operator(E22.Operator):
         the CLI runs exactly once; the document and directory are removed; the CLI exit code is returned."""
         payload = base64.b64encode(inputs)
         inner = f"umask 077 && mkdir -m 0700 {STAGE_DIR} && cat > {STAGE_FILE}"
-        unstage = f"sudo -n rm -f -- {STAGE_FILE}; sudo -n rmdir -- {STAGE_DIR}"
+        unstage = f"sudo -n /usr/bin/rm -f -- {STAGE_FILE}; sudo -n /usr/bin/rmdir -- {STAGE_DIR}"
         command = (
             f"B=$(cat); printf %s \"$B\" | sha256sum | cut -c1-64 | grep -qx '{sha256_hex(payload)}' || exit 96; "
-            f"sudo -n test ! -e {STAGE_DIR} || exit 95; "
-            f"printf %s \"$B\" | base64 -d | sudo -n /bin/sh -c '{inner}' || {{ {unstage}; exit 94; }}; "
-            f"sudo -n sha256sum {STAGE_FILE} | cut -c1-64 | grep -qx '{sha256_hex(inputs)}' || {{ {unstage}; exit 93; }}; "
+            f"sudo -n /usr/bin/test ! -e {STAGE_DIR} || exit 95; "
+            f"printf %s \"$B\" | base64 -d | sudo -n /usr/bin/sh -c '{inner}' || {{ {unstage}; exit 94; }}; "
+            f"sudo -n /usr/bin/sha256sum {STAGE_FILE} | cut -c1-64 | grep -qx '{sha256_hex(inputs)}' || {{ {unstage}; exit 93; }}; "
             f"echo MB14_CLI_BEGIN; sudo -n {HOLD_CLI} release-initial {APPROVED_PACKAGE_DIGEST} {STAGE_FILE}; rc=$?; "
             f"echo MB14_CLI_RC=$rc; {unstage}; echo MB14_UNSTAGED=$?; exit $rc")
         return command, payload + b"\n"
@@ -501,28 +501,34 @@ class Operator(E22.Operator):
         _need(gate["hold"]["class"] == HELD_UNCHANGED and gate["stage"] == "ABSENT" and tuple(gate["signer"]) == SIGNER,
               "GATE_NOT_EXACT")
         command, stdin = self.release_command(inputs)
+        self.plink_argv(command)          # B1: every local transport binding checked BEFORE the marker; nothing launched
         self._one_attempt(workdir, MARKER, raw)                                         # the go is consumed HERE
         code = self._save(out, MARKER, self._invoke_once(command, stdin))
         cli, cli_rc, unstaged = parse_release((out / f"{MARKER}.out").read_bytes())
         cli_exact = code == 0 and cli_rc == 0 and cli == {"record": expected["released"]["record"]}
-        post = self.post(repo, workdir)
-        record = {"marker": MARKER, "goSha256": sha256_hex(raw), "code": code, "cliRc": cli_rc, "cliExact": cli_exact,
-                  "unstaged": unstaged, "post": post["post"], "readback": post["result"],
-                  "approvedPackageDigest": APPROVED_PACKAGE_DIGEST, "releasedSha256": expected["released"]["sha256"],
-                  "result": ("MB14_RELEASED_EXACT" if cli_exact and post["result"] == "MB14_READBACK_RELEASED_EXACT"
-                             else "MB14_RELEASED_ADOPTION_REQUIRED" if post["result"] == "MB14_READBACK_RELEASED_EXACT"
-                             else "MB14_STOP:" + post["result"])}
+        attempt = {"marker": MARKER, "goSha256": sha256_hex(raw), "run": out.name, "code": code, "cliRc": cli_rc,
+                   "cliExact": cli_exact, "unstaged": unstaged, "approvedPackageDigest": APPROVED_PACKAGE_DIGEST,
+                   "releasedSha256": expected["released"]["sha256"]}
+        self._record(Path(workdir) / ATTEMPT_FILE, attempt)   # B2: the invocation facts, before anything can fail
+        try:
+            post = self.post(repo, workdir)
+        except Stop as exc:            # the read-back did not complete: never a retry; `post` re-observes (C-19)
+            post = {"post": None, "result": "MB14_READBACK_NOT_COMPLETED:" + exc.code}
+        record = dict(attempt, post=post["post"], readback=post["result"],
+                      result=("MB14_RELEASED_EXACT" if cli_exact and post["result"] == "MB14_READBACK_RELEASED_EXACT"
+                              else "MB14_RELEASED_ADOPTION_REQUIRED" if post["result"] == "MB14_READBACK_RELEASED_EXACT"
+                              else "MB14_STOP:" + post["result"]))
         self._record(out / "RELEASE.json", record)
         return dict(record, next="owner acceptance (`render ACCEPT`); nothing further is authorized"
                     if post["result"] == "MB14_READBACK_RELEASED_EXACT"
-                    else "STOP: no retry; owner adjudication of the read-back (C-19)")
+                    else "STOP: no retry; read-only `post` re-observation and owner adjudication (C-19)")
 
     def unstage(self, repo: Path, workdir: Path, statement: Path) -> dict:
         raw = Path(statement).read_bytes()
         _need(raw == self.render(repo, workdir, "UNSTAGE")["text"].encode("ascii"), "STATEMENT_NOT_CANONICAL")
         _prepared, inputs, _expected = self._prepared(workdir)
-        command = (f"sudo -n sha256sum {STAGE_FILE} | cut -c1-64 | grep -qx '{sha256_hex(inputs)}' || exit 93; "
-                   f"sudo -n rm -f -- {STAGE_FILE} && sudo -n rmdir -- {STAGE_DIR}")
+        command = (f"sudo -n /usr/bin/sha256sum {STAGE_FILE} | cut -c1-64 | grep -qx '{sha256_hex(inputs)}' || exit 93; "
+                   f"sudo -n /usr/bin/rm -f -- {STAGE_FILE} && sudo -n /usr/bin/rmdir -- {STAGE_DIR}")
         out = self._new_run(Path(workdir) / RELEASE_DIR, "UNSTAGE")
         self._one_attempt(workdir, UNSTAGE_MARKER, raw)
         code = self._save(out, UNSTAGE_MARKER, self._invoke_once(command, None))
