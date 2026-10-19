@@ -72,8 +72,10 @@ OD_M12_6_TRANSCRIPTS = {
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
     "BROKER_PRESERVATION": frozenset({"79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"}),
-    "PRESERVATION_SET": frozenset({"4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e"}),
-    "DEPLOYER_DENIAL": frozenset({"4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"}),
+    # post-E-22 V7 owner pins (record slice-15b2b-b1b3e-e22-completion.md §7): E-23 / E-08 replaced, E-22 first pin
+    "PRESERVATION_SET": frozenset({"9d7599c7cda30a264f94d2552e9e5de1df65bf7fe43b6ac5150985883ddb10cd"}),
+    "DEPLOYER_DENIAL": frozenset({"7fe21378bb97f57aed3a6c60f6fc216e08d646f9da42d9c35feb7509f5468f1c"}),
+    "SECRET_HYGIENE": frozenset({"bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc"}),
 }
 
 class OsDenialTests(unittest.TestCase):
@@ -1233,9 +1235,11 @@ class DevFailsClosedTests(unittest.TestCase):
         self.assertEqual(dict(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS), OD_M12_6_TRANSCRIPTS)
         self.assertEqual(dict(PS.ACCEPTED_BASELINES), E23_ACCEPTED_BASELINES)
         # E-22 cannot PASS: the real scope has unrecorded windows (L2b, the M-B9b end), so the builder's closure
-        # check refuses any PASS transcript, and SECRET_HYGIENE is not pinned.
+        # check refuses any PASS transcript. The one pinned SECRET_HYGIENE transcript is the post-V7 `prove` FAIL,
+        # admitted only through the OD-M12-10 adjudication (record slice-15b2b-b1b3e-e22-completion.md §7).
         self.assertTrue(any(c.venue == "DEV" and (not c.window or None in c.window) for c in SH.CEREMONIES.values()))
-        self.assertNotIn("SECRET_HYGIENE", RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS)
+        self.assertEqual(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS["SECRET_HYGIENE"],
+                         frozenset({"bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc"}))
 
 
 class SourceGuardTests(unittest.TestCase):

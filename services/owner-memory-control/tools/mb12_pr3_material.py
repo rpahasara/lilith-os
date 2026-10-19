@@ -91,10 +91,13 @@ DEV_EXPECTED = {
 EXPECTED_FIELDS = frozenset(DEV_EXPECTED)
 # Owner PR-3 confirmations established by a merged owner record: candidate digest -> confirmation record SHA-256.
 # E-21 (OD-M12-4, owner-confirmed 2026-10-17T16:33:23Z; record slice-15b2b-b1b3e-mb12-prb1-prerequisite-tooling.md
-# §17): the seven owner-retained public sources (evidence lilith-mb12-e21-candidate-b3aa16c).
+# §17): the seven owner-retained public sources (evidence lilith-mb12-e21-candidate-b3aa16c). Re-confirmed after E-22 V7
+# (2026-10-19; record slice-15b2b-b1b3e-e22-completion.md §7; evidence lilith-e22-mb12-b1f30c2): the same sources, with
+# only material.releaseSha / releaseManifestSha256 moved to the installed E-22 release. The ba943e1 candidate 5d7a4e2b
+# is no longer assemblable from DEV_EXPECTED and is retired.
 DEV_ACCEPTED_CANDIDATES: Mapping[str, str] = {
-    "5d7a4e2bc530c3c04ac99b3494ae417e3042475cd246f917853174340389d842":
-        "108b2ae2befbe12a5e153d50002b39e52d36c14d1abed2115afd3698845af0ab",
+    "44541116ca9aa693b8eb08f8e77126608ed65e41bea8b759023e412821bd253a":
+        "c01db2f5fc6cd980b63c4a76ddd3cc9de395ff92305a7e7b97eeac9ab9c7b730",
 }
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _INSTANT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")

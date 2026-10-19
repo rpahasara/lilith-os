@@ -128,12 +128,18 @@ PRODUCER_SCRIPT_SHA256 = {
 # lilith-e23-compare-c2cbb2d), owner-accepted under OD-M12-6 for this transcript only (operator record §18).
 # DEPLOYER_DENIAL: the exact DR-5 stdout retained as artifact 12125829855 of protected-main run 39100360778
 # (e6401448; evidence lilith-mb12-e08-artifact-e640144), owner-accepted under OD-M12-6 for this transcript only
-# (operator record §19). SECRET_HYGIENE stays unpinned (E-22 BLOCKED).
+# (operator record §19).
+# Post-E-22 V7 (owner record OWNER-PROOF-PIN-RECORD.txt efad2202…, 2026-10-19; record
+# slice-15b2b-b1b3e-e22-completion.md §7; evidence lilith-e22-mb12-b1f30c2): P1B-12, OS_DENIAL and BROKER_PRESERVATION
+# re-ran byte-identical; DEPLOYER_DENIAL and PRESERVATION_SET are replaced by their post-V7 transcripts (the earlier ones
+# named the retired release / a pre-V7 observation); SECRET_HYGIENE is pinned for the first time: its FAIL is admitted
+# only through the OD-M12-10 adjudication below, never as a PASS.
 _P1B12_TRANSCRIPT = "92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"
 _OS_DENIAL_TRANSCRIPT = "3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"
 _BROKER_PRESERVATION_TRANSCRIPT = "79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"
-_PRESERVATION_SET_TRANSCRIPT = "4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e"
-_DEPLOYER_DENIAL_TRANSCRIPT = "4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"
+_PRESERVATION_SET_TRANSCRIPT = "9d7599c7cda30a264f94d2552e9e5de1df65bf7fe43b6ac5150985883ddb10cd"     # post-V7
+_DEPLOYER_DENIAL_TRANSCRIPT = "7fe21378bb97f57aed3a6c60f6fc216e08d646f9da42d9c35feb7509f5468f1c"      # post-V7
+_SECRET_HYGIENE_TRANSCRIPT = "bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc"       # post-V7 FAIL
 DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {
     "SIGNER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
     "BROKER_DENIAL": frozenset({_P1B12_TRANSCRIPT}),
@@ -141,6 +147,7 @@ DEV_ACCEPTED_PROOF_TRANSCRIPTS: Mapping[str, frozenset[str]] = {
     "BROKER_PRESERVATION": frozenset({_BROKER_PRESERVATION_TRANSCRIPT}),
     "PRESERVATION_SET": frozenset({_PRESERVATION_SET_TRANSCRIPT}),
     "DEPLOYER_DENIAL": frozenset({_DEPLOYER_DENIAL_TRANSCRIPT}),
+    "SECRET_HYGIENE": frozenset({_SECRET_HYGIENE_TRANSCRIPT}),
 }
 
 # The accepted DEV records (public values only).
