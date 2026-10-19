@@ -132,6 +132,11 @@ The operator does not trust the writer's response. It decodes the observer's wir
 byte, with `EXPECTED.json`. It recomputes the listing digest and requires it to equal both the observer's and the
 expected digest. Only one entry, with exactly the expected RELEASED bytes, is `RELEASED_EXACT`.
 
+The staging answer is printed only by the root shell, so a failed `sudo` reads as UNKNOWN, never as absent.
+`MB14_READBACK_RELEASED_EXACT` needs all of: every observation exit 0, the exact RELEASED, staging proven absent,
+and the accepted signer unchanged. `ACCEPT` is refused unless the **latest** read-back meets all of them; after a
+`MB14_READBACK_STOP_C19` read-back it is refused.
+
 **HELD evidence off-host.** After the release the HELD bytes exist on no host. They are retained in:
 
 - the M-B10 evidence;

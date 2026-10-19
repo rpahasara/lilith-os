@@ -78,7 +78,8 @@ OBSERVE_COMMAND = M10.HOLD_OBSERVE_COMMAND
 STAGE_DIR = "/run/lilith-mb14-release-initial"
 STAGE_FILE = STAGE_DIR + "/inputs.json"
 MAX_INPUT = 256 * 1024                                  # lilith_authority_root.cli.MAX_INPUT
-STAGE_COMMAND = f"sudo -n /usr/bin/test -e {STAGE_DIR} && echo STAGE=present || echo STAGE=absent"
+# Both answers are printed by the ROOT shell only: a failed `sudo` prints neither and is UNKNOWN, never absent.
+STAGE_COMMAND = (f"sudo -n /usr/bin/sh -c 'if /usr/bin/test -e {STAGE_DIR}; then echo STAGE=present; else echo STAGE=absent; fi'")
 UNITS_COMMAND = ("systemctl show -p Id,ActiveState,SubState,MainPID,NRestarts,InvocationID "
                  f"{E22.SIGNER_SERVICE} {E22.WITNESS_SERVICE} --no-pager")
 MARKER, UNSTAGE_MARKER = "mb14", "mb14-unstage"
@@ -89,6 +90,7 @@ ACCEPT_FILE, ATTEMPT_FILE = "MB14_ACCEPTANCE.json", "ATTEMPT.json"
 # Read-back classes (the C-19 root observer decides; ambiguous = STOP).
 RELEASED_EXACT, HELD_UNCHANGED = "RELEASED_EXACT", "HELD_UNCHANGED"
 UNEXPECTED, UNOBSERVABLE = "HOLD_SET_UNEXPECTED", "HOLD_STORE_UNOBSERVABLE"
+READBACK_EXACT = "MB14_READBACK_RELEASED_EXACT"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 PONR = ("I understand that INITIAL_CUSTODY RELEASED is forward only: it replaces the HELD record of the same ceremony "
@@ -230,6 +232,21 @@ def judge_observe(rc: int | None, stdout: bytes, expected: Mapping[str, Any]) ->
             verdict = label
     return {"class": verdict, "listingDigest": listing,
             "entries": [{"name": n, "sha256": sha256_hex(d), "length": len(d)} for n, d in entries]}
+
+
+def readback_verdict(record: Mapping[str, Any]) -> str:
+    """The one read-back classification, from the recorded facts. RELEASED_EXACT needs every required observation
+    successful (exit 0), the exact RELEASED, the staging path proven absent and the accepted signer unchanged."""
+    codes = record.get("codes")
+    observed = isinstance(codes, Mapping) and set(codes) == {"observe", "stage", "units"}         and all(code == 0 for code in codes.values())
+    released, unchanged = record.get("hold") == RELEASED_EXACT, record.get("signerUnchanged") is True
+    if observed and released and unchanged and record.get("stage") == "ABSENT":
+        return READBACK_EXACT
+    if observed and released and unchanged and record.get("stage") == "PRESENT":
+        return "MB14_READBACK_RELEASED_STAGING_RESIDUE"
+    if record.get("hold") == HELD_UNCHANGED:
+        return "MB14_READBACK_NOT_WRITTEN"
+    return "MB14_READBACK_STOP_C19"
 
 
 def parse_units(stdout: bytes) -> dict[str, dict[str, str]]:
@@ -380,8 +397,8 @@ class Operator(E22.Operator):
     def _accept_values(self, workdir: Path) -> tuple[dict, bool]:
         _prepared, _inputs, expected = self._prepared(workdir)
         record, record_sha = self._latest_record(workdir, POST_DIR, "POST.json")
-        _need(record is not None and record.get("hold") == RELEASED_EXACT and record.get("stage") == "ABSENT",
-              "READBACK_NOT_RELEASED_EXACT")
+        _need(record is not None and readback_verdict(record) == READBACK_EXACT
+              and record.get("result") == READBACK_EXACT, "READBACK_NOT_RELEASED_EXACT")
         _need(self._marker_exists(workdir) and (Path(workdir) / ATTEMPT_FILE).is_file(), "RELEASE_NOT_RUN")
         attempt = self._json(Path(workdir) / ATTEMPT_FILE, "ATTEMPT_INVALID")
         return ({"name": expected["name"], "released": expected["released"]["sha256"], "readback": record_sha,
@@ -462,14 +479,9 @@ class Operator(E22.Operator):
                   "entries": read["hold"]["entries"], "stage": read["stage"], "signer": read["signer"],
                   "witness": read["witness"], "signerUnchanged": unchanged, "codes": read["codes"],
                   "markerConsumed": self._marker_exists(workdir), "observedAt": self._now()}
+        record["result"] = readback_verdict(record)
         self._record(out / "POST.json", record)
-        hold = read["hold"]["class"]
-        verdict = ("MB14_READBACK_RELEASED_EXACT" if hold == RELEASED_EXACT and read["stage"] == "ABSENT" and unchanged
-                   else "MB14_READBACK_RELEASED_STAGING_RESIDUE" if hold == RELEASED_EXACT and read["stage"] == "PRESENT"
-                   and unchanged
-                   else "MB14_READBACK_NOT_WRITTEN" if hold == HELD_UNCHANGED
-                   else "MB14_READBACK_STOP_C19")
-        return dict(record, post=out.name, result=verdict)
+        return dict(record, post=out.name)
 
     # ------------------------------------------------------------------ mutation ---
 

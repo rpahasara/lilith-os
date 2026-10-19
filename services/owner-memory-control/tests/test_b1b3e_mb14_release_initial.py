@@ -66,7 +66,9 @@ class Dev:
         self.entries = [(SC.hold_record_name(held["ceremonyId"]), SC.hold_record_bytes(held))]
         self.staged = False
         self.signer = OP.SIGNER
-        self.behaviour = "release"        # release | refuse | lost | misbound | leave-staged
+        self.behaviour = "release"        # release | refuse | lost | misbound | leave-staged | signer-changed
+        self.root_reads = True            # False: the root stage read fails (no output, exit 1)
+        self.units_rc = 0
         self.releases: list[bytes] = []
         self.digest = OP.APPROVED_PACKAGE_DIGEST
 
@@ -80,9 +82,11 @@ class Dev:
         if command == OP.OBSERVE_COMMAND:
             return done(0, observe_out(self.entries))
         if command == OP.STAGE_COMMAND:
+            if not self.root_reads:
+                return done(1, b"", b"sudo: a password is required\n")
             return done(0, b"STAGE=present\n" if self.staged else b"STAGE=absent\n")
         if command == OP.UNITS_COMMAND:
-            return done(0, self.units())
+            return done(self.units_rc, self.units() if self.units_rc == 0 else b"")
         if command.startswith(f"sudo -n /usr/bin/sha256sum {OP.STAGE_FILE}"):
             self.staged = False
             return done(0)
@@ -99,6 +103,8 @@ class Dev:
         if self.behaviour == "lost":
             return done(None, b"", b"LOCAL_TimeoutExpired")
         self.staged = self.behaviour == "leave-staged"
+        if self.behaviour == "signer-changed":
+            self.signer = ("7" * 32, "99999")
         cli = json.dumps({"record": released}, sort_keys=True, separators=(",", ":")).encode()
         return done(0, b"MB14_CLI_BEGIN\n" + cli + b"\nMB14_CLI_RC=0\nMB14_UNSTAGED=" +
                     (b"1" if self.staged else b"0") + b"\n")
@@ -243,6 +249,18 @@ class StagingCommandTests(unittest.TestCase):
         self.assertEqual((result.returncode, OP.parse_release(result.stdout)[1]), (2, 2))
         self.assertFalse(self.stage.exists())
 
+    def test_stage_observation_answers_only_from_the_root_shell(self):
+        def stage(sudo: str) -> subprocess.CompletedProcess:
+            command = OP.STAGE_COMMAND.replace("sudo -n ", sudo).replace(OP.STAGE_DIR, self.stage.as_posix())
+            return subprocess.run(["bash", "-c", command], capture_output=True, timeout=60)
+        self.assertEqual(stage("").stdout, b"STAGE=absent\n")
+        self.stage.mkdir()
+        self.assertEqual(stage("").stdout, b"STAGE=present\n")
+        self.stage.rmdir()
+        failed = stage("/nonexistent/sudo ")                                     # sudo / root unavailable
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(failed.stdout, b"")                                      # never STAGE=absent
+
     def test_existing_staging_path_or_tampered_payload_refuse_before_the_cli(self):
         self.stage.mkdir()
         self.assertEqual(self.run_command(self.stage, 0).returncode, 95)
@@ -324,6 +342,55 @@ class FlowTests(Case):
         self.assertEqual(self.op.unstage(ROOT, self.work, self.text("UNSTAGE"))["result"], "MB14_UNSTAGED")
         self.assertTrue(self.marker(OP.UNSTAGE_MARKER).is_file())
         self.assertEqual(self.op.post(ROOT, self.work)["result"], "MB14_READBACK_RELEASED_EXACT")
+
+
+class ObservationFailureTests(Case):
+    def test_a_failed_root_stage_read_is_unknown_and_blocks_the_go(self):
+        self.op.prepare(ROOT, self.work, self.envelope)
+        self.dev.root_reads = False
+        pre = self.op.pre(ROOT, self.work)
+        self.assertEqual((pre["stage"], pre["result"]), ("UNKNOWN", "MB14_PRE_NOT_EXACT"))
+        self.assertIn("STAGING_PATH_NOT_ABSENT", pre["reasons"])
+        with self.assertRaises(OP.Stop):
+            self.op.render(ROOT, self.work, "GO")
+
+    def test_a_failed_root_stage_read_after_the_write_is_a_c19_stop_and_blocks_acceptance(self):
+        self.ready()
+        go = self.text("GO")
+        real = self.dev.release
+
+        def release_then_fail_root_reads(command, stdin):
+            result = real(command, stdin)
+            self.dev.root_reads = False
+            return result
+        self.dev.release = release_then_fail_root_reads
+        self.assertEqual(self.op.release(ROOT, self.work, go)["result"], "MB14_STOP:MB14_READBACK_STOP_C19")
+        with self.assertRaises(OP.Stop):
+            self.op.render(ROOT, self.work, "ACCEPT")
+
+    def test_no_acceptance_after_a_c19_readback_with_a_changed_signer(self):
+        self.ready()
+        self.dev.behaviour = "signer-changed"
+        self.assertEqual(self.op.release(ROOT, self.work, self.text("GO"))["result"], "MB14_STOP:MB14_READBACK_STOP_C19")
+        with self.assertRaises(OP.Stop):
+            self.op.render(ROOT, self.work, "ACCEPT")
+
+    def test_no_acceptance_when_the_latest_required_observation_failed(self):
+        self.ready()
+        self.assertEqual(self.op.release(ROOT, self.work, self.text("GO"))["result"], "MB14_RELEASED_EXACT")
+        self.dev.units_rc = 1
+        self.assertEqual(self.op.post(ROOT, self.work)["result"], "MB14_READBACK_STOP_C19")
+        with self.assertRaises(OP.Stop):                                           # the LATEST read-back decides
+            self.op.render(ROOT, self.work, "ACCEPT")
+
+    def test_the_verdict_needs_every_condition(self):
+        exact = {"hold": OP.RELEASED_EXACT, "stage": "ABSENT", "signerUnchanged": True,
+                 "codes": {"observe": 0, "stage": 0, "units": 0}}
+        self.assertEqual(OP.readback_verdict(exact), OP.READBACK_EXACT)
+        for change in ({"signerUnchanged": False}, {"stage": "UNKNOWN"},
+                       {"codes": {"observe": 0, "stage": 0, "units": 1}}, {"codes": {"observe": 0, "stage": 0}},
+                       {"hold": OP.UNEXPECTED}):
+            self.assertEqual(OP.readback_verdict(dict(exact, **change)), "MB14_READBACK_STOP_C19", change)
 
 
 class PostMarkerTests(Case):
