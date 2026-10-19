@@ -96,3 +96,50 @@ M-B12 = COMPLETED (owner-accepted 2026-10-19, digest eab79d56…a1a86)
 RR-38 B = REPRODUCED;  E-26 / E-27 / E-28 = BOUND (accepted records);  E-25 = PENDING (owner S25 read)
 M-B13 = PREPARED, NOT ACCEPTED;  M-B14 = NOT AUTHORIZED;  CUSTODY = HELD;  AUTHORITY = DARK;  FIRST MEMORY = NONE
 ```
+
+## 4. Addendum (2026-10-19): E-25 bound; M-B13 ready for owner decision
+
+**E-25: owner freshness at package time.** No replica, DEV state or custody changed.
+
+| Input | Result |
+| --- | --- |
+| DEV witness chain (one read-only fetch of `chain/1.json` and `witness.json`) | `252c32204bebf3fa1ca0981d8791115e2abb6cd8ddb0925285c64213317cfb99`, byte-identical to the chain bound in the Package C bundle (`chain-export.json` `d542e616…`, trust inputs `62555da7…`). The witness chain has not moved |
+| Replica A (WSL) | `REPLICA_VERIFIED`, one record `77752db1…`; tree `7b24e904…` = the A view on the S25 |
+| laptop cross-check (Replica A + the proven Package C B view) | `AUTHENTIC` + `CURRENT`, register head `77752db1…`, latest record version 1 |
+| owner S25 read-only run (`E25-S25-READONLY.sh`, `9bb62800…`; `bash -n` and a full WSL simulation verified first) | Replica B `REPLICA_VERIFIED` (manifest `c068e533…`, 1 record, head `77752db1…`). **`FRESHNESS=AUTHENTIC:CURRENT`**, register head `77752db1…`, latest record version 1, presented witness `ac892dc2…`. No STOP |
+| comparison | the owner-reported `RESULT_BLOCK_SHA256` `7815f49e836baaac5d56484a0123c28ec6840c4e8355c177101c5b2da4ec2402` equals the expected block, so all 11 lines are byte-exact |
+
+Evidence: `C:\Users\edufo\lilith-mb13-prep-31e5a28\e25\`, with `OWNER-S25-RESULT.txt` (evidence class
+`OWNER_SCREEN_TRANSCRIPTION`) and `E25-BINDING.json`, binding SHA-256
+`448477db2d0c4987af5cd0845556f0b46f70c2ac64cb36c9a18a3d15624a255c`. Seal `SHA256SUMS.seal-2-e25` `3f2e5b4e…`. The
+owner reported a screenshot, but the agent did not receive it; the binding rests on the reported values and the block
+digest.
+
+**M-B13 evidence, complete:**
+
+| Item | State |
+| --- | --- |
+| PR-1 package (E-01 … E-24) | READY, digest `eab79d56e58f0d7ce88217c43acdba1d31dec30743d79245dca6a893b49a1a86` (M-B12, owner-accepted) |
+| RR-38 B off-host reproduction | REPRODUCED; digest recomputed equal |
+| E-25 | **BOUND**: `AUTHENTIC` + `CURRENT`, head `77752db1…`, record version 1 (binding `448477db…`) |
+| E-26 | BOUND: record 1 `77752db1…` on Replicas A and B |
+| E-27 | BOUND: `P3_3_COMPLETE`, Replica A `fbdd045c…`, Replica B `c068e533…`, independent devices |
+| E-28 | BOUND: envelope 1 `95da36cd…`, `ACCEPTANCE_COMPLETE` |
+
+**M-B13 owner acceptance text (for the owner to issue verbatim; NOT accepted by this record):**
+
+> I accept M-B13 for DEV_SYNTHETIC: the PR-1 package with digest
+> eab79d56e58f0d7ce88217c43acdba1d31dec30743d79245dca6a893b49a1a86 (HOLD_RELEASE_ELIGIBILITY READY), reproduced
+> off-host (RR-38 B), with E-25 bound AUTHENTIC + CURRENT (binding 448477db2d0c4987af5cd0845556f0b46f70c2ac64cb36c9a18a3d15624a255c)
+> and E-26 … E-28 bound as recorded. This is acceptance only: it does not release custody, run release-initial,
+> activate authority, make Registry V1 effective, or authorize First Memory or PROD.
+
+M-B14 (`release-initial`, HELD → RELEASED) is a separate, forward-only operation. It needs its own owner
+authorization, and a current re-run must give exactly this digest.
+
+## 5. State
+
+```text
+M-B12 = COMPLETED (eab79d56…a1a86);  RR-38 B = REPRODUCED;  E-25 … E-28 = BOUND
+M-B13 = READY FOR OWNER DECISION (not accepted);  M-B14 = NOT AUTHORIZED;  CUSTODY = HELD;  AUTHORITY = DARK
+```
