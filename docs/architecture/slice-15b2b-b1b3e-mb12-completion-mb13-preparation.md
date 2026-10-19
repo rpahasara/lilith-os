@@ -143,3 +143,29 @@ authorization, and a current re-run must give exactly this digest.
 M-B12 = COMPLETED (eab79d56…a1a86);  RR-38 B = REPRODUCED;  E-25 … E-28 = BOUND
 M-B13 = READY FOR OWNER DECISION (not accepted);  M-B14 = NOT AUTHORIZED;  CUSTODY = HELD;  AUTHORITY = DARK
 ```
+
+## 6. Addendum (2026-10-19): M-B13 owner acceptance (recorded)
+
+**Owner decision (verbatim):**
+
+> I accept M-B13 for DEV_SYNTHETIC: the PR-1 package with digest
+> eab79d56e58f0d7ce88217c43acdba1d31dec30743d79245dca6a893b49a1a86 (HOLD_RELEASE_ELIGIBILITY READY), reproduced
+> off-host (RR-38 B), with E-25 bound AUTHENTIC + CURRENT (binding 448477db2d0c4987af5cd0845556f0b46f70c2ac64cb36c9a18a3d15624a255c)
+> and E-26 … E-28 bound as recorded. This is acceptance only: it does not release custody, run release-initial,
+> activate authority, make Registry V1 effective, or authorize First Memory or PROD.
+
+The statement equals the §4 text, ignoring line wrapping. The off-host owner record is
+`C:\Users\edufo\lilith-mb13-acceptance-529c4be\OWNER-ACCEPTANCE-RECORD.txt`, SHA-256
+`a5d16b7383e7b53d26892c80405736d0d6198433b275e370e41927d50203b5dc`. The verbatim statement is in `owner-statement.txt`,
+SHA-256 `2028eaae…`.
+
+**M-B14 (not authorized here).** `release-initial` with the approved digest
+`eab79d56e58f0d7ce88217c43acdba1d31dec30743d79245dca6a893b49a1a86` is a forward-only HELD → RELEASED write. It needs
+the owner's separate authorization. It refuses unless a current re-run of the package gives exactly this digest.
+
+## 7. State
+
+```text
+M-B12 = COMPLETED;  M-B13 = OWNER-ACCEPTED 2026-10-19 (digest eab79d56…a1a86; record a5d16b73…)
+M-B14 = NOT AUTHORIZED;  CUSTODY = HELD;  AUTHORITY = DARK;  REGISTRY V1 = NOT EFFECTIVE;  FIRST MEMORY = NONE
+```
