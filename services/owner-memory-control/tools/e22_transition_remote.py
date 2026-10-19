@@ -16,6 +16,9 @@ canonical digest of `DOC` and `DOC.form` equals the form.
             select, the pinned NEW after it); plus the journal-counted signer invocations after `kActCursor` (the
             M-B11 gate cursor: every K-ACT load since the first) and the witness invocations after `kWitCursor` (the
             V5 window cursor), or null
+    package the release verifier's own HOLD_RELEASE_ELIGIBILITY report over the owner inputs
+            (`lilith_authority_root.verifier.report`: status, reasons, packageDigest, package): the W11 `readiness_pair`
+            evaluation, with HEALTH captured only from an exact RUNNING pair (the M-B11 guard), returned in full
 
 It never starts, stops, enables or reloads a unit, never reads a credential and never writes.
 
@@ -35,14 +38,15 @@ import mb11_start_remote as R  # noqa: E402  (BOOT bundle member; the M-B11 host
 
 REMOTE_TYPE = "LILITH_E22_TRANSITION_REMOTE"
 EVIDENCE_MODULE = "e22_transition_evidence"
-FORMS = ("window", "post")
+FORMS = ("window", "post", "package")
 RELEASES = "/opt/lilith-authority-dev/releases/"
 WITNESS_SERVICE = "lilith-recovery-witness.service"
 BOOT_ID = "/proc/sys/kernel/random/boot_id"
 _SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 _LABEL = re.compile(r"V[56]_(OPEN|CLOSE)\Z")
 _FIELDS = {"window": frozenset({"form", "label"}),
-           "post": frozenset({"form", "release", "post", "kActCursor", "kWitCursor"})}
+           "post": frozenset({"form", "release", "post", "kActCursor", "kWitCursor"}),
+           "package": frozenset({"form", "ownerInputs"})}
 
 Refused = R.Refused
 canonical = R.canonical
@@ -60,6 +64,10 @@ def check_evidence(doc: Any, form: str) -> Mapping[str, Any]:
     if form == "window":
         if not isinstance(doc["label"], str) or _LABEL.fullmatch(doc["label"]) is None:
             raise Refused("EVIDENCE_LABEL_INVALID")
+        return doc
+    if form == "package":
+        if not isinstance(doc["ownerInputs"], Mapping):
+            raise Refused("EVIDENCE_OWNER_INPUTS_INVALID")
         return doc
     if not isinstance(doc["release"], str) or _SHA40.fullmatch(doc["release"]) is None:
         raise Refused("EVIDENCE_RELEASE_INVALID")
@@ -117,12 +125,48 @@ def run_form(doc: Mapping[str, Any], *, root: Any = "/", W: Any = None, tail: Ca
         return out
     if W is None:
         import mb11_signer_verifier as W  # noqa: N811
+    if doc["form"] == "package":
+        out.update(package_report(doc["ownerInputs"], root=root, W=W, units=post_seams.get("units"),
+                                  health=post_seams.get("health"), evaluate=post_seams.get("evaluate")))
+        return out
     with release_of_phase(W, doc["release"]):
         out["w11"] = R.run_form(doc["post"], root=root, W=W, **post_seams)
     out["release"] = doc["release"]
     out["kActInvocations"] = (kact or W.journal_invocations)(doc["kActCursor"])
     out["kWitInvocations"] = None if doc["kWitCursor"] is None else \
         (kwit or (lambda cursor: unit_invocations(WITNESS_SERVICE, cursor, W=W)))(doc["kWitCursor"])
+    return out
+
+
+def package_report(owner_document: Mapping[str, Any], *, root: Any = "/", W: Any, units: Callable | None = None,
+                   health: Callable[[], Mapping[str, Any]] | None = None, evaluate: Callable | None = None
+                   ) -> dict[str, Any]:
+    """The release verifier's HOLD_RELEASE_ELIGIBILITY report (`verifier.report`), exactly as W11 `readiness_pair`
+    evaluates it, over ONE HEALTH frame bound to one exact RUNNING incarnation. Without that frame nothing is
+    evaluated (`report` null). `units`, `health`, `evaluate` are TEST seams."""
+    from pathlib import Path
+
+    if health is None:
+        from lilith_authority_root import clients
+
+        health = clients.signer_health
+    capture = R.capture_health(units=units or W._units, health=health, W=W)
+    out: dict[str, Any] = {"healthCapture": capture, "report": None}
+    if not capture["attempted"] or capture.get("health") is None or capture["before"] != capture["after"]:
+        return out
+    if evaluate is None:
+        def evaluate(document: Mapping[str, Any], frame: Mapping[str, Any]) -> dict[str, Any]:
+            from lilith_authority_root import observers as O
+            from lilith_authority_root import verifier as RV
+            from lilith_authority_root.hold_store import HoldStoreV1
+            from lilith_owner_memory import successor_readiness as SR
+
+            owner = RV.parse_verifier_inputs(document)
+            hold = HoldStoreV1(environment=owner.environment, root=Path(root), owner_uid=0, owner_gid=0).observe()
+            result = RV.evaluate(SR.HOLD_RELEASE_ELIGIBILITY, owner, root=Path(root), owner_uid=0, owner_gid=0,
+                                 health=lambda: dict(frame), run=O.default_runner, hold=hold)
+            return dict(RV.report(result), holdListingDigest=hold.listing_digest)
+    out["report"] = evaluate(owner_document, capture["health"])
     return out
 
 

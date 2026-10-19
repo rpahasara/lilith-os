@@ -159,3 +159,36 @@ which replaces `5d7a4e2b…` in `DEV_ACCEPTED_CANDIDATES`.
 3. The DEV readiness evaluation of E-01 … E-24.
 
 M-B12 stays NOT PASSED until the owner accepts that package.
+
+## 8. Addendum (2026-10-19): the M-B12 package on DEV, and the package-digest read form
+
+Control `d4655f14c5e404c4d71004d3c3d715934e0333bb` (PR #223). Deploy `39200840403`: success, and the DR-5 compare is
+EQUAL again. Evidence: `C:\Users\edufo\lilith-mb12-package-d4655f1\` (`STATUS.md`). Every DEV read below ran once and
+read-only.
+
+**Inputs**
+
+- CURRENT (`mb11_operator current`) is `MB11_CURRENT_EXACT`.
+- The activation line is exactly the dark line (rc 1).
+- The envelope from `mb12_readiness_inputs build` is `3128a0a857cae8a0121c2febf97f2e6e0e9a3f0e92f9fa6bec843dba13c875fb`,
+  with `expectedNotReady` empty:
+  - all seven proofs are admitted under the owner pins;
+  - E-22 is carried as the OD-M12-10 adjudication;
+  - PR-2 (E-20) and PR-3 (the re-confirmed E-21) are present.
+
+**DEV evaluation.** The pinned E-22 host tail's W11 `post` form ran over that envelope:
+
+- W11 `W11_1_SIGNER_STARTED_EXACT`.
+- `HOLD_RELEASE_ELIGIBILITY` is **READY** with no package reasons.
+- `FULL_READINESS` is NOT_READY only on `E16_HOLD_STORE:CEREMONY_HOLD_HELD` and `E17_READINESS`. Custody is HELD, which
+  is expected before M-B13.
+
+**Gap.** The W11 summary does not carry the canonical package digest, and the owner's M-B12 acceptance (and the M-B13
+`release-initial`) must name it. This change adds one read-only form for it:
+
+- `e22_transition_remote` `package`: the same release-verifier call as W11 `readiness_pair`, over one HEALTH frame
+  taken only from an exact RUNNING pair. It returns `verifier.report` in full: status, reasons, `packageDigest` and the
+  package.
+- `e22_operator package <repo> <outdir> <envelope>` runs it once into a fresh directory.
+
+No other tool changes. M-B12 stays NOT PASSED until the owner accepts the digest that form returns.
