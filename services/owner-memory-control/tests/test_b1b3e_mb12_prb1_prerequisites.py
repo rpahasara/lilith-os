@@ -99,8 +99,9 @@ def live_inventory(**kwargs):
 
 # OD-M12-6 (owner-accepted 2026-10-16): the only DEV proof transcripts an owner record has established.
 # E-21 (OD-M12-4, owner-confirmed 2026-10-17): the only DEV PR-3 candidate an owner record has established.
-E21_ACCEPTED_CANDIDATES = {"5d7a4e2bc530c3c04ac99b3494ae417e3042475cd246f917853174340389d842":
-                           "108b2ae2befbe12a5e153d50002b39e52d36c14d1abed2115afd3698845af0ab"}
+# E-21 re-confirmed after E-22 V7 (release fields only; record slice-15b2b-b1b3e-e22-completion.md §7).
+E21_ACCEPTED_CANDIDATES = {"44541116ca9aa693b8eb08f8e77126608ed65e41bea8b759023e412821bd253a":
+                           "c01db2f5fc6cd980b63c4a76ddd3cc9de395ff92305a7e7b97eeac9ab9c7b730"}
 # E-20 (owner-accepted 2026-10-17): the only DEV PR-2 inventory an owner record has established.
 E20_ACCEPTED_INVENTORIES = {"61d9268613c13354c0184a30909a21f4cd2f8db20424bcb10f6f2e51168d46cf":
                             "6a3dd81b80453b805ac46ae058dd4ea56c22c32855909a82ec5027b8ee894682"}
@@ -109,8 +110,10 @@ OD_M12_6_TRANSCRIPTS = {
     "BROKER_DENIAL": frozenset({"92dcb9aa87a40244ef02a38901f319491197b82e31fb064f6e356a57a9ec32c1"}),
     "OS_DENIAL": frozenset({"3cb0e744abda6a2540ad56a25e4ad1b144449833af296756eb37b0c21bd29b4a"}),
     "BROKER_PRESERVATION": frozenset({"79387fe7d1db1e7eab0d8e508991656ba195d284cefac3889ffff9595f221c40"}),
-    "PRESERVATION_SET": frozenset({"4692f3bae979aca82782a66605a3235939420223aa7841a931ad9a473f1e863e"}),
-    "DEPLOYER_DENIAL": frozenset({"4337f769d984876468379caf7b1ba59dd0d503344f942e30eedb912d2bd96c64"}),
+    # post-E-22 V7 owner pins (record slice-15b2b-b1b3e-e22-completion.md §7): E-23 / E-08 replaced, E-22 first pin
+    "PRESERVATION_SET": frozenset({"9d7599c7cda30a264f94d2552e9e5de1df65bf7fe43b6ac5150985883ddb10cd"}),
+    "DEPLOYER_DENIAL": frozenset({"7fe21378bb97f57aed3a6c60f6fc216e08d646f9da42d9c35feb7509f5468f1c"}),
+    "SECRET_HYGIENE": frozenset({"bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc"}),
 }
 
 class Pr2InventoryTests(unittest.TestCase):

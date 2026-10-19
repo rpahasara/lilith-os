@@ -110,3 +110,52 @@ E-22 TRANSITION = V7 REACHED (owner-accepted replacements: witness 8cbfbed2…/1
 K-ACT LOAD COUNT = 2;  K-WIT LOADS IN E-22 = 1;  OD-M12-11 READS = 12 HISTORICAL ATTRIBUTED MATCHES, NO NEW MARKER
 INSTALLED = 129f2be (only);  POST-V7 DR-5 = NOT YET RUN;  M-B12 = NOT PASSED;  CUSTODY = HELD;  AUTHORITY = DARK
 ```
+
+## 7. Addendum (2026-10-19): post-V7 proof pins and E-21 re-confirmation (owner records)
+
+The post-V7 deploy `39197801754` (main `b1f30c2`) compared **EQUAL** with `e22_dr5_target.py`
+(194 / `a0ebd54d…`, 155 / `7fe21378…`, 29 / `f5087042…`; fail 0, allowed 0, no OLD-release line). Evidence:
+`C:\Users\edufo\lilith-e22-mb12-b1f30c2` (`SHA256SUMS.seal-2-batch` `b8318dce…`; `STATUS.md`).
+
+**Fresh producer runs.** Each producer ran once, read-only:
+
+| Proof | Post-V7 transcript | Pin |
+| --- | --- | --- |
+| SIGNER_DENIAL / BROKER_DENIAL (P1B-12) | `92dcb9aa…` PASS | unchanged (byte-identical) |
+| OS_DENIAL | `3cb0e744…` PASS | unchanged (byte-identical) |
+| BROKER_PRESERVATION | `79387fe7…` PASS | unchanged (byte-identical) |
+| DEPLOYER_DENIAL (E-08) | `7fe21378bb97f57aed3a6c60f6fc216e08d646f9da42d9c35feb7509f5468f1c` PASS (artifact `12162682175`) | **replaces** `4337f769…` (named `ba943e1`) |
+| PRESERVATION_SET (E-23) | `9d7599c7cda30a264f94d2552e9e5de1df65bf7fe43b6ac5150985883ddb10cd` PASS (22 EQUAL vs baseline `019e0117`) | **replaces** `4692f3ba…` (pre-V7 observation) |
+| SECRET_HYGIENE (E-22 `prove`) | `bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc` FAIL | **first pin**; admitted only through the OD-M12-10 adjudication |
+
+**The E-22 inputs match what OD-M12-10 approved:**
+
+- the `prove` body is `6f7c8683…`;
+- the journal scan `959bb0b2…` has the approved `24d1771d` boot line and 12 markers;
+- the attribution body is `4c293fd8…`.
+
+The `prove` scope is `c8a58746…`: the accepted OD-M12-9 scope with only the journal item replaced.
+
+**E-21.** The re-pinned `DEV_EXPECTED` moves the candidate's release fields, so the candidate is now
+`44541116ca9aa693b8eb08f8e77126608ed65e41bea8b759023e412821bd253a`. The sources are identical, and nothing else in the
+material changed. The candidate is re-confirmed by owner record `c01db2f5fc6cd980b63c4a76ddd3cc9de395ff92305a7e7b97eeac9ab9c7b730`,
+which replaces `5d7a4e2b…` in `DEV_ACCEPTED_CANDIDATES`.
+
+**Owner records** (`lilith-e22-mb12-b1f30c2\owner-records`) carry the owner's verbatim 2026-10-19 decision:
+`OWNER-PROOF-PIN-RECORD.txt` `efad2202479134ba70dfb555ec1840a563eba4df65f656fb6fcb9238230af958` and
+`OWNER-CONFIRMATION-RECORD.txt` `c01db2f5…`. Merging this change establishes them.
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_readiness_inputs.py` | `8f50d92415f0a34b4670d10465367e61c55cd0ee9e0c1e7bdd8bf57155b5a5d0` |
+| `mb12_pr3_material.py` | `71b1b6df92ac179e0d39bcfc51adde061d587664d6890357559fa7691a257fc3` |
+| `mb11_operator.py` (cascade) | `aa8c93fc1aea676d7888e20b94cc5f471df2663f2dab9c6e82e7956cc97e1256` |
+| `e22_operator.py` (cascade) | `4d12efe10f3d1eeb721d6e24ddd359642efd9e1dceec045119e985281ab17a92` |
+
+**Next (read-only, after this merges):**
+
+1. Fresh CURRENT and activation reads.
+2. The envelope build, which must report no missing or unadmitted proof.
+3. The DEV readiness evaluation of E-01 … E-24.
+
+M-B12 stays NOT PASSED until the owner accepts that package.

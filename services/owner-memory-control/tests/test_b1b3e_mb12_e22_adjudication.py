@@ -132,10 +132,13 @@ class RealAdjudicationTests(unittest.TestCase):
             self.assertTrue(any(text in claim for claim in spec["nonclaims"]), text)
         self.assertIn("NOT a clean scan", PA.E22_ADJUDICATION_NONCLAIM)
 
-    def test_not_effective_on_dev_yet(self):
-        # The release judge with the adjudication is repository-only, and no SECRET_HYGIENE transcript is pinned, so
-        # no DEV build can carry the adjudication (OD-M12-6 provenance refuses first).
-        self.assertNotIn("SECRET_HYGIENE", RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS)
+    def test_effective_on_dev_only_for_the_pinned_post_v7_fail(self):
+        # After E-22 V7 the release judge is installed and exactly one SECRET_HYGIENE transcript is owner-pinned: the
+        # post-V7 `prove` FAIL (record slice-15b2b-b1b3e-e22-completion.md §7). DEV trust stays non-overridable.
+        self.assertEqual(RI.DEV_ACCEPTED_PROOF_TRANSCRIPTS["SECRET_HYGIENE"],
+                         frozenset({"bb97c6a69a00911ffce554edf1f7e71cf6fd7c1b2b5ebcc1e7e0bb1ccd3081cc"}))
+        self.assertEqual(dict(RI.DEV_ACCEPTED_E22_ADJUDICATIONS), {RI.E22_ADJUDICATION_SHA256:
+                         "56e71df1b7bf5c599c7d3f09edd5b12a37cf642c63d715b2f823f2ff92242c5a"})
         with self.assertRaises(RI.Refused) as caught:
             RI.trust_for("dev", RI.ReadinessTrustV1({}, T1.T0, {}, None, None, {H("x"): H("y")}))
         self.assertEqual(caught.exception.reason, "DEV_TRUST_NOT_OVERRIDABLE")

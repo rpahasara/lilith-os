@@ -517,3 +517,13 @@ changes; the M-B11 start is consumed and stays historical. Pin cascade (supersed
 | `mb12_readiness_inputs.py` | `229c75af41f705e62c61a0d1f3e34475879e33da6e32b666ebaeafa917e1e538` |
 | `mb12_pr3_material.py` | `12c40b58c96f2025d0bbb97015d01eea3483f3c454b8f750e51dea95475f20c7` |
 | `mb11_operator.py` | `9ba4a096cf69200ca9b6ab52dc182d41c7693871049aa88453ebd1b3f721df3d` |
+
+## 24. Addendum (2026-10-19): post-V7 proof pins and E-21 re-confirmation — re-pin only
+
+Record `slice-15b2b-b1b3e-e22-completion.md` §7. No operator behaviour changes. Pin cascade (supersedes §23):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_readiness_inputs.py` | `8f50d92415f0a34b4670d10465367e61c55cd0ee9e0c1e7bdd8bf57155b5a5d0` |
+| `mb12_pr3_material.py` | `71b1b6df92ac179e0d39bcfc51adde061d587664d6890357559fa7691a257fc3` |
+| `mb11_operator.py` | `aa8c93fc1aea676d7888e20b94cc5f471df2663f2dab9c6e82e7956cc97e1256` |
