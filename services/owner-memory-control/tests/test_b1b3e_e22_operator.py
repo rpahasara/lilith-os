@@ -161,7 +161,14 @@ class Dev:
                               journal=lambda c: self.after(self.signer_loads, c), process=self.process, w10=self.w10,
                               readiness=lambda _o, h, **_k: T.good_readiness() if h is not None else
                               {"eligibility": {"status": "NOT_READY"}, "full": {"status": "NOT_READY"}},
-                              restart_boundary=lambda _r, _u: {"reasons": []})
+                              restart_boundary=lambda _r, _u: {"reasons": []},
+                              evaluate=self.evaluate)
+
+    def evaluate(self, document, frame):
+        """The release verifier's eligibility report (synthetic), only ever called with a captured HEALTH frame."""
+        assert frame == T.good_health() and document == INPUTS
+        return {"mode": "HOLD_RELEASE_ELIGIBILITY", "status": "READY", "reasons": [], "packageDigest": "f" * 64,
+                "package": {"status": "READY"}, "authorityGranted": False}
 
     # ---- the transport ----
     def plink(self, command: str, payload: bytes):
@@ -488,6 +495,27 @@ class ImportPathTests(unittest.TestCase):
             out = subprocess.run([sys.executable, "-B", "-c", code], cwd=cwd, env={**env, "PYTHONPATH": os.pathsep.join([str(TOOLS), *outside])},
                                  capture_output=True, text=True, timeout=120)
         self.assertEqual((out.returncode, out.stdout.strip()), (0, "True"), out.stderr[-2000:])
+
+
+class PackageTests(Case):
+    def test_package_returns_the_verifier_report_only_from_a_running_signer(self):
+        out = self.base / "package"
+        report = self.op.package(ROOT, out, self.envelope)
+        self.assertEqual((report["result"], report["status"], report["packageDigest"]),
+                         ("E22_PACKAGE_READY", "READY", "f" * 64))
+        self.assertTrue((out / "PACKAGE.json").is_file())
+        self.assertEqual(self.dev.mutations, [])                          # read-only
+        with self.assertRaises(OP.Stop):
+            self.op.package(ROOT, out, self.envelope)                     # never overwrites evidence
+        self.dev.signer = None                                            # no HEALTH frame -> nothing evaluated
+        stopped = self.op.package(ROOT, self.base / "package-stopped", self.envelope)
+        self.assertEqual((stopped["result"], stopped["packageDigest"]), ("E22_PACKAGE_NOT_EVALUATED", None))
+
+    def test_package_evidence_is_closed(self):
+        with self.assertRaises(Q.Refused):
+            Q.check_evidence({"form": "package", "ownerInputs": {}, "extra": 1}, "package")
+        with self.assertRaises(Q.Refused):
+            Q.check_evidence({"form": "package", "ownerInputs": "x"}, "package")
 
 
 class RemoteAndPinTests(unittest.TestCase):

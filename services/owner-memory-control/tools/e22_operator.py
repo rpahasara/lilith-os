@@ -32,6 +32,7 @@ release; journal-counted K-ACT and K-WIT loads).
 | `accept-signer <repo> <workdir> <statement>` | local: the owner's verbatim signer acceptance |
 | `retire <repo> <workdir> <go>` | **mutation** V6 -> V7: `e22-retire-old`, both accepted replacements named |
 | `windows <repo> <workdir>` | local: the two OD-M12-11 windows (boot, cursors, instants, transcript digests) |
+| `package <repo> <outdir> <envelope>` | read-only DEV, after V7: the release verifier's HOLD_RELEASE_ELIGIBILITY report (E-01 … E-24, `packageDigest`) over the envelope, in a fresh `<outdir>` |
 
     status != classification != permission;  one start go != one credential load (journal-counted, never inferred)
     POST VERIFIED != acceptance (the owner's verbatim statement);  V7 != M-B12 PASS
@@ -81,7 +82,7 @@ TOOL_PINS = {
     MB11_OPERATOR: "aa8c93fc1aea676d7888e20b94cc5f471df2663f2dab9c6e82e7956cc97e1256",
     CONTRACT: "505966d4c065a07ab53d7b9a16875b301a04525032ac5b553f8f216f20d21ec9",
     STAGES: "97359e84c89e3e70fd0bcb3d49de1bdc996d04b5233b807adf74b506c06050d2",
-    REMOTE: "4f1c52635021852043105431a39263c8ac2bbf68437d83ddb598f3dc8138aa93",
+    REMOTE: "051416c315b8a3a12986a3cca0a3e03e1d615951f1d8cd7f731922c4b17bc75e",
 }
 # The E-22 stages run with the byte-unchanged installer, the E-19 contract and stage tool (reused host reads) and the
 # E-22 contract, under the system interpreter (as every installer stage).
@@ -706,8 +707,30 @@ class Operator(M11.Operator):
                 "next": "the OD-M12-11 journal and attribute reads, in boot readsBootId: exactly the historical 12 "
                         "attributed matches and no new marker; nothing is authorized by this"}
 
+    # ------------------------------------------------------------------ M-B12 package ---
 
-USAGE = __doc__.split("| Form |", 1)[1].split("\n\n", 1)[0]
+    def package(self, repo: Path, outdir: Path, envelope: Path) -> dict:
+        """ONE read-only evaluation of the canonical PR-1 package on DEV (the M-B12 owner-acceptance input)."""
+        self.pins(repo)
+        outdir = Path(outdir)
+        _need(not outdir.exists(), "OUTDIR_EXISTS")
+        outdir.mkdir(mode=0o700, parents=True)
+        raw = Path(envelope).read_bytes()
+        (outdir / M11.ENVELOPE_FILE).write_bytes(raw)
+        remote = self._e22_remote(repo, outdir, "remote", {"form": "package", "ownerInputs": self.owner_inputs(raw)})
+        report = None if remote is None else remote.get("report")
+        record = {"envelopeSha256": sha256_hex(raw), "observationSha256": sha256_hex((outdir / "remote.out").read_bytes()),
+                  "mode": None if report is None else report.get("mode"),
+                  "status": None if report is None else report.get("status"),
+                  "reasons": None if report is None else report.get("reasons"),
+                  "packageDigest": None if report is None else report.get("packageDigest"),
+                  "result": "E22_PACKAGE_" + ("NOT_RECEIVED" if remote is None else "NOT_EVALUATED" if report is None
+                                             else str(report.get("status")))}
+        self._record(outdir / "PACKAGE.json", record)
+        return dict(record, next="the owner's M-B12 acceptance names exactly packageDigest; nothing is accepted by this")
+
+
+USAGE =__doc__.split("| Form |", 1)[1].split("\n\n", 1)[0]
 
 
 def main(argv: Sequence[str], operator: Operator | None = None) -> int:
@@ -723,6 +746,7 @@ def main(argv: Sequence[str], operator: Operator | None = None) -> int:
         ("post-signer", 3): lambda a: operator.post_signer(Path(a[0]), Path(a[1]), Path(a[2])),
         ("accept-signer", 3): lambda a: operator.accept_signer(Path(a[0]), Path(a[1]), Path(a[2])),
         ("windows", 2): lambda a: operator.windows(Path(a[0]), Path(a[1])),
+        ("package", 3): lambda a: operator.package(Path(a[0]), Path(a[1]), Path(a[2])),
         **{(form, 3): (lambda step: lambda a: operator._step(Path(a[0]), Path(a[1]), step, Path(a[2])))(step)
            for form, (step, _p, _q, _m) in STEPS.items()},
     }
