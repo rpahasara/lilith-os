@@ -54,6 +54,9 @@ _MEMORY_TABLES = frozenset(
         "memory_apply_audit",
         "memory_active_revision",
         "rollback_consumption",
+        # Optional V2 admission ↔ authority link, written only through `apply(in_transaction=...)` so it commits
+        # atomically with the admission it names (15B2b fresh A1-A7). Not a runtime schema object.
+        "memory_admission_authority_link",
     }
 )
 _READ_TABLES = _MEMORY_TABLES | frozenset(
@@ -362,8 +365,18 @@ class CanonicalMemoryStoreV2:
             raise CanonicalStoreError("CANDIDATE_BINDING_INVALID")
         return proposal, action, policy
 
-    def apply(self, proposal_ref_id: str) -> CanonicalApplyResult:
-        """Apply a V2 proposal reference; no caller-controlled authority inputs."""
+    def apply(
+        self,
+        proposal_ref_id: str,
+        *,
+        in_transaction: Optional[Callable[[sqlite3.Connection], None]] = None,
+    ) -> CanonicalApplyResult:
+        """Apply a V2 proposal reference; no caller-controlled authority inputs.
+
+        `in_transaction`, when given, runs on the ACCEPTED path after every L04
+        write and before the commit, on the same connection: its writes commit
+        or roll back together with the admission. If it raises, nothing is
+        committed and the exception propagates."""
         try:
             enabled = self.enabled_provider()
         except Exception:
@@ -601,6 +614,8 @@ class CanonicalMemoryStoreV2:
                     "last_operation_id=? WHERE memory_item_id=?",
                     (revision_id, now, operation_id, item_id),
                 )
+            if in_transaction is not None:
+                in_transaction(conn)
             if self.fault_hook:
                 self.fault_hook("before_commit")
             if self.privacy_hold_resolver.is_held(*action.identity):

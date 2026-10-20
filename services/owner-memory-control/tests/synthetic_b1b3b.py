@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -282,17 +283,76 @@ def owner_proof(action: C.FrozenMemoryActionV1, challenge_id: str, *, memory_ite
                       SC.assertion_dict(challenge.webauthn_challenge()), SC.credential_dict())
 
 
+def install_link_table(db: Path) -> None:
+    """TEST stand-in for the reviewed L04 migration that would add the durable admission link table."""
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute(AD.LINK_DDL)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class EvidenceUseJournal:
+    """TEST-ONLY authority-side write-ahead journal for `SyntheticEvidenceUseLedgerV1` (one row per evidence ID;
+    each write is one durable transaction)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = str(path)
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS evidence_use_v1 (evidence_id TEXT PRIMARY KEY, "
+                             "evidence_digest TEXT NOT NULL UNIQUE, record_json TEXT NOT NULL)")
+        finally:
+            conn.close()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.execute("PRAGMA synchronous=FULL")
+        return conn
+
+    def load(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            return [json.loads(row[0]) for row in conn.execute("SELECT record_json FROM evidence_use_v1")]
+        finally:
+            conn.close()
+
+    def write(self, record: dict[str, Any]) -> None:
+        conn = self._connect()
+        try:
+            with conn:
+                cursor = conn.execute("INSERT INTO evidence_use_v1 VALUES (?,?,?) ON CONFLICT(evidence_id) DO UPDATE SET "
+                                      "record_json=excluded.record_json WHERE evidence_digest=excluded.evidence_digest",
+                                      (record["evidenceId"], record["evidenceDigest"],
+                                       json.dumps(record, sort_keys=True)))
+                if cursor.rowcount != 1:
+                    # An ID with a conflicting digest must not advance the in-memory ledger.
+                    raise RuntimeError("evidence-use journal write conflict")
+        finally:
+            conn.close()
+
+
 class Flow:
     """One complete synthetic V2 flow over a real temporary L04."""
 
-    def __init__(self, harness: L04Harness | None = None) -> None:
+    def __init__(self, harness: L04Harness | None = None, *, durable: bool = False) -> None:
         self.l04 = harness or L04Harness()
         self.clock = Clock(CHALLENGE_ISSUED + timedelta(seconds=20))
         self.broker = broker(self.clock)
         self.registry_doc = registry()
-        self.links = AD.AdmissionLinkStoreV1()
-        # Authority-side (broker) evidence-use ledger: not application state.
-        self.ledger = EL.SyntheticEvidenceUseLedgerV1()
+        if durable:
+            # Fresh A1-A7: the link commits inside the L04 transaction; the evidence-use ledger journals to an
+            # authority-side file next to (never inside) the L04 database. Both survive a restart.
+            install_link_table(self.l04.db)
+            self.links = AD.L04AdmissionLinkStoreV1(self.l04.db)
+            self.ledger = EL.SyntheticEvidenceUseLedgerV1(
+                EvidenceUseJournal(self.l04.root / "authority-evidence-use.db"))
+        else:
+            self.links = AD.AdmissionLinkStoreV1()
+            # Authority-side (broker) evidence-use ledger: not application state.
+            self.ledger = EL.SyntheticEvidenceUseLedgerV1()
         self.adapter = self.make_adapter()
 
     def make_adapter(self, *, store_overrides: dict | None = None, fault_hook=None,
@@ -311,8 +371,15 @@ class Flow:
         return AR.AcceptedMemoryReadFacadeV2(
             self.l04_read_facade(), self.l04.store(), owner_context=owner_context(),
             authority_context=SA.historical_context(**context), registry_provider=lambda: self.registry_doc,
-            challenge_record_provider=self.broker.ledger_record, link_store=self.links,
+            challenge_record_provider=self.challenge_record, link_store=self.links,
             evidence_use_ledger=self.ledger)
+
+    def challenge_record(self, challenge_id: str):
+        """The broker's (volatile) record, else the one archived with a durable link."""
+        record = self.broker.ledger_record(challenge_id)
+        if record is None and isinstance(self.links, AD.L04AdmissionLinkStoreV1):
+            record = self.links.challenge_record(challenge_id)
+        return record
 
     def read(self, reader=None):
         return (reader or self.reader()).read_accepted(actor=self.l04.actor.ACTOR, memory_class=L04_CLASS,
