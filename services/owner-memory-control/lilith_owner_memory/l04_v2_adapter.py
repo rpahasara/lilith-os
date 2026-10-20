@@ -43,10 +43,13 @@ consumes. They are necessary for L04 but never sufficient for V2.
 
 Honest limits (TEST-only):
 
-- the link and the authority confirmation are written after L04 commits, so
-  a crash in between leaves a stored row that is not accepted (fail closed,
-  tested). Production needs the link in the L04 transaction (a schema
-  migration) and a durable authority acknowledgement;
+- with the in-memory `AdmissionLinkStoreV1`, the link and the authority
+  confirmation are written after L04 commits, so a crash in between leaves a
+  stored row that is not accepted (fail closed, tested). With
+  `L04AdmissionLinkStoreV1` (fresh A1-A7) the link commits inside the L04
+  transaction, and a lost authority confirmation is completed by `reconcile`
+  against that committed link. Production still needs a reviewed L04 migration
+  for the link table and a durable authority-side evidence-use ledger;
 - the V2 guarantee holds for stores built in V2 admission mode. An unguarded
   `CanonicalMemoryStoreV2` over the same database can still write a V1 row.
   Such a row is never L04_ADMITTED, ACCEPTED_MEMORY, or returned by the
@@ -85,6 +88,7 @@ from .admission_v2 import (
 )
 
 L04_ADMITTED = "L04_ADMITTED"
+RECONCILED = "AUTHORITY_CONFIRMATION_RECONCILED"
 ADMISSION_SEMANTICS = "L04_APPLIED_AND_LINKED_TO_VERIFIED_AUTHORITY_NOT_MEMORY_ACCEPTANCE"
 FAULT_POINTS = ("before_apply", "after_l04_commit", "after_link", "after_confirm")
 
@@ -130,6 +134,85 @@ class AdmissionLinkStoreV1:
     def chain(self, proposal_ref_id: str) -> dict[str, Any] | None:
         chain = self._chains.get(proposal_ref_id)
         return None if chain is None else dict(chain)
+
+
+LINK_TABLE = "memory_admission_authority_link"
+LINK_DDL = (
+    f"CREATE TABLE IF NOT EXISTS {LINK_TABLE} ("
+    "proposal_ref_id TEXT PRIMARY KEY, admission_id TEXT NOT NULL UNIQUE, "
+    "authority_evidence_id TEXT NOT NULL UNIQUE, authority_evidence_digest TEXT NOT NULL UNIQUE, "
+    "challenge_id TEXT NOT NULL UNIQUE, link_json TEXT NOT NULL, chain_json TEXT NOT NULL)"
+)
+
+
+class L04AdmissionLinkStoreV1(AdmissionLinkStoreV1):
+    """TEST-ONLY durable admission link store inside the L04 database (fresh A1-A7).
+
+    The adapter writes one row in the SAME transaction as the L04 admission it names (`CanonicalMemoryStoreV2.apply(
+    in_transaction=...)`), so a committed admission always has its link, and an uncommitted one never does: the old
+    "committed, link absent" window (A6-B) no longer exists. One evidence, digest, challenge and admission each link
+    at most once (UNIQUE). The row is still application-held metadata: forging it grants nothing, because acceptance
+    re-verifies every archived artifact and requires the authority-side CONSUMED evidence use. The archived chain
+    includes the verified owner challenge record, so a restarted reader can re-verify without the broker's volatile
+    challenge ledger.
+
+    The adapter only ever opens L04 read-only, so the table (`LINK_DDL`, outside the L04 runtime schema objects) is
+    created by the caller; production needs a reviewed L04 migration. A missing table fails closed here.
+    """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = Path(path)
+        conn = _read_only(self.path)
+        try:
+            present = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                                   (LINK_TABLE,)).fetchone()
+        finally:
+            conn.close()
+        if present is None:
+            raise RuntimeError("the durable admission link table is not installed")
+
+    def record(self, link: AdmissionAuthorityLinkV1, chain: Mapping[str, Any]) -> None:
+        raise RuntimeError("a durable admission link is written only inside the L04 commit")
+
+    @staticmethod
+    def write_in_transaction(conn: sqlite3.Connection, link: AdmissionAuthorityLinkV1,
+                             chain: Mapping[str, Any]) -> None:
+        fields = dict(link.fields)
+        archived = dict(chain)
+        archived["challengeJson"] = bytes(archived["challengeJson"]).decode("utf-8")
+        conn.execute(
+            f"INSERT INTO {LINK_TABLE} VALUES (?,?,?,?,?,?,?)",
+            (fields["proposalRefId"], fields["admissionId"], fields["authorityEvidenceId"],
+             fields["authorityEvidenceDigest"], fields["challengeId"],
+             json.dumps(fields, sort_keys=True), json.dumps(archived, sort_keys=True)))
+
+    def _row(self, column: str, value: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        if not isinstance(value, str):
+            return None
+        conn = _read_only(self.path)
+        try:
+            row = conn.execute(f"SELECT link_json, chain_json FROM {LINK_TABLE} WHERE {column}=?",
+                               (value,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        chain = json.loads(row[1])
+        chain["challengeJson"] = chain["challengeJson"].encode("utf-8")
+        return json.loads(row[0]), chain
+
+    def get(self, proposal_ref_id: str) -> dict[str, Any] | None:
+        found = self._row("proposal_ref_id", proposal_ref_id)
+        return None if found is None else found[0]
+
+    def chain(self, proposal_ref_id: str) -> dict[str, Any] | None:
+        found = self._row("proposal_ref_id", proposal_ref_id)
+        return None if found is None else found[1]
+
+    def challenge_record(self, challenge_id: str) -> dict[str, Any] | None:
+        found = self._row("challenge_id", challenge_id)
+        return None if found is None else found[1].get("challengeRecord")
 
 
 class V2AdmissionActorGate:
@@ -231,25 +314,31 @@ def read_l04_admission_view(path: Path, proposal_ref_id: str, action: C.FrozenMe
     """Read one admission from the unchanged L04 rows, read-only."""
     conn = _read_only(path)
     try:
-        admission = conn.execute(
-            "SELECT admission_id,outcome FROM memory_admission WHERE proposal_ref_id=?",
-            (proposal_ref_id,)).fetchone()
-        if admission is None:
-            return None
-        audit = conn.execute(
-            "SELECT operation_id,operation,memory_item_id,created_revision_id FROM memory_apply_audit "
-            "WHERE proposal_ref_id=? AND admission_id=?", (proposal_ref_id, admission[0])).fetchone()
-        revision = item = None
-        if audit is not None:
-            revision = conn.execute(
-                "SELECT value_digest,epistemic_basis,admission_basis,value_schema,normalized_value_json "
-                "FROM memory_revision "
-                "WHERE revision_id=? AND memory_item_id=?", (audit[3], audit[2])).fetchone()
-            item = conn.execute(
-                "SELECT memory_class,subject_namespace,subject_key FROM memory_item WHERE memory_item_id=?",
-                (audit[2],)).fetchone()
+        return _admission_view(conn, proposal_ref_id, action)
     finally:
         conn.close()
+
+
+def _admission_view(conn: sqlite3.Connection, proposal_ref_id: str,
+                    action: C.FrozenMemoryActionV1) -> dict[str, Any] | None:
+    """One admission view over `conn` (a read-only connection, or the L04 apply transaction itself)."""
+    admission = conn.execute(
+        "SELECT admission_id,outcome FROM memory_admission WHERE proposal_ref_id=?",
+        (proposal_ref_id,)).fetchone()
+    if admission is None:
+        return None
+    audit = conn.execute(
+        "SELECT operation_id,operation,memory_item_id,created_revision_id FROM memory_apply_audit "
+        "WHERE proposal_ref_id=? AND admission_id=?", (proposal_ref_id, admission[0])).fetchone()
+    revision = item = None
+    if audit is not None:
+        revision = conn.execute(
+            "SELECT value_digest,epistemic_basis,admission_basis,value_schema,normalized_value_json "
+            "FROM memory_revision "
+            "WHERE revision_id=? AND memory_item_id=?", (audit[3], audit[2])).fetchone()
+        item = conn.execute(
+            "SELECT memory_class,subject_namespace,subject_key FROM memory_item WHERE memory_item_id=?",
+            (audit[2],)).fetchone()
     identity = tuple(item) if item is not None else action.identity
     return {
         "schemaVersion": 1,
@@ -350,10 +439,44 @@ class L04V2AdmissionAdapter:
             require(reserved.status == "RESERVED", "EVIDENCE_ALREADY_CONSUMED", reserved.reason)
             self._fault("before_apply")
 
+            chain = {
+                "evidence": dict(request.evidence), "challengeJson": bytes(request.challenge_json),
+                "assertion": dict(request.assertion), "ownerCredential": dict(request.owner_credential),
+            }
+
+            def linked_view(conn_or_path) -> tuple[dict[str, Any], AdmissionAuthorityLinkV1]:
+                view = (_admission_view(conn_or_path, request.proposal_ref_id, action)
+                        if isinstance(conn_or_path, sqlite3.Connection)
+                        else read_l04_admission_view(conn_or_path, request.proposal_ref_id, action))
+                require(view is not None, "ADMISSION_MISSING")
+                link = {
+                    "schemaVersion": 1,
+                    "proposalRefId": request.proposal_ref_id,
+                    "admissionId": view["admissionId"],
+                    "applyAuditId": view["applyAuditId"],
+                    "memoryItemId": view["memoryItemId"],
+                    "revisionId": view["revisionId"],
+                    "authorityEvidenceId": envelope["evidenceId"],
+                    "authorityEvidenceDigest": authority.evidence_digest,
+                    "challengeId": envelope["challengeId"],
+                    "actionDigest": envelope["actionDigest"],
+                    "payloadDigest": envelope["payloadDigest"],
+                }
+                return view, check_admission_link(authority, action, view, link)[1]
+
+            durable = isinstance(self.link_store, L04AdmissionLinkStoreV1)
+
+            def link_in_transaction(conn: sqlite3.Connection) -> None:
+                # The link and its archived chain commit atomically with the admission (fresh A1-A7).
+                _view, in_txn = linked_view(conn)
+                self.link_store.write_in_transaction(
+                    conn, in_txn, dict(chain, challengeRecord=dict(request.challenge_record)))
+
             # Every existing L04 rule applies unchanged, including its own
             # in-transaction Privacy hold checks and V1 internal-state rows.
             with self.store.actor_authority.admitting(action.action_digest):
-                applied = self.store.apply(request.proposal_ref_id)
+                applied = (self.store.apply(request.proposal_ref_id, in_transaction=link_in_transaction) if durable
+                           else self.store.apply(request.proposal_ref_id))
             if applied.outcome != S.ACCEPTED:
                 self.evidence_use_ledger.abandon(evidence_id=envelope["evidenceId"],
                                                  proposal_ref_id=request.proposal_ref_id)
@@ -361,26 +484,11 @@ class L04V2AdmissionAdapter:
                     applied.outcome if applied.failure_code is None
                     else f"{applied.outcome}:{applied.failure_code}")
             self._fault("after_l04_commit")
-            view = read_l04_admission_view(self.store.path, request.proposal_ref_id, action)
-            require(view is not None, "ADMISSION_MISSING")
-            link = {
-                "schemaVersion": 1,
-                "proposalRefId": request.proposal_ref_id,
-                "admissionId": view["admissionId"],
-                "applyAuditId": view["applyAuditId"],
-                "memoryItemId": view["memoryItemId"],
-                "revisionId": view["revisionId"],
-                "authorityEvidenceId": envelope["evidenceId"],
-                "authorityEvidenceDigest": authority.evidence_digest,
-                "challengeId": envelope["challengeId"],
-                "actionDigest": envelope["actionDigest"],
-                "payloadDigest": envelope["payloadDigest"],
-            }
-            _admitted, linked = check_admission_link(authority, action, view, link)
-            self.link_store.record(linked, {
-                "evidence": dict(request.evidence), "challengeJson": bytes(request.challenge_json),
-                "assertion": dict(request.assertion), "ownerCredential": dict(request.owner_credential),
-            })
+            view, linked = linked_view(self.store.path)
+            if not durable:
+                self.link_store.record(linked, chain)
+            else:
+                require(self.link_store.get(request.proposal_ref_id) == dict(linked.fields), "ADMISSION_LINK_MISSING")
             self._fault("after_link")
             confirmed = self.evidence_use_ledger.confirm(
                 evidence_id=envelope["evidenceId"], proposal_ref_id=request.proposal_ref_id,
@@ -389,6 +497,55 @@ class L04V2AdmissionAdapter:
             self._fault("after_confirm")
         except Reject as rejected:
             return V2ResultV1(NOT_ACCEPTED, rejected.reason, rejected.detail)
+        return self._admitted(view, linked, authority.authority_facts)
+
+    def reconcile(self, proposal_ref_id: str) -> V2ResultV1:
+        """A7 recovery after a restart: the L04 admission and its link are committed (atomically, durable link
+        store), but the authority-side confirmation was lost. Confirm the still-RESERVED evidence use against exactly
+        that committed admission. Never re-applies L04, never reserves, never reissues; any mismatch fails closed."""
+        try:
+            require(isinstance(self.link_store, L04AdmissionLinkStoreV1), "ADMISSION_LINK_MISSING", "LINK_STORE_NOT_DURABLE")
+            link = self.link_store.get(proposal_ref_id)
+            require(link is not None, "ADMISSION_LINK_MISSING")
+            action = resolve_v2_action(self.store, proposal_ref_id)
+            view = read_l04_admission_view(self.store.path, proposal_ref_id, action)
+            require(view is not None and view["admissionOutcome"] == S.ACCEPTED, "ADMISSION_MISSING")
+            # Re-verify the archived owner proof and signed evidence BEFORE changing
+            # the authority-side RESERVED state. App-held L04/link rows alone confer no authority.
+            require(link.get("proposalRefId") == proposal_ref_id, "ADMISSION_LINK_MISMATCH")
+            chain = self.link_store.chain(proposal_ref_id)
+            require(isinstance(chain, Mapping), "ADMISSION_LINK_MISSING")
+            require(isinstance(chain.get("challengeRecord"), Mapping), "OWNER_PROOF_REJECTED")
+            authority = verify_owner_authority(
+                owner_context=self.owner_context, authority_context=self.authority_context,
+                action=action, challenge_json=chain.get("challengeJson"),
+                challenge_record=chain["challengeRecord"], assertion=chain.get("assertion"),
+                owner_credential=chain.get("ownerCredential"), registry=self.registry_provider(),
+                evidence=chain.get("evidence"), expected_evidence_id=link.get("authorityEvidenceId"))
+            check_admission_link(authority, action, view, link)
+            use = self.evidence_use_ledger.lookup(link["authorityEvidenceId"])
+            require(isinstance(use, Mapping) and
+                    (use.get("evidenceId"), use.get("evidenceDigest"), use.get("challengeId"),
+                     use.get("proposalRefId"), use.get("actionDigest")) ==
+                    (link["authorityEvidenceId"], authority.evidence_digest, link["challengeId"],
+                     proposal_ref_id, link["actionDigest"]), "EVIDENCE_USE_MISMATCH")
+            if use.get("state") == "RESERVED":
+                confirmed = self.evidence_use_ledger.confirm(
+                    evidence_id=link["authorityEvidenceId"], proposal_ref_id=proposal_ref_id,
+                    admission_id=link["admissionId"], revision_id=link["revisionId"])
+                require(confirmed.status == "CONSUMED", "EVIDENCE_USE_MISMATCH", confirmed.reason)
+            else:
+                require(use.get("state") == "CONSUMED" and
+                        (use.get("admissionId"), use.get("revisionId")) ==
+                        (link["admissionId"], link["revisionId"]), "EVIDENCE_USE_MISMATCH")
+        except Reject as rejected:
+            return V2ResultV1(NOT_ACCEPTED, rejected.reason, rejected.detail)
+        return V2ResultV1(RECONCILED, None, None, {"semantics": ADMISSION_SEMANTICS, "stage": RECONCILED,
+                                                   "memoryAcceptance": False, "truthClaim": False,
+                                                   "admission": view, "link": dict(link)})
+
+    @staticmethod
+    def _admitted(view, linked, authority_facts) -> V2ResultV1:
         return V2ResultV1(L04_ADMITTED, None, None, {
             "semantics": ADMISSION_SEMANTICS,
             "stage": L04_ADMITTED,
@@ -396,5 +553,5 @@ class L04V2AdmissionAdapter:
             "truthClaim": False,
             "admission": view,
             "link": dict(linked.fields),
-            "authority": dict(authority.authority_facts),
+            "authority": dict(authority_facts),
         })

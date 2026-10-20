@@ -20,9 +20,11 @@ proposal or admission, and a replay after forged cognitive-DB or link state
 are all refused. RESERVED is fail-closed. After a crash between reservation
 and confirmation, the evidence is never reusable; the owner re-authorizes.
 
-TEST-ONLY and in memory. Production (B1b-3d and later) needs durable
-authority-side storage, outside application custody, whose restore semantics
-are defined by B1b-3c.
+TEST-ONLY. In memory, optionally mirrored to a caller-supplied write-ahead
+journal (fresh A1-A7 restart rehearsal; the journal and its storage live
+outside this package, which stays free of I/O). Production (B1b-3d and later)
+needs durable authority-side storage, outside application custody, whose
+restore semantics are defined by B1b-3c.
 """
 
 from __future__ import annotations
@@ -54,11 +56,25 @@ def _valid(value: Any, pattern: re.Pattern[str]) -> bool:
 
 class SyntheticEvidenceUseLedgerV1:
     """In-memory authority-side record of which admission consumed which
-    evidence. Callers receive copies only; there is no reset or delete."""
+    evidence. Callers receive copies only; there is no reset or delete.
 
-    def __init__(self) -> None:
+    With `journal` (an object with `load() -> iterable of records` and a
+    durable, atomic `write(record)` upsert), the ledger is rebuilt from the
+    journal at construction and every transition is written to it BEFORE it
+    takes effect in memory, so RESERVED, CONSUMED and ABANDONED survive a
+    process restart. One live ledger per journal (TEST-ONLY)."""
+
+    def __init__(self, journal: Any = None) -> None:
         self.__entries: dict[str, dict[str, Any]] = {}
         self.__digests: set[str] = set()
+        self.__journal = journal
+        for record in (() if journal is None else journal.load()):
+            self.__entries[record["evidenceId"]] = dict(record)
+            self.__digests.add(record["evidenceDigest"])
+
+    def __persist(self, record: Mapping[str, Any]) -> None:
+        if self.__journal is not None:
+            self.__journal.write(dict(record))
 
     def __reduce__(self):
         raise TypeError("the TEST evidence ledger is not serializable")
@@ -84,6 +100,7 @@ class SyntheticEvidenceUseLedgerV1:
             "challengeId": challenge_id, "proposalRefId": proposal_ref_id, "actionDigest": action_digest,
             "state": RESERVED, "admissionId": None, "revisionId": None,
         }
+        self.__persist(record)
         self.__entries[evidence_id] = record
         self.__digests.add(evidence_digest)
         return LedgerResultV1(RESERVE_OK, None, dict(record))
@@ -94,6 +111,7 @@ class SyntheticEvidenceUseLedgerV1:
         if entry is None or entry["state"] != RESERVED or entry["proposalRefId"] != proposal_ref_id \
                 or not (_valid(admission_id, _ID) and _valid(revision_id, _ID)):
             return LedgerResultV1(REFUSED, "CONFIRMATION_REFUSED", None if entry is None else dict(entry))
+        self.__persist(dict(entry, state=CONSUMED, admissionId=admission_id, revisionId=revision_id))
         entry.update(state=CONSUMED, admissionId=admission_id, revisionId=revision_id)
         return LedgerResultV1(CONSUMED, None, dict(entry))
 
@@ -101,6 +119,7 @@ class SyntheticEvidenceUseLedgerV1:
         entry = self.__entries.get(evidence_id)
         if entry is None or entry["state"] != RESERVED or entry["proposalRefId"] != proposal_ref_id:
             return LedgerResultV1(REFUSED, "ABANDON_REFUSED", None if entry is None else dict(entry))
+        self.__persist(dict(entry, state=ABANDONED))
         entry.update(state=ABANDONED)
         return LedgerResultV1(ABANDONED, None, dict(entry))
 
