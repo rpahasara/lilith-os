@@ -255,14 +255,40 @@ class JudgeTests(unittest.TestCase):
         self.assert_stop("FULL_CHECKS_NOT_ALL_PASS",
                          value=remote(readiness=readiness_with(full=report(OP.FULL, package={"checks": failing}))))
 
-    def test_the_pinned_e22_adjudication_is_admitted_and_nothing_else(self):
+    @staticmethod
+    def adjudicated(identifier: str, **evidence_change) -> dict:
+        """A FULL report whose E-22 is OWNER_RISK_ADJUDICATED, written as `pr1_acceptance` writes it."""
         checks = copy.deepcopy(report(OP.FULL)["package"]["checks"])
-        checks["E22_SECRET_HYGIENE"] = [OP.ADJUDICATED_E22, "JOURNAL_SECRET_SCAN"]
-        self.assertEqual(self.judge(value=remote(readiness=readiness_with(
-            full=report(OP.FULL, package={"checks": checks}))))["w14"], OP.W14_1)
-        checks["E21_OFFHOST_REGISTER"] = [OP.ADJUDICATED_E22, "X"]
+        checks["E22_SECRET_HYGIENE"] = [PA.OWNER_RISK_ADJUDICATED, identifier]
+        evidence = copy.deepcopy(report(OP.FULL)["package"]["evidence"])
+        evidence["secretHygieneAdjudication"] = {
+            "status": PA.OWNER_RISK_ADJUDICATED, "decision": "OD-M12-10", "adjudicationSha256": identifier,
+            "ownerRecordSha256": PA.ACCEPTED_E22_ADJUDICATIONS.get(identifier, "f" * 64),
+            "keyId": PA.E22_ADJUDICATION_KEY_ID, "transcriptSha256": "e" * 64,
+            "failures": list(PA.E22_ADJUDICATED_FAILURES), "nonclaim": PA.E22_ADJUDICATION_NONCLAIM,
+            **evidence_change}
+        return report(OP.FULL, package={"checks": checks, "evidence": evidence,
+                                        "nonclaims": [PA.E22_ADJUDICATION_NONCLAIM]})
+
+    def test_the_accepted_e22_adjudication_is_admitted_and_nothing_else(self):
+        self.assertEqual(OP.ADJUDICATED_E22, PA.OWNER_RISK_ADJUDICATED)
+        (accepted,) = PA.ACCEPTED_E22_ADJUDICATIONS                       # the one owner-accepted OD-M12-10 identity
+        result = self.judge(value=remote(readiness=readiness_with(full=self.adjudicated(accepted))))
+        self.assertEqual((result["w14"], result["reasons"]), (OP.W14_1, []))
+        self.assertEqual(result["ownerInputChecks"]["E22_SECRET_HYGIENE"], PA.OWNER_RISK_ADJUDICATED)   # never PASS
+        checks = copy.deepcopy(report(OP.FULL)["package"]["checks"])
+        checks["E21_OFFHOST_REGISTER"] = [OP.ADJUDICATED_E22, accepted]
         self.assert_stop("FULL_CHECKS_NOT_ALL_PASS",
                          value=remote(readiness=readiness_with(full=report(OP.FULL, package={"checks": checks}))))
+
+    def test_a_fabricated_or_unaccepted_e22_adjudication_stops(self):
+        (accepted,) = PA.ACCEPTED_E22_ADJUDICATIONS
+        for full in (self.adjudicated("0" * 64),                                   # well-formed, not accepted
+                     self.adjudicated("JOURNAL_SECRET_SCAN"),                       # not an identity at all
+                     self.adjudicated(accepted, ownerRecordSha256="f" * 64),        # wrong owner record
+                     self.adjudicated(accepted, nonclaim="a clean scan"),           # nonclaim dropped
+                     report(OP.FULL, package={"checks": {**self.adjudicated(accepted)["package"]["checks"]}})):
+            self.assert_stop("FULL_E22_ADJUDICATION_NOT_ACCEPTED", value=remote(readiness=readiness_with(full=full)))
 
     def test_a_package_digest_that_does_not_reproduce_stops(self):
         tampered = report(OP.FULL)
@@ -336,6 +362,20 @@ class JudgeTests(unittest.TestCase):
         live = summary(OP.FULL, facts={**summary(OP.FULL)["facts"], "liveEntryAuthorized": True})
         self.assert_stop("FULL_AUTHORITY_NOT_DARK", value=remote(readiness=readiness_with(fullSummary=live)))
         self.assert_stop("FULL_REMOTE_NOT_RECEIVED", value=remote(authorityGranted=True))
+
+    def test_darkness_facts_must_be_explicitly_false(self):
+        for mode, key in ((OP.FULL, "fullSummary"), (OP.ELIGIBILITY, "eligibilitySummary")):
+            tag = "FULL" if mode == OP.FULL else "ELIGIBILITY"
+            for fact in OP.DARK_FALSE_FACTS:
+                missing = {k: v for k, v in summary(mode)["facts"].items() if k != fact}
+                for facts in (missing, {**summary(mode)["facts"], fact: None}, {**summary(mode)["facts"], fact: True}):
+                    self.assert_stop(f"{tag}_AUTHORITY_NOT_DARK",
+                                     value=remote(readiness=readiness_with(**{key: summary(mode, facts=facts)})))
+        relaxed = {**summary(OP.FULL)["facts"]}                     # readiness facts: reported, never darkness
+        relaxed.pop("successorCurrent")
+        relaxed["issuanceReady"] = None
+        self.assertEqual(self.judge(value=remote(readiness=readiness_with(
+            fullSummary=summary(OP.FULL, facts=relaxed))))["w14"], OP.W14_1)
 
     # --- missing / inconsistent evidence
     def test_missing_or_incomplete_evidence_is_never_success(self):

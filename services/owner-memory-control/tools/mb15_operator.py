@@ -140,9 +140,31 @@ def judge_package(report: Any, mode: str, exp: Mapping[str, Any]) -> list[str]:
                 value[0] != PA.PASS and not (name == "E22_SECRET_HYGIENE" and value[0] == ADJUDICATED_E22)
                 for name, value in checks.items()):
             reasons.append("FULL_CHECKS_NOT_ALL_PASS")
+        elif checks["E22_SECRET_HYGIENE"][0] == ADJUDICATED_E22 and not e22_adjudication_accepted(package):
+            reasons.append("FULL_E22_ADJUDICATION_NOT_ACCEPTED")
     elif report.get("status") != "NOT_READY" or tuple(report.get("reasons") or ()) != ELIGIBILITY_PACKAGE_REASONS:
         reasons.append("ELIGIBILITY_NOT_EXACTLY_THE_RELEASED_HOLD")
     return reasons
+
+
+def e22_adjudication_accepted(package: Mapping[str, Any]) -> bool:
+    """An E-22 OWNER_RISK_ADJUDICATED check names exactly an owner-accepted adjudication (OD-M12-10) and carries its
+    pinned evidence and nonclaim, as `pr1_acceptance` writes them. Any other identifier is not admitted."""
+    from lilith_owner_memory import pr1_acceptance as PA
+
+    adjudication = (package.get("checks") or {}).get("E22_SECRET_HYGIENE", [None, None])[1]
+    if not isinstance(adjudication, str) or adjudication not in PA.ACCEPTED_E22_ADJUDICATIONS:
+        return False
+    evidence = (package.get("evidence") or {}).get("secretHygieneAdjudication")
+    if not isinstance(evidence, Mapping) or not isinstance(evidence.get("transcriptSha256"), str) \
+            or _HEX64.fullmatch(evidence["transcriptSha256"]) is None:
+        return False
+    expected = {"status": PA.OWNER_RISK_ADJUDICATED, "decision": "OD-M12-10", "adjudicationSha256": adjudication,
+                "ownerRecordSha256": PA.ACCEPTED_E22_ADJUDICATIONS[adjudication], "keyId": PA.E22_ADJUDICATION_KEY_ID,
+                "transcriptSha256": evidence["transcriptSha256"], "failures": list(PA.E22_ADJUDICATED_FAILURES),
+                "nonclaim": PA.E22_ADJUDICATION_NONCLAIM}
+    return json.loads(json.dumps(dict(evidence))) == json.loads(json.dumps(expected)) \
+        and PA.E22_ADJUDICATION_NONCLAIM in (package.get("nonclaims") or [])
 
 
 def judge_summary(summary: Any, mode: str) -> list[str]:
@@ -160,7 +182,7 @@ def judge_summary(summary: Any, mode: str) -> list[str]:
         reasons.append("FULL_LOADED_KEY_BINDING_NOT_PASS")
     facts = summary.get("facts") if isinstance(summary.get("facts"), Mapping) else {}
     flags = summary.get("packageFlags") if isinstance(summary.get("packageFlags"), Mapping) else {}
-    if any(facts.get(key) is True for key in DARK_FALSE_FACTS) \
+    if any(facts.get(key) is not False for key in DARK_FALSE_FACTS) \
             or any(flags.get(key) is not False for key in ("authorityGranted", "activationGranted", "issuanceWired")):
         reasons.append(f"{tag}_AUTHORITY_NOT_DARK")
     return reasons
