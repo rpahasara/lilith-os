@@ -703,6 +703,55 @@ class TestCanonicalLifecycle(CanonicalRuntimeCase):
             canonical_store.ACCEPTED,
         )
 
+    def test_in_transaction_callback_can_only_insert_the_admission_link(self):
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute(
+                "CREATE TABLE memory_admission_authority_link "
+                "(proposal_ref_id TEXT PRIMARY KEY, revision_id TEXT NOT NULL)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        action, encoded = self.action("SYNTH-CALLBACK")
+        _, ref, _ = self.proposal(action, encoded, nonce="callback.create")
+        before = self.counts()
+        for statement in (
+            "UPDATE memory_item SET subject_key='forged'",
+            "INSERT INTO memory_revision_source SELECT * FROM memory_revision_source",
+            "DELETE FROM memory_admission",
+            "UPDATE memory_admission_authority_link SET revision_id='x'",
+            "DELETE FROM memory_admission_authority_link",
+            "CREATE TABLE callback_side_table (x)",
+        ):
+            with self.subTest(statement=statement):
+                with self.assertRaisesRegex(sqlite3.DatabaseError, "not authorized"):
+                    self.store().apply(
+                        ref.proposal_ref_id,
+                        in_transaction=lambda conn, sql=statement: conn.execute(sql),
+                    )
+                self.assertEqual(self.counts(), before)  # the whole admission rolled back
+
+        def link(conn):
+            revision_id = conn.execute(
+                "SELECT revision_id FROM memory_active_revision"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO memory_admission_authority_link VALUES (?,?)",
+                (ref.proposal_ref_id, revision_id),
+            )
+
+        result = self.store().apply(ref.proposal_ref_id, in_transaction=link)
+        self.assertEqual(result.outcome, canonical_store.ACCEPTED)
+        conn = sqlite3.connect(self.db)
+        try:
+            rows = conn.execute(
+                "SELECT proposal_ref_id, revision_id FROM memory_admission_authority_link"
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(rows, [(ref.proposal_ref_id, result.revision_id)])
+
     def test_database_busy_returns_retryable_without_partial_state(self):
         action, encoded = self.action("SYNTH-BUSY")
         _, ref, _ = self.proposal(action, encoded, nonce="busy.create")

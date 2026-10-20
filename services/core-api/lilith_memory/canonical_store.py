@@ -54,11 +54,11 @@ _MEMORY_TABLES = frozenset(
         "memory_apply_audit",
         "memory_active_revision",
         "rollback_consumption",
-        # Optional V2 admission ↔ authority link, written only through `apply(in_transaction=...)` so it commits
-        # atomically with the admission it names (15B2b fresh A1-A7). Not a runtime schema object.
-        "memory_admission_authority_link",
     }
 )
+# Optional V2 admission <-> authority link (15B2b fresh A1-A7). Not a runtime schema object, and not in
+# _MEMORY_TABLES: it is writable only by an `apply(in_transaction=...)` callback, which can do nothing else.
+_ADMISSION_LINK_TABLE = "memory_admission_authority_link"
 _READ_TABLES = _MEMORY_TABLES | frozenset(
     {
         "canonical_runtime_schema_migration",
@@ -102,6 +102,21 @@ def _authorizer(
     }:
         return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_OK
+
+
+def _in_transaction_authorizer(
+    action: int,
+    arg1: Optional[str],
+    arg2: Optional[str],
+    database: Optional[str],
+    trigger: Optional[str],
+) -> int:
+    """While an `apply(in_transaction=...)` callback runs: L04 reads as usual, and
+    the only permitted write is an INSERT into the admission link table."""
+    if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}:
+        allowed = action == sqlite3.SQLITE_INSERT and str(arg1 or "") == _ADMISSION_LINK_TABLE
+        return sqlite3.SQLITE_OK if allowed else sqlite3.SQLITE_DENY
+    return _authorizer(action, arg1, arg2, database, trigger)
 
 
 class CanonicalMemoryStoreV2:
@@ -376,7 +391,9 @@ class CanonicalMemoryStoreV2:
         `in_transaction`, when given, runs on the ACCEPTED path after every L04
         write and before the commit, on the same connection: its writes commit
         or roll back together with the admission. If it raises, nothing is
-        committed and the exception propagates."""
+        committed and the exception propagates. It confers no authority: while
+        it runs, the only permitted write is an INSERT into the admission link
+        table (`_in_transaction_authorizer`)."""
         try:
             enabled = self.enabled_provider()
         except Exception:
@@ -615,7 +632,13 @@ class CanonicalMemoryStoreV2:
                     (revision_id, now, operation_id, item_id),
                 )
             if in_transaction is not None:
-                in_transaction(conn)
+                # Re-registering the authorizer expires every prepared statement, so nothing
+                # prepared under the wider L04 authorizer can run inside the callback.
+                conn.set_authorizer(_in_transaction_authorizer)
+                try:
+                    in_transaction(conn)
+                finally:
+                    conn.set_authorizer(_authorizer)
             if self.fault_hook:
                 self.fault_hook("before_commit")
             if self.privacy_hold_resolver.is_held(*action.identity):

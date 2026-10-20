@@ -26,10 +26,12 @@ import sqlite3
 import unittest
 from unittest import mock
 
+import synthetic_authority as SA
 import synthetic_b1b3b as T
 from lilith_authority_signer import synthetic_broker as B
 from lilith_authority_signer import synthetic_evidence_ledger as EL
 from lilith_owner_memory import admission_v2 as V2
+from lilith_owner_memory import authority_contracts as A
 from lilith_owner_memory import l04_v2_adapter as AD
 
 POINTS = (None,) + AD.FAULT_POINTS            # None = a complete, fully confirmed admission
@@ -207,6 +209,16 @@ class DurabilityContractTests(RestartCase):
                 result = self.replay(self.restart(), proposal, proof, evidence, record)
                 self.assertEqual((result.status, result.reason), (V2.NOT_ACCEPTED, "EVIDENCE_ALREADY_CONSUMED"))
                 self.assertEqual(self.flow.l04.counts(), committed)               # reconciliation never re-applies
+
+    def test_a7_reconciliation_after_a_recovery_epoch_advance_grants_nothing(self):
+        # B1b-3c section 15, row "S6 link, confirm lost (B')": after recovery, never accepted.
+        proposal, _proof, evidence, _record = self.admit_then_crash("after_link")
+        advanced = A.RecoveryEpochV1(SA.EPOCH.counter + 1, SA.EPOCH.random)
+        after = self.restart()
+        result = after.make_adapter(expected_recovery_epoch=advanced).reconcile(proposal)
+        self.assertEqual(result.status, V2.NOT_ACCEPTED)
+        self.assertEqual(self.use_state(evidence), EL.RESERVED)
+        self.assertNotEqual(after.read().status, V2.ACCEPTED_MEMORY)
 
     def test_a7_corrupted_archived_challenge_cannot_confirm_reserved_evidence(self):
         proposal, _proof, evidence, _record = self.admit_then_crash("after_l04_commit")
