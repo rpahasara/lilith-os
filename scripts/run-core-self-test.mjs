@@ -1,8 +1,9 @@
 /**
  * Headless runner for the Cognitive Core self-test (all slices, incl. Slice 4
- * approval-gated write). Bundles the TypeScript with esbuild (resolving the
- * `@/` path alias) and runs it under Node — no browser, no live backend (the
- * transport + task/draft stores are all in-memory fakes).
+ * approval-gated write) and the memory projection self-test (FM-09). Bundles
+ * the TypeScript with esbuild (resolving the `@/` path alias) and runs it under
+ * Node — no browser, no live backend (the transport + task/draft stores are all
+ * in-memory fakes).
  *
  *   node scripts/run-core-self-test.mjs
  *
@@ -21,7 +22,8 @@ await build({
   stdin: {
     contents: `
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
-      const results = await runCoreSelfTest();
+      import { runMemorySelfTest } from "@/lib/memory/self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest()];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
