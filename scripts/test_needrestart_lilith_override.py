@@ -142,10 +142,11 @@ class PackagingBoundary(unittest.TestCase):
             self.assertNotIn("/etc/needrestart", text, relative)
 
     def test_prod_deploy_trigger_excludes_broker_tree(self) -> None:
+        # The PROD workflow is owner-dispatched only: no file change, broker tree included, can trigger it.
         workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-        paths = re.search(r"paths:\n((?:\s+- .+\n)+)", workflow).group(1)
-        self.assertEqual(re.findall(r'- "([^"]+)"', paths),
-                         ["services/core-api/**", "scripts/deploy_core_api_remote.sh", ".github/workflows/deploy.yml"])
+        triggers = workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"(?m)^  ([a-z_]+):", triggers), ["workflow_dispatch"])
+        self.assertNotIn("paths:", triggers)
 
     def test_dev_classifier_gives_it_no_special_lane(self) -> None:
         from scripts import classify_dev_deployment as classify

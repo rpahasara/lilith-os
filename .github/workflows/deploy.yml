@@ -1,13 +1,14 @@
 name: Deploy LILITH Core API
 
+# Production deployment is owner-dispatched only (ADR-0005: Git-driven from protected main).
+# Merges to main never start it; a dispatch is refused unless it is the exact approved main commit.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "services/core-api/**"
-      - "scripts/deploy_core_api_remote.sh"
-      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      approved_main_sha:
+        description: "Exact protected-main SHA approved for this production deployment"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -30,12 +31,28 @@ env:
 jobs:
   deploy:
     name: Deploy core API to GCP
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Refuse anything but the approved protected-main commit
+        env:
+          APPROVED_MAIN_SHA: ${{ inputs.approved_main_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_ACTOR" = rpahasara
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$APPROVED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$APPROVED_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$APPROVED_MAIN_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
 
       - name: Set up Python
         uses: actions/setup-python@v7

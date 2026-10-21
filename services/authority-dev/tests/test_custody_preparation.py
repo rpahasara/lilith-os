@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import fnmatch
 import hashlib
 import io
 import json
@@ -795,15 +794,10 @@ class BoundaryTests(unittest.TestCase):
                 self.assertNotIn(needle, text, f"{path.name}: {needle}")
 
     def test_no_prod_trigger(self):
+        # The PROD workflow is owner-dispatched only: no file change, ceremony material included, can trigger it.
         deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-        filters = re.findall(r'^\s+- "([^"]+)"', deploy.split("paths:", 1)[1].split("permissions:", 1)[0], re.MULTILINE)
-        self.assertTrue(filters)
-        new = [p.relative_to(ROOT).as_posix() for p in HERE.iterdir() if p.is_file()] + [
-            "services/authority-dev/tests/test_custody_preparation.py",
-            "docs/architecture/slice-15b2b-b1b3d-l2-custody-preparation.md"]
-        for path in new:
-            for pattern in filters:
-                self.assertFalse(fnmatch.fnmatch(path, pattern.replace("**", "*")), (path, pattern))
+        triggers = deploy.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"(?m)^  ([a-z_]+):", triggers), ["workflow_dispatch"])
         for text in (KEYGEN_SOURCE, INSTALLER_SOURCE):
             self.assertNotIn("lilith-prod", text)
 
