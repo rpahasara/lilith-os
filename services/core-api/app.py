@@ -562,7 +562,8 @@ def _career_memory_records(conn):
             "category": "career",
             "entity_type": "application",
             "entities": entities,
-            "kind": "fact",
+            # EPI-01 / P-07: email-derived connector activity is a candidate observation, not a stated fact.
+            "kind": "unknown",
             "confidence": _pct(r["confidence"]),
             "importance": None,
             "pinned": False,
@@ -615,7 +616,8 @@ def _curated_memory_records():
                 "category": category,
                 "entity_type": None,
                 "entities": [],
-                "kind": "fact",
+                # EPI-01 / P-07: curated markdown states no per-entry epistemic basis.
+                "kind": "unknown",
                 "confidence": None,
                 "importance": None,
                 "pinned": False,
