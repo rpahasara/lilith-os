@@ -501,6 +501,32 @@ class L04PrivacyErasureOwner:
         )
         return v1, v2, tuple(str(row[0]) for row in rows)
 
+    @staticmethod
+    def _identity_admission_refs(
+        conn: sqlite3.Connection, identity: Tuple[str, str, str]
+    ) -> Tuple[str, ...]:
+        """Proposal references of every L04 V2 proposal for exactly this identity that has an
+        admission row, whatever its outcome. Rejected and precondition-failed admissions have no
+        revision, so the revision lineage misses them; left in place they keep a foreign key to
+        learning_proposal_ref and block the L18 V2 erasure of the same identity. Legacy
+        proposal-id lineage is unchanged (empty here)."""
+        admission_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(memory_admission)")
+        }
+        if "proposal_ref_id" not in admission_columns:
+            return ()
+        return tuple(
+            str(row[0])
+            for row in conn.execute(
+                "SELECT a.proposal_ref_id FROM memory_admission a "
+                "JOIN learning_proposal_ref r ON r.proposal_ref_id=a.proposal_ref_id "
+                "JOIN learning_proposal_v2 p ON p.proposal_id=r.family_proposal_id "
+                "WHERE r.proposal_family=? AND p.memory_class=? AND p.subject_namespace=? "
+                "AND p.subject_key=? ORDER BY a.proposal_ref_id",
+                (L.V2_PROPOSAL_FAMILY, *identity),
+            )
+        )
+
     def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
         authorization = self.privacy_authority.resolve_erasure_authorization(
             authorization_ref_id,
@@ -520,7 +546,8 @@ class L04PrivacyErasureOwner:
                 "AND subject_namespace=? AND subject_key=?",
                 authorization.identity,
             ).fetchone()
-            if item is None:
+            identity_refs = self._identity_admission_refs(conn, authorization.identity)
+            if item is None and not identity_refs:
                 conn.rollback()
                 result = {
                     "owner": self.OWNER,
@@ -532,8 +559,12 @@ class L04PrivacyErasureOwner:
                     authorization_ref_id, execution_nonce, result
                 )
                 return result
-            item_id = str(item[0])
-            if authorization.memory_item_id and authorization.memory_item_id != item_id:
+            item_id = str(item[0]) if item is not None else None
+            if (
+                item_id is not None
+                and authorization.memory_item_id
+                and authorization.memory_item_id != item_id
+            ):
                 raise PermissionError("PRIVACY_ERASURE_IDENTITY_MISMATCH")
             trigger_sql = {
                 str(row[0]): str(row[1])
@@ -570,6 +601,13 @@ class L04PrivacyErasureOwner:
                 conn.execute(
                     f"DELETE FROM memory_admission WHERE {admission_column} IN ({marks})",
                     identifiers,
+                )
+            if identity_refs:
+                # Rejected / precondition-failed admissions of this identity (no revision lineage).
+                marks = ",".join("?" for _ in identity_refs)
+                conn.execute(
+                    f"DELETE FROM memory_admission WHERE proposal_ref_id IN ({marks})",
+                    identity_refs,
                 )
             conn.execute("DELETE FROM memory_active_revision WHERE memory_item_id=?", (item_id,))
             conn.execute("DELETE FROM memory_revision WHERE memory_item_id=?", (item_id,))
