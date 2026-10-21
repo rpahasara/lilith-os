@@ -1,0 +1,16 @@
+{
+  "_note": "TEST-ONLY synthetic Identity V1 golden vectors. Not a real LILITH identity.",
+  "binding": {
+    "charterDigest": "ee1846465918680df9e1706c80c642c925bd2b3a13154982f86ce42fc96056b2",
+    "charterVersion": "1.0.0-test",
+    "identityProfileDigest": "ce93b2991c06cf73c1a5612004b2d05594e757d289a8b7439ad22f43a193aaf1",
+    "lilithIdentityId": "lid1.44233276f073f2df51b57745eb36c3f3"
+  },
+  "charterBytesUtf8": "LILITH Identity Charter V1 - TEST_ONLY SYNTHETIC FIXTURE\n",
+  "charterDigest": "ee1846465918680df9e1706c80c642c925bd2b3a13154982f86ce42fc96056b2",
+  "charterDomainSeparator": "LILITH_IDENTITY_CHARTER_V1\u0000",
+  "lilithIdentityId": "lid1.44233276f073f2df51b57745eb36c3f3",
+  "profileCanonical": "{\"charter\":{\"charterDigest\":\"ee1846465918680df9e1706c80c642c925bd2b3a13154982f86ce42fc96056b2\",\"charterVersion\":\"1.0.0-test\"},\"environment\":\"test\",\"lilithIdentityId\":\"lid1.44233276f073f2df51b57745eb36c3f3\",\"protocol\":\"lilith.identity.profile\",\"schemaVersion\":1}",
+  "profileDigest": "ce93b2991c06cf73c1a5612004b2d05594e757d289a8b7439ad22f43a193aaf1",
+  "profileDomainSeparator": "LILITH_IDENTITY_PROFILE_V1\u0000"
+}
