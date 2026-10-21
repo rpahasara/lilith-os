@@ -8,7 +8,6 @@ closed. Nothing touches DEV, PROD, or any authority material.
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 import shutil
@@ -559,12 +558,10 @@ class StaticSafetyTests(unittest.TestCase):
             self.assertNotIn(needle, helper)
 
     def test_no_prod_trigger_or_path(self):
+        # The PROD workflow is owner-dispatched only: no file change can trigger it.
         deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-        filters = re.findall(r'^\s+- "([^"]+)"', deploy.split("paths:", 1)[1].split("permissions:", 1)[0], re.MULTILINE)
-        for path in ("scripts/deployer_authority_boundary_proof.sh", "scripts/test_deployer_authority_boundary_proof.py",
-                     ".github/workflows/deploy-dev.yml"):
-            for pattern in filters:
-                self.assertFalse(fnmatch.fnmatch(path, pattern.replace("**", "*")), (path, pattern))
+        triggers = deploy.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(re.findall(r"(?m)^  ([a-z_]+):", triggers), ["workflow_dispatch"])
         self.assertNotIn("lilith-01", SOURCE.replace("lilith-dev-01", ""))
         self.assertNotIn("GCP_PROD", SOURCE)
 
