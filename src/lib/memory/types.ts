@@ -32,6 +32,7 @@ import {
   Database,
   GitBranch,
   BookMarked,
+  CircleHelp,
 } from "lucide-react";
 
 /* ----------------------------------------------------------------- categories */
@@ -96,7 +97,9 @@ export type ProvenanceKind =
   | "automation"
   | "project_data"
   | "career_event"
-  | "curated_memory";
+  | "curated_memory"
+  /** the source gave no provenance, or one this UI does not recognize (FM-09). Never shown as "manual". */
+  | "unknown";
 
 export const PROVENANCE_META: Record<
   ProvenanceKind,
@@ -111,6 +114,7 @@ export const PROVENANCE_META: Record<
   project_data: { label: "Project data", icon: Database, accent: "cyan" },
   career_event: { label: "Career event", icon: Briefcase, accent: "amber" },
   curated_memory: { label: "Curated memory", icon: BookMarked, accent: "green" },
+  unknown: { label: "Unknown source", icon: CircleHelp, accent: "faint" },
 };
 
 export interface Provenance {
@@ -125,9 +129,17 @@ export interface Provenance {
 
 /**
  * FACT vs INFERENCE — a first-class distinction. A fact was stated/observed
- * directly; an inference was derived by Lilith and may be wrong.
+ * directly; an inference was derived by Lilith and may be wrong. UNKNOWN means
+ * the source did not state a recognized classification: it is shown as unknown,
+ * never promoted to fact (P-07; ledger FM-09).
  */
-export type MemoryKind = "fact" | "inference";
+export type MemoryKind = "fact" | "inference" | "unknown";
+
+export const KIND_META: Record<MemoryKind, { label: string; title: string; accent: Accent }> = {
+  fact: { label: "Fact", title: "Directly stated or observed", accent: "cyan" },
+  inference: { label: "Inference", title: "Derived by Lilith — may be wrong", accent: "amber" },
+  unknown: { label: "Unknown", title: "Classification not stated by the source — not a fact", accent: "faint" },
+};
 
 /* --------------------------------------------------------------- core records */
 

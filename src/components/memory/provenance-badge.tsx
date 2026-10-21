@@ -1,5 +1,5 @@
-import { CircleCheck, Sparkles } from "lucide-react";
-import { PROVENANCE_META, type MemoryKind, type Provenance, type Accent } from "@/lib/memory/types";
+import { CircleCheck, CircleHelp, Sparkles } from "lucide-react";
+import { KIND_META, PROVENANCE_META, type MemoryKind, type Provenance, type Accent } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
 
 const CHIP: Record<Accent, string> = {
@@ -43,24 +43,25 @@ export function ProvenanceBadge({
 
 /**
  * FACT vs INFERENCE — a first-class distinction. Facts were stated/observed;
- * inferences were derived by Lilith and may be wrong.
+ * inferences were derived by Lilith and may be wrong. UNKNOWN is shown as
+ * unknown, never as either (FM-09).
  */
+const KIND_ICON = { fact: CircleCheck, inference: Sparkles, unknown: CircleHelp } as const;
+
 export function KindTag({ kind, className }: { kind: MemoryKind; className?: string }) {
-  const isFact = kind === "fact";
-  const Icon = isFact ? CircleCheck : Sparkles;
+  const meta = KIND_META[kind] ?? KIND_META.unknown;
+  const Icon = KIND_ICON[kind] ?? CircleHelp;
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em]",
-        isFact
-          ? "bg-cyan-bright/10 text-cyan-bright"
-          : "bg-amber/10 text-amber",
+        CHIP[meta.accent],
         className,
       )}
-      title={isFact ? "Directly stated or observed" : "Derived by Lilith — may be wrong"}
+      title={meta.title}
     >
       <Icon className="h-2.5 w-2.5" />
-      {isFact ? "Fact" : "Inference"}
+      {meta.label}
     </span>
   );
 }

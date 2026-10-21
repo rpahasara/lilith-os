@@ -52,11 +52,15 @@ function asCategory(v: unknown): MemoryCategory {
 function asEntityType(v: unknown): EntityType {
   return ENTITY_SET.has(v as string) ? (v as EntityType) : "concept";
 }
+// FM-09: absent or unrecognized epistemic values stay "unknown". They are never
+// promoted to "manual" provenance or to a "fact" (P-07: inferences never silently become facts).
 function asProvenanceKind(v: unknown): ProvenanceKind {
-  return PROVENANCE_SET.has(v as string) ? (v as ProvenanceKind) : "manual";
+  return PROVENANCE_SET.has(v as string) ? (v as ProvenanceKind) : "unknown";
 }
 function asKind(v: unknown): MemoryKind {
-  return v === "inference" || v === "inferred" ? "inference" : "fact";
+  if (v === "fact") return "fact";
+  if (v === "inference" || v === "inferred") return "inference";
+  return "unknown";
 }
 function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
@@ -71,7 +75,8 @@ function normalizeEntityRef(r: any): EntityRef {
   };
 }
 
-function normalizeRecord(r: any): MemoryRecord {
+/** Exported for the memory self-test (FM-09 regression coverage). */
+export function normalizeRecord(r: any): MemoryRecord {
   return {
     id: str(r.id ?? r.memory_id ?? Math.random().toString(36).slice(2)),
     summary: str(r.summary ?? r.title ?? r.content ?? "").slice(0, 240),
@@ -94,11 +99,16 @@ function normalizeRecord(r: any): MemoryRecord {
 
 function normalizeProvenance(raw: any) {
   const p = typeof raw === "string" ? { kind: raw } : (raw ?? {});
-  const kind = asProvenanceKind(p.kind ?? p.type);
+  const rawKind = p.kind ?? p.type;
+  const kind = asProvenanceKind(rawKind);
+  // An unrecognized source stays visible as such rather than being dropped or relabelled.
+  const fallback = kind === "unknown" && rawKind != null && str(rawKind) !== "" && str(rawKind) !== "unknown"
+    ? `Unrecognized source "${str(rawKind)}"`
+    : PROVENANCE_META[kind].label;
   return {
     kind,
     sourceAccount: p.source_account ? str(p.source_account) : p.account ? str(p.account) : undefined,
-    label: str(p.label ?? p.reason ?? PROVENANCE_META[kind].label),
+    label: str(p.label ?? p.reason ?? fallback),
     at: p.at ? str(p.at) : p.occurred_at ? str(p.occurred_at) : undefined,
   };
 }
