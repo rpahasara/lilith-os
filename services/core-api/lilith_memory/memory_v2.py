@@ -830,10 +830,56 @@ class L18V2PrivacyErasureOwner:
     )
     # Present only after first_interaction_migration (schema v2); then all are required.
     _FI_TRIGGERS = tuple(sorted(f"{table}_no_delete" for table in L.FIRST_INTERACTION_TABLES))
+    # F4: the relay's separate First Interaction capture database (app.py ConversationCaptureStore), children first.
+    # Every capture session exists only for the single First Interaction identity, so a FORGET of that identity
+    # erases all of them: sealed, unfinished, faulted and never-admitted alike.
+    _CAPTURE_TABLES = ("fi_conversation_evidence", "fi_capture_turn", "fi_capture_fault", "fi_capture_session")
 
-    def __init__(self, path: Path, privacy_authority: Any):
+    def __init__(self, path: Path, privacy_authority: Any, *, capture_evidence_path: Optional[Path] = None):
         self.path = Path(path)
         self.privacy_authority = privacy_authority
+        self.capture_evidence_path = None if capture_evidence_path is None else Path(capture_evidence_path)
+
+    @classmethod
+    def _erase_capture_evidence(cls, path: Path) -> int:
+        """Erase every captured session, turn, fault and sealed transcript. Never creates the database; a missing
+        file has nothing to erase. Its own transaction: on failure nothing is reported and a retry starts over."""
+        if not path.is_file():
+            return 0
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=rw", uri=True, timeout=5.0, isolation_level=None)
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA secure_delete=ON")
+            conn.execute("BEGIN EXCLUSIVE")
+            triggers = tuple(f"{table}_no_delete" for table in cls._CAPTURE_TABLES)
+            trigger_sql = {
+                str(row[0]): str(row[1])
+                for row in conn.execute(
+                    "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN (%s)"
+                    % ",".join("?" for _ in triggers),
+                    triggers,
+                )
+            }
+            if set(trigger_sql) != set(triggers):
+                raise RuntimeError("L18 V2 capture evidence immutability trigger set is incomplete")
+            sessions = int(conn.execute("SELECT COUNT(*) FROM fi_capture_session").fetchone()[0])
+            for name in triggers:
+                conn.execute(f'DROP TRIGGER "{name}"')
+            for table in cls._CAPTURE_TABLES:
+                conn.execute(f"DELETE FROM {table}")
+            for name in triggers:
+                conn.execute(trigger_sql[name])
+            if conn.execute("PRAGMA foreign_key_check").fetchall():
+                raise RuntimeError("L18 V2 capture evidence foreign-key check failed")
+            conn.execute("COMMIT")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            return sessions
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
 
     @staticmethod
     def _erase_identity_intents(conn: sqlite3.Connection, table: str, identity: Tuple[str, str, str]) -> None:
@@ -985,6 +1031,11 @@ class L18V2PrivacyErasureOwner:
         finally:
             conn.close()
         result = {"owner": self.OWNER, "status": "COMPLETE", "deleted": int(deleted)}
+        if self.capture_evidence_path is not None and authorization.identity == MA.FIRST_INTERACTION_IDENTITY:
+            # After the L18 commit, before the owner result: if this fails no COMPLETE is recorded, so Privacy cannot
+            # complete while captured dialogue remains, and a retry (the authorization stays resolvable while the
+            # hold is active) re-runs both idempotent steps.
+            result["captureSessionsErased"] = self._erase_capture_evidence(self.capture_evidence_path)
         self.privacy_authority.record_owner_result(
             authorization_ref_id, execution_nonce, result
         )
