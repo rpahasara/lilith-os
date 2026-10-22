@@ -20,13 +20,20 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 try:
     from . import canonical_contracts as C
+    from . import first_interaction_v1 as FI
+    from . import memory_action_v2 as MA
 except ImportError:  # deploy-exact flat-directory tests
     import canonical_contracts as C
+    import first_interaction_v1 as FI
+    import memory_action_v2 as MA
 
 
 SCHEMA_VERSION = 1
 V2_PROPOSAL_FAMILY = "OWNER_DIRECTED_PROJECT_CODENAME_V1"
 V1_PROPOSAL_FAMILY = "L18_V1_CAREER"
+FIRST_INTERACTION_PROPOSAL_FAMILY = "OWNER_DIRECTED_FIRST_INTERACTION_V1"
+# Families whose proposals L04 V2 applies (V1 stays historical and unchanged).
+L04_V2_FAMILIES = frozenset({V2_PROPOSAL_FAMILY, FIRST_INTERACTION_PROPOSAL_FAMILY})
 CANDIDATE_CLASS = "OWNER_DIRECTED_MEMORY_CANDIDATE"
 SOURCE_STREAM = "home_owner_memory_intents"
 VALUE_SCHEMA = "HomelabCodenameV1"
@@ -239,8 +246,139 @@ LEARNING_V2_MIGRATION_STATEMENTS = (
 )
 
 
+# FM-02 First Interaction family (schema v2, applied only by first_interaction_migration). The five tables are
+# additive and pinned to the one approved tuple, CREATE-only, RECORDED_INTERACTION. The codename tables above are
+# unchanged; learning_proposal_ref is the one shared table the migration rebuilds, because L04 rows reference it.
+_FI_CLASS, _FI_NAMESPACE, _FI_KEY = MA.FIRST_INTERACTION_IDENTITY
+_FI_SCOPE = (
+    f"operation TEXT NOT NULL CHECK(operation='CREATE'), "
+    f"memory_class TEXT NOT NULL CHECK(memory_class='{_FI_CLASS}'), "
+    f"subject_namespace TEXT NOT NULL CHECK(subject_namespace='{_FI_NAMESPACE}'), "
+    f"subject_key TEXT NOT NULL CHECK(subject_key='{_FI_KEY}'), "
+    f"value_schema TEXT NOT NULL CHECK(value_schema='{MA.FIRST_INTERACTION_VALUE_SCHEMA}'), "
+)
+_FI_PURPOSE = f"purpose TEXT NOT NULL CHECK(purpose='{MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION}'), "
+_FI_NO_REVISION = (
+    "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
+    "restore_revision_id TEXT CHECK(restore_revision_id IS NULL), "
+)
+
+FIRST_INTERACTION_TABLES = frozenset({
+    "learning_fi_intent_v1",
+    "learning_fi_candidate_v1",
+    "learning_fi_candidate_source_v1",
+    "learning_fi_assessment_v1",
+    "learning_fi_proposal_v1",
+})
+FIRST_INTERACTION_SCHEMA_OBJECTS = frozenset({
+    *FIRST_INTERACTION_TABLES,
+    "learning_fi_intent_v1_action",
+    "learning_fi_candidate_v1_idempotency",
+    "learning_fi_candidate_v1_action",
+    "learning_fi_proposal_v1_candidate",
+    "learning_fi_proposal_v1_fingerprint",
+    *(f"{table}_no_{verb}" for table in FIRST_INTERACTION_TABLES for verb in ("update", "delete")),
+})
+LEARNING_V2_SCHEMA_OBJECTS_V2 = LEARNING_V2_SCHEMA_OBJECTS | FIRST_INTERACTION_SCHEMA_OBJECTS
+
+FIRST_INTERACTION_MIGRATION_STATEMENTS = (
+    "CREATE TABLE learning_fi_intent_v1 ("
+    "intent_ref_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
+    "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
+    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, " + _FI_SCOPE
+    + "normalized_value_json TEXT NOT NULL, payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    + _FI_NO_REVISION + _FI_PURPOSE
+    + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), created_at TEXT NOT NULL)",
+    "CREATE UNIQUE INDEX learning_fi_intent_v1_action ON learning_fi_intent_v1(actor_evidence_ref_id,action_digest)",
+    "CREATE TABLE learning_fi_candidate_v1 ("
+    "candidate_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "candidate_class TEXT NOT NULL CHECK(candidate_class='OWNER_DIRECTED_MEMORY_CANDIDATE'), "
+    "descriptor_family TEXT NOT NULL CHECK(descriptor_family='FIRST_INTERACTION_V1'), "
+    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, "
+    "intent_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
+    "policy_decision_ref_id TEXT NOT NULL, consent_ref_id TEXT NOT NULL, "
+    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+    "admission_basis TEXT NOT NULL CHECK(admission_basis='OWNER_DIRECTED_EXACT_ACTION'), "
+    "epistemic_basis TEXT NOT NULL CHECK(epistemic_basis='RECORDED_INTERACTION'), "
+    "validation_state TEXT NOT NULL CHECK(validation_state IN ('VALID','INVALID')), "
+    "idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, " + _FI_SCOPE
+    + "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
+    "restore_revision_id TEXT CHECK(restore_revision_id IS NULL))",
+    "CREATE UNIQUE INDEX learning_fi_candidate_v1_idempotency ON learning_fi_candidate_v1(idempotency_key)",
+    "CREATE UNIQUE INDEX learning_fi_candidate_v1_action ON learning_fi_candidate_v1(action_digest)",
+    "CREATE TABLE learning_fi_candidate_source_v1 ("
+    "candidate_id TEXT PRIMARY KEY REFERENCES learning_fi_candidate_v1(candidate_id), "
+    "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
+    "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
+    "source_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
+    "source_digest TEXT NOT NULL CHECK(length(source_digest)=64), "
+    "UNIQUE(source_owner,source_stream,source_ref_id,source_digest))",
+    "CREATE TABLE learning_fi_assessment_v1 ("
+    "candidate_id TEXT PRIMARY KEY REFERENCES learning_fi_candidate_v1(candidate_id), "
+    "schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "outcome TEXT NOT NULL CHECK(outcome IN ('REAL_ELIGIBLE','REJECTED','DEFERRED')), "
+    "reason_code TEXT NOT NULL, assessed_at TEXT NOT NULL)",
+    "CREATE TABLE learning_fi_proposal_v1 ("
+    "proposal_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "candidate_id TEXT NOT NULL REFERENCES learning_fi_candidate_v1(candidate_id), "
+    "intent_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
+    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, policy_decision_ref_id TEXT NOT NULL, "
+    "consent_ref_id TEXT NOT NULL, rollback_authorization_ref_id TEXT CHECK(rollback_authorization_ref_id IS NULL), "
+    + _FI_SCOPE + "proposed_value_json TEXT NOT NULL, "
+    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), " + _FI_NO_REVISION + _FI_PURPOSE
+    + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+    "proposal_fingerprint TEXT NOT NULL CHECK(length(proposal_fingerprint)=64), created_at TEXT NOT NULL)",
+    "CREATE UNIQUE INDEX learning_fi_proposal_v1_candidate ON learning_fi_proposal_v1(candidate_id)",
+    "CREATE UNIQUE INDEX learning_fi_proposal_v1_fingerprint ON learning_fi_proposal_v1(proposal_fingerprint)",
+    *(
+        f"CREATE TRIGGER {table}_no_{verb} BEFORE {verb.upper()} ON {table} BEGIN "
+        f"SELECT RAISE(ABORT,'{message}'); END"
+        for table in sorted(FIRST_INTERACTION_TABLES)
+        for verb, message in (("update", "First Interaction L18 row is immutable"),
+                              ("delete", "First Interaction L18 deletion requires Privacy authority"))
+    ),
+)
+
+# The rebuilt shared reference table: the closed family set gains exactly the First Interaction family.
+LEARNING_PROPOSAL_REF_V2_DDL = (
+    "CREATE TABLE learning_proposal_ref ("
+    "proposal_ref_id TEXT PRIMARY KEY, "
+    "proposal_family TEXT NOT NULL CHECK(proposal_family IN "
+    f"('{V1_PROPOSAL_FAMILY}','{V2_PROPOSAL_FAMILY}','{FIRST_INTERACTION_PROPOSAL_FAMILY}')), "
+    "proposal_schema_version INTEGER NOT NULL CHECK(proposal_schema_version=1), "
+    "family_proposal_id TEXT NOT NULL, "
+    "immutable_fingerprint TEXT NOT NULL CHECK(length(immutable_fingerprint)=64), "
+    "created_at TEXT NOT NULL, UNIQUE(proposal_family,family_proposal_id))"
+)
+
+
 class LearningV2Error(RuntimeError):
     pass
+
+
+def is_first_interaction(purpose: str) -> bool:
+    return purpose == MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION
+
+
+def normalize_for_purpose(purpose: str, value: Any) -> Tuple[str, str]:
+    """The family normalizer for a (validated) action purpose; codename behaviour is unchanged."""
+    if is_first_interaction(purpose):
+        try:
+            return FI.normalize_first_interaction_episode(value)
+        except FI.FirstMemoryContractViolation as exc:
+            raise LearningV2Error(f"FirstInteractionEpisodeV1 is invalid: {exc}") from exc
+    return normalize_project_codename(value)
+
+
+def normalize_for_schema(value_schema: Any, value: Any) -> Tuple[str, str]:
+    """The family normalizer for a stored value schema; unknown schemas fail closed."""
+    if value_schema == VALUE_SCHEMA:
+        return normalize_project_codename(value)
+    if value_schema == MA.FIRST_INTERACTION_VALUE_SCHEMA:
+        return normalize_for_purpose(MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION, value)
+    raise LearningV2Error("value schema is unsupported")
 
 
 def utc_now(value: Optional[datetime] = None) -> str:
@@ -346,8 +484,8 @@ def _authorizer(
 ) -> int:
     del arg2, database, trigger
     table = str(arg1 or "")
-    readable = LEARNING_V2_TABLES | {"learning_proposal", "sqlite_master"}
-    writable = LEARNING_V2_TABLES - {"learning_v2_schema_migration"}
+    readable = LEARNING_V2_TABLES | FIRST_INTERACTION_TABLES | {"learning_proposal", "sqlite_master"}
+    writable = (LEARNING_V2_TABLES | FIRST_INTERACTION_TABLES) - {"learning_v2_schema_migration"}
     if action == sqlite3.SQLITE_READ:
         return sqlite3.SQLITE_OK if table in readable else sqlite3.SQLITE_DENY
     if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}:
@@ -406,6 +544,20 @@ class LearningV2Store:
         conn.set_authorizer(_authorizer)
         return conn
 
+    @staticmethod
+    def has_first_interaction_schema(conn: sqlite3.Connection) -> bool:
+        names = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'learning_fi_%'"
+            )
+        }
+        return FIRST_INTERACTION_TABLES.issubset(names)
+
+    def _require_first_interaction_schema(self, conn: sqlite3.Connection) -> None:
+        if not self.has_first_interaction_schema(conn):
+            raise LearningV2Error("First Interaction schema is unavailable")
+
     def create_intent(
         self,
         *,
@@ -425,11 +577,15 @@ class LearningV2Store:
                 value = json.loads(normalized_value_json)
             except (TypeError, ValueError) as exc:
                 raise LearningV2Error("intent value is invalid JSON") from exc
-            canonical, digest = normalize_project_codename(value)
+            canonical, digest = normalize_for_purpose(action.purpose, value)
             if canonical != normalized_value_json or digest != action.payload_digest:
                 raise LearningV2Error("intent payload/action digest mismatch")
         elif normalized_value_json is not None:
             raise LearningV2Error("RESTORE intent cannot carry plaintext")
+        intent_table = (
+            "learning_fi_intent_v1" if is_first_interaction(action.purpose)
+            else "learning_memory_intent_v2"
+        )
         intent = MemoryIntentV1(
             intent_ref_id=intent_ref_id or ("intent." + uuid.uuid4().hex),
             action=action,
@@ -439,8 +595,10 @@ class LearningV2Store:
         )
         conn = self.connect()
         try:
+            if is_first_interaction(action.purpose):
+                self._require_first_interaction_schema(conn)
             conn.execute(
-                "INSERT INTO learning_memory_intent_v2 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO {intent_table} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     intent.intent_ref_id,
                     1,
@@ -487,10 +645,14 @@ class LearningV2Store:
             C.require_id(value, field)
         if validation_state not in {"VALID", "INVALID"}:
             raise LearningV2Error("candidate validation state is unsupported")
+        first = is_first_interaction(action.purpose)
         conn = self.connect()
         try:
+            if first:
+                self._require_first_interaction_schema(conn)
             intent = conn.execute(
-                "SELECT * FROM learning_memory_intent_v2 WHERE intent_ref_id=?",
+                "SELECT * FROM %s WHERE intent_ref_id=?"
+                % ("learning_fi_intent_v1" if first else "learning_memory_intent_v2"),
                 (intent_ref_id,),
             ).fetchone()
             exact_intent = (
@@ -521,7 +683,7 @@ class LearningV2Store:
             policy = self.policy_store.resolve(
                 policy_decision_ref_id,
                 action=action,
-                capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
+                capability=MA.capability_for_purpose(action.purpose),
             )
             if getattr(policy, "status", None) != "CONFIRMED":
                 raise LearningV2Error("candidate Policy binding is invalid")
@@ -534,7 +696,7 @@ class LearningV2Store:
             if getattr(consent, "status", None) != "CONFIRMED":
                 raise LearningV2Error("candidate Consent binding is invalid")
             candidate = LearningCandidateV2(
-                candidate_id="candidate.v2." + uuid.uuid4().hex,
+                candidate_id=("candidate.fi." if first else "candidate.v2.") + uuid.uuid4().hex,
                 action=action,
                 actor_evidence_ref_id=actor_evidence_ref_id,
                 intent_ref_id=intent_ref_id,
@@ -545,6 +707,28 @@ class LearningV2Store:
                 created_at=utc_now(self.now_fn()),
             )
             conn.execute("BEGIN IMMEDIATE")
+            if first:
+                conn.execute(
+                    "INSERT INTO learning_fi_candidate_v1 VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        candidate.candidate_id, 1, CANDIDATE_CLASS, "FIRST_INTERACTION_V1",
+                        action.actor_ref_id, actor_evidence_ref_id, intent_ref_id,
+                        policy_decision_ref_id, consent_ref_id, action.action_digest,
+                        "OWNER_DIRECTED_EXACT_ACTION", MA.RECORDED_INTERACTION, validation_state,
+                        candidate.idempotency_key, candidate.created_at, action.operation,
+                        action.memory_class, action.subject_namespace, action.subject_key,
+                        action.value_schema, action.payload_digest,
+                        action.expected_active_revision_id, action.restore_revision_id,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO learning_fi_candidate_source_v1 VALUES (?,?,?,?,?)",
+                    (candidate.candidate_id, C.MEMORY_INTERACTION_AUTHORITY, SOURCE_STREAM,
+                     intent_ref_id, action.action_digest),
+                )
+                conn.commit()
+                return candidate
             conn.execute(
                 "INSERT INTO learning_candidate_v2 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -612,6 +796,13 @@ class LearningV2Store:
                 "ON d.candidate_id=c.candidate_id WHERE c.candidate_id=?",
                 (candidate_id,),
             ).fetchone()
+            assessment_table = "learning_assessment_v2"
+            if candidate is None and self.has_first_interaction_schema(conn):
+                candidate = conn.execute(
+                    "SELECT * FROM learning_fi_candidate_v1 WHERE candidate_id=?",
+                    (candidate_id,),
+                ).fetchone()
+                assessment_table = "learning_fi_assessment_v1"
             if candidate is None:
                 raise LearningV2Error("candidate not found")
             held = False
@@ -630,7 +821,7 @@ class LearningV2Store:
             else:
                 outcome, reason = requested_outcome, "AUTHORITY_FOUNDATIONS_READY"
             conn.execute(
-                "INSERT INTO learning_assessment_v2 VALUES (?,?,?,?,?)",
+                f"INSERT INTO {assessment_table} VALUES (?,?,?,?,?)",
                 (candidate_id, 1, outcome, reason, utc_now(self.now_fn())),
             )
             conn.commit()
@@ -646,18 +837,29 @@ class LearningV2Store:
         rollback_authorization_ref_id: Optional[str] = None,
     ) -> Tuple[MemoryWriteProposalV2, ProposalRefV1]:
         action.validate()
+        first = is_first_interaction(action.purpose)
         conn = self.connect()
         try:
-            row = conn.execute(
-                "SELECT c.*,d.operation,d.memory_class,d.subject_namespace,d.subject_key,"
-                "d.value_schema,d.payload_digest,d.expected_active_revision_id,d.restore_revision_id,"
-                "i.normalized_value_json,a.outcome FROM learning_candidate_v2 c "
-                "JOIN learning_project_codename_candidate_v1 d ON d.candidate_id=c.candidate_id "
-                "JOIN learning_memory_intent_v2 i ON i.intent_ref_id=c.intent_ref_id "
-                "JOIN learning_assessment_v2 a ON a.candidate_id=c.candidate_id "
-                "WHERE c.candidate_id=?",
-                (candidate_id,),
-            ).fetchone()
+            if first:
+                self._require_first_interaction_schema(conn)
+                row = conn.execute(
+                    "SELECT c.*,i.normalized_value_json,a.outcome FROM learning_fi_candidate_v1 c "
+                    "JOIN learning_fi_intent_v1 i ON i.intent_ref_id=c.intent_ref_id "
+                    "JOIN learning_fi_assessment_v1 a ON a.candidate_id=c.candidate_id "
+                    "WHERE c.candidate_id=?",
+                    (candidate_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT c.*,d.operation,d.memory_class,d.subject_namespace,d.subject_key,"
+                    "d.value_schema,d.payload_digest,d.expected_active_revision_id,d.restore_revision_id,"
+                    "i.normalized_value_json,a.outcome FROM learning_candidate_v2 c "
+                    "JOIN learning_project_codename_candidate_v1 d ON d.candidate_id=c.candidate_id "
+                    "JOIN learning_memory_intent_v2 i ON i.intent_ref_id=c.intent_ref_id "
+                    "JOIN learning_assessment_v2 a ON a.candidate_id=c.candidate_id "
+                    "WHERE c.candidate_id=?",
+                    (candidate_id,),
+                ).fetchone()
             if row is None or str(row["outcome"]) != REAL_ELIGIBLE:
                 raise LearningV2Error("candidate is not REAL_ELIGIBLE")
             descriptor_exact = (
@@ -707,7 +909,7 @@ class LearningV2Store:
             )
             proposal_ref = ProposalRefV1(
                 proposal_ref_id="proposal-ref." + uuid.uuid4().hex,
-                proposal_family=V2_PROPOSAL_FAMILY,
+                proposal_family=FIRST_INTERACTION_PROPOSAL_FAMILY if first else V2_PROPOSAL_FAMILY,
                 proposal_schema_version=1,
                 family_proposal_id=proposal_id,
                 immutable_fingerprint=proposal.proposal_fingerprint,
@@ -715,7 +917,8 @@ class LearningV2Store:
             )
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
-                "INSERT INTO learning_proposal_v2 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO %s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                % ("learning_fi_proposal_v1" if first else "learning_proposal_v2"),
                 (
                     proposal.proposal_id,
                     1,
@@ -800,6 +1003,12 @@ class LearningV2Store:
             if ref.proposal_family == V2_PROPOSAL_FAMILY:
                 proposal = conn.execute(
                     "SELECT * FROM learning_proposal_v2 WHERE proposal_id=?",
+                    (ref.family_proposal_id,),
+                ).fetchone()
+            elif ref.proposal_family == FIRST_INTERACTION_PROPOSAL_FAMILY:
+                self._require_first_interaction_schema(conn)
+                proposal = conn.execute(
+                    "SELECT * FROM learning_fi_proposal_v1 WHERE proposal_id=?",
                     (ref.family_proposal_id,),
                 ).fetchone()
             elif ref.proposal_family == V1_PROPOSAL_FAMILY:

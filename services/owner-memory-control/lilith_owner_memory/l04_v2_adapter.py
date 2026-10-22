@@ -272,7 +272,7 @@ def resolve_v2_action(store: S.CanonicalMemoryStoreV2, proposal_ref_id: Any) -> 
     """The frozen action named by an immutable L04 V2 proposal reference."""
     try:
         ref, proposal = store.learning_store.resolve_proposal_ref(proposal_ref_id)
-        require(ref.proposal_family == L.V2_PROPOSAL_FAMILY, "PROPOSAL_UNRESOLVED", "V1_PROPOSAL_FAMILY")
+        require(ref.proposal_family in L.L04_V2_FAMILIES, "PROPOSAL_UNRESOLVED", "V1_PROPOSAL_FAMILY")
         action = S.CanonicalMemoryStoreV2._action(proposal)
         action.validate()
     except Reject:
@@ -295,12 +295,11 @@ def _stored_value_digest(revision: sqlite3.Row | tuple) -> str | None:
     """The digest of the value L04 actually stores, recomputed from the stored
     JSON. None (fail closed) if the stored value does not re-normalize to
     itself and to its recorded digest, so a rewritten value cannot hide
-    behind an unchanged `value_digest` column."""
+    behind an unchanged `value_digest` column. The family normalizer is chosen
+    by the stored value schema; an unknown schema fails closed."""
     value_digest, value_schema, value_json = str(revision[0]), revision[3], revision[4]
-    if value_schema != L.VALUE_SCHEMA:
-        return None
     try:
-        canonical, recomputed = L.normalize_project_codename(json.loads(str(value_json)))
+        canonical, recomputed = L.normalize_for_schema(value_schema, json.loads(str(value_json)))
     except Exception:
         return None
     return recomputed if canonical == str(value_json) and recomputed == value_digest else None

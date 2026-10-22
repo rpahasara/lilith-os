@@ -11,8 +11,11 @@ Option III (owner decision D-3), corrected:
 - **Admitted value only (D-B).** The binding is read from the exact class-normalized value L04 stored for that
   admission. The value is accepted only if `sha256(value.encode("ascii"))` equals the owner-signed `payloadDigest`
   that V2 just verified (the existing L04 rule), so neither a caller packet nor an edited stored value can stand in.
-  FM-02 has not defined a First Memory class whose value carries a binding; until it does, every existing class
-  fails closed (`IDENTITY_BINDING_MISSING`) and no positive end-to-end binding exists.
+  The FM-02 First Interaction class (`OWNER_DIRECTED_FIRST_INTERACTION`, value schema `FirstInteractionEpisodeV1`)
+  carries this binding inside its admitted value; every other class fails closed (`IDENTITY_BINDING_MISSING`).
+  Known limitation, a blocker for real use: the environment check compares the trusted profile with the caller's
+  identity context only; it is not yet bound to the verified V2 authority/owner environment, and no owner-accepted,
+  repository-pinned profile source exists yet.
 - **No independence claim (D-C).** `lid1.` structure and known-value collision checks catch some mistakes. They
   cannot prove that an identifier was generated independently; that rests on the reviewed generation procedure.
 
@@ -39,7 +42,7 @@ PROFILE_SCHEMA_VERSION = 1
 IDENTITY_BOUND = "IDENTITY_BOUND"
 IDENTITY_NOT_BOUND = "IDENTITY_NOT_BOUND"
 BINDING_SEMANTICS = "BINDS_ACCEPTED_MEMORY_TO_IDENTITY_PROFILE_NOT_A_TRUTH_OR_AUTHORITY_CLAIM"
-# Where a First Memory value would carry its binding. Placeholder name until FM-02 defines the class and schema.
+# Where a First Memory value carries its binding (the FM-02 FirstInteractionEpisodeV1 schema uses this field).
 BINDING_FIELD = "identityBinding"
 
 REASONS = frozenset({

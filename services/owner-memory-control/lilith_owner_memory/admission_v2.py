@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from lilith_memory import canonical_contracts as C
+from lilith_memory import memory_action_v2 as MA
 from lilith_memory.owner_proof import OwnerProofError, _digest, _exact, _id, _instant, _optional_id
 
 from . import authority_contracts as A
@@ -44,10 +45,14 @@ NOT_ACCEPTED = "NOT_ACCEPTED"
 VERIFIED_OWNER_AUTHORITY = "VERIFIED_OWNER_AUTHORITY"
 ACCEPTANCE_V2_SEMANTICS = "OWNER_AUTHORIZED_AUTHORITY_SIGNED_L04_ADMITTED_NOT_A_TRUTH_CLAIM"
 
-# The unchanged L04 V2 apply writes exactly these bases for every admission.
-# OwnerEvidenceV2 does not sign an epistemic basis, so acceptance pins them:
-# any other value means the row was not produced by that apply.
-L04_V2_EPISTEMIC_BASIS = "USER_ASSERTED"
+# L04 V2 apply writes exactly these bases. OwnerEvidenceV2 does not sign an
+# epistemic basis, so acceptance pins them: the expected epistemic basis is the
+# one the closed per-purpose map gives for the VERIFIED action's purpose, which
+# the owner challenge and the signed actionDigest cover (codename: USER_ASSERTED,
+# unchanged; First Interaction: RECORDED_INTERACTION). There is no basis input:
+# the stored row's basis is compared, never trusted; an unknown purpose fails.
+EPISTEMIC_BASIS_BY_PURPOSE = MA.EPISTEMIC_BASIS_BY_PURPOSE
+L04_V2_EPISTEMIC_BASIS = EPISTEMIC_BASIS_BY_PURPOSE[C.LONG_TERM_PERSONAL_PROJECT_RECALL]
 L04_V2_ADMISSION_BASIS = "OWNER_DIRECTED_EXACT_ACTION"
 
 ACTOR_EVIDENCE_REF_V1 = "ACTOR_EVIDENCE_REF_V1"
@@ -303,7 +308,8 @@ def check_admission_link(authority: VerifiedOwnerAuthorityV1, action: C.FrozenMe
     if action.operation != C.CREATE:
         require(admitted["memoryItemId"] == authority.owner.challenge["memoryItemId"], "ADMISSION_BINDING_MISMATCH")
     require((admitted["epistemicBasis"], admitted["admissionBasis"])
-            == (L04_V2_EPISTEMIC_BASIS, L04_V2_ADMISSION_BASIS), "ADMISSION_BINDING_MISMATCH")
+            == (EPISTEMIC_BASIS_BY_PURPOSE.get(action.purpose), L04_V2_ADMISSION_BASIS),
+            "ADMISSION_BINDING_MISMATCH")
     return admitted, linked
 
 
