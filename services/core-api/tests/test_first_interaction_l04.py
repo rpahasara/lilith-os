@@ -30,6 +30,7 @@ from lilith_memory import canonical_authority as authority
 from lilith_memory import canonical_contracts as C
 from lilith_memory import canonical_store
 from lilith_memory import config
+from lilith_memory import conversation_evidence as CE
 from lilith_memory import first_interaction_migration as FIM
 from lilith_memory import first_interaction_v1 as FI
 from lilith_memory import learning_v2
@@ -60,16 +61,31 @@ SYNTHETIC_BINDING = {  # TEST_ONLY shape-valid binding; never a real identity
 }
 
 
+class SyntheticEvidenceSource:
+    """TEST-ONLY stand-in for sealed captured evidence: exact transcript bytes by evidence reference."""
+
+    def __init__(self) -> None:
+        self.transcripts: dict[str, bytes] = {}
+
+    def sealed_transcript(self, evidence_ref: str) -> bytes | None:
+        return self.transcripts.get(evidence_ref)
+
+
+SYNTHETIC_EVIDENCE = SyntheticEvidenceSource()
+
+
 def fi_value(closing: str = "TEST_ONLY good night") -> dict:
     turns = [("OWNER", "2026-11-01T18:00:00Z", "TEST_ONLY hi"), ("LILITH", "2026-11-01T18:00:05Z", closing)]
     evidence = json.dumps({"schema": FI.TRANSCRIPT_SCHEMA, "conversationRef": "conv.test-only.core",
                            "turns": [{"index": i, "speaker": s, "at": at, "text": t}
                                      for i, (s, at, t) in enumerate(turns)]}).encode("utf-8")
+    evidence_ref = "evidence.test-only.core." + hashlib.sha256(evidence).hexdigest()[:16]
+    SYNTHETIC_EVIDENCE.transcripts[evidence_ref] = evidence
     return {
         "schemaVersion": 1, "valueSchema": FI.VALUE_SCHEMA, "identityBinding": dict(SYNTHETIC_BINDING),
         "truthBasis": FI.RECORDED_INTERACTION,
         "eventTime": {"startedAt": turns[0][1], "endedAt": turns[1][1]},
-        "transcript": {"schema": FI.TRANSCRIPT_SCHEMA, "evidenceRef": "evidence.test-only.core",
+        "transcript": {"schema": FI.TRANSCRIPT_SCHEMA, "evidenceRef": evidence_ref,
                        "sha256": hashlib.sha256(evidence).hexdigest(), "turnCount": 2},
         "quotations": [{"position": FI.OPENING, "turnIndex": 0, "speaker": "OWNER", "start": 0,
                         "end": len(turns[0][2]), "text": turns[0][2]},
@@ -254,7 +270,10 @@ class FirstInteractionCase(CanonicalRuntimeCase):
         self.rollback = authority.RollbackAuthority(self.db, self.actor, self.consent, now_fn=lambda: self.now)
         self.learning = learning_v2.LearningV2Store(
             self.db, privacy_hold_resolver=self.hold, containment_ready=lambda: True, actor_authority=self.actor,
-            policy_store=self.policy, consent_store=self.consent, now_fn=lambda: self.now)
+            policy_store=self.policy, consent_store=self.consent, now_fn=lambda: self.now,
+            first_interaction_evidence_gate=CE.FirstInteractionEvidenceGate(
+                SYNTHETIC_EVIDENCE, trusted_identity=CE.TrustedIdentityBindingV1("test", SYNTHETIC_BINDING),
+                deployment_environment="test"))
         self.registry = memory_v2.CanonicalTupleRegistry((self.registry_policy, memory_v2.MemoryTuplePolicyV1(
             FI_CLASS, FI_NAMESPACE, FI_KEY, FI.VALUE_SCHEMA, FI_CAPABILITY, True, True)))
 

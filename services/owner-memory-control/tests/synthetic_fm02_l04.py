@@ -13,20 +13,43 @@ from typing import Any
 
 import synthetic_b1b3b as T
 import synthetic_first_memory as SF
+import synthetic_identity as SI
 from lilith_memory import backup
 from lilith_memory import canonical_authority as CA
 from lilith_memory import canonical_contracts as C
+from lilith_memory import conversation_evidence as CE
 from lilith_memory import first_interaction_migration as FIM
 from lilith_memory import learning_v2
 from lilith_memory import memory_action_v2 as MA
 from lilith_memory import memory_v2
 from lilith_memory import privacy_governance as P
 from lilith_memory import slice15b2a_migration
+from lilith_owner_memory import identity_profile as IP
 
 FI_CLASS, FI_NAMESPACE, FI_KEY = MA.FIRST_INTERACTION_IDENTITY
 FI_CAPABILITY = MA.CANONICAL_MEMORY_FIRST_INTERACTION_CREATE
 FI_PURPOSE = MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION
 TEST_ONLY_PRIVACY_SECRET = b"TEST_ONLY FM-02 privacy governance secret, 32+ bytes"
+
+
+class SyntheticEvidenceSource:
+    """TEST-ONLY stand-in for sealed captured conversation evidence: exact transcript bytes by evidence reference.
+    Holds the labelled synthetic FM-02 transcript; a value naming any other reference is refused by the real gate."""
+
+    def __init__(self) -> None:
+        self.transcripts: dict[str, bytes] = {SF.value()["transcript"]["evidenceRef"]: SF.transcript_bytes()}
+
+    def sealed_transcript(self, evidence_ref: str) -> bytes | None:
+        return self.transcripts.get(evidence_ref)
+
+
+def evidence_gate(source: SyntheticEvidenceSource | None = None, *, profile: IP.IdentityProfileV1 | None = None,
+                  deployment_environment: str = "test") -> CE.FirstInteractionEvidenceGate:
+    """The real F2/F3 candidate gate over synthetic evidence and the synthetic trusted profile."""
+    return CE.FirstInteractionEvidenceGate(
+        source or SyntheticEvidenceSource(),
+        trusted_identity=IP.first_interaction_trusted_identity(profile or SI.profile()),
+        deployment_environment=deployment_environment)
 
 
 def migrate_v2(harness: T.L04Harness, *, tag: str = "fm02", **kwargs: Any) -> dict[str, str]:
@@ -40,6 +63,7 @@ class FirstInteractionHarness(T.L04Harness):
 
     def __init__(self, *, migrate: bool = True) -> None:
         super().__init__()
+        self.evidence = SyntheticEvidenceSource()
         if migrate:
             self.fingerprints = migrate_v2(self)
         both = frozenset({T.L04_CAPABILITY, FI_CAPABILITY})
@@ -49,7 +73,7 @@ class FirstInteractionHarness(T.L04Harness):
         self.learning = learning_v2.LearningV2Store(
             self.db, privacy_hold_resolver=self.privacy, containment_ready=lambda: True,
             actor_authority=self.actor, policy_store=self.policy, consent_store=self.consent,
-            now_fn=lambda: self.now)
+            now_fn=lambda: self.now, first_interaction_evidence_gate=evidence_gate(self.evidence))
         self.fi_policy = memory_v2.MemoryTuplePolicyV1(
             memory_class=FI_CLASS, subject_namespace=FI_NAMESPACE, subject_key=FI_KEY,
             value_schema=MA.FIRST_INTERACTION_VALUE_SCHEMA, capability=FI_CAPABILITY, read_allowed=True,

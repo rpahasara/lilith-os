@@ -517,6 +517,7 @@ class LearningV2Store:
         policy_store: Optional[Any] = None,
         consent_store: Optional[Any] = None,
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        first_interaction_evidence_gate: Optional[Callable[[str], Any]] = None,
     ):
         self.path = Path(path)
         self.privacy_hold_resolver = privacy_hold_resolver
@@ -525,6 +526,9 @@ class LearningV2Store:
         self.policy_store = policy_store
         self.consent_store = consent_store
         self.now_fn = now_fn
+        # F2: a First Interaction value proceeds only when this gate verifies it against sealed captured
+        # conversation evidence and the trusted identity (conversation_evidence.FirstInteractionEvidenceGate).
+        self.first_interaction_evidence_gate = first_interaction_evidence_gate
 
     def connect(self) -> sqlite3.Connection:
         if not self.path.is_file():
@@ -558,6 +562,23 @@ class LearningV2Store:
         if not self.has_first_interaction_schema(conn):
             raise LearningV2Error("First Interaction schema is unavailable")
 
+    def _require_first_interaction_evidence(self, action: C.FrozenMemoryActionV1,
+                                            normalized_value_json: Optional[str]) -> None:
+        """Fail closed unless the evidence gate verifies this exact value. The gate's facts never accept memory."""
+        gate = self.first_interaction_evidence_gate
+        if gate is None:
+            raise LearningV2Error("First Interaction evidence gate is unavailable")
+        try:
+            facts = gate(normalized_value_json)
+        except Exception as exc:
+            raise LearningV2Error(
+                "First Interaction evidence is not verified: " + str(getattr(exc, "code", type(exc).__name__))
+            ) from exc
+        if not (isinstance(facts, Mapping) and facts.get("payloadDigest") == action.payload_digest
+                and facts.get("truthClaim") is False and facts.get("authorizesAdmission") is False
+                and facts.get("firstMemoryAccepted") is False):
+            raise LearningV2Error("First Interaction evidence is not verified: GATE_RESULT_INVALID")
+
     def create_intent(
         self,
         *,
@@ -582,6 +603,8 @@ class LearningV2Store:
                 raise LearningV2Error("intent payload/action digest mismatch")
         elif normalized_value_json is not None:
             raise LearningV2Error("RESTORE intent cannot carry plaintext")
+        if is_first_interaction(action.purpose):
+            self._require_first_interaction_evidence(action, normalized_value_json)
         intent_table = (
             "learning_fi_intent_v1" if is_first_interaction(action.purpose)
             else "learning_memory_intent_v2"
@@ -672,6 +695,8 @@ class LearningV2Store:
             )
             if not exact_intent:
                 raise LearningV2Error("candidate intent/action mismatch")
+            if first:
+                self._require_first_interaction_evidence(action, intent["normalized_value_json"])
             if self.actor_authority is None or self.policy_store is None or self.consent_store is None:
                 raise LearningV2Error("L18 V2 authority resolvers are unavailable")
             try:
