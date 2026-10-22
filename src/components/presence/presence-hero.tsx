@@ -6,6 +6,7 @@ import { History } from "lucide-react";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
 import { ConversationView } from "@/components/conversation/conversation-view";
+import { RecordingControl } from "@/components/conversation/recording-control";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { CommandConsole, CommandHistory, useCommand } from "@/components/command";
 import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
@@ -226,6 +227,7 @@ export function PresenceHero() {
 
       {/* command input — the primary conversation + command surface */}
       <div className="w-full max-w-xl">
+        <RecordingControl />
         <CommandInput
           onFocusChange={handleFocus}
           onSubmit={handleSubmit}

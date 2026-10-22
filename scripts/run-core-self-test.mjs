@@ -1,6 +1,7 @@
 /**
  * Headless runner for the Cognitive Core self-test (all slices, incl. Slice 4
- * approval-gated write) and the memory projection self-test (FM-09). Bundles
+ * approval-gated write), the memory projection self-test (FM-09) and the
+ * owner-protected recording self-test (F5). Bundles
  * the TypeScript with esbuild (resolving the `@/` path alias) and runs it under
  * Node — no browser, no live backend (the transport + task/draft stores are all
  * in-memory fakes).
@@ -23,7 +24,8 @@ await build({
     contents: `
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest()];
+      import { runConversationSelfTest } from "@/lib/conversation/self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
@@ -42,7 +44,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node18",
-  alias: { "@": join(root, "src") },
+  alias: { "@": join(root, "src"), "next/server": join(root, "scripts", "self-test-next-server-shim.mjs") },
   outfile: out,
   logLevel: "warning",
 });

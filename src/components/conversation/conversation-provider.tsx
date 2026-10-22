@@ -6,11 +6,21 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { sendConversation } from "@/lib/conversation/client";
+import {
+  INITIAL_RECORDING,
+  fetchRecordingAvailability,
+  finishRecording as requestFinish,
+  isRecordingActive,
+  recordingReducer,
+  startRecording as requestStart,
+  type RecordingState,
+} from "@/lib/conversation/recording";
 import type { ConversationMessage, ConversationStatus } from "@/lib/conversation/types";
 
 /**
@@ -25,6 +35,8 @@ import type { ConversationMessage, ConversationStatus } from "@/lib/conversation
 
 const SESSION_KEY = "lilith-os:session-id";
 const MESSAGES_KEY = "lilith-os:messages";
+// UI hint only (resume after a refresh); the server re-checks the session on every action.
+const RECORDING_KEY = "lilith-os:recording-session";
 const MAX_PERSISTED = 60;
 
 interface ConversationContextValue {
@@ -38,6 +50,11 @@ interface ConversationContextValue {
   retry: () => void;
   /** Clear the transcript and start a fresh backend session. */
   reset: () => void;
+  /** Owner-protected First Interaction recording (hidden unless the server reports it available). */
+  recording: RecordingState;
+  startRecording: () => void;
+  finishRecording: () => void;
+  dismissRecording: () => void;
 }
 
 const ConversationContext = createContext<ConversationContextValue | null>(null);
@@ -62,6 +79,9 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>("lilith-os");
   const [hydrated, setHydrated] = useState(false);
+  const [recording, dispatchRecording] = useReducer(recordingReducer, INITIAL_RECORDING);
+  // Guards duplicate Start/Finish clicks while a recording request is pending.
+  const recordingBusy = useRef(false);
 
   // Guards against duplicate concurrent sends even across rapid calls.
   const inFlight = useRef(false);
@@ -87,6 +107,28 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     }
     setHydrated(true);
   }, []);
+
+  // Recording availability comes from the server (owner session), never from local state.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRecordingAvailability(fetch).then(({ available, reason }) => {
+      if (cancelled) return;
+      dispatchRecording({ type: "AVAILABILITY", available, reason });
+      try {
+        const stored = window.localStorage.getItem(RECORDING_KEY);
+        if (!available) window.localStorage.removeItem(RECORDING_KEY);
+        else if (stored) dispatchRecording({ type: "RESTORE", session: stored });
+      } catch {
+        /* storage unavailable */
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // While recording, every turn goes to the server-minted capture session.
+  const activeSession = isRecordingActive(recording) && recording.session ? recording.session : sessionId;
 
   // Persist transcript.
   useEffect(() => {
@@ -118,7 +160,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       setMessages((prev) => [...prev, userMsg]);
 
       try {
-        const res = await sendConversation(text, sessionId);
+        const res = await sendConversation(text, activeSession);
         const reply = res.reply.trim() || "…";
         setMessages((prev) => [
           ...prev,
@@ -137,7 +179,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         setStatus("idle");
       }
     },
-    [sessionId],
+    [activeSession],
   );
 
   const send = useCallback(
@@ -156,7 +198,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   }, [runSend]);
 
   const reset = useCallback(() => {
-    if (inFlight.current) return;
+    if (inFlight.current || isRecordingActive(recording)) return; // finish the recording first
     const sid = makeSessionId();
     try {
       window.localStorage.setItem(SESSION_KEY, sid);
@@ -167,11 +209,73 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     setSessionId(sid);
     setMessages([]);
     setError(null);
-  }, []);
+  }, [recording]);
+
+  const startRecording = useCallback(() => {
+    if (recordingBusy.current || inFlight.current) return;
+    if (!["idle", "finished", "interrupted"].includes(recording.phase)) return;
+    recordingBusy.current = true;
+    dispatchRecording({ type: "START_REQUESTED" });
+    void requestStart(fetch)
+      .then((result) => {
+        if (!result.ok || !result.value) {
+          dispatchRecording({ type: "START_FAILED", error: result.error ?? "The recording request failed." });
+          return;
+        }
+        dispatchRecording({ type: "STARTED", session: result.value });
+        try {
+          window.localStorage.setItem(RECORDING_KEY, result.value);
+        } catch {
+          /* ignore */
+        }
+        setMessages([]); // a recording is its own conversation
+        setError(null);
+      })
+      .finally(() => {
+        recordingBusy.current = false;
+      });
+  }, [recording.phase]);
+
+  const finishRecording = useCallback(() => {
+    const session = recording.session;
+    if (recordingBusy.current || inFlight.current || recording.phase !== "recording" || !session) return;
+    recordingBusy.current = true;
+    dispatchRecording({ type: "FINISH_REQUESTED" });
+    void requestFinish(fetch, session)
+      .then((result) => {
+        if (result.ok && result.value) {
+          dispatchRecording({ type: "FINISHED", evidence: result.value });
+        } else {
+          dispatchRecording({ type: "FINISH_FAILED", code: result.code ?? "UNKNOWN",
+                              error: result.error ?? "The recording request failed." });
+          if (result.code === "NETWORK") return; // still recording on the server; the owner may retry
+        }
+        try {
+          window.localStorage.removeItem(RECORDING_KEY);
+        } catch {
+          /* ignore */
+        }
+        // Ordinary chat resumes in a fresh session, never the capture session.
+        const sid = makeSessionId();
+        try {
+          window.localStorage.setItem(SESSION_KEY, sid);
+        } catch {
+          /* ignore */
+        }
+        setSessionId(sid);
+      })
+      .finally(() => {
+        recordingBusy.current = false;
+      });
+  }, [recording.phase, recording.session]);
+
+  const dismissRecording = useCallback(() => dispatchRecording({ type: "DISMISS" }), []);
 
   const value = useMemo(
-    () => ({ messages, status, error, sessionId, send, retry, reset }),
-    [messages, status, error, sessionId, send, retry, reset],
+    () => ({ messages, status, error, sessionId, send, retry, reset, recording, startRecording, finishRecording,
+             dismissRecording }),
+    [messages, status, error, sessionId, send, retry, reset, recording, startRecording, finishRecording,
+     dismissRecording],
   );
 
   return (
