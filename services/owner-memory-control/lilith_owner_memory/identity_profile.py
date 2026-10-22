@@ -13,8 +13,9 @@ Option III (owner decision D-3), corrected:
   that V2 just verified (the existing L04 rule), so neither a caller packet nor an edited stored value can stand in.
   The FM-02 First Interaction class (`OWNER_DIRECTED_FIRST_INTERACTION`, value schema `FirstInteractionEpisodeV1`)
   carries this binding inside its admitted value; every other class fails closed (`IDENTITY_BINDING_MISSING`).
-  Known limitation, a blocker for real use: the environment check compares the trusted profile with the caller's
-  identity context only; it is not yet bound to the verified V2 authority/owner environment, and no owner-accepted,
+  F3: the trusted profile's environment must equal both the identity context's environment and the environment of
+  the owner-authority evidence that V2 verification just verified (its signed envelope environment), so a caller
+  cannot pair a profile with another environment's authority. Remaining blocker for real use: no owner-accepted,
   repository-pinned profile source exists yet.
 - **No independence claim (D-C).** `lid1.` structure and known-value collision checks catch some mistakes. They
   cannot prove that an identifier was generated independently; that rests on the reviewed generation procedure.
@@ -128,6 +129,16 @@ class IdentityProfileV1:
         }
 
 
+def first_interaction_trusted_identity(profile: IdentityProfileV1):
+    """The F2/F3 candidate-gate identity for a trusted profile: its environment and exact binding. The profile must
+    come from trusted code (an owner-accepted, repository-pinned profile); this only converts it."""
+    from lilith_memory import conversation_evidence as CE
+
+    if not isinstance(profile, IdentityProfileV1):
+        raise IdentityContractViolation("MALFORMED_CONTEXT")
+    return CE.TrustedIdentityBindingV1(environment=profile.environment, binding=profile.binding())
+
+
 def known_value_collisions(identity_id: str, known_values: Iterable[str]) -> list[str]:
     """Known values the identifier collides with: exact equality (whole ID or its hex body), or the hex body
     appearing inside a known hex digest. This catches some mistakes only. It cannot show that an identifier was
@@ -220,6 +231,10 @@ def verify_identity_bound_memory_v1(*, admitted_value: Any, identity_context: Id
         except ValueError:
             raise _Reject("ADMITTED_VALUE_MALFORMED") from None
         _require(isinstance(value, dict), "ADMITTED_VALUE_MALFORMED")
+        authority = accepted.facts.get("authority")
+        _require(isinstance(authority, Mapping)
+                 and authority.get("environment") == identity_context.trusted_profile.environment,
+                 "IDENTITY_ENVIRONMENT_MISMATCH")
         _compare_binding(value.get(BINDING_FIELD), identity_context)
     except _Reject as rejected:
         return _not_bound(rejected)

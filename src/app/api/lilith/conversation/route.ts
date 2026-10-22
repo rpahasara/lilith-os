@@ -50,10 +50,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
 
+  // F2 evidence capture: the server-only capture credential authenticates this
+  // proxy to the backend (service authentication, NOT owner authentication). The
+  // backend records turns only for capture sessions it minted (`fi-capture-…`);
+  // every other session is relayed exactly as before.
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+  const capture = process.env.LILITH_OS_OWNER_CAPTURE_TOKEN;
+  if (capture) headers["x-lilith-os-owner-capture"] = capture;
+
   try {
     const upstream = await fetch(`${base}/os/conversation`, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers,
       body: JSON.stringify({ message, session }),
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),

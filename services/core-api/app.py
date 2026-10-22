@@ -1190,7 +1190,11 @@ def meetings_prep(event_id: str):
 # ─────────────────────────────────────────────────────────────────────────
 import urllib.request as _urlreq
 import urllib.error as _urlerr
+import hashlib as _hashlib
+import hmac as _hmac
+import threading as _threading
 from fastapi import Body as _Body
+from fastapi import Header as _Header
 
 
 def _hermes_env(key: str, default: str = "") -> str:
@@ -1207,8 +1211,258 @@ def _hermes_env(key: str, default: str = "") -> str:
     return _os.getenv(key, default)
 
 
+# F2 First Interaction evidence capture. Inactive unless LILITH_FI_EVIDENCE_CAPTURE=1. The capture credential is
+# read from this process's environment only (never ~/.hermes/.env, which the console's own tools can read) and is
+# sent by the server-side Next proxy, never by the browser. Only sessions minted by the capture store are captured;
+# every other session is relayed exactly as before. Like the PROD API as a whole, capture never imports the canonical
+# memory runtime: it only records and seals exact bytes. Verifying them is the First Interaction candidate gate's job
+# (conversation_evidence in the canonical runtime package, which reads `fi_conversation_evidence` read-only).
+# The capture credential is SERVICE authentication (the Next server proxy to this API), NOT owner authentication: it
+# proves which service sent a turn, never who typed it. Nothing captured here is an owner identity, an authentic First
+# Memory or an acceptance; the owner is authenticated only later, by the owner proof and V2 evidence over the exact
+# episode value at admission.
+_CAPTURE_PREFIX = "fi-capture-"
+_CAPTURE_PAYLOAD_KEYS = frozenset({"message", "session"})
+_TRANSCRIPT_SCHEMA = "lilith.fm02.transcript.v1"
+_capture_locks: dict = {}
+_capture_locks_guard = _threading.Lock()
+_CAPTURE_TABLES = ("fi_capture_session", "fi_capture_turn", "fi_capture_fault", "fi_conversation_evidence")
+_CAPTURE_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS fi_capture_session (
+        session_id TEXT PRIMARY KEY, opened_at TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS fi_capture_turn (
+        session_id TEXT NOT NULL REFERENCES fi_capture_session(session_id),
+        turn_index INTEGER NOT NULL CHECK(turn_index>=0),
+        speaker TEXT NOT NULL CHECK(speaker IN ('OWNER','LILITH')),
+        at TEXT NOT NULL, text TEXT NOT NULL,
+        PRIMARY KEY(session_id, turn_index))""",
+    """CREATE TABLE IF NOT EXISTS fi_capture_fault (
+        session_id TEXT NOT NULL REFERENCES fi_capture_session(session_id), at TEXT NOT NULL, reason TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS fi_conversation_evidence (
+        evidence_ref TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL UNIQUE REFERENCES fi_capture_session(session_id),
+        transcript BLOB NOT NULL, sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+        turn_count INTEGER NOT NULL CHECK(turn_count>=2),
+        started_at TEXT NOT NULL, ended_at TEXT NOT NULL, sealed_at TEXT NOT NULL)""",
+    *(f"""CREATE TRIGGER IF NOT EXISTS {t}_no_update BEFORE UPDATE ON {t}
+          BEGIN SELECT RAISE(ABORT,'conversation evidence is immutable'); END""" for t in _CAPTURE_TABLES),
+    *(f"""CREATE TRIGGER IF NOT EXISTS {t}_no_delete BEFORE DELETE ON {t}
+          BEGIN SELECT RAISE(ABORT,'conversation evidence erasure requires Privacy authority'); END"""
+      for t in _CAPTURE_TABLES),
+    """CREATE TRIGGER IF NOT EXISTS fi_capture_turn_after_seal BEFORE INSERT ON fi_capture_turn
+        WHEN EXISTS (SELECT 1 FROM fi_conversation_evidence WHERE session_id=NEW.session_id)
+        BEGIN SELECT RAISE(ABORT,'capture session is sealed'); END""",
+)
+
+
+class CaptureRefused(ValueError):
+    """Closed capture refusal; `code` never carries dialogue text."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _capture_stamp(moment):
+    """Fixed-width UTC (six fraction digits), so stamps order as text and fit the transcript schema."""
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _capture_transcript_bytes(conversation_ref, turns):
+    """Deterministic UTF-8 transcript bytes; dialogue text is kept exactly (no ASCII escaping, no trimming)."""
+    doc = {"schema": _TRANSCRIPT_SCHEMA, "conversationRef": conversation_ref,
+           "turns": [{"index": i, "speaker": s, "at": at, "text": text} for i, (s, at, text) in enumerate(turns)]}
+    return json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+class ConversationCaptureStore:
+    """Append-only capture sessions, turns, faults and sealed transcripts in their own SQLite file. Speaker, order,
+    time and text come from the relay itself; a relay fault makes a session unsealable, because the console may have
+    kept a turn the transcript does not have. Sealing stores exact bytes and never repairs text."""
+
+    def __init__(self, path, *, now_fn=lambda: datetime.now(timezone.utc)):
+        self.path = Path(path)
+        self.now_fn = now_fn
+
+    def _connect(self):
+        created = not self.path.exists()
+        conn = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
+        if created and _os.name != "nt":
+            _os.chmod(self.path, 0o600)
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA secure_delete=ON")
+        for statement in _CAPTURE_SCHEMA:
+            conn.execute(statement)
+        return conn
+
+    @staticmethod
+    def _state(conn, session_id):
+        if conn.execute("SELECT 1 FROM fi_capture_session WHERE session_id=?", (session_id,)).fetchone() is None:
+            return None
+        sealed = conn.execute("SELECT 1 FROM fi_conversation_evidence WHERE session_id=?", (session_id,)).fetchone()
+        return "SEALED" if sealed else "OPEN"
+
+    @staticmethod
+    def _faulted(conn, session_id):
+        return conn.execute("SELECT 1 FROM fi_capture_fault WHERE session_id=?", (session_id,)).fetchone() is not None
+
+    def open_session(self):
+        import uuid as _uuid
+
+        session_id = _CAPTURE_PREFIX + _uuid.uuid4().hex
+        conn = self._connect()
+        try:
+            conn.execute("INSERT INTO fi_capture_session VALUES (?,?)", (session_id, _capture_stamp(self.now_fn())))
+        finally:
+            conn.close()
+        return session_id
+
+    def require_capturable(self, session_id):
+        """Refuse before a turn is relayed: unknown, sealed or faulted sessions take no turns."""
+        conn = self._connect()
+        try:
+            state = self._state(conn, session_id)
+            if state is None:
+                raise CaptureRefused("CAPTURE_SESSION_UNKNOWN")
+            if state == "SEALED":
+                raise CaptureRefused("CAPTURE_SESSION_SEALED")
+            if self._faulted(conn, session_id):
+                raise CaptureRefused("CAPTURE_INCOMPLETE")
+        finally:
+            conn.close()
+
+    def record_exchange(self, session_id, *, owner_text, owner_at, lilith_text, lilith_at):
+        """Append one OWNER turn and its LILITH reply; returns the OWNER turn index."""
+        if not all(isinstance(v, str) for v in (owner_text, owner_at, lilith_text, lilith_at)):
+            raise CaptureRefused("CAPTURE_TURN_MALFORMED")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            if self._state(conn, session_id) != "OPEN" or self._faulted(conn, session_id):
+                raise CaptureRefused("CAPTURE_SESSION_NOT_OPEN")
+            last = conn.execute("SELECT turn_index, at FROM fi_capture_turn WHERE session_id=? "
+                                "ORDER BY turn_index DESC LIMIT 1", (session_id,)).fetchone()
+            ordered = [owner_at, lilith_at] if last is None else [last[1], owner_at, lilith_at]
+            if ordered != sorted(ordered):
+                raise CaptureRefused("CAPTURE_ORDER_INVALID")
+            index = 0 if last is None else int(last[0]) + 1
+            conn.execute("INSERT INTO fi_capture_turn VALUES (?,?,?,?,?)",
+                         (session_id, index, "OWNER", owner_at, owner_text))
+            conn.execute("INSERT INTO fi_capture_turn VALUES (?,?,?,?,?)",
+                         (session_id, index + 1, "LILITH", lilith_at, lilith_text))
+            conn.execute("COMMIT")
+            return index
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+    def record_fault(self, session_id, reason):
+        conn = self._connect()
+        try:
+            if self._state(conn, session_id) == "OPEN":
+                conn.execute("INSERT INTO fi_capture_fault VALUES (?,?,?)",
+                             (session_id, _capture_stamp(self.now_fn()), str(reason)[:64]))
+        finally:
+            conn.close()
+
+    def seal(self, session_id):
+        import uuid as _uuid
+
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            state = self._state(conn, session_id)
+            if state is None:
+                raise CaptureRefused("CAPTURE_SESSION_UNKNOWN")
+            if state == "SEALED":
+                raise CaptureRefused("CAPTURE_SESSION_SEALED")
+            if self._faulted(conn, session_id):
+                raise CaptureRefused("CAPTURE_INCOMPLETE")
+            turns = [(str(r[0]), str(r[1]), str(r[2])) for r in conn.execute(
+                "SELECT speaker, at, text FROM fi_capture_turn WHERE session_id=? ORDER BY turn_index", (session_id,))]
+            if len(turns) < 2:
+                raise CaptureRefused("CAPTURE_TOO_SHORT")
+            data = _capture_transcript_bytes(session_id, turns)
+            evidence_ref = "evidence.conv." + _uuid.uuid4().hex
+            conn.execute("INSERT INTO fi_conversation_evidence VALUES (?,?,?,?,?,?,?,?)",
+                         (evidence_ref, session_id, data, _hashlib.sha256(data).hexdigest(), len(turns),
+                          turns[0][1], turns[-1][1], _capture_stamp(self.now_fn())))
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+        return self.evidence(session_id)
+
+    def evidence(self, session_id):
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT evidence_ref, session_id, sha256, turn_count, started_at, ended_at, sealed_at, "
+                               "transcript FROM fi_conversation_evidence WHERE session_id=?", (session_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return {"evidenceRef": row[0], "conversationRef": row[1], "transcriptSchema": _TRANSCRIPT_SCHEMA,
+                "sha256": row[2], "turnCount": int(row[3]), "startedAt": row[4], "endedAt": row[5],
+                "sealedAt": row[6], "firstMemoryAccepted": False}
+
+    def sealed_transcript(self, session_id):
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT transcript, sha256 FROM fi_conversation_evidence WHERE session_id=?",
+                               (session_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        data = bytes(row[0])
+        if _hashlib.sha256(data).hexdigest() != row[1]:
+            raise CaptureRefused("EVIDENCE_CORRUPT")
+        return data
+
+
+def _capture_enabled() -> bool:
+    return _os.getenv("LILITH_FI_EVIDENCE_CAPTURE", "") == "1"
+
+
+def _capture_store():
+    path = Path(_os.getenv("LILITH_FI_EVIDENCE_DB", str(LILITH_DATA_DIR / "conversation-evidence.db")))
+    return ConversationCaptureStore(path)
+
+
+def _require_capture_auth(credential) -> None:
+    if not _capture_enabled():
+        raise HTTPException(status_code=403, detail="CAPTURE_INACTIVE")
+    expected = _os.getenv("LILITH_OS_OWNER_CAPTURE_TOKEN", "")
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="CAPTURE_CREDENTIAL_UNCONFIGURED")
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), expected.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="CAPTURE_NOT_AUTHENTICATED")
+
+
+def _capture_lock(session: str):
+    with _capture_locks_guard:
+        return _capture_locks.setdefault(session, _threading.Lock())
+
+
+def _capture_refusal(exc) -> HTTPException:
+    status = 404 if exc.code in {"CAPTURE_SESSION_UNKNOWN", "EVIDENCE_UNKNOWN"} else 409
+    return HTTPException(status_code=status, detail=exc.code)
+
+
 @app.post("/os/conversation")
-def os_conversation(payload: dict = _Body(default=None)):
+def os_conversation(
+    payload: dict = _Body(default=None),
+    x_lilith_os_owner_capture: str = _Header(default=None),
+):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     message = str(payload.get("message") or payload.get("text") or "").strip()
@@ -1217,7 +1471,72 @@ def os_conversation(payload: dict = _Body(default=None)):
     ).strip() or "lilith-os"
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
+    if session.startswith(_CAPTURE_PREFIX):
+        return _captured_conversation(payload, message, session, x_lilith_os_owner_capture)
+    return _relay_conversation(message, session)
 
+
+def _captured_conversation(payload, message, session, credential):
+    """One OWNER turn and its LILITH reply, recorded exactly as relayed. Refused before relaying unless the request
+    is authenticated, carries only {message, session} and the session is an open capture session."""
+    _require_capture_auth(credential)
+    if set(payload) != _CAPTURE_PAYLOAD_KEYS or payload.get("message") != message:
+        raise HTTPException(status_code=400, detail="CAPTURE_PAYLOAD_INVALID")
+    store = _capture_store()
+    with _capture_lock(session):
+        try:
+            store.require_capturable(session)
+        except CaptureRefused as exc:
+            raise _capture_refusal(exc)
+        owner_at = _capture_stamp(datetime.now(timezone.utc))
+        try:
+            relayed = _relay_conversation(message, session)
+        except HTTPException as exc:
+            # The console may still have kept this turn: the session can no longer be sealed.
+            store.record_fault(session, f"RELAY_{exc.status_code}")
+            raise
+        lilith_at = _capture_stamp(datetime.now(timezone.utc))
+        reply = relayed["reply"]
+        try:
+            store.record_exchange(session, owner_text=message, owner_at=owner_at,
+                                  lilith_text=reply if isinstance(reply, str) else "", lilith_at=lilith_at)
+        except CaptureRefused as exc:
+            store.record_fault(session, exc.code)
+            raise _capture_refusal(exc)
+    return {**relayed, "session": session, "capture": {"state": "OPEN", "captured": True}}
+
+
+@app.post("/os/conversation/evidence")
+def os_conversation_evidence(
+    payload: dict = _Body(default=None),
+    x_lilith_os_owner_capture: str = _Header(default=None),
+):
+    """Open a capture session, seal it, or read its sealed transcript. Authenticated; never accepts memory."""
+    _require_capture_auth(x_lilith_os_owner_capture)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    action = payload.get("action")
+    store = _capture_store()
+    try:
+        if action == "open" and set(payload) == {"action"}:
+            return {"session": store.open_session(), "state": "OPEN", "firstMemoryAccepted": False}
+        session = payload.get("session")
+        if set(payload) != {"action", "session"} or not isinstance(session, str):
+            raise HTTPException(status_code=400, detail="EVIDENCE_REQUEST_INVALID")
+        if action == "seal":
+            with _capture_lock(session):
+                return store.seal(session)
+        if action == "transcript":
+            data = store.sealed_transcript(session)
+            if data is None:
+                raise HTTPException(status_code=404, detail="EVIDENCE_UNKNOWN")
+            return {**store.evidence(session), "transcript": data.decode("utf-8")}
+    except CaptureRefused as exc:
+        raise _capture_refusal(exc)
+    raise HTTPException(status_code=400, detail="EVIDENCE_REQUEST_INVALID")
+
+
+def _relay_conversation(message, session):
     port = _hermes_env("LILITH_OS_PORT", "9901")
     token = _hermes_env("LILITH_OS_TOKEN", "")
     url = f"http://127.0.0.1:{port}/"
