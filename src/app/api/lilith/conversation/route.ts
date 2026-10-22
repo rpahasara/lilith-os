@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { ownerCaptureAuthentication } from "@/lib/conversation/owner-capture-auth";
 
 /**
  * Server-side proxy for the LILITH OS conversation surface.
@@ -50,16 +51,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
 
-  // F2 evidence capture: the server-only capture credential authenticates this
-  // proxy to the backend (service authentication, NOT owner authentication). The
-  // backend records turns only for capture sessions it minted (`fi-capture-…`);
-  // every other session is relayed exactly as before.
+  // F2/F5 evidence capture. Ordinary sessions are relayed exactly as before and
+  // never carry the capture credential. A recording session (`fi-capture-…`,
+  // minted by the backend) is relayed only for a same-origin request from a
+  // server-verified owner session; the server-only capture credential is then
+  // service authentication (this proxy to the backend), NOT owner
+  // authentication, and is never exposed to the browser.
   const headers: Record<string, string> = {
     "content-type": "application/json",
     accept: "application/json",
   };
-  const capture = process.env.LILITH_OS_OWNER_CAPTURE_TOKEN;
-  if (capture) headers["x-lilith-os-owner-capture"] = capture;
+  if (session.startsWith("fi-capture-")) {
+    const auth = await ownerCaptureAuthentication(req);
+    if (!auth.available) {
+      return NextResponse.json({ error: "OWNER_AUTHENTICATION_REQUIRED" }, { status: 403 });
+    }
+    if (req.headers.get("origin") !== req.nextUrl.origin) {
+      return NextResponse.json({ error: "CROSS_ORIGIN_REQUEST_REFUSED" }, { status: 403 });
+    }
+    const capture = process.env.LILITH_OS_OWNER_CAPTURE_TOKEN;
+    if (!capture) {
+      return NextResponse.json({ error: "conversation evidence capture is not configured" }, { status: 503 });
+    }
+    headers["x-lilith-os-owner-capture"] = capture;
+  }
 
   try {
     const upstream = await fetch(`${base}/os/conversation`, {

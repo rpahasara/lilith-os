@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
 
@@ -834,6 +835,9 @@ class L18V2PrivacyErasureOwner:
     # Every capture session exists only for the single First Interaction identity, so a FORGET of that identity
     # erases all of them: sealed, unfinished, faulted and never-admitted alike.
     _CAPTURE_TABLES = ("fi_conversation_evidence", "fi_capture_turn", "fi_capture_fault", "fi_capture_session")
+    # F5: the permanent block the relay checks inside every capture transaction (identical DDL in app.py), so no
+    # capture can follow this FORGET even after Privacy completion removes the hold.
+    _CAPTURE_PRIVACY_BLOCK_DDL = "CREATE TABLE IF NOT EXISTS fi_capture_privacy_block (blocked_at TEXT NOT NULL)"
 
     def __init__(self, path: Path, privacy_authority: Any, *, capture_evidence_path: Optional[Path] = None):
         self.path = Path(path)
@@ -867,6 +871,10 @@ class L18V2PrivacyErasureOwner:
                 conn.execute(f'DROP TRIGGER "{name}"')
             for table in cls._CAPTURE_TABLES:
                 conn.execute(f"DELETE FROM {table}")
+            conn.execute(cls._CAPTURE_PRIVACY_BLOCK_DDL)
+            conn.execute("INSERT INTO fi_capture_privacy_block SELECT ? "
+                         "WHERE NOT EXISTS (SELECT 1 FROM fi_capture_privacy_block)",
+                         (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),))
             for name in triggers:
                 conn.execute(trigger_sql[name])
             if conn.execute("PRAGMA foreign_key_check").fetchall():

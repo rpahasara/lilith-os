@@ -11,18 +11,25 @@ store only. Capture stays disabled; nothing here relays a conversation.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
+import threading
 from pathlib import Path
+from unittest import mock
+
+from fastapi import HTTPException
 
 from test_canonical_runtime import TEST_CLASS, TEST_KEY, TEST_NAMESPACE, digest, stamp_text  # noqa: F401
 from test_first_interaction_l04 import FI_CLASS, FI_KEY, FI_NAMESPACE, FI_PURPOSE, FirstInteractionCase, fi_value
+import test_conversation_evidence as CEV  # module import only: its test classes must not re-run here
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import app  # noqa: E402
 
 from lilith_memory import canonical_contracts as contracts  # noqa: E402
 from lilith_memory import canonical_store  # noqa: E402
+from lilith_memory import conversation_evidence as CE  # noqa: E402
 from lilith_memory import memory_action_v2 as MA  # noqa: E402
 from lilith_memory import memory_v2  # noqa: E402
 from lilith_memory import privacy_governance as privacy  # noqa: E402
@@ -41,7 +48,7 @@ class CaptureForgetCase(FirstInteractionCase):
         self.create()                                                         # codename "SYNTH-ALPHA" survives
         self.migrate_fi()
         self.enable_fi()
-        path = self.root / "privacy.test.db"
+        path = self.privacy_db = self.root / "privacy.test.db"
         slice15b2a_migration.migrate_privacy(path, applied_at=stamp_text(3))
         self.privacy = privacy.PrivacyGovernanceStore(path, TEST_ONLY_PRIVACY_SECRET, self.actor,
                                                       now_fn=lambda: self.now)
@@ -211,16 +218,205 @@ class CaptureForgetTests(CaptureForgetCase):
         with self.assertRaises(privacy.PrivacyError):
             self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
 
-    def test_capture_after_forget_is_still_append_only(self):
-        self.populate_capture()
-        self.l18(self.begin())
-        session = self.capture.open_session()                                   # the store keeps working
-        self.capture.record_exchange(session, owner_text="TEST_ONLY later", owner_at=self.stamp(10),
-                                     lilith_text="TEST_ONLY later reply", lilith_at=self.stamp(11))
+    def test_no_capture_can_follow_forget_and_the_block_is_permanent(self):
+        sessions = self.populate_capture()
+        auth = self.begin()
+        self.l18(auth)
+        memory_v2.L18V2PrivacyErasureOwner._erase_capture_evidence(self.capture_db)  # re-run: no second block
+        self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)   # hold removed: block remains
+        for attempt in (self.capture.open_session,
+                        lambda: self.capture.record_exchange(sessions["unfinished"], owner_text="TEST_ONLY later",
+                                                             owner_at=self.stamp(10), lilith_text="x",
+                                                             lilith_at=self.stamp(11)),
+                        lambda: self.capture.seal(sessions["unfinished"]),
+                        lambda: self.capture.sealed_transcript(sessions["sealed"])):
+            with self.assertRaises(app.CaptureRefused) as caught:
+                attempt()
+            self.assertIn(caught.exception.code, {"CAPTURE_PRIVACY_FORGOTTEN", "CAPTURE_SESSION_NOT_OPEN"})
+        with self.assertRaises(app.CaptureRefused) as caught:
+            self.capture.open_session()
+        self.assertEqual(caught.exception.code, "CAPTURE_PRIVACY_FORGOTTEN")
         conn = sqlite3.connect(self.capture_db)
         try:
-            with self.assertRaises(sqlite3.DatabaseError):
-                conn.execute("DELETE FROM fi_capture_turn")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM fi_capture_privacy_block").fetchone()[0], 1)
+            for sql in ("DELETE FROM fi_capture_privacy_block", "UPDATE fi_capture_privacy_block SET blocked_at='x'"):
+                with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                    conn.execute(sql)
+        finally:
+            conn.close()
+        self.assertEqual(self.capture_counts(), {t: 0 for t in CAPTURE_TABLES})
+
+
+class RelayPrivacyTests(CaptureForgetCase):
+    """The relay's capture endpoints under the real Privacy store: hold, block, fail-closed and races."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.selector = CE.provision_capture_store(self.capture_db, self.privacy)   # operator provisioning step
+        self.env = {"LILITH_FI_EVIDENCE_CAPTURE": "1", "LILITH_OS_OWNER_CAPTURE_TOKEN": CEV.TEST_ONLY_CAPTURE_TOKEN,
+                    "LILITH_FI_EVIDENCE_DB": str(self.capture_db), "LILITH_PRIVACY_DB_PATH": str(self.privacy_db)}
+
+    def call(self, fn, payload, *, env=None, console=None):
+        console = console or CEV.FakeConsole()
+        with mock.patch.dict(os.environ, self.env if env is None else env), \
+                mock.patch.object(app, "_hermes_env", lambda key, default="": default), \
+                mock.patch.object(app._urlreq, "urlopen", console):
+            return fn(payload, CEV.TEST_ONLY_CAPTURE_TOKEN)
+
+    def refused(self, status, detail, fn, payload, **kwargs):
+        with self.assertRaises(HTTPException) as caught:
+            self.call(fn, payload, **kwargs)
+        self.assertEqual((caught.exception.status_code, caught.exception.detail), (status, detail))
+
+    def test_identity_and_path_match_the_erasure_contract(self):
+        self.assertEqual(app._FI_IDENTITY, MA.FIRST_INTERACTION_IDENTITY)
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(app._capture_db_path(), self.capture_db)               # what L18_V2 must be given
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(app._capture_db_path(), app.LILITH_DATA_DIR / "conversation-evidence.db")
+
+    def test_active_hold_blocks_open_continue_seal_and_read_then_forget_blocks_forever(self):
+        session = self.call(app.os_conversation_evidence, {"action": "open"})["session"]
+        self.call(app.os_conversation, {"message": SEALED_TEXT, "session": session})
+        sealed = self.call(app.os_conversation_evidence, {"action": "open"})["session"]
+        self.call(app.os_conversation, {"message": UNFINISHED_TEXT, "session": sealed})
+        self.call(app.os_conversation_evidence, {"action": "seal", "session": sealed})
+        auth = self.begin()                                                      # ACTIVE hold, nothing erased yet
+        console = CEV.FakeConsole()
+        for fn, payload in ((app.os_conversation_evidence, {"action": "open"}),
+                            (app.os_conversation, {"message": "TEST_ONLY during hold", "session": session}),
+                            (app.os_conversation_evidence, {"action": "seal", "session": session}),
+                            (app.os_conversation_evidence, {"action": "transcript", "session": sealed})):
+            with self.subTest(payload=payload):
+                self.refused(409, "CAPTURE_PRIVACY_HELD", fn, payload, console=console)
+        self.assertEqual(console.sent, [])
+        self.l18(auth)
+        self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
+        self.assertFalse(self.privacy_has_hold())
+        self.refused(409, "CAPTURE_PRIVACY_FORGOTTEN", app.os_conversation_evidence, {"action": "open"})
+        self.assert_capture_erased(SEALED_TEXT, UNFINISHED_TEXT)
+
+    def test_privacy_or_store_unavailable_fails_closed_without_creating_a_database(self):
+        not_privacy = self.root / "not-privacy.db"
+        sqlite3.connect(not_privacy).close()
+        for privacy_db in ("", str(self.root / "missing-privacy.db"), str(not_privacy)):
+            with self.subTest(privacy_db=privacy_db):
+                self.refused(503, "CAPTURE_PRIVACY_UNAVAILABLE", app.os_conversation_evidence, {"action": "open"},
+                             env=dict(self.env, LILITH_PRIVACY_DB_PATH=privacy_db))
+        missing = self.root / "unprovisioned-capture.db"
+        self.refused(503, "CAPTURE_STORE_UNPROVISIONED", app.os_conversation_evidence, {"action": "open"},
+                     env=dict(self.env, LILITH_FI_EVIDENCE_DB=str(missing)))
+        self.refused(503, "CAPTURE_STORE_UNPROVISIONED", app.os_conversation,
+                     {"message": "x", "session": "fi-capture-" + "c" * 32},
+                     env=dict(self.env, LILITH_FI_EVIDENCE_DB=str(missing)))
+        self.assertFalse(missing.exists())
+        self.assertEqual(self.capture_counts()["fi_capture_session"], 0)
+
+    def test_disabled_capture_never_touches_privacy_or_capture_files(self):
+        missing = self.root / "never-created.db"
+        self.refused(403, "CAPTURE_INACTIVE", app.os_conversation_evidence, {"action": "open"},
+                     env={"LILITH_FI_EVIDENCE_CAPTURE": "0", "LILITH_FI_EVIDENCE_DB": str(missing)})
+        self.assertFalse(missing.exists())
+
+    def test_write_that_raced_forget_is_erased_not_left_behind(self):
+        """A capture transaction that passed its privacy check just before the hold holds its lock; the FORGET's
+        exclusive erasure waits for it and erases it. A capture that starts after the hold is refused."""
+        session = self.capture.open_session()
+        passed, release = threading.Event(), threading.Event()
+
+        def slow_gate(selector):
+            app._capture_privacy_gate(selector)
+            passed.set()
+            release.wait(5)
+
+        racer = app.ConversationCaptureStore(self.capture_db, privacy_gate=slow_gate)
+        outcome = {}
+
+        def capture():
+            with mock.patch.dict(os.environ, self.env):
+                try:
+                    outcome["index"] = racer.record_exchange(session, owner_text="TEST_ONLY raced", owner_at=
+                                                             self.stamp(20), lilith_text="TEST_ONLY raced reply",
+                                                             lilith_at=self.stamp(21))
+                except Exception as exc:                                         # pragma: no cover - reported
+                    outcome["error"] = exc
+
+        writer = threading.Thread(target=capture)
+        writer.start()
+        self.assertTrue(passed.wait(5))
+        auth = self.begin()                                                      # hold now ACTIVE
+        eraser = threading.Thread(target=lambda: outcome.setdefault("l18", self.l18(auth)))
+        eraser.start()
+        release.set()
+        writer.join(10)
+        eraser.join(10)
+        self.assertEqual(outcome.get("index"), 0, outcome)                       # the raced write committed first
+        self.assertEqual(outcome["l18"]["captureSessionsErased"], 1)             # ...and was erased
+        self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
+        self.assert_capture_erased("TEST_ONLY raced")
+        late = app.ConversationCaptureStore(self.capture_db, privacy_gate=app._capture_privacy_gate)
+        with mock.patch.dict(os.environ, self.env), self.assertRaises(app.CaptureRefused):
+            late.open_session()
+
+    def complete_fi_forget(self, capture_path=None):
+        auth = self.begin()
+        self.l18(auth, capture_path=self.capture_db if capture_path is None else capture_path)
+        self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
+        self.assertFalse(self.privacy_has_hold())                                # the hold is gone; suppression stays
+
+    def test_forget_before_provisioning_refuses_provisioning_and_capture(self):
+        fresh = self.root / "provisioned-after-forget.db"
+        self.complete_fi_forget(capture_path=fresh)                              # nothing to erase, nothing created
+        self.assertFalse(fresh.exists())
+        with self.assertRaises(CE.ConversationEvidenceError) as caught:
+            CE.provision_capture_store(fresh, self.privacy)
+        self.assertEqual(caught.exception.code, "CAPTURE_PRIVACY_FORGOTTEN")
+        self.assertFalse(fresh.exists())
+        self.refused(503, "CAPTURE_STORE_UNPROVISIONED", app.os_conversation_evidence, {"action": "open"},
+                     env=dict(self.env, LILITH_FI_EVIDENCE_DB=str(fresh)))
+        self.assertFalse(fresh.exists())
+
+    def test_provisioning_during_an_active_hold_is_refused(self):
+        self.begin()                                                             # hold + ACTIVE suppression
+        with self.assertRaises(CE.ConversationEvidenceError):
+            CE.provision_capture_store(self.root / "during-hold.db", self.privacy)
+        self.assertFalse((self.root / "during-hold.db").exists())
+
+    def test_missing_replaced_or_recreated_database_cannot_capture_after_forget(self):
+        session = self.call(app.os_conversation_evidence, {"action": "open"})["session"]
+        self.call(app.os_conversation, {"message": SEALED_TEXT, "session": session})
+        self.complete_fi_forget()
+        os.remove(self.capture_db)                                               # file lost after FORGET
+        self.refused(503, "CAPTURE_STORE_UNPROVISIONED", app.os_conversation_evidence, {"action": "open"})
+        with self.assertRaises(CE.ConversationEvidenceError):
+            CE.provision_capture_store(self.capture_db, self.privacy)            # re-provisioning refused
+        self.assertFalse(self.capture_db.exists())
+        sqlite3.connect(self.capture_db).close()                                 # a raw, unbound replacement
+        self.refused(503, "CAPTURE_STORE_UNPROVISIONED", app.os_conversation_evidence, {"action": "open"})
+        os.remove(self.capture_db)
+        replacement = app.ConversationCaptureStore(self.capture_db)              # schema, no FORGET block ...
+        conn = replacement._connect()
+        try:                                                                     # ... carrying the old binding
+            conn.execute("INSERT INTO fi_capture_privacy_binding VALUES (?)", (self.selector,))
+        finally:
+            conn.close()
+        self.refused(409, "CAPTURE_PRIVACY_FORGOTTEN", app.os_conversation_evidence, {"action": "open"})
+        self.refused(409, "CAPTURE_PRIVACY_FORGOTTEN", app.os_conversation,
+                     {"message": "TEST_ONLY again", "session": session})
+        self.assertEqual(self.capture_counts()["fi_capture_session"], 0)
+        self.assertNotIn(SEALED_TEXT.encode("utf-8"), self.capture_db.read_bytes())
+
+    def test_codename_forget_does_not_block_capture(self):
+        auth = self.begin((TEST_CLASS, TEST_NAMESPACE, TEST_KEY))
+        self.l18(auth)
+        self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
+        self.assertTrue(self.call(app.os_conversation_evidence, {"action": "open"})["session"].startswith(
+            "fi-capture-"))
+
+    def privacy_has_hold(self) -> bool:
+        conn = sqlite3.connect(self.privacy_db)
+        try:
+            return conn.execute("SELECT COUNT(*) FROM privacy_hold").fetchone()[0] > 0
         finally:
             conn.close()
 

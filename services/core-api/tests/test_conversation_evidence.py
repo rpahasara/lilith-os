@@ -43,6 +43,8 @@ from lilith_memory import canonical_contracts as C  # noqa: E402
 from lilith_memory import conversation_evidence as CE  # noqa: E402
 from lilith_memory import first_interaction_v1 as FI  # noqa: E402
 from lilith_memory import learning_v2  # noqa: E402
+from lilith_memory import privacy_governance as privacy  # noqa: E402
+from lilith_memory import slice15b2a_migration  # noqa: E402
 
 T0 = datetime(2026, 11, 1, 18, 0, 0, tzinfo=timezone.utc)
 OWNER_1 = "TEST_ONLY hi LILITH — café?"
@@ -322,8 +324,12 @@ class FakeConsole:
 class RelayTests(EvidenceCase):
     def setUp(self) -> None:
         super().setUp()
+        privacy_db = Path(self.tmp_evidence.name) / "privacy.test.db"
+        slice15b2a_migration.migrate_privacy(privacy_db, applied_at="2026-11-01T17:00:00Z")   # no hold: open
+        self.privacy_store = privacy.PrivacyGovernanceStore(privacy_db, b"TEST_ONLY relay privacy secret (32+ b)",
+                                                            None)
         self.env = {"LILITH_FI_EVIDENCE_CAPTURE": "1", "LILITH_OS_OWNER_CAPTURE_TOKEN": TEST_ONLY_CAPTURE_TOKEN,
-                    "LILITH_FI_EVIDENCE_DB": str(self.evidence_db)}
+                    "LILITH_FI_EVIDENCE_DB": str(self.evidence_db), "LILITH_PRIVACY_DB_PATH": str(privacy_db)}
 
     def call(self, fn, payload, credential=TEST_ONLY_CAPTURE_TOKEN, *, env=None, console=None):
         console = console or FakeConsole()
@@ -338,6 +344,7 @@ class RelayTests(EvidenceCase):
         self.assertEqual((caught.exception.status_code, caught.exception.detail), (status, detail))
 
     def open(self) -> str:
+        CE.provision_capture_store(self.evidence_db, self.privacy_store)  # operator step; the relay never creates
         return self.call(app.os_conversation_evidence, {"action": "open"})["session"]
 
     def test_existing_sessions_are_relayed_exactly_as_before(self):

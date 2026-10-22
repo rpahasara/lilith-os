@@ -1227,6 +1227,7 @@ _TRANSCRIPT_SCHEMA = "lilith.fm02.transcript.v1"
 _capture_locks: dict = {}
 _capture_locks_guard = _threading.Lock()
 _CAPTURE_TABLES = ("fi_capture_session", "fi_capture_turn", "fi_capture_fault", "fi_conversation_evidence")
+_CAPTURE_PRIVACY_BLOCK_DDL = "CREATE TABLE IF NOT EXISTS fi_capture_privacy_block (blocked_at TEXT NOT NULL)"
 _CAPTURE_SCHEMA = (
     """CREATE TABLE IF NOT EXISTS fi_capture_session (
         session_id TEXT PRIMARY KEY, opened_at TEXT NOT NULL)""",
@@ -1252,7 +1253,25 @@ _CAPTURE_SCHEMA = (
     """CREATE TRIGGER IF NOT EXISTS fi_capture_turn_after_seal BEFORE INSERT ON fi_capture_turn
         WHEN EXISTS (SELECT 1 FROM fi_conversation_evidence WHERE session_id=NEW.session_id)
         BEGIN SELECT RAISE(ABORT,'capture session is sealed'); END""",
+    # Written by the L18_V2 First Interaction FORGET in the same transaction as its erasure; permanent.
+    _CAPTURE_PRIVACY_BLOCK_DDL,
+    """CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_block_no_update BEFORE UPDATE ON fi_capture_privacy_block
+        BEGIN SELECT RAISE(ABORT,'capture privacy block is permanent'); END""",
+    """CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_block_no_delete BEFORE DELETE ON fi_capture_privacy_block
+        BEGIN SELECT RAISE(ABORT,'capture privacy block is permanent'); END""",
+    # Written only by operator provisioning through the Privacy authority (identical DDL in the canonical runtime's
+    # conversation_evidence): the opaque Privacy restore-suppression selector of the First Interaction identity.
+    """CREATE TABLE IF NOT EXISTS fi_capture_privacy_binding (
+        identity_selector TEXT NOT NULL CHECK(length(identity_selector)=64))""",
+    """CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_binding_no_update BEFORE UPDATE ON fi_capture_privacy_binding
+        BEGIN SELECT RAISE(ABORT,'capture privacy binding is permanent'); END""",
+    """CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_binding_no_delete BEFORE DELETE ON fi_capture_privacy_binding
+        BEGIN SELECT RAISE(ABORT,'capture privacy binding is permanent'); END""",
 )
+# The single First Interaction memory identity (memory_action_v2.FIRST_INTERACTION_IDENTITY; a test pins equality).
+_FI_IDENTITY = ("OWNER_DIRECTED_FIRST_INTERACTION", "lilith.core.autobiographical", "episode.first-interaction")
+_CAPTURE_REFUSAL_STATUS = {"CAPTURE_SESSION_UNKNOWN": 404, "EVIDENCE_UNKNOWN": 404,
+                           "CAPTURE_PRIVACY_UNAVAILABLE": 503, "CAPTURE_STORE_UNPROVISIONED": 503}
 
 
 class CaptureRefused(ValueError):
@@ -1278,13 +1297,35 @@ def _capture_transcript_bytes(conversation_ref, turns):
 class ConversationCaptureStore:
     """Append-only capture sessions, turns, faults and sealed transcripts in their own SQLite file. Speaker, order,
     time and text come from the relay itself; a relay fault makes a session unsealable, because the console may have
-    kept a turn the transcript does not have. Sealing stores exact bytes and never repairs text."""
+    kept a turn the transcript does not have. Sealing stores exact bytes and never repairs text.
 
-    def __init__(self, path, *, now_fn=lambda: datetime.now(timezone.utc)):
+    Privacy: every write and every transcript read runs `_guard` inside its own transaction. It refuses once the
+    L18_V2 First Interaction FORGET has written the permanent block, and `privacy_gate(selector)` (the relay's
+    read-only Privacy check) refuses during a hold and, permanently, once Privacy restore suppression exists for the
+    selector bound at provisioning, so neither re-provisioning nor replacing this file can capture again. A FORGET's
+    erasure takes an exclusive lock on this file, so a write either commits before it (and is erased) or is refused.
+    With `provisioned_only` (the relay) a missing file is never created and an unbound one is refused."""
+
+    def __init__(self, path, *, now_fn=lambda: datetime.now(timezone.utc), privacy_gate=None,
+                 provisioned_only=False):
         self.path = Path(path)
         self.now_fn = now_fn
+        self.privacy_gate = privacy_gate
+        self.provisioned_only = provisioned_only
+
+    def _guard(self, conn):
+        binding = conn.execute("SELECT identity_selector FROM fi_capture_privacy_binding").fetchall()
+        selector = str(binding[0][0]) if len(binding) == 1 else None
+        if self.provisioned_only and selector is None:
+            raise CaptureRefused("CAPTURE_STORE_UNPROVISIONED")
+        if conn.execute("SELECT 1 FROM fi_capture_privacy_block LIMIT 1").fetchone() is not None:
+            raise CaptureRefused("CAPTURE_PRIVACY_FORGOTTEN")
+        if self.privacy_gate is not None:
+            self.privacy_gate(selector)
 
     def _connect(self):
+        if self.provisioned_only and not self.path.is_file():
+            raise CaptureRefused("CAPTURE_STORE_UNPROVISIONED")
         created = not self.path.exists()
         conn = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
         if created and _os.name != "nt":
@@ -1312,7 +1353,14 @@ class ConversationCaptureStore:
         session_id = _CAPTURE_PREFIX + _uuid.uuid4().hex
         conn = self._connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            self._guard(conn)
             conn.execute("INSERT INTO fi_capture_session VALUES (?,?)", (session_id, _capture_stamp(self.now_fn())))
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
         return session_id
@@ -1321,6 +1369,7 @@ class ConversationCaptureStore:
         """Refuse before a turn is relayed: unknown, sealed or faulted sessions take no turns."""
         conn = self._connect()
         try:
+            self._guard(conn)
             state = self._state(conn, session_id)
             if state is None:
                 raise CaptureRefused("CAPTURE_SESSION_UNKNOWN")
@@ -1338,6 +1387,7 @@ class ConversationCaptureStore:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            self._guard(conn)
             if self._state(conn, session_id) != "OPEN" or self._faulted(conn, session_id):
                 raise CaptureRefused("CAPTURE_SESSION_NOT_OPEN")
             last = conn.execute("SELECT turn_index, at FROM fi_capture_turn WHERE session_id=? "
@@ -1374,6 +1424,7 @@ class ConversationCaptureStore:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            self._guard(conn)
             state = self._state(conn, session_id)
             if state is None:
                 raise CaptureRefused("CAPTURE_SESSION_UNKNOWN")
@@ -1415,6 +1466,7 @@ class ConversationCaptureStore:
     def sealed_transcript(self, session_id):
         conn = self._connect()
         try:
+            self._guard(conn)
             row = conn.execute("SELECT transcript, sha256 FROM fi_conversation_evidence WHERE session_id=?",
                                (session_id,)).fetchone()
         finally:
@@ -1431,9 +1483,43 @@ def _capture_enabled() -> bool:
     return _os.getenv("LILITH_FI_EVIDENCE_CAPTURE", "") == "1"
 
 
+def _capture_db_path() -> Path:
+    """The one capture path; the First Interaction FORGET runner must pass exactly this to L18_V2."""
+    return Path(_os.getenv("LILITH_FI_EVIDENCE_DB", str(LILITH_DATA_DIR / "conversation-evidence.db")))
+
+
+def _capture_privacy_gate(selector) -> None:
+    """Read-only Privacy check for the First Interaction identity: an ACTIVE hold, or the Privacy authority's
+    restore suppression for the selector bound at provisioning (written at FORGET begin and never removed). Fails
+    closed: an unbound store or no configured, readable Privacy Governance database means no capture."""
+    if not isinstance(selector, str) or len(selector) != 64:
+        raise CaptureRefused("CAPTURE_STORE_UNPROVISIONED")
+    configured = _os.getenv("LILITH_PRIVACY_DB_PATH", "")
+    path = Path(configured) if configured else None
+    if path is None or not path.is_file():
+        raise CaptureRefused("CAPTURE_PRIVACY_UNAVAILABLE")
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            held = conn.execute(
+                "SELECT 1 FROM privacy_hold WHERE memory_class=? AND subject_namespace=? AND subject_key=? "
+                "AND state='ACTIVE'", _FI_IDENTITY).fetchone()
+            forgotten = conn.execute(
+                "SELECT 1 FROM privacy_restore_suppression_manifest WHERE identity_selector=?",
+                (selector,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        raise CaptureRefused("CAPTURE_PRIVACY_UNAVAILABLE")
+    if held is not None:
+        raise CaptureRefused("CAPTURE_PRIVACY_HELD")
+    if forgotten is not None:
+        raise CaptureRefused("CAPTURE_PRIVACY_FORGOTTEN")
+
+
 def _capture_store():
-    path = Path(_os.getenv("LILITH_FI_EVIDENCE_DB", str(LILITH_DATA_DIR / "conversation-evidence.db")))
-    return ConversationCaptureStore(path)
+    # The relay never creates the capture database: it must be provisioned (bound) through the Privacy authority.
+    return ConversationCaptureStore(_capture_db_path(), privacy_gate=_capture_privacy_gate, provisioned_only=True)
 
 
 def _require_capture_auth(credential) -> None:
@@ -1454,8 +1540,7 @@ def _capture_lock(session: str):
 
 
 def _capture_refusal(exc) -> HTTPException:
-    status = 404 if exc.code in {"CAPTURE_SESSION_UNKNOWN", "EVIDENCE_UNKNOWN"} else 409
-    return HTTPException(status_code=status, detail=exc.code)
+    return HTTPException(status_code=_CAPTURE_REFUSAL_STATUS.get(exc.code, 409), detail=exc.code)
 
 
 @app.post("/os/conversation")

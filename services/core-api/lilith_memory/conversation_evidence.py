@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,17 @@ except ImportError:  # deploy-exact flat-directory tests
 
 ENVIRONMENTS = frozenset({"test", "dev", "prod"})
 EVIDENCE_SEMANTICS = "CAPTURED_CONVERSATION_EVIDENCE_NOT_A_MEMORY_ACCEPTANCE"
+FIRST_INTERACTION_IDENTITY = (FI.MEMORY_CLASS, FI.SUBJECT_NAMESPACE, FI.SUBJECT_KEY)
+# Identical DDL in app.py. One row: the Privacy authority's opaque restore-suppression selector for the First
+# Interaction identity, so the relay can check Privacy suppression read-only without the Privacy secret.
+CAPTURE_PRIVACY_BINDING_DDL = (
+    "CREATE TABLE IF NOT EXISTS fi_capture_privacy_binding ("
+    "identity_selector TEXT NOT NULL CHECK(length(identity_selector)=64))",
+    "CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_binding_no_update BEFORE UPDATE ON fi_capture_privacy_binding "
+    "BEGIN SELECT RAISE(ABORT,'capture privacy binding is permanent'); END",
+    "CREATE TRIGGER IF NOT EXISTS fi_capture_privacy_binding_no_delete BEFORE DELETE ON fi_capture_privacy_binding "
+    "BEGIN SELECT RAISE(ABORT,'capture privacy binding is permanent'); END",
+)
 
 
 class ConversationEvidenceError(ValueError):
@@ -43,6 +55,38 @@ class ConversationEvidenceError(ValueError):
 
 def _refuse(code: str) -> None:
     raise ConversationEvidenceError(code)
+
+
+def provision_capture_store(path: Path, privacy_store: Any) -> str:
+    """Operator provisioning of the relay's capture database, run with the Privacy Governance store (the only holder
+    of the selector secret). Refuses, creating nothing, once the First Interaction identity is held or forgotten
+    (Privacy restore suppression is permanent). Otherwise records the identity's selector, which the relay then
+    checks against Privacy suppression inside every capture transaction. Idempotent; a different binding refuses."""
+    path = Path(path)
+    if privacy_store.is_held(*FIRST_INTERACTION_IDENTITY):          # ACTIVE hold, or ACTIVE/COMPLETE suppression
+        _refuse("CAPTURE_PRIVACY_FORGOTTEN")
+    selector = privacy_store.identity_selector(FIRST_INTERACTION_IDENTITY)
+    created = not path.exists()
+    conn = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+    try:
+        if created and os.name != "nt":
+            os.chmod(path, 0o600)
+        conn.execute("BEGIN IMMEDIATE")
+        for statement in CAPTURE_PRIVACY_BINDING_DDL:
+            conn.execute(statement)
+        rows = [str(r[0]) for r in conn.execute("SELECT identity_selector FROM fi_capture_privacy_binding")]
+        if rows and rows != [selector]:
+            _refuse("CAPTURE_BINDING_MISMATCH")
+        if not rows:
+            conn.execute("INSERT INTO fi_capture_privacy_binding VALUES (?)", (selector,))
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    return selector
 
 
 class ConversationEvidenceReader:
