@@ -39,6 +39,7 @@ SHARED_FILES = frozenset({
     "services/core-api/lilith_memory/__init__.py",
     "services/core-api/lilith_memory/canonical_contracts.py",
     "services/core-api/lilith_memory/canonical_authority.py",
+    "services/core-api/lilith_memory/memory_action_v2.py",
     "services/core-api/lilith_memory/owner_proof.py",
     "services/core-api/tests/test_owner_proof.py",
     "services/core-api/tests/owner_proof_golden.jsonl",
