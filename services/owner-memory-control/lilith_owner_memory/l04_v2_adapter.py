@@ -474,9 +474,17 @@ class L04V2AdmissionAdapter:
 
             # Every existing L04 rule applies unchanged, including its own
             # in-transaction Privacy hold checks and V1 internal-state rows.
-            with self.store.actor_authority.admitting(action.action_digest):
-                applied = (self.store.apply(request.proposal_ref_id, in_transaction=link_in_transaction) if durable
-                           else self.store.apply(request.proposal_ref_id))
+            try:
+                with self.store.actor_authority.admitting(action.action_digest):
+                    applied = (self.store.apply(request.proposal_ref_id, in_transaction=link_in_transaction)
+                               if durable else self.store.apply(request.proposal_ref_id))
+            except (Reject, S.CanonicalStoreError):
+                # A deterministic refusal raised inside the L04 transaction (a Reject from the in-transaction link
+                # check, or L04's own pre-commit refusal); apply has rolled back. Abandon the reservation only when
+                # L04 provably holds no accepted admission for this proposal. Any other exception keeps the accepted
+                # A1-A7 crash semantics: the evidence stays RESERVED for `reconcile`.
+                self._abandon_if_not_admitted(envelope["evidenceId"], request.proposal_ref_id, action)
+                raise
             if applied.outcome != S.ACCEPTED:
                 self.evidence_use_ledger.abandon(evidence_id=envelope["evidenceId"],
                                                  proposal_ref_id=request.proposal_ref_id)
@@ -498,6 +506,17 @@ class L04V2AdmissionAdapter:
         except Reject as rejected:
             return V2ResultV1(NOT_ACCEPTED, rejected.reason, rejected.detail)
         return self._admitted(view, linked, authority.authority_facts)
+
+    def _abandon_if_not_admitted(self, evidence_id: str, proposal_ref_id: str,
+                                 action: C.FrozenMemoryActionV1) -> None:
+        """RESERVED -> ABANDONED (the ledger's existing transition) only when a read-only L04 view shows no
+        accepted admission for the proposal. Any doubt (view unreadable, or an accepted admission) keeps RESERVED."""
+        try:
+            view = read_l04_admission_view(self.store.path, proposal_ref_id, action)
+        except Exception:
+            return
+        if view is None or view["admissionOutcome"] != S.ACCEPTED:
+            self.evidence_use_ledger.abandon(evidence_id=evidence_id, proposal_ref_id=proposal_ref_id)
 
     def reconcile(self, proposal_ref_id: str) -> V2ResultV1:
         """A7 recovery after a restart: the L04 admission and its link are committed (atomically, durable link
