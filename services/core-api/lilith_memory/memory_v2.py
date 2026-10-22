@@ -836,6 +836,13 @@ class L18V2PrivacyErasureOwner:
         self.privacy_authority = privacy_authority
 
     @staticmethod
+    def _erase_identity_intents(conn: sqlite3.Connection, table: str, identity: Tuple[str, str, str]) -> None:
+        """Delete the plaintext intents of exactly this identity, including orphans that never reached a
+        candidate. Runs after the candidate/proposal rows, so a still-referenced intent fails the foreign key."""
+        conn.execute(
+            f"DELETE FROM {table} WHERE memory_class=? AND subject_namespace=? AND subject_key=?", identity)
+
+    @staticmethod
     def _erase_first_interaction(conn: sqlite3.Connection, identity: Tuple[str, str, str]) -> int:
         """Erase every First Interaction L18 row for one identity, including the plaintext intent and
         proposal values. Triggers are already dropped by the caller."""
@@ -848,6 +855,7 @@ class L18V2PrivacyErasureOwner:
             )
         )
         if not candidate_ids:
+            L18V2PrivacyErasureOwner._erase_identity_intents(conn, "learning_fi_intent_v1", identity)
             return 0
         marks = ",".join("?" for _ in candidate_ids)
         intent_ids = tuple(str(row[0]) for row in conn.execute(
@@ -868,6 +876,7 @@ class L18V2PrivacyErasureOwner:
         if intent_ids:
             imarks = ",".join("?" for _ in intent_ids)
             conn.execute(f"DELETE FROM learning_fi_intent_v1 WHERE intent_ref_id IN ({imarks})", intent_ids)
+        L18V2PrivacyErasureOwner._erase_identity_intents(conn, "learning_fi_intent_v1", identity)
         return int(deleted)
 
     def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
@@ -961,6 +970,7 @@ class L18V2PrivacyErasureOwner:
                     f"DELETE FROM learning_memory_intent_v2 WHERE intent_ref_id IN ({marks})",
                     intent_ids,
                 )
+            self._erase_identity_intents(conn, "learning_memory_intent_v2", authorization.identity)
             if first_interaction:
                 deleted += self._erase_first_interaction(conn, authorization.identity)
             for name in triggers:

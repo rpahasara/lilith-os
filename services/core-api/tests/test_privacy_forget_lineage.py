@@ -23,9 +23,12 @@ from test_canonical_runtime import (  # noqa: F401  (also puts the Core API on s
     stamp_text,
 )
 
+from test_first_interaction_l04 import FI_CLASS, FI_KEY, FI_NAMESPACE, FI_PURPOSE, FirstInteractionCase, fi_action, fi_value
+
 from lilith_memory import canonical_contracts as contracts
 from lilith_memory import canonical_store
 from lilith_memory import learning_v2
+from lilith_memory import memory_action_v2 as MA
 from lilith_memory import memory_v2
 from lilith_memory import privacy_governance as privacy
 from lilith_memory import slice15b2a_migration
@@ -160,6 +163,152 @@ class ForgetLineageTests(ForgetLineageCase):
         l04, l18, receipt = self.forget()
         self.assertEqual(l04, {"owner": "L04", "status": "COMPLETE", "deleted": 0, "proposalIds": ()})
         self.assertEqual((l18["status"], receipt.verification_status), ("COMPLETE", "COMPLETE"))
+
+
+
+def orphan_intent(case, action, encoded: str, nonce: str):
+    """A plaintext intent recorded before any candidate/proposal exists (an interrupted admission)."""
+    evidence = case.actor.issue(action=action, request_digest=digest("request:" + nonce), nonce=nonce)
+    return case.learning.create_intent(action=action, actor_evidence_ref_id=evidence.actor_evidence_ref_id,
+                                       normalized_value_json=encoded, intent_ref_id="intent." + nonce)
+
+
+class OrphanIntentForgetTests(ForgetLineageCase):
+    """F1: an authorized FORGET erases plaintext intents that never reached a candidate."""
+
+    def test_orphan_intent_only_is_erased(self):
+        action, encoded = self.keyed_action("TEST-ONLY-ORPHAN", TEST_KEY)
+        orphan_intent(self, action, encoded, "orphan")
+        other_action, other_encoded = self.keyed_action("TEST-ONLY-OTHER-ORPHAN", OTHER_KEY)
+        orphan_intent(self, other_action, other_encoded, "other-orphan")
+        self.apply("TEST-ONLY-OTHER-OK", key=OTHER_KEY, nonce="other-ok")
+        before = self.identity_rows(OTHER_KEY)
+        self.assertEqual(self.identity_rows()["learning_memory_intent_v2"], 1)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM learning_candidate_v2 c JOIN learning_memory_intent_v2 i "
+                                   "ON i.intent_ref_id=c.intent_ref_id WHERE i.subject_key=?", TEST_KEY), [(0,)])
+        l04, l18, receipt = self.forget()
+        self.assertEqual((l04["status"], l18["status"], receipt.verification_status),
+                         ("COMPLETE", "COMPLETE", "COMPLETE"))
+        self.assertEqual(self.identity_rows(), {"memory_item": 0, "learning_memory_intent_v2": 0,
+                                                "learning_proposal_v2": 0})
+        self.assertEqual(self.identity_rows(OTHER_KEY), before)                      # unrelated identity intact
+        self.assertEqual(self.identity_rows(OTHER_KEY)["learning_memory_intent_v2"], 2)
+        self.assert_clean()
+        raw = self.db.read_bytes()
+        self.assertNotIn(b"TEST-ONLY-ORPHAN", raw)
+        self.assertIn(b"TEST-ONLY-OTHER-ORPHAN", raw)
+        self.assertIn(b"TEST-ONLY-OTHER-OK", raw)
+
+    def test_admitted_memory_and_orphan_intent_are_erased_together(self):
+        accepted, _ref = self.apply("TEST-ONLY-ADMITTED", nonce="admitted")
+        self.assertEqual(accepted.outcome, canonical_store.ACCEPTED)
+        action, encoded = self.keyed_action("TEST-ONLY-LATE-ORPHAN", TEST_KEY)
+        orphan_intent(self, action, encoded, "late-orphan")
+        self.apply("TEST-ONLY-OTHER-KEPT", key=OTHER_KEY, nonce="other-kept")
+        before = self.identity_rows(OTHER_KEY)
+        l04, l18, receipt = self.forget()
+        self.assertEqual((l04["status"], l04["deleted"], l18["status"], l18["deleted"]),
+                         ("COMPLETE", 1, "COMPLETE", 1))                             # candidate path unchanged
+        self.assertEqual(receipt.verification_status, "COMPLETE")
+        self.assertEqual(self.identity_rows(), {"memory_item": 0, "learning_memory_intent_v2": 0,
+                                                "learning_proposal_v2": 0})
+        self.assertEqual(self.identity_rows(OTHER_KEY), before)
+        self.assert_clean()
+        raw = self.db.read_bytes()
+        for value in (b"TEST-ONLY-ADMITTED", b"TEST-ONLY-LATE-ORPHAN"):
+            self.assertNotIn(value, raw)
+        self.assertIn(b"TEST-ONLY-OTHER-KEPT", raw)
+
+    def test_unauthorized_erasure_leaves_orphan_intent(self):
+        action, encoded = self.keyed_action("TEST-ONLY-UNAUTHORIZED", TEST_KEY)
+        orphan_intent(self, action, encoded, "unauthorized")
+        with self.assertRaisesRegex(PermissionError, "PRIVACY_ERASURE_NOT_AUTHORIZED"):
+            memory_v2.L18V2PrivacyErasureOwner(self.db, self.privacy).erase_authorized("auth.missing", "nonce.missing")
+        self.assertEqual(self.identity_rows()["learning_memory_intent_v2"], 1)
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?",
+                                   "learning_memory_intent_v2_no_delete"), [(1,)])
+
+
+class FirstInteractionOrphanIntentForgetTests(FirstInteractionCase):
+    """F1 for the First Interaction family; a pre-existing codename memory must survive."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.create()                                                                # codename "SYNTH-ALPHA"
+        self.migrate_fi()
+        self.enable_fi()
+        path = self.root / "privacy.test.db"
+        slice15b2a_migration.migrate_privacy(path, applied_at=stamp_text(3))
+        self.privacy = privacy.PrivacyGovernanceStore(path, TEST_ONLY_PRIVACY_SECRET, self.actor,
+                                                      now_fn=lambda: self.now)
+
+    def forget_fi(self):
+        active = self.fi_store().get_active(*MA.FIRST_INTERACTION_IDENTITY)
+        action = MA.action_from_fields(
+            schema_version=1, actor_ref_id=self.actor.ACTOR.actor_ref_id, operation=contracts.FORGET,
+            memory_class=FI_CLASS, subject_namespace=FI_NAMESPACE, subject_key=FI_KEY, value_schema=None,
+            payload_digest="0" * 64, expected_active_revision_id=None, restore_revision_id=None, purpose=FI_PURPOSE)
+        evidence = self.actor.issue(action=action, request_digest=digest("forget:fi"), nonce="forget.fi")
+        _request, auth, _suppression = self.privacy.begin_forget(
+            action=action, actor_evidence_ref_id=evidence.actor_evidence_ref_id, intent_ref_id="intent.forget.fi",
+            memory_item_id=None if active is None else active["memory_item_id"],
+            resource_owners=("L04", "L18_V2"), confirmation_event_ref="confirm.forget.fi")
+        l04 = memory_v2.L04PrivacyErasureOwner(self.db, self.privacy).erase_authorized(
+            auth.authorization_ref_id, auth.execution_nonce)
+        l18 = memory_v2.L18V2PrivacyErasureOwner(self.db, self.privacy).erase_authorized(
+            auth.authorization_ref_id, auth.execution_nonce)
+        return l04, l18, self.privacy.complete(auth.authorization_ref_id, auth.execution_nonce)
+
+    def count(self, table: str, where: str = "", *params) -> int:
+        conn = sqlite3.connect(self.db)
+        try:
+            return int(conn.execute(f"SELECT COUNT(*) FROM {table} {where}", params).fetchone()[0])
+        finally:
+            conn.close()
+
+    def codename_counts(self) -> dict:
+        counts = {t: self.count(t) for t in ("learning_memory_intent_v2", "learning_candidate_v2",
+                                             "learning_proposal_v2")}
+        counts["memory_item"] = self.count("memory_item", "WHERE memory_class=?", TEST_CLASS)
+        return counts
+
+    def assert_fi_erased_codename_kept(self, codename_before: dict, *gone: bytes):
+        tables = sorted(learning_v2.FIRST_INTERACTION_TABLES)
+        self.assertEqual({t: self.count(t) for t in tables}, {t: 0 for t in tables})
+        self.assertEqual(self.codename_counts(), codename_before)
+        conn = sqlite3.connect(self.db)
+        try:
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchall(), [("ok",)])
+        finally:
+            conn.close()
+        raw = self.db.read_bytes()
+        for value in gone:
+            self.assertNotIn(value, raw)
+        self.assertIn(b"SYNTH-ALPHA", raw)
+        self.assertTrue(self.privacy.is_held(*MA.FIRST_INTERACTION_IDENTITY))
+
+    def test_orphan_first_interaction_intent_is_erased(self):
+        action, encoded = fi_action(fi_value(closing="TEST_ONLY orphan farewell"))
+        orphan_intent(self, action, encoded, "fi.orphan")
+        self.assertEqual((self.count("learning_fi_intent_v1"), self.count("learning_fi_candidate_v1")), (1, 0))
+        codename_before = self.codename_counts()
+        l04, l18, receipt = self.forget_fi()
+        self.assertEqual((l04["status"], l18["status"], l18["deleted"], receipt.verification_status),
+                         ("COMPLETE", "COMPLETE", 0, "COMPLETE"))
+        self.assert_fi_erased_codename_kept(codename_before, b"TEST_ONLY orphan farewell")
+
+    def test_admitted_first_interaction_and_orphan_intent_are_erased(self):
+        _action, ref = self.fi_proposal(fi_value(closing="TEST_ONLY admitted farewell"), nonce="fi.admitted")
+        self.assertEqual(self.fi_store().apply(ref.proposal_ref_id).outcome, canonical_store.ACCEPTED)
+        action, encoded = fi_action(fi_value(closing="TEST_ONLY stray farewell"))
+        orphan_intent(self, action, encoded, "fi.stray")
+        codename_before = self.codename_counts()
+        l04, l18, receipt = self.forget_fi()
+        self.assertEqual((l04["status"], l04["deleted"], l18["status"], l18["deleted"], receipt.verification_status),
+                         ("COMPLETE", 1, "COMPLETE", 1, "COMPLETE"))
+        self.assert_fi_erased_codename_kept(codename_before, b"TEST_ONLY admitted farewell",
+                                            b"TEST_ONLY stray farewell")
 
 
 if __name__ == "__main__":
