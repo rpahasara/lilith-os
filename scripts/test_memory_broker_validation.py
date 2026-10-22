@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import json
 import subprocess
@@ -280,6 +281,35 @@ class BrokerControlTests(unittest.TestCase):
         names = {name for name, _ in api_bundle._sources(Path(__file__).resolve().parents[1])}
         self.assertFalse(any("memory-broker" in name or "test_owner_proof" in name for name in names))
         self.assertIn("services/core-api/tests/test_owner_proof.py", broker.SHARED_FILES)
+
+    def test_packaged_lilith_memory_imports_are_packaged(self) -> None:
+        # The artifact is a closed file set: every lilith_memory module that a packaged
+        # file imports (package, relative or flat-fallback form) must be packaged too.
+        repository = Path(__file__).resolve().parents[1]
+        package = "services/core-api/lilith_memory"
+
+        def imported(name: str, local: bool) -> set[str]:
+            names = []
+            for node in ast.walk(ast.parse((repository / name).read_bytes(), name)):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        parts = alias.name.split(".")
+                        names += parts[1:2] if parts[0] == "lilith_memory" else parts[:1] if local else []
+                elif isinstance(node, ast.ImportFrom):
+                    parts = (node.module or "").split(".")
+                    if node.level == 0 and parts[0] == "lilith_memory":
+                        names += parts[1:2] or [alias.name for alias in node.names]
+                    elif local and node.level == 1 and not node.module:
+                        names += [alias.name for alias in node.names]
+                    elif local and node.level in (0, 1):
+                        names += parts[:1]
+            return {f"{package}/{n}.py" for n in names if (repository / package / f"{n}.py").is_file()}
+
+        for selected in (broker.FILES, broker.B1B2A_FILES):
+            for name in sorted(n for n in selected if n.endswith(".py")):
+                for target in sorted(imported(name, name.startswith(f"{package}/"))):
+                    with self.subTest(importer=name, module=target):
+                        self.assertIn(target, selected)
 
     def test_dev_wiring_is_additive_and_proves_cleanup_and_stage_i_state(self) -> None:
         root = Path(__file__).resolve().parents[1]
