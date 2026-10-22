@@ -18,10 +18,12 @@ try:
     from . import canonical_contracts as C
     from . import canonical_authority as A
     from . import learning_v2 as L
+    from . import memory_action_v2 as MA
 except ImportError:  # deploy-exact flat-directory tests
     import canonical_contracts as C
     import canonical_authority as A
     import learning_v2 as L
+    import memory_action_v2 as MA
 
 
 SCHEMA_VERSION = 1
@@ -99,8 +101,14 @@ class CanonicalTupleRegistry:
         production_path: Optional[Path] = None,
     ):
         mapped: Dict[Tuple[str, str, str], MemoryTuplePolicyV1] = {}
+        purpose_by_capability = {cap: purpose for purpose, cap in MA.CAPABILITY_BY_PURPOSE.items()}
         for entry in entries:
-            C.FrozenMemoryActionV1(
+            if entry.capability not in purpose_by_capability:
+                raise ValueError("unsupported memory capability")
+            # The action shape check binds the tuple to its capability's purpose (the First
+            # Interaction capability admits only its one exact tuple and value schema; the codename
+            # capability can never register the First Interaction tuple).
+            MA.action_from_fields(
                 schema_version=1,
                 actor_ref_id="actor.local-owner.v1",
                 operation=C.CREATE,
@@ -111,12 +119,10 @@ class CanonicalTupleRegistry:
                 payload_digest="0" * 64,
                 expected_active_revision_id=None,
                 restore_revision_id=None,
-                purpose=C.LONG_TERM_PERSONAL_PROJECT_RECALL,
+                purpose=purpose_by_capability[entry.capability],
             ).validate()
             if entry.identity in mapped:
                 raise ValueError("duplicate exact memory tuple")
-            if entry.capability != C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE:
-                raise ValueError("unsupported memory capability")
             if not all(
                 isinstance(value, bool)
                 for value in (entry.read_allowed, entry.write_allowed, entry.requires_consent)
@@ -151,7 +157,7 @@ class L04V2Decision:
 
 class ProposalFamilyRegistry:
     def __init__(self, families: Iterable[str] = ()):
-        allowed = {L.V1_PROPOSAL_FAMILY, L.V2_PROPOSAL_FAMILY}
+        allowed = {L.V1_PROPOSAL_FAMILY, *L.L04_V2_FAMILIES}
         values = frozenset(families)
         if not values.issubset(allowed):
             raise ValueError("unknown proposal family")
@@ -515,17 +521,24 @@ class L04PrivacyErasureOwner:
         }
         if "proposal_ref_id" not in admission_columns:
             return ()
-        return tuple(
-            str(row[0])
-            for row in conn.execute(
-                "SELECT a.proposal_ref_id FROM memory_admission a "
-                "JOIN learning_proposal_ref r ON r.proposal_ref_id=a.proposal_ref_id "
-                "JOIN learning_proposal_v2 p ON p.proposal_id=r.family_proposal_id "
-                "WHERE r.proposal_family=? AND p.memory_class=? AND p.subject_namespace=? "
-                "AND p.subject_key=? ORDER BY a.proposal_ref_id",
-                (L.V2_PROPOSAL_FAMILY, *identity),
+        # Each L04 V2 family keeps its proposals in its own table; First Interaction only after schema v2.
+        families = [(L.V2_PROPOSAL_FAMILY, "learning_proposal_v2")]
+        if L.LearningV2Store.has_first_interaction_schema(conn):
+            families.append((L.FIRST_INTERACTION_PROPOSAL_FAMILY, "learning_fi_proposal_v1"))
+        refs = set()
+        for family, table in families:
+            refs.update(
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT a.proposal_ref_id FROM memory_admission a "
+                    "JOIN learning_proposal_ref r ON r.proposal_ref_id=a.proposal_ref_id "
+                    f"JOIN {table} p ON p.proposal_id=r.family_proposal_id "
+                    "WHERE r.proposal_family=? AND p.memory_class=? AND p.subject_namespace=? "
+                    "AND p.subject_key=?",
+                    (family, *identity),
+                )
             )
-        )
+        return tuple(sorted(refs))
 
     def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
         authorization = self.privacy_authority.resolve_erasure_authorization(
@@ -815,10 +828,47 @@ class L18V2PrivacyErasureOwner:
         "learning_proposal_ref_no_delete",
         "learning_proposal_v2_no_delete",
     )
+    # Present only after first_interaction_migration (schema v2); then all are required.
+    _FI_TRIGGERS = tuple(sorted(f"{table}_no_delete" for table in L.FIRST_INTERACTION_TABLES))
 
     def __init__(self, path: Path, privacy_authority: Any):
         self.path = Path(path)
         self.privacy_authority = privacy_authority
+
+    @staticmethod
+    def _erase_first_interaction(conn: sqlite3.Connection, identity: Tuple[str, str, str]) -> int:
+        """Erase every First Interaction L18 row for one identity, including the plaintext intent and
+        proposal values. Triggers are already dropped by the caller."""
+        candidate_ids = tuple(
+            str(row[0])
+            for row in conn.execute(
+                "SELECT candidate_id FROM learning_fi_candidate_v1 "
+                "WHERE memory_class=? AND subject_namespace=? AND subject_key=?",
+                identity,
+            )
+        )
+        if not candidate_ids:
+            return 0
+        marks = ",".join("?" for _ in candidate_ids)
+        intent_ids = tuple(str(row[0]) for row in conn.execute(
+            f"SELECT intent_ref_id FROM learning_fi_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids))
+        proposal_ids = tuple(str(row[0]) for row in conn.execute(
+            f"SELECT proposal_id FROM learning_fi_proposal_v1 WHERE candidate_id IN ({marks})", candidate_ids))
+        if proposal_ids:
+            pmarks = ",".join("?" for _ in proposal_ids)
+            conn.execute(
+                f"DELETE FROM learning_proposal_ref WHERE proposal_family=? AND family_proposal_id IN ({pmarks})",
+                (L.FIRST_INTERACTION_PROPOSAL_FAMILY, *proposal_ids),
+            )
+            conn.execute(f"DELETE FROM learning_fi_proposal_v1 WHERE proposal_id IN ({pmarks})", proposal_ids)
+        for table in ("learning_fi_assessment_v1", "learning_fi_candidate_source_v1"):
+            conn.execute(f"DELETE FROM {table} WHERE candidate_id IN ({marks})", candidate_ids)
+        deleted = conn.execute(
+            f"DELETE FROM learning_fi_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids).rowcount
+        if intent_ids:
+            imarks = ",".join("?" for _ in intent_ids)
+            conn.execute(f"DELETE FROM learning_fi_intent_v1 WHERE intent_ref_id IN ({imarks})", intent_ids)
+        return int(deleted)
 
     def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
         authorization = self.privacy_authority.resolve_erasure_authorization(
@@ -831,15 +881,17 @@ class L18V2PrivacyErasureOwner:
         conn.execute("PRAGMA secure_delete=ON")
         try:
             conn.execute("BEGIN EXCLUSIVE")
+            first_interaction = L.LearningV2Store.has_first_interaction_schema(conn)
+            triggers = self._TRIGGERS + (self._FI_TRIGGERS if first_interaction else ())
             trigger_sql = {
                 str(row[0]): str(row[1])
                 for row in conn.execute(
                     "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN (%s)"
-                    % ",".join("?" for _ in self._TRIGGERS),
-                    self._TRIGGERS,
+                    % ",".join("?" for _ in triggers),
+                    triggers,
                 )
             }
-            if set(trigger_sql) != set(self._TRIGGERS):
+            if set(trigger_sql) != set(triggers):
                 raise RuntimeError("L18 V2 immutability trigger set is incomplete")
             candidate_ids = tuple(
                 str(row[0])
@@ -869,7 +921,7 @@ class L18V2PrivacyErasureOwner:
                         candidate_ids,
                     )
                 )
-            for name in self._TRIGGERS:
+            for name in triggers:
                 conn.execute(f'DROP TRIGGER "{name}"')
             if proposal_ids:
                 marks = ",".join("?" for _ in proposal_ids)
@@ -909,7 +961,9 @@ class L18V2PrivacyErasureOwner:
                     f"DELETE FROM learning_memory_intent_v2 WHERE intent_ref_id IN ({marks})",
                     intent_ids,
                 )
-            for name in self._TRIGGERS:
+            if first_interaction:
+                deleted += self._erase_first_interaction(conn, authorization.identity)
+            for name in triggers:
                 conn.execute(trigger_sql[name])
             if conn.execute("PRAGMA foreign_key_check").fetchall():
                 raise RuntimeError("L18 V2 erasure foreign-key check failed")

@@ -21,8 +21,10 @@ from typing import Any, Callable, Dict, FrozenSet, Optional, Tuple
 
 try:
     from . import canonical_contracts as C
+    from . import memory_action_v2 as MA
 except ImportError:  # deploy-exact flat-directory tests
     import canonical_contracts as C
+    import memory_action_v2 as MA
 
 
 AUTHORITY_SCHEMA_VERSION = 1
@@ -274,6 +276,59 @@ AUTHORITY_MIGRATION_STATEMENTS = (
     """CREATE TRIGGER IF NOT EXISTS rollback_consumption_no_delete
         BEFORE DELETE ON rollback_consumption BEGIN
         SELECT RAISE(ABORT,'rollback consumption deletion requires Privacy authority'); END""",
+)
+
+
+KNOWN_CAPABILITIES = MA.KNOWN_CAPABILITIES
+
+# Schema v2 (applied only by first_interaction_migration): consent_grant and policy_decision are rebuilt so the
+# closed purpose/capability set gains the First Interaction pair. The CHECKs are paired: the codename purpose and
+# capability stay exactly as before, and the First Interaction purpose/capability admit only CREATE of the one tuple.
+_FI_CLASS, _FI_NAMESPACE, _FI_KEY = MA.FIRST_INTERACTION_IDENTITY
+_FI_ROW_SCOPE = (
+    f"operation='CREATE' AND memory_class='{_FI_CLASS}' AND subject_namespace='{_FI_NAMESPACE}' "
+    f"AND subject_key='{_FI_KEY}' AND expected_active_revision_id IS NULL AND restore_revision_id IS NULL"
+)
+_NOT_FI_TUPLE = (
+    f"NOT (memory_class='{_FI_CLASS}' AND subject_namespace='{_FI_NAMESPACE}' AND subject_key='{_FI_KEY}')"
+)
+_CODENAME_PURPOSE = C.LONG_TERM_PERSONAL_PROJECT_RECALL
+_FI_PURPOSE = MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION
+
+CONSENT_GRANT_V2_DDL = (
+    "CREATE TABLE consent_grant ("
+    "consent_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "authority TEXT NOT NULL CHECK(authority='LOCAL_CONSENT_AUTHORITY_V1'), actor_ref_id TEXT NOT NULL, "
+    "actor_evidence_ref_id TEXT NOT NULL REFERENCES actor_evidence_ref(actor_evidence_ref_id), "
+    "memory_class TEXT NOT NULL, subject_namespace TEXT NOT NULL, subject_key TEXT NOT NULL, "
+    "operation TEXT NOT NULL CHECK(operation IN ('CREATE','SUPERSEDE','RESTORE')), "
+    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    "expected_active_revision_id TEXT, restore_revision_id TEXT, "
+    f"purpose TEXT NOT NULL CHECK(purpose IN ('{_CODENAME_PURPOSE}','{_FI_PURPOSE}')), "
+    "granted_at TEXT NOT NULL, issuer_type TEXT NOT NULL CHECK(issuer_type='USER_CONFIRMATION'), "
+    "issuer_ref TEXT NOT NULL, intent_ref_id TEXT NOT NULL, privacy_notice_version TEXT NOT NULL, "
+    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+    "consent_fingerprint TEXT NOT NULL CHECK(length(consent_fingerprint)=64), "
+    f"CHECK((purpose='{_CODENAME_PURPOSE}' AND {_NOT_FI_TUPLE}) "
+    f"OR (purpose='{_FI_PURPOSE}' AND {_FI_ROW_SCOPE})))"
+)
+POLICY_DECISION_V2_DDL = (
+    "CREATE TABLE policy_decision ("
+    "decision_ref_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "actor_ref_id TEXT NOT NULL, "
+    "actor_evidence_ref_id TEXT NOT NULL REFERENCES actor_evidence_ref(actor_evidence_ref_id), "
+    "capability TEXT NOT NULL, "
+    "operation TEXT NOT NULL CHECK(operation IN ('CREATE','SUPERSEDE','RESTORE')), "
+    "memory_class TEXT NOT NULL, subject_namespace TEXT NOT NULL, subject_key TEXT NOT NULL, "
+    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    "expected_active_revision_id TEXT, restore_revision_id TEXT, purpose TEXT NOT NULL, "
+    "policy_version TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('ALLOWED','DENIED')), "
+    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), created_at TEXT NOT NULL, "
+    "decision_fingerprint TEXT NOT NULL CHECK(length(decision_fingerprint)=64), "
+    f"CHECK((capability='{C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE}' AND purpose='{_CODENAME_PURPOSE}' "
+    f"AND {_NOT_FI_TUPLE}) "
+    f"OR (capability='{MA.CANONICAL_MEMORY_FIRST_INTERACTION_CREATE}' AND purpose='{_FI_PURPOSE}' "
+    f"AND {_FI_ROW_SCOPE})))"
 )
 
 
@@ -667,7 +722,7 @@ class ConsentStore:
         policy = self.policy_store.resolve(
             policy_decision_ref_id,
             action=action,
-            capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
+            capability=MA.capability_for_purpose(action.purpose),
         )
         if policy.status != CONFIRMED:
             raise ConsentError("Policy denied action before confirmation")
@@ -707,7 +762,7 @@ class ConsentStore:
         if self.policy_store is None or self.policy_store.resolve(
             challenge.policy_decision_ref_id,
             action=action,
-            capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
+            capability=MA.capability_for_purpose(action.purpose),
         ).status != CONFIRMED:
             raise ConsentError("Policy decision is no longer valid")
         self.actor_authority.validate_existing(
@@ -744,7 +799,7 @@ class ConsentStore:
             action_digest=action.action_digest,
             consent_fingerprint=C.sha256_digest(semantics),
         )
-        consent.validate_shape()
+        MA.validate_consent(consent)
         conn = self._connect()
         try:
             conn.execute(
@@ -823,7 +878,7 @@ class ConsentStore:
                 return AuthorityResolution(REVOKED, reference_id, "CONSENT_REVOKED")
             consent = self._from_row(row)
             try:
-                consent.validate_shape()
+                MA.validate_consent(consent)
             except C.ContractError:
                 return AuthorityResolution(INVALID, reference_id, "CONSENT_INVALID")
             semantics = C.consent_semantics(
@@ -939,9 +994,7 @@ class MemoryPolicyStore:
         active_capabilities: FrozenSet[str] = frozenset(),
         now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
-        unknown = set(active_capabilities) - {
-            C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE
-        }
+        unknown = set(active_capabilities) - KNOWN_CAPABILITIES
         if unknown:
             raise ValueError("unknown Policy capability")
         self.path = Path(path)
@@ -966,7 +1019,7 @@ class MemoryPolicyStore:
         action.validate()
         if action.operation not in C.MEMORY_MUTATIONS:
             raise PolicyError("Policy mutation operation is unsupported")
-        if capability != C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE:
+        if capability != MA.capability_for_purpose(action.purpose):
             raise PolicyError("unknown Policy capability")
         actor = self.actor_authority.resolve_and_consume(
             actor_evidence_ref_id,
@@ -1006,7 +1059,7 @@ class MemoryPolicyStore:
             created_at=utc_now(self.now_fn()),
             decision_fingerprint=C.sha256_digest(semantic),
         )
-        decision.validate_shape()
+        MA.validate_policy(decision)
         conn = self._connect()
         try:
             conn.execute(
@@ -1060,7 +1113,7 @@ class MemoryPolicyStore:
                 return AuthorityResolution(INVALID, reference_id, "POLICY_DECISION_INVALID")
             decision = self._from_row(row)
             try:
-                decision.validate_shape()
+                MA.validate_policy(decision)
             except C.ContractError:
                 return AuthorityResolution(INVALID, reference_id, "POLICY_DECISION_INVALID")
             semantic = {

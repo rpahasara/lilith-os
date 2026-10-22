@@ -14,6 +14,7 @@ from . import canonical_authority as A
 from . import canonical_contracts as C
 from . import canonical_migration
 from . import learning_v2 as L
+from . import memory_action_v2 as MA
 from . import memory_v2 as M
 
 
@@ -72,7 +73,7 @@ _READ_TABLES = _MEMORY_TABLES | frozenset(
         "rollback_authorization",
         "sqlite_master",
     }
-)
+) | L.FIRST_INTERACTION_TABLES
 
 
 def _authorizer(
@@ -182,19 +183,8 @@ class CanonicalMemoryStoreV2:
 
     @staticmethod
     def _action(row: sqlite3.Row) -> C.FrozenMemoryActionV1:
-        return C.FrozenMemoryActionV1(
-            schema_version=1,
-            actor_ref_id=str(row["actor_ref_id"]),
-            operation=str(row["operation"]),
-            memory_class=str(row["memory_class"]),
-            subject_namespace=str(row["subject_namespace"]),
-            subject_key=str(row["subject_key"]),
-            value_schema=row["value_schema"],
-            payload_digest=str(row["payload_digest"]),
-            expected_active_revision_id=row["expected_active_revision_id"],
-            restore_revision_id=row["restore_revision_id"],
-            purpose=str(row["purpose"]),
-        )
+        # Codename rows build the unchanged FrozenMemoryActionV1; First Interaction rows its versioned subclass.
+        return MA.action_from_row(row)
 
     @staticmethod
     def _result(
@@ -270,19 +260,32 @@ class CanonicalMemoryStoreV2:
     ) -> bool:
         conn = self.learning_store.connect()
         try:
-            row = conn.execute(
-                "SELECT c.action_digest,c.actor_ref_id,c.actor_evidence_ref_id,"
-                "c.policy_decision_ref_id,c.consent_ref_id,a.outcome,s.source_digest,"
-                "s.source_owner,s.source_stream,s.source_ref_id,d.operation,d.memory_class,"
-                "d.subject_namespace,d.subject_key,d.value_schema,d.payload_digest,"
-                "d.expected_active_revision_id,d.restore_revision_id "
-                "FROM learning_candidate_v2 c "
-                "JOIN learning_project_codename_candidate_v1 d ON d.candidate_id=c.candidate_id "
-                "JOIN learning_assessment_v2 a ON a.candidate_id=c.candidate_id "
-                "JOIN learning_candidate_source_v2 s ON s.candidate_id=c.candidate_id "
-                "WHERE c.candidate_id=?",
-                (str(proposal["candidate_id"]),),
-            ).fetchone()
+            if L.is_first_interaction(action.purpose):
+                row = conn.execute(
+                    "SELECT c.action_digest,c.actor_ref_id,c.actor_evidence_ref_id,"
+                    "c.policy_decision_ref_id,c.consent_ref_id,a.outcome,s.source_digest,"
+                    "c.operation,c.memory_class,c.subject_namespace,c.subject_key,c.value_schema,"
+                    "c.payload_digest,c.expected_active_revision_id,c.restore_revision_id "
+                    "FROM learning_fi_candidate_v1 c "
+                    "JOIN learning_fi_assessment_v1 a ON a.candidate_id=c.candidate_id "
+                    "JOIN learning_fi_candidate_source_v1 s ON s.candidate_id=c.candidate_id "
+                    "WHERE c.candidate_id=? AND c.epistemic_basis=?",
+                    (str(proposal["candidate_id"]), MA.RECORDED_INTERACTION),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT c.action_digest,c.actor_ref_id,c.actor_evidence_ref_id,"
+                    "c.policy_decision_ref_id,c.consent_ref_id,a.outcome,s.source_digest,"
+                    "s.source_owner,s.source_stream,s.source_ref_id,d.operation,d.memory_class,"
+                    "d.subject_namespace,d.subject_key,d.value_schema,d.payload_digest,"
+                    "d.expected_active_revision_id,d.restore_revision_id "
+                    "FROM learning_candidate_v2 c "
+                    "JOIN learning_project_codename_candidate_v1 d ON d.candidate_id=c.candidate_id "
+                    "JOIN learning_assessment_v2 a ON a.candidate_id=c.candidate_id "
+                    "JOIN learning_candidate_source_v2 s ON s.candidate_id=c.candidate_id "
+                    "WHERE c.candidate_id=?",
+                    (str(proposal["candidate_id"]),),
+                ).fetchone()
             return bool(
                 row is not None
                 and str(row["action_digest"]) == action.action_digest
@@ -313,10 +316,16 @@ class CanonicalMemoryStoreV2:
         ref, proposal = self.learning_store.resolve_proposal_ref(proposal_ref_id)
         if not self.family_registry.permits(ref.proposal_family):
             raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
-        if ref.proposal_family != L.V2_PROPOSAL_FAMILY:
+        if ref.proposal_family not in L.L04_V2_FAMILIES:
             raise CanonicalStoreError("V1_DISPATCH_UNAVAILABLE")
         action = self._action(proposal)
         action.validate()
+        # Family, purpose and (below) capability must agree; the First Interaction family is CREATE-only.
+        first = ref.proposal_family == L.FIRST_INTERACTION_PROPOSAL_FAMILY
+        if first != L.is_first_interaction(action.purpose):
+            raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
+        if first and action.operation != C.CREATE:
+            raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
         if (
             ref.immutable_fingerprint != str(proposal["proposal_fingerprint"])
             or str(proposal["action_digest"]) != action.action_digest
@@ -325,7 +334,11 @@ class CanonicalMemoryStoreV2:
         ):
             raise CanonicalStoreError("PROPOSAL_FINGERPRINT_MISMATCH")
         policy = self.memory_registry.resolve(*action.identity)
-        if policy is None or not policy.write_allowed:
+        if (
+            policy is None
+            or not policy.write_allowed
+            or policy.capability != MA.capability_for_purpose(action.purpose)
+        ):
             raise CanonicalStoreError("UNKNOWN_MEMORY_TUPLE")
         if policy.value_schema != (action.value_schema or policy.value_schema):
             raise CanonicalStoreError("UNKNOWN_VALUE_SCHEMA")
@@ -345,8 +358,8 @@ class CanonicalMemoryStoreV2:
             raise CanonicalStoreError("PRIVACY_HOLD_ACTIVE")
         if action.operation in {C.CREATE, C.SUPERSEDE}:
             try:
-                canonical, digest = L.normalize_project_codename(
-                    json.loads(str(proposal["proposed_value_json"]))
+                canonical, digest = L.normalize_for_purpose(
+                    action.purpose, json.loads(str(proposal["proposed_value_json"]))
                 )
             except Exception as exc:
                 raise CanonicalStoreError("INVALID_PROPOSAL_VALUE") from exc
@@ -570,7 +583,9 @@ class CanonicalMemoryStoreV2:
                     proposal_ref_id,
                     current_revision_id,
                     action.restore_revision_id if action.operation == C.RESTORE else None,
-                    "USER_ASSERTED",
+                    # Fixed by L04 per family, never selectable by a proposal (equal to
+                    # MA.EPISTEMIC_BASIS_BY_PURPOSE; a test pins the agreement).
+                    "RECORDED_INTERACTION" if L.is_first_interaction(action.purpose) else "USER_ASSERTED",
                     "OWNER_DIRECTED_EXACT_ACTION",
                     str(proposal["consent_ref_id"]),
                     str(proposal["policy_decision_ref_id"]),
@@ -578,14 +593,16 @@ class CanonicalMemoryStoreV2:
                     now,
                 ),
             )
+            first = L.is_first_interaction(action.purpose)
             source = conn.execute(
-                "SELECT source_owner,source_stream,source_ref_id,source_digest "
-                "FROM learning_candidate_source_v2 WHERE candidate_id=?",
+                "SELECT source_owner,source_stream,source_ref_id,source_digest FROM %s WHERE candidate_id=?"
+                % ("learning_fi_candidate_source_v1" if first else "learning_candidate_source_v2"),
                 (str(proposal["candidate_id"]),),
             ).fetchone()
             source_record_id = int(str(source["source_digest"])[:15], 16) + 1
             intent = conn.execute(
-                "SELECT created_at FROM learning_memory_intent_v2 WHERE intent_ref_id=?",
+                "SELECT created_at FROM %s WHERE intent_ref_id=?"
+                % ("learning_fi_intent_v1" if first else "learning_memory_intent_v2"),
                 (str(source["source_ref_id"]),),
             ).fetchone()
             conn.execute(
