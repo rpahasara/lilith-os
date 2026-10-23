@@ -17,7 +17,7 @@ concurrency:
 jobs:
   repository-contracts:
     name: Repository contracts
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'rpahasara' && github.ref == 'refs/heads/ops/self-hosted-ci-smoke' && fromJSON('["self-hosted","linux","x64","lilith-ci-isolated"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
 
     steps:
@@ -151,7 +151,7 @@ jobs:
 
   frontend-quality:
     name: Frontend build and command core
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'rpahasara' && github.ref == 'refs/heads/ops/self-hosted-ci-smoke' && fromJSON('["self-hosted","linux","x64","lilith-ci-isolated"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
 
     steps:
@@ -178,7 +178,7 @@ jobs:
 
   backend-quality:
     name: Core API tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'rpahasara' && github.ref == 'refs/heads/ops/self-hosted-ci-smoke' && fromJSON('["self-hosted","linux","x64","lilith-ci-isolated"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
 
     steps:
@@ -222,7 +222,7 @@ jobs:
     name: LILITH DEV deployment
     if: always() && github.event_name == 'pull_request'
     needs: [repository-contracts, frontend-quality, backend-quality]
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.actor == 'rpahasara' && github.ref == 'refs/heads/ops/self-hosted-ci-smoke' && fromJSON('["self-hosted","linux","x64","lilith-ci-isolated"]') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
