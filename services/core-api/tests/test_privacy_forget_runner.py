@@ -67,6 +67,12 @@ class CountingOwner:
         return self.inner.erase_authorized(ref, nonce)
 
 
+
+def DURABLE_FOR_TEST():
+    """TEST_ONLY barrier: this suite's subject is the owner sequence; Track B durability (the governed
+    ``privacy_freshness.DurabilityBarrier``) is proven in test_privacy_freshness / test_privacy_activation_integration."""
+    return None
+
 class RunnerCase(FirstInteractionCase):
     def setUp(self) -> None:
         super().setUp()
@@ -105,7 +111,8 @@ class RunnerCase(FirstInteractionCase):
 
     def runner(self, owners=None, store=None):
         return R.FirstInteractionForgetRunner(store or self.privacy, owners or self.owners(store),
-                                              deployment_environment="DEV_SYNTHETIC")
+                                              deployment_environment="DEV_SYNTHETIC",
+                                              durability_barrier=DURABLE_FOR_TEST)
 
     def evidence(self, action=None):
         """The authorized synthetic fixture: the test actor authority issues evidence for the canonical action."""
@@ -169,6 +176,11 @@ class RunnerCase(FirstInteractionCase):
 
 
 class ContractTests(RunnerCase):
+    def test_a_runner_without_a_durability_barrier_is_refused(self):
+        with self.assertRaises(R.ForgetRunnerError) as caught:
+            R.FirstInteractionForgetRunner(self.privacy, self.owners(), deployment_environment="DEV_SYNTHETIC")
+        self.assertEqual(caught.exception.code, "DURABILITY_BARRIER_REQUIRED")
+
     def test_runner_is_dev_synthetic_only(self):
         for environment in ("PROD", "DEV", "LIVE", "", "dev_synthetic"):
             with self.subTest(environment=environment), self.assertRaises(R.ForgetRunnerError) as caught:
@@ -325,8 +337,8 @@ class OmissionAndDowngradeTests(RunnerCase):
 
         evidence = self.evidence()
         with self.assertRaisesRegex(privacy.PrivacyError, "required erasure resource owner is missing"):
-            self.forget(Omitting(self.privacy, self.owners(), deployment_environment="DEV_SYNTHETIC"),
-                        evidence=evidence)
+            self.forget(Omitting(self.privacy, self.owners(), deployment_environment="DEV_SYNTHETIC",
+                                 durability_barrier=DURABLE_FOR_TEST), evidence=evidence)
         self.assert_nothing_started()
         self.evidence_unconsumed(evidence)
 

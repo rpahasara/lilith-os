@@ -79,16 +79,19 @@ def first_interaction_forget_action(actor_ref_id: str) -> C.FrozenMemoryActionV1
 class FirstInteractionForgetRunner:
     def __init__(self, privacy_authority: Any, owners: Mapping[str, Any], *, deployment_environment: str,
                  durability_barrier: Optional[Callable[[], Optional[str]]] = None):
-        """``durability_barrier`` (Track B, durable-before-erase): called before any owner erases; None means the
-        current suppression set is anchored and owner-checkpointed, anything else is a refusal code and the FORGET
-        stays INCOMPLETE_HOLD_ACTIVE with nothing erased (``resume`` continues once the checkpoint is applied). The
-        F9c2 DEV_SYNTHETIC drill ran without one (Track A: no anchor, not live-eligible)."""
+        """``durability_barrier`` (Track B, durable-before-erase; REQUIRED): called before any owner erases; None
+        means the current suppression set is anchored and owner-checkpointed, anything else is a refusal code and the
+        FORGET stays INCOMPLETE_HOLD_ACTIVE with nothing erased (``resume`` continues once the checkpoint is applied).
+        The governed barrier is ``privacy_freshness.DurabilityBarrier``. The historical F9c2 DEV_SYNTHETIC drill ran
+        before Track B with none; a runner without one is now refused, so no composition can erase undurably."""
         if deployment_environment != DEV_SYNTHETIC:
             raise ForgetRunnerError("INTERIM_V1_PATH_DEV_SYNTHETIC_ONLY")
         for name, owner in owners.items():
             if name not in P.OWNER_SET or getattr(owner, "OWNER", None) != name:
                 raise ForgetRunnerError("OWNER_ADAPTER_INVALID")
-        if durability_barrier is not None and not callable(durability_barrier):
+        if durability_barrier is None:
+            raise ForgetRunnerError("DURABILITY_BARRIER_REQUIRED")
+        if not callable(durability_barrier):
             raise ForgetRunnerError("DURABILITY_BARRIER_INVALID")
         self.privacy_authority = privacy_authority
         self.owners = dict(owners)
@@ -145,13 +148,12 @@ class FirstInteractionForgetRunner:
             return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, failure_code="PRIVACY_ERASURE_NOT_AUTHORIZED")
         if set(authorization.resource_owners) != set(policy):
             return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, failure_code="AUTHORIZATION_OWNER_SET_MISMATCH")
-        if self.durability_barrier is not None:
-            try:
-                refusal = self.durability_barrier()
-            except Exception as exc:                                        # an unverifiable barrier is a refusal
-                refusal = "DURABILITY_BARRIER:" + type(exc).__name__
-            if refusal is not None:
-                return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, (), policy, failure_code=str(refusal))
+        try:
+            refusal = self.durability_barrier()
+        except Exception as exc:                                            # an unverifiable barrier is a refusal
+            refusal = "DURABILITY_BARRIER:" + type(exc).__name__
+        if refusal is not None:
+            return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, (), policy, failure_code=str(refusal))
         completed, results = [], {}
         for position, owner in enumerate(policy):
             status = self.privacy_authority.owner_result(ref, nonce, owner)
