@@ -44,9 +44,23 @@ STATUS = "PROPOSED_NOT_ACCEPTED"
 # ------------------------------------------------------------------ releases ---
 OLD_RELEASE = E22.NEW_RELEASE                                    # 129f2be (E-22 V7)
 OLD_MANIFEST_SHA256 = E22.NEW_MANIFEST_SHA256
-# NEW stays None until a merged owner record pins an independently attested build of the MERGED source.
-NEW_RELEASE: str | None = None
-NEW_MANIFEST_SHA256: str | None = None
+# The PROPOSED pin of the independently attested build (record trackb-e23-new-release-pin.md, NOT APPROVED until the
+# owner reviews and merges it). NEW_RELEASE is the SOURCE commit the archive was built from (the PR #251 merge), never
+# the commit carrying this pin.
+NEW_RELEASE: str | None = "57bff671fbfe5df4e59248d5d69338dc0ba05846"
+NEW_MANIFEST_SHA256: str | None = "fc29a23cbb411704f2799b418f8c7fd7fadf215489174e9ac9d370db2e78368c"
+# Build provenance (a record only; the archive is verified by its builder stamp and NEW_MANIFEST_SHA256).
+NEW_RELEASE_ATTESTATION = {
+    "archiveSha256": "a8cadbfa75023ed19c6939b17841e56f1ad9d0b83a6f854755621e32ed174486",
+    "archiveByteSize": 5367662,
+    "builderStampSha256": "3972c9a7f899df0e7c1d0cad2d52d267cb2e4decefd876ea17c3f63b05fed32e",
+    "attestationDigest": "3f18fd50f0269c1e72e537e996b2a38de8369b0ed4da6150ee597cd5299f4b90",
+    "buildRecipeSha256": "5e687a8e06d6c937a6ac088c055d603d581000cf413fe8d2a42a4c813a580130",
+    "authorityReleaseDigest": "4475c3c408571a7cba0a0f705c360ae1a6df02486a7d32c710531a8fd2ed16b7",
+    "recoveryWitnessReleaseDigest": "c911b7334d97dfe3b9246832d5301a830771e3f41c3b2d6d86867519de16c2be",
+    "identitySha256": "409874ff7c5e216b613f0bf649ea66443c1ec81f52b8f69277c8e0f1ef45f40e",
+    "evidenceManifestSha256": "3ca5bbe1a2e24a5d24fd29fde4c297e26c7438869760ac53052206ba2d15ff68",
+}
 
 # ------------------------------------------------------------------ the delta ---
 PAYLOAD_DELTA = {

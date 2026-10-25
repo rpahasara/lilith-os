@@ -4,6 +4,7 @@ staged, selected, stopped, started or loaded."""
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import unittest
 
 import e23_installed as H
@@ -18,12 +19,30 @@ def sha(data: bytes) -> str:
 
 
 class ContractTests(unittest.TestCase):
-    def test_old_is_the_installed_e22_release_and_new_is_unpinned(self):
+    def test_old_is_the_installed_e22_release_and_new_is_the_attested_build(self):
+        # OLD stays the installed E-22 release (record trackb-e23-new-release-pin §4).
         self.assertEqual(E23.OLD_RELEASE, "129f2bed617334be61dcac5204cd409946a7a566")
         self.assertEqual(E23.OLD_RELEASE, E22.NEW_RELEASE)
-        self.assertIsNone(E23.NEW_RELEASE)
-        self.assertIsNone(E23.NEW_MANIFEST_SHA256)
+        self.assertEqual(E23.OLD_MANIFEST_SHA256, "fc7dbf08bb5b8260716a762fd2fbccdb44fbf0e438e2e21d0cfddcd6f1a3348a")
+        self.assertEqual(E23.NEW_RELEASE, "57bff671fbfe5df4e59248d5d69338dc0ba05846")       # the PR #251 merge
+        self.assertEqual(E23.NEW_MANIFEST_SHA256, "fc29a23cbb411704f2799b418f8c7fd7fadf215489174e9ac9d370db2e78368c")
+        self.assertEqual(E23.NEW_RELEASE_ATTESTATION["archiveSha256"],
+                         "a8cadbfa75023ed19c6939b17841e56f1ad9d0b83a6f854755621e32ed174486")
         self.assertEqual(E23.STATUS, "PROPOSED_NOT_ACCEPTED")
+
+    def test_the_pinned_new_source_is_the_installed_payload_moved_by_exactly_the_delta(self):
+        installed = {member: sha(data) for member, data in H.installed_payloads().items()}
+        pinned = {target: subprocess.run(["git", "show", f"{E23.NEW_RELEASE}:{source}"], cwd=ROOT,
+                                         capture_output=True, check=True).stdout
+                  for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
+        E23.check_payload(pinned, installed)
+
+    def test_the_pin_record_names_every_pin_and_is_not_approved(self):
+        record = (ROOT / "docs/architecture/trackb-e23-new-release-pin.md").read_text(encoding="utf-8")
+        self.assertIn("PROPOSED — NOT APPROVED", record)
+        for value in (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256, E23.OLD_RELEASE, E23.OLD_MANIFEST_SHA256,
+                      *E23.NEW_RELEASE_ATTESTATION.values()):
+            self.assertIn(str(value), record)
 
     def test_the_repository_payload_is_the_installed_payload_moved_by_exactly_the_delta(self):
         installed = {member: sha(data) for member, data in H.installed_payloads().items()}
