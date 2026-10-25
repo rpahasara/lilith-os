@@ -283,6 +283,44 @@ class Rehearsal(unittest.TestCase):
                   self.work / "go-WITNESS_UNITS.txt")
         self.assertNotIn(OP.WITNESS_START_COMMAND, self.dev.mutations)
 
+    def test_an_owner_adjudicated_stop_continues_the_chain_only_from_an_exact_fresh_gate(self):
+        """The 2026-10-25 recovery: the WITNESS_UNITS record says STOP while the host is exactly E5. Only the pinned
+        record digest unblocks the chain; the next step still needs its own fresh E5 gate, and nothing re-runs."""
+        self.to("SELECT")
+        self.host.keygen()
+        real = self.host.run
+        self.host.run = lambda argv, cwd=None, **kw: (subprocess.CompletedProcess(argv, 1, "", "reload failed")
+                                                      if list(argv) == list(S.DAEMON_RELOAD) else real(argv, cwd, **kw))
+        self.dev.system = self.host.system()
+        self.assertEqual(self.run_step("WITNESS_UNITS")["result"], "E23_WITNESS_UNITS_STOP")
+        self.host.run = real
+        self.dev.system = self.host.system()
+        record = next((self.work / OP.STEP_DIR).glob("*-WITNESS_UNITS")) / OP.STEP_FILE
+        digest = sha(record.read_bytes())
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"WITNESS_UNITS": "0" * 64}):
+            self.stop("STEP_NOT_REACHED:WITNESS_UNITS", self.op.render, self.repo, self.work, "WITNESS_START")
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"WITNESS_UNITS": digest}):
+            self.op.status(self.repo, self.work, "STILL_STOP")             # host not yet E5: the gate refuses
+            self.stop("LATEST_STATUS_NOT_E5", self.op.render, self.repo, self.work, "WITNESS_START")
+            self.host.loaded = self.host.unit_sha()                       # the host reaches exact E5 (as on DEV)
+            self.host.run(list(S.TMPFILES_CREATE))
+            for step in ("WITNESS_START", "SIGNER_START", "RETIRE"):
+                if step == "SIGNER_START":
+                    self.accept("WITNESS")
+                if step == "RETIRE":
+                    self.accept("SIGNER")
+                self.assertTrue(self.run_step(step)["result"].startswith(f"E23_{step}_REACHED"), step)
+            self.stop("ATTEMPT_ALREADY_CONSUMED:e23-witness-units", self.op._step, self.repo, self.work,
+                      "WITNESS_UNITS", self.work / "go-WITNESS_UNITS.txt")
+        self.assertEqual(self.dev.mutations.count("e23-witness-units"), 1)
+
+    def test_the_only_adjudication_is_the_recorded_e5_stop(self):
+        self.assertEqual(set(OP.ADJUDICATED_STEPS), {"WITNESS_UNITS"})
+        self.assertRegex(OP.ADJUDICATED_STEPS["WITNESS_UNITS"], r"\A[0-9a-f]{64}\Z")
+        record = (ROOT / "docs/architecture/trackb-e23-e5-adjudication.md").read_text(encoding="utf-8")
+        self.assertIn("PROPOSED — NOT APPROVED", record)
+        self.assertIn(OP.ADJUDICATED_STEPS["WITNESS_UNITS"], record)
+
     def test_steps_cannot_be_skipped_or_reordered(self):
         self.to("STAGE")
         self.host.signer_stopped()                                        # an out-of-band stop (not the operator's)

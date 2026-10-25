@@ -61,7 +61,7 @@ STAGES = T + "e23_release_stages.py"
 TOOL_PINS = {
     E22OP.OPERATOR: "7a04d4567ea6d8ea5d4f9074ba4d61d51beeb17cd61c366edfcaddfa8ba3452b",
     CONTRACT: "8d3b7baa2552d6268af19deed385348311da0c3777b5e0747538b1807a69301a",
-    STAGES: "2f9e80f06c1f10f8a73d260f0e24da73615e176736fd66dead44e9a2f922a0f3",
+    STAGES: "9b408961b03e3314fa4e1e45e2c08403f5a2cabcf27a8f4bd6d051dbfec95f46",
 }
 ALL_PINS = {**E22OP.TOOL_PINS, **TOOL_PINS}
 # The E-23 stages run with the byte-unchanged installer V1, the E-19 and E-22 contracts and stage tools (reused host
@@ -106,6 +106,11 @@ STEPS = {
 }
 BY_STEP = {step: (form, pre, post, marker) for form, (step, pre, post, marker) in STEPS.items()}
 ORDER = [step for step, _p, _q, _m in STEPS.values()]
+# Owner-adjudicated STOP records (docs/architecture/trackb-e23-e5-adjudication.md, PROPOSED until merged): step ->
+# SHA-256 of its exact consumed `STEP.json`. Such a step counts as reached for the step chain ONLY; it never re-runs,
+# and the next step's own fresh gate must still read its post-phase. The 2026-10-25 WITNESS_UNITS STOP was the
+# anchor-group classifier defect (the host was exactly E5: read-only stat, record §2).
+ADJUDICATED_STEPS = {"WITNESS_UNITS": "c331e1e48e83d6a2885134ccb2347347eb771e5bda5f99cfd1df245170816f10"}
 
 GO_COMMON = ("Mode: " + E23.MODE + " (E-23, DEV_SYNTHETIC, lilith-dev-01 only). OLD release {old}; NEW release {new}, "
              "manifest SHA-256 {manifest}, archive SHA-256 {archive}.",
@@ -357,7 +362,9 @@ class Operator(E22OP.Operator):
             return None
         _need(consumed and len(runs) == 1, "STEP_NOT_EXACTLY_ONE:" + step)
         record = _json(runs[0] / STEP_FILE, "STEP_INVALID:" + step)
-        _need(record.get("result") == f"E23_{step}_REACHED_{post}", "STEP_NOT_REACHED:" + step)
+        adjudicated = record.get("result") == f"E23_{step}_STOP" \
+            and ADJUDICATED_STEPS.get(step) == sha256_hex((runs[0] / STEP_FILE).read_bytes())
+        _need(record.get("result") == f"E23_{step}_REACHED_{post}" or adjudicated, "STEP_NOT_REACHED:" + step)
         return record
 
     def _acceptance(self, workdir: Path, kind: str) -> tuple[dict, str] | None:
