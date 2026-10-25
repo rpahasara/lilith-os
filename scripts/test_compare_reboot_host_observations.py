@@ -504,7 +504,9 @@ class ContractTests(unittest.TestCase):
         authority = (ROOT / "services/authority-dev/deploy/lilith-authority-dev.tmpfiles.conf").read_text()
         witness = (ROOT / "services/recovery-witness/deploy/lilith-recovery-witness.tmpfiles.conf").read_text()
         self.assertEqual(authority, "d /run/lilith-authority-dev 0700 root root -\n")
-        self.assertEqual(witness, "d /run/lilith-recovery-witness 0710 root lilith-authority-dev -\n")
+        # The protected runtime directory is unchanged; Track B adds exactly the witness-owned Privacy anchor state dir.
+        self.assertEqual(witness, "d /run/lilith-recovery-witness 0710 root lilith-authority-dev -\n"
+                                  "d /var/lib/lilith-privacy-anchor 0700 lilith-recovery-witness lilith-recovery-witness -\n")
         self.assertEqual(C.TMPFILES_RUNTIME_DIRS["/run/lilith-authority-dev"], ("dir", 0, 0, "0700"))
         self.assertEqual(C.TMPFILES_RUNTIME_DIRS["/run/lilith-recovery-witness"], ("dir", 0, None, "0710"))
         self.assertEqual(C.SIGNER_ACCOUNT, "lilith-authority-dev")

@@ -43,7 +43,8 @@ class KeygenTests(unittest.TestCase):
 
     def build(self):
         for path, mode, data in (("/etc/machine-id", 0o644, K.DEV_MACHINE_ID + "\n"),
-                                 ("/proc/swaps", 0o444, "Filename Type Size Used Priority\n"),
+                                 # simulated, rewritten by the swap cases below; keygen reads it and never checks its mode
+                                 ("/proc/swaps", 0o644, "Filename Type Size Used Priority\n"),
                                  (K.HOST_KEY, 0o400, "k"), (K.SYSTEMD_CREDS, 0o755, "#!")):
             self.p(path).parent.mkdir(parents=True, exist_ok=True)
             self.p(path).write_text(data)

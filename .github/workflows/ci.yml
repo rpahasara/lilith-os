@@ -184,6 +184,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # Track B E-23 fixtures read the installed release (129f2be) from Git history.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
