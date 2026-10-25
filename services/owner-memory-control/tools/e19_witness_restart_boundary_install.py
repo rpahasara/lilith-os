@@ -67,9 +67,10 @@ DROPIN_BYTES = {
     E.OWNER_SOCKET: _SOCKET_DROPIN,
     E.SIGNER_SOCKET: _SOCKET_DROPIN,
 }
-# The accepted release fragments (`E.OLD_RELEASE` assets, byte-identical in the repository; a test re-derives them).
+# The installed release fragments (repository assets; a test re-derives them). The witness service is the E-23 unit
+# (installed 57bff671, E-23 E8: + K-PAN credential, + anchor state path); its E-19 / E-22 bytes were 9f78130c.
 FRAGMENTS = {
-    E.WITNESS_SERVICE: "9f78130c06491d184aff7066de99f804bf3816e171c63d6f70b734b1c6e85d7d",
+    E.WITNESS_SERVICE: "b3e2c753c6facea0691752c4894f28ce3f2fe3738f31cf3baa75a25af1d011c1",
     E.OWNER_SOCKET: "d260917fb31e9c76341fba131bafdc2802b80c0cf2fdcffb8cecc6e176440beb",
     E.SIGNER_SOCKET: "ad345d18747c30a7c2a93cb18d5be310dc091f5efe07fc6e1606efbc099bb9c7",
 }

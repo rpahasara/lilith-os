@@ -331,6 +331,21 @@ class StageTests(unittest.TestCase):
         unknown = S.e23_status(self.host.system(user=lambda _n: None), OLD, NEW, status=self.host.status)
         self.assertEqual(unknown["phase"], S.STOP_UNITS)                   # no witness account: fail closed
 
+    def test_the_kpan_listing_admission_is_exactly_the_two_credential_names(self):
+        """The frozen installer reports `LISTING:<credentials dir>` once K-PAN exists. Admitted only when the listing is
+        exactly K-WIT + K-PAN and K-PAN is exact; any extra name, or an unsafe K-PAN, stays a STOP."""
+        self.host.keygen()
+        report = self.status()
+        self.assertEqual((report["phase"], report["credentialNames"]), (S.E0, S.CREDENTIAL_NAMES_WITH_KPAN))
+        extra = self.host.p(S.CREDENTIAL_DIR) / "lilith-recovery-witness.other.cred"
+        extra.write_bytes(b"synthetic")
+        report = self.status()
+        self.assertIn("INSTALLER:LISTING:" + S.CREDENTIAL_DIR, report["failures"])
+        self.assertEqual(report["phase"], S.STOP_INCONSISTENT)
+        extra.unlink()
+        os.chmod(self.host.p(S.KPAN_BLOB), 0o640)
+        self.assertEqual(self.status()["phase"], S.STOP_KPAN)
+
     def test_a_pending_reload_at_e5_is_a_stop(self):
         self.to_e4()
         self.host.keygen()

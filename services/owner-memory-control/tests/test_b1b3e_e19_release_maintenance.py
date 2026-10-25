@@ -215,11 +215,11 @@ class ReleasePinTests(unittest.TestCase):
         self.assertEqual(M6.RELEASE_SHA, OLD)                                                       # byte-identical
         # E-22 V7 (record slice-15b2b-b1b3e-e22-completion.md): the readiness and PR-3 installed-release pins moved on
         # to the E-22 release; the M-B11 tools keep the E-19 NEW binding (the E-22 host tail binds W11 per phase).
-        import e22_judge_upgrade as J
+        # Then E-23 E8 (record trackb-e23-completion.md): they moved on again, to the E-23 release.
+        import e23_privacy_anchor_upgrade as E23
         moved = {"services/owner-memory-control/tools/mb12_pr3_material.py",
                  "services/owner-memory-control/tools/mb12_readiness_inputs.py"}
-        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]),
-                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
+        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]), (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256))
         # E-19 NEW is named by the contract and by exactly the re-pinned current bindings that have not moved on.
         named_new = {f"services/owner-memory-control/tools/{p.name}" for p in TOOLS.glob("*.py")
                      if E.NEW_RELEASE[:12] in p.read_text(encoding="utf-8")
