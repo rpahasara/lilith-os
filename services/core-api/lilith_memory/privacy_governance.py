@@ -30,7 +30,7 @@ except ImportError:  # deploy-exact flat-directory tests
 SCHEMA_VERSION = 1
 DEFAULT_MAX_BACKUP_RETENTION_DAYS = 30
 SCOPE = "CANONICAL_AND_KNOWN_DERIVED_COPIES"
-OWNER_SET = frozenset({
+OWNER_SET_V1 = frozenset({
     "L04",
     "L18_V1",
     "L18_V2",
@@ -42,6 +42,21 @@ OWNER_SET = frozenset({
     "LEGACY_SKILLS",
     "PENDING",
 })
+# F9-C: the Hermes DEV conversation store is a peer erasure owner under this authority (never part of L18_V2). It is
+# scope-bound: an authorization may name it only where the governed required-owner floor (schema v2) names it for the
+# identity's memory class and namespace, and there it is mandatory. Schema v1 databases accept only OWNER_SET_V1.
+HERMES_DEV_CONVERSATION = "HERMES_DEV_CONVERSATION"
+SCOPED_OWNERS = frozenset({HERMES_DEV_CONVERSATION})
+OWNER_SET = OWNER_SET_V1 | SCOPED_OWNERS
+PRIVACY_SCHEMA_V1 = 1
+PRIVACY_SCHEMA_V2 = 2
+REQUIRED_OWNER_FLOOR_TABLE = "privacy_required_owner_floor"
+# Database-level enforcement created and dropped together with the floor row (privacy_schema_v2), so code that
+# predates the floor (a rolled-back release) can neither authorize nor complete a floor-scoped FORGET without it.
+FLOOR_ENFORCEMENT_TRIGGERS = (
+    "privacy_floor_hermes_fi_authorization",
+    "privacy_floor_hermes_fi_completion",
+)
 
 PRIVACY_TABLES = frozenset({
     "privacy_schema_migration",
@@ -308,7 +323,9 @@ def _authorizer(
     del arg2, database, trigger
     table = str(arg1 or "")
     if action == sqlite3.SQLITE_READ:
-        return sqlite3.SQLITE_OK if table in (PRIVACY_TABLES | {"sqlite_master"}) else sqlite3.SQLITE_DENY
+        # The v2 required-owner floor is readable but never writable here; only the governed tool provisions it.
+        readable = PRIVACY_TABLES | {"sqlite_master", REQUIRED_OWNER_FLOOR_TABLE}
+        return sqlite3.SQLITE_OK if table in readable else sqlite3.SQLITE_DENY
     if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}:
         writable = PRIVACY_TABLES - {
             "privacy_schema_migration",
@@ -406,6 +423,41 @@ class PrivacyGovernanceStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _owner_floor(conn: sqlite3.Connection, memory_class: str, subject_namespace: str) -> Tuple[int, frozenset]:
+        """Schema version and the governed required-owner floor for one identity scope (always empty on v1)."""
+        try:
+            version = int(conn.execute("SELECT MAX(version) FROM privacy_schema_migration").fetchone()[0] or 0)
+            if version == PRIVACY_SCHEMA_V1:
+                return version, frozenset()
+            if version != PRIVACY_SCHEMA_V2:
+                raise PrivacyError("privacy governance schema version is unsupported")
+            rows = conn.execute(
+                f"SELECT resource_owner FROM {REQUIRED_OWNER_FLOOR_TABLE} "
+                "WHERE memory_class=? AND subject_namespace=?",
+                (memory_class, subject_namespace),
+            ).fetchall()
+            if rows:
+                marks = ",".join("?" for _ in FLOOR_ENFORCEMENT_TRIGGERS)
+                present = conn.execute(
+                    f"SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN ({marks})",
+                    FLOOR_ENFORCEMENT_TRIGGERS,
+                ).fetchone()[0]
+                if int(present) != len(FLOOR_ENFORCEMENT_TRIGGERS):
+                    raise PrivacyError("required erasure owner floor enforcement is missing")
+        except sqlite3.Error as exc:
+            raise PrivacyError("privacy governance owner floor is unavailable") from exc
+        return version, frozenset(str(row[0]) for row in rows)
+
+    @staticmethod
+    def _check_owner_scope(version: int, floor: frozenset, owners: Sequence[str]) -> None:
+        if version == PRIVACY_SCHEMA_V1 and not set(owners).issubset(OWNER_SET_V1):
+            raise PrivacyError("erasure resource owner requires privacy schema v2")
+        if not floor.issubset(owners):
+            raise PrivacyError("required erasure resource owner is missing")
+        if (set(owners) & SCOPED_OWNERS) - floor:
+            raise PrivacyError("erasure resource owner is not provisioned for this scope")
+
     def begin_forget(
         self,
         *,
@@ -422,6 +474,13 @@ class PrivacyGovernanceStore:
         owners = tuple(sorted(set(resource_owners)))
         if not owners or not set(owners).issubset(OWNER_SET):
             raise PrivacyError("erasure resource owner set is invalid")
+        # Checked before the actor evidence is consumed, and again inside the write transaction below.
+        conn = self._connect()
+        try:
+            scope = self._owner_floor(conn, action.memory_class, action.subject_namespace)
+        finally:
+            conn.close()
+        self._check_owner_scope(*scope, owners)
         actor = self.actor_authority.resolve_and_consume(
             actor_evidence_ref_id,
             action=action,
@@ -482,6 +541,8 @@ class PrivacyGovernanceStore:
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
+            if self._owner_floor(conn, action.memory_class, action.subject_namespace) != scope:
+                raise PrivacyError("required erasure owner floor changed during FORGET")
             conn.execute(
                 "INSERT INTO privacy_forget_request VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -664,6 +725,114 @@ class PrivacyGovernanceStore:
         finally:
             conn.close()
 
+    def owner_result(
+        self, authorization_ref_id: str, execution_nonce: str, owner: str
+    ) -> Optional[str]:
+        """Read-only: the recorded status of one owner for one live authorization (exact nonce), else None.
+
+        Lets an owner make a retry idempotent instead of colliding with its own earlier result.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT e.status FROM privacy_erasure_execution e "
+                "JOIN privacy_erasure_authorization a ON a.authorization_ref_id=e.authorization_ref_id "
+                "WHERE e.authorization_ref_id=? AND e.resource_owner=? AND a.execution_nonce=?",
+                (authorization_ref_id, owner, execution_nonce),
+            ).fetchone()
+            return None if row is None else str(row[0])
+        finally:
+            conn.close()
+
+    def owner_completion_recorded(self, authorization_ref_id: str, owner: str) -> bool:
+        """Read-only: Privacy has COMPLETED exactly this authorization with this owner COMPLETE.
+
+        Proven by the immutable completion rows (the owner result fingerprint is HMAC-bound to the reference, owner
+        and status under this secret) and by the authorization no longer being in flight."""
+        fingerprint = _hmac(self._secret, {
+            "authorizationRefId": authorization_ref_id,
+            "resourceOwner": owner,
+            "status": "COMPLETE",
+        })
+        conn = self._connect()
+        try:
+            in_flight = conn.execute(
+                "SELECT 1 FROM privacy_erasure_authorization WHERE authorization_ref_id=?", (authorization_ref_id,)
+            ).fetchone()
+            recorded = conn.execute(
+                "SELECT 1 FROM privacy_completion_owner_result WHERE resource_owner=? AND status='COMPLETE' "
+                "AND result_fingerprint=?", (owner, fingerprint)
+            ).fetchone()
+            return in_flight is None and recorded is not None
+        finally:
+            conn.close()
+
+    def identity_forget_completed(self, identity: Tuple[str, str, str], required_owner: str) -> bool:
+        """Read-only: a FORGET of exactly this identity has COMPLETED with ``required_owner`` among its owners.
+
+        Proven by no ACTIVE hold on the identity, its suppression selector, and a completion receipt for that selector
+        whose HMAC verifies under this secret and whose owner results include ``required_owner`` COMPLETE. Lets the
+        root hold-first release (F9-C Track A) clear a durable FORGET intent without the intent naming an
+        authorization."""
+        selector = self.identity_selector(identity)
+        conn = self._connect()
+        try:
+            if conn.execute(
+                "SELECT 1 FROM privacy_hold WHERE memory_class=? AND subject_namespace=? AND subject_key=? "
+                "AND state='ACTIVE'", tuple(identity)
+            ).fetchone() is not None:
+                return False
+            suppression = conn.execute(
+                "SELECT suppression_ref_id FROM privacy_restore_suppression_manifest WHERE identity_selector=?",
+                (selector,)).fetchone()
+            if suppression is None:
+                return False
+            for receipt in conn.execute(
+                    "SELECT * FROM privacy_completion_receipt WHERE restore_suppression_ref=?",
+                    (str(suppression[0]),)).fetchall():
+                results = conn.execute(
+                    "SELECT resource_owner,status,result_fingerprint FROM privacy_completion_owner_result "
+                    "WHERE receipt_id=? ORDER BY resource_owner", (receipt["receipt_id"],)).fetchall()
+                semantic = {
+                    "authorityVersion": C.PRIVACY_GOVERNANCE_AUTHORITY_V1,
+                    "resourceOwnerResults": [
+                        {"owner": str(r[0]), "status": str(r[1]), "fingerprint": str(r[2])} for r in results
+                    ],
+                    "restoreSuppressionRef": str(receipt["restore_suppression_ref"]),
+                    "verificationStatus": "COMPLETE",
+                }
+                if hmac.compare_digest(str(receipt["receipt_fingerprint"]), _hmac(self._secret, semantic)) \
+                        and any(str(r[0]) == required_owner and str(r[1]) == "COMPLETE" for r in results):
+                    return True
+            return False
+        finally:
+            conn.close()
+
+    def required_owners(self, memory_class: str, subject_namespace: str) -> frozenset:
+        """Read-only: the governed required-owner floor for one identity scope (empty on v1; fails closed)."""
+        conn = self._connect()
+        try:
+            return self._owner_floor(conn, memory_class, subject_namespace)[1]
+        finally:
+            conn.close()
+
+    def in_flight_authorization(self, identity: Tuple[str, str, str]) -> Optional[Tuple[str, str]]:
+        """Read-only: (authorization_ref_id, execution_nonce) of the ACTIVE hold on exactly this identity, else None.
+
+        Lets the governed runner resume an interrupted FORGET without the caller naming an authorization.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT a.authorization_ref_id,a.execution_nonce FROM privacy_hold h "
+                "JOIN privacy_erasure_authorization a ON a.hold_id=h.hold_id "
+                "WHERE h.memory_class=? AND h.subject_namespace=? AND h.subject_key=? AND h.state='ACTIVE'",
+                tuple(identity),
+            ).fetchone()
+            return None if row is None else (str(row[0]), str(row[1]))
+        finally:
+            conn.close()
+
     def complete(
         self, authorization_ref_id: str, execution_nonce: str
     ) -> PrivacyCompletionReceiptV1:
@@ -772,6 +941,43 @@ class PrivacyGovernanceStore:
         finally:
             conn.close()
 
+    def verify_suppression_integrity(self) -> int:
+        """Read-only pre-serve check that this store and its secret really are the Privacy authority's records.
+
+        Every completion receipt's HMAC must verify under this secret and still name an existing suppression selector,
+        and every in-flight authorization's HMAC must verify. A wrong or rotated secret (whose selectors would match
+        nothing, silently disabling suppression) or tampered records raise. Returns the number of selectors."""
+        conn = self._connect()
+        try:
+            for receipt in conn.execute("SELECT * FROM privacy_completion_receipt ORDER BY receipt_id").fetchall():
+                results = conn.execute(
+                    "SELECT resource_owner,status,result_fingerprint FROM privacy_completion_owner_result "
+                    "WHERE receipt_id=? ORDER BY resource_owner", (receipt["receipt_id"],)).fetchall()
+                semantic = {
+                    "authorityVersion": C.PRIVACY_GOVERNANCE_AUTHORITY_V1,
+                    "resourceOwnerResults": [
+                        {"owner": str(r[0]), "status": str(r[1]), "fingerprint": str(r[2])} for r in results
+                    ],
+                    "restoreSuppressionRef": str(receipt["restore_suppression_ref"]),
+                    "verificationStatus": "COMPLETE",
+                }
+                if not results or not hmac.compare_digest(str(receipt["receipt_fingerprint"]),
+                                                          _hmac(self._secret, semantic)):
+                    raise PrivacyError("privacy completion receipt does not verify")
+                if conn.execute("SELECT 1 FROM privacy_restore_suppression_manifest WHERE suppression_ref_id=?",
+                                (receipt["restore_suppression_ref"],)).fetchone() is None:
+                    raise PrivacyError("privacy restore suppression selector is missing")
+            for row in conn.execute("SELECT authorization_ref_id,execution_nonce FROM privacy_erasure_authorization"):
+                owners = [str(r[0]) for r in conn.execute(
+                    "SELECT resource_owner FROM privacy_erasure_authorization_owner WHERE authorization_ref_id=?",
+                    (row[0],))]
+                if not owners or self.resolve_erasure_authorization(
+                        str(row[0]), owner=owners[0], execution_nonce=str(row[1])) is None:
+                    raise PrivacyError("in-flight erasure authorization does not verify")
+            return int(conn.execute("SELECT COUNT(*) FROM privacy_restore_suppression_manifest").fetchone()[0])
+        finally:
+            conn.close()
+
     def suppression_matches(self, identity: Tuple[str, str, str]) -> bool:
         selector = self.identity_selector(identity)
         conn = self._connect()
@@ -813,27 +1019,110 @@ class RestoreSuppressionVerification:
 
 
 class RestoreSuppressionVerifier:
-    """Explicit pre-serve utility; it is not a startup hook or scheduler."""
+    """Explicit pre-serve utility; it is not a startup hook or scheduler.
 
-    def __init__(self, privacy_store: PrivacyGovernanceStore, l04_owner: Any):
+    Privacy's suppression selectors are the authority: whatever a restored cognitive database contains, every identity
+    this Privacy store has suppressed is erased from L04 and then L18 V2 (L04 admissions reference L18 proposal rows)
+    through their governed restore paths. Ready only when, re-read afterwards, no suppressed identity has any L04 or
+    L18 V2 row left (for First Interaction: the whole family and the capture copy). Any error fails closed; a re-run
+    after a crash or partial cleanup is safe."""
+
+    def __init__(self, privacy_store: PrivacyGovernanceStore, l04_owner: Any, l18_owner: Any):
+        if l04_owner is None or l18_owner is None:
+            raise PrivacyError("restore suppression needs both the L04 and L18 V2 owners")
         self.privacy_store = privacy_store
         self.l04_owner = l04_owner
+        self.l18_owner = l18_owner
+
+    def _identities(self) -> Tuple[Tuple[str, str, str], ...]:
+        return tuple(sorted(
+            {tuple(i) for i in self.l04_owner.list_identities()} | {tuple(i) for i in self.l18_owner.list_identities()}
+        ))
 
     def verify_and_apply(self) -> RestoreSuppressionVerification:
+        owners = (self.l04_owner, self.l18_owner)
         try:
-            identities = tuple(self.l04_owner.list_identities())
-            matched = [
-                identity
-                for identity in identities
-                if self.privacy_store.suppression_matches(identity)
-            ]
+            self.privacy_store.verify_suppression_integrity()
+        except Exception:
+            return RestoreSuppressionVerification(False, 0, 0, "PRIVACY_RECORDS_UNVERIFIED")
+        try:
+            matched = [i for i in self._identities() if self.privacy_store.suppression_matches(i)]
             suppressed = 0
             for identity in matched:
-                self.l04_owner.erase_restore_suppressed(identity, self.privacy_store)
+                for owner in owners:
+                    owner.erase_restore_suppressed(identity, self.privacy_store)
                 suppressed += 1
-            remaining = tuple(self.l04_owner.list_identities())
-            if any(self.privacy_store.suppression_matches(i) for i in remaining):
+            remaining = [i for i in self._identities() if self.privacy_store.suppression_matches(i)]
+            if remaining or any(owner.restore_residue(i) for i in matched for owner in owners):
                 return RestoreSuppressionVerification(False, len(matched), suppressed, "SUPPRESSION_INCOMPLETE")
             return RestoreSuppressionVerification(True, len(matched), suppressed, None)
         except Exception:
             return RestoreSuppressionVerification(False, 0, 0, "RESTORE_VERIFICATION_FAILED")
+
+
+class RestoreSuppressionNotReady(PermissionError):
+    """Memory serving refused: the restore-suppression gate is not ready (an explicit refusal, never a miss)."""
+
+    def __init__(self, code: str):
+        super().__init__("RESTORE_SUPPRESSION_NOT_READY:" + code)
+        self.code = code
+
+
+class RestoreSuppressionGate:
+    """Read-only pre-serve gate over this Privacy authority and the L04 / L18 V2 restore probes.
+
+    There is no readiness flag: every check re-reads the current Privacy and cognitive (and capture) stores, so a
+    restore, a database replacement or a new suppression takes effect at the next memory-serving call. Ready requires
+    the Privacy records to verify under this secret, and no suppressed identity to have content that no ACTIVE hold
+    covers (content under an in-flight FORGET is expected and already refused per identity by ``is_held``). It only
+    lists and counts (read-only connections); erasure stays with ``RestoreSuppressionVerifier.verify_and_apply``, a
+    separate maintenance step that request handlers are never given."""
+
+    def __init__(self, privacy_store: PrivacyGovernanceStore, l04_owner: Any, l18_owner: Any):
+        if l04_owner is None or l18_owner is None:
+            raise PrivacyError("the restore-suppression gate needs both the L04 and L18 V2 owners")
+        self._privacy = privacy_store
+        # Only the read-only probes are kept; the gate has no erasure operation.
+        self._probes = tuple((owner.list_identities, owner.restore_residue) for owner in (l04_owner, l18_owner))
+
+    def check(self) -> RestoreSuppressionVerification:
+        try:
+            self._privacy.verify_suppression_integrity()
+        except Exception:
+            return RestoreSuppressionVerification(False, 0, 0, "PRIVACY_RECORDS_UNVERIFIED")
+        try:
+            identities = sorted({tuple(i) for listing, _ in self._probes for i in listing()})
+            matched = [i for i in identities if self._privacy.suppression_matches(i)]
+            exposed = [
+                i for i in matched
+                if self._privacy.in_flight_authorization(i) is None and any(residue(i) for _, residue in self._probes)
+            ]
+        except Exception:
+            return RestoreSuppressionVerification(False, 0, 0, "RESTORE_CHECK_FAILED")
+        if exposed:
+            return RestoreSuppressionVerification(False, len(matched), 0, "SUPPRESSED_CONTENT_PRESENT")
+        return RestoreSuppressionVerification(True, len(matched), 0, None)
+
+    def require_ready(self) -> None:
+        verification = self.check()
+        if not verification.ready_to_serve:
+            raise RestoreSuppressionNotReady(str(verification.failure_code))
+
+
+class GatedPrivacyHoldResolver:
+    """The ``privacy_hold_resolver`` given to memory-serving components (read facade, canonical store, learning
+    store). Every call first requires the restore-suppression gate, then answers from the Privacy authority exactly
+    as before; a gate failure raises (it is never reported as a hold, which would write REJECTED admissions)."""
+
+    def __init__(self, privacy_store: PrivacyGovernanceStore, gate: RestoreSuppressionGate):
+        if not isinstance(gate, RestoreSuppressionGate):
+            raise TypeError("a RestoreSuppressionGate is required")
+        self._privacy = privacy_store
+        self._gate = gate
+
+    def require_ready(self) -> None:
+        self._gate.require_ready()
+
+    def is_held(self, memory_class: str, subject_namespace: str, subject_key: str) -> bool:
+        self._gate.require_ready()
+        return self._privacy.is_held(memory_class, subject_namespace, subject_key)

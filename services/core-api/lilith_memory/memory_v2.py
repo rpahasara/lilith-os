@@ -434,6 +434,11 @@ class CanonicalMemoryReadFacade:
         row = self._raw_l04_store.get_active(
             memory_class, subject_namespace, subject_key
         )
+        # A restore-gated resolver is re-checked after the read too, so a database replaced between the hold check
+        # and the read cannot be served.
+        confirm_ready = getattr(self._privacy_hold_resolver, "require_ready", None)
+        if confirm_ready is not None:
+            confirm_ready()
         if row is None:
             return None
         consent_ref = row.get("consent_ref_id")
@@ -667,6 +672,17 @@ class L04PrivacyErasureOwner:
         finally:
             conn.close()
 
+    def restore_residue(self, identity: Tuple[str, str, str]) -> int:
+        """Read-only: L04 rows of exactly this identity still present (item and identity admissions)."""
+        conn = sqlite3.connect(f"file:{self.path.resolve()}?mode=ro", uri=True)
+        try:
+            items = int(conn.execute(
+                "SELECT COUNT(*) FROM memory_item WHERE memory_class=? AND subject_namespace=? AND subject_key=?",
+                tuple(identity)).fetchone()[0])
+            return items + len(self._identity_admission_refs(conn, tuple(identity)))
+        finally:
+            conn.close()
+
     def erase_restore_suppressed(self, identity: Tuple[str, str, str], privacy_store: Any) -> None:
         """Maintenance-only restore gate; Privacy proves the opaque selector first."""
         if not privacy_store.suppression_matches(identity):
@@ -682,10 +698,13 @@ class L04PrivacyErasureOwner:
                 "AND subject_namespace=? AND subject_key=?",
                 identity,
             ).fetchone()
-            if item is None:
+            # As in the authorized FORGET: rejected / precondition-failed admissions have no revision lineage, and
+            # left behind they keep L18 proposal references alive (and block the L18 V2 restore erasure).
+            identity_refs = self._identity_admission_refs(conn, tuple(identity))
+            if item is None and not identity_refs:
                 conn.rollback()
                 return
-            item_id = str(item[0])
+            item_id = str(item[0]) if item is not None else None
             trigger_sql = {
                 str(row[0]): str(row[1])
                 for row in conn.execute(
@@ -721,6 +740,12 @@ class L04PrivacyErasureOwner:
                 conn.execute(
                     f"DELETE FROM memory_admission WHERE {admission_column} IN ({marks})",
                     identifiers,
+                )
+            if identity_refs:
+                marks = ",".join("?" for _ in identity_refs)
+                conn.execute(
+                    f"DELETE FROM memory_admission WHERE proposal_ref_id IN ({marks})",
+                    identity_refs,
                 )
             conn.execute("DELETE FROM memory_active_revision WHERE memory_item_id=?", (item_id,))
             conn.execute("DELETE FROM memory_revision WHERE memory_item_id=?", (item_id,))
@@ -933,12 +958,9 @@ class L18V2PrivacyErasureOwner:
         L18V2PrivacyErasureOwner._erase_identity_intents(conn, "learning_fi_intent_v1", identity)
         return int(deleted)
 
-    def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
-        authorization = self.privacy_authority.resolve_erasure_authorization(
-            authorization_ref_id, owner=self.OWNER, execution_nonce=execution_nonce
-        )
-        if authorization is None:
-            raise PermissionError("PRIVACY_ERASURE_NOT_AUTHORIZED")
+    def _erase_identity(self, identity: Tuple[str, str, str]) -> int:
+        """The exact-identity L18 V2 erasure, one transaction; shared by an authorized FORGET and restore
+        suppression so both delete exactly the same rows."""
         conn = sqlite3.connect(str(self.path), timeout=5.0)
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA secure_delete=ON")
@@ -961,7 +983,7 @@ class L18V2PrivacyErasureOwner:
                 for row in conn.execute(
                     "SELECT candidate_id FROM learning_project_codename_candidate_v1 "
                     "WHERE memory_class=? AND subject_namespace=? AND subject_key=?",
-                    authorization.identity,
+                    identity,
                 )
             )
             intent_ids: Tuple[str, ...] = ()
@@ -1024,9 +1046,9 @@ class L18V2PrivacyErasureOwner:
                     f"DELETE FROM learning_memory_intent_v2 WHERE intent_ref_id IN ({marks})",
                     intent_ids,
                 )
-            self._erase_identity_intents(conn, "learning_memory_intent_v2", authorization.identity)
+            self._erase_identity_intents(conn, "learning_memory_intent_v2", identity)
             if first_interaction:
-                deleted += self._erase_first_interaction(conn, authorization.identity)
+                deleted += self._erase_first_interaction(conn, identity)
             for name in triggers:
                 conn.execute(trigger_sql[name])
             if conn.execute("PRAGMA foreign_key_check").fetchall():
@@ -1038,6 +1060,15 @@ class L18V2PrivacyErasureOwner:
             raise
         finally:
             conn.close()
+        return int(deleted)
+
+    def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
+        authorization = self.privacy_authority.resolve_erasure_authorization(
+            authorization_ref_id, owner=self.OWNER, execution_nonce=execution_nonce
+        )
+        if authorization is None:
+            raise PermissionError("PRIVACY_ERASURE_NOT_AUTHORIZED")
+        deleted = self._erase_identity(authorization.identity)
         result = {"owner": self.OWNER, "status": "COMPLETE", "deleted": int(deleted)}
         if self.capture_evidence_path is not None and authorization.identity == MA.FIRST_INTERACTION_IDENTITY:
             # After the L18 commit, before the owner result: if this fails no COMPLETE is recorded, so Privacy cannot
@@ -1048,3 +1079,111 @@ class L18V2PrivacyErasureOwner:
             authorization_ref_id, execution_nonce, result
         )
         return result
+
+    # Restore suppression (maintenance only, driven by Privacy's RestoreSuppressionVerifier before a restored
+    # cognitive database may serve). Tables whose rows carry the exact memory identity; the First Interaction ones
+    # exist after first_interaction_migration and CHECK the single First Interaction identity, so every row of that
+    # family (children included) belongs to it.
+    _IDENTITY_TABLES = ("learning_memory_intent_v2", "learning_project_codename_candidate_v1", "learning_proposal_v2")
+    _FI_IDENTITY_TABLES = ("learning_fi_intent_v1", "learning_fi_candidate_v1", "learning_fi_proposal_v1")
+
+    @staticmethod
+    def _read_only(path: Path) -> sqlite3.Connection:
+        if not Path(path).is_file():
+            raise RuntimeError("L18 V2 restore check: store is unavailable")
+        return sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, timeout=5.0)
+
+    @staticmethod
+    def _tables(conn: sqlite3.Connection) -> FrozenSet[str]:
+        return frozenset(str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
+
+    @classmethod
+    def _first_interaction_rows(cls, conn: sqlite3.Connection) -> int:
+        """Every First Interaction family row, including children and its proposal references."""
+        if not L.LearningV2Store.has_first_interaction_schema(conn):
+            return 0
+        rows = sum(int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                   for table in sorted(L.FIRST_INTERACTION_TABLES))
+        return rows + int(conn.execute("SELECT COUNT(*) FROM learning_proposal_ref WHERE proposal_family=?",
+                                       (L.FIRST_INTERACTION_PROPOSAL_FAMILY,)).fetchone()[0])
+
+    def _capture_rows(self) -> int:
+        """Rows of the separate First Interaction capture copy (sessions, turns, faults, sealed transcripts)."""
+        if self.capture_evidence_path is None or not self.capture_evidence_path.is_file():
+            return 0
+        conn = self._read_only(self.capture_evidence_path)
+        try:
+            present = self._tables(conn)
+            return sum(int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                       for table in self._CAPTURE_TABLES if table in present)
+        finally:
+            conn.close()
+
+    def list_identities(self) -> Tuple[Tuple[str, str, str], ...]:
+        """Read-only: every identity with L18 V2 rows (or capture rows) in the store as it is now."""
+        identities = set()
+        conn = self._read_only(self.path)
+        try:
+            present = self._tables(conn)
+            for table in self._IDENTITY_TABLES + self._FI_IDENTITY_TABLES:
+                if table in present:
+                    identities.update(
+                        (str(r[0]), str(r[1]), str(r[2])) for r in conn.execute(
+                            f"SELECT DISTINCT memory_class,subject_namespace,subject_key FROM {table}"))
+            if self._first_interaction_rows(conn):
+                identities.add(MA.FIRST_INTERACTION_IDENTITY)
+        finally:
+            conn.close()
+        if self._capture_rows():
+            identities.add(MA.FIRST_INTERACTION_IDENTITY)
+        return tuple(sorted(identities))
+
+    def restore_residue(self, identity: Tuple[str, str, str]) -> int:
+        """Read-only: rows of exactly this identity still present in L18 V2 (and, for First Interaction, the whole
+        family and the capture copy). The verifier refuses readiness unless this is 0 for every suppressed identity."""
+        identity = tuple(identity)
+        conn = self._read_only(self.path)
+        try:
+            present = self._tables(conn)
+            rows = sum(
+                int(conn.execute(f"SELECT COUNT(*) FROM {table} WHERE memory_class=? AND subject_namespace=? "
+                                 "AND subject_key=?", identity).fetchone()[0])
+                for table in self._IDENTITY_TABLES + self._FI_IDENTITY_TABLES if table in present)
+            if identity == MA.FIRST_INTERACTION_IDENTITY:
+                rows += self._first_interaction_rows(conn)
+        finally:
+            conn.close()
+        if identity == MA.FIRST_INTERACTION_IDENTITY:
+            rows += self._capture_rows()
+        return rows
+
+    def erase_restore_suppressed(self, identity: Tuple[str, str, str], privacy_store: Any) -> None:
+        """Maintenance-only restore gate, as for L04: Privacy proves the opaque selector first, then exactly the
+        authorized-FORGET erasure runs (nothing is recorded with Privacy). Idempotent; each step is its own
+        transaction, so a crash leaves a state a re-run finishes. Raises unless nothing of the identity remains."""
+        identity = tuple(identity)
+        if not privacy_store.suppression_matches(identity):
+            raise PermissionError("RESTORE_SUPPRESSION_NOT_AUTHORIZED")
+        self._erase_identity(identity)
+        if self.capture_evidence_path is not None and identity == MA.FIRST_INTERACTION_IDENTITY:
+            self._erase_capture_evidence(self.capture_evidence_path)
+        if self.restore_residue(identity):
+            raise RuntimeError("L18 V2 restore suppression left rows of the suppressed identity")
+
+
+def restore_gated_hold_resolver(
+    privacy_store: Any, cognitive_path: Path, *, capture_evidence_path: Optional[Path] = None
+) -> Any:
+    """The privacy_hold_resolver every memory-serving component of a cognitive database must be given: Privacy's
+    answers behind the read-only restore-suppression gate over this database's L04 and L18 V2 rows (and the First
+    Interaction capture copy, given the same path the relay uses). Erasure is not reachable through it."""
+    try:
+        from . import privacy_governance as P
+    except ImportError:  # deploy-exact flat-directory tests
+        import privacy_governance as P
+    gate = P.RestoreSuppressionGate(
+        privacy_store,
+        L04PrivacyErasureOwner(cognitive_path, privacy_store),
+        L18V2PrivacyErasureOwner(cognitive_path, privacy_store, capture_evidence_path=capture_evidence_path),
+    )
+    return P.GatedPrivacyHoldResolver(privacy_store, gate)

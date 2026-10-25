@@ -1543,11 +1543,41 @@ def _capture_refusal(exc) -> HTTPException:
     return HTTPException(status_code=_CAPTURE_REFUSAL_STATUS.get(exc.code, 409), detail=exc.code)
 
 
+# F9-C hold-first: a durable FORGET intent (recorded by the governed Privacy FORGET runner before Privacy authorizes
+# anything; removed only by root once Privacy proves the FORGET complete, or by an explicit operator cancel) refuses
+# every conversation turn at once, before and while the gateway is being stopped. Only the file's existence is read.
+# A host without the F9-C intent directory relays as before; one whose intent state cannot be read refuses.
+_FORGET_INTENT_DEFAULT = "/var/lib/hermes-forget/intent/first-interaction.intent"
+
+
+def _refuse_while_forget_pending() -> None:
+    path = Path(_os.getenv("LILITH_FORGET_INTENT_PATH", _FORGET_INTENT_DEFAULT))
+    unavailable = HTTPException(status_code=503, detail="FORGET_STATE_UNAVAILABLE")
+    try:
+        _os.lstat(path)
+    except FileNotFoundError:
+        for directory, installed in ((path.parent, True), (path.parent.parent, False)):
+            try:
+                _os.stat(directory)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                raise unavailable
+            if installed:
+                return                                               # intent directory present: nothing pending
+            raise unavailable                                        # F9-C host without its intent directory
+        return                                                       # F9-C not installed on this host
+    except OSError:
+        raise unavailable
+    raise HTTPException(status_code=503, detail="FORGET_HOLD_ACTIVE")
+
+
 @app.post("/os/conversation")
 def os_conversation(
     payload: dict = _Body(default=None),
     x_lilith_os_owner_capture: str = _Header(default=None),
 ):
+    _refuse_while_forget_pending()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     message = str(payload.get("message") or payload.get("text") or "").strip()
@@ -1622,6 +1652,7 @@ def os_conversation_evidence(
 
 
 def _relay_conversation(message, session):
+    _refuse_while_forget_pending()
     port = _hermes_env("LILITH_OS_PORT", "9901")
     token = _hermes_env("LILITH_OS_TOKEN", "")
     url = f"http://127.0.0.1:{port}/"
