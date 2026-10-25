@@ -66,6 +66,13 @@ CONTROL_ONLY_PATHS = frozenset(
         "docs/architecture/slice15b2b-stage3-a2-final-controller.md",
         "docs/architecture/slice15b2b-stage3-a2-operational-wiring.md",
         "docs/architecture/slice15b2b-stage3-a2-consumed-run-forensics.md",
+        # Track B E-23 owner-side transition tooling, its tests and its adjudication record (never in the Core API
+        # bundle). A merge of these alone must not deploy mid-transition (E-23 deploy freeze).
+        "services/owner-memory-control/tools/e23_release_stages.py",
+        "services/owner-memory-control/tools/e23_operator.py",
+        "services/owner-memory-control/tests/test_trackb_e23_release_stages.py",
+        "services/owner-memory-control/tests/test_trackb_e23_operator.py",
+        "docs/architecture/trackb-e23-e5-adjudication.md",
     }
 )
 

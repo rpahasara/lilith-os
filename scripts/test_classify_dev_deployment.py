@@ -191,6 +191,31 @@ class DevGateClassifierTests(unittest.TestCase):
             gate.DEPLOY_REQUIRED,
         )
 
+    def test_e23_e5_fix_is_control_only_and_nothing_else_is(self):
+        e23 = (
+            "services/owner-memory-control/tools/e23_release_stages.py",
+            "services/owner-memory-control/tools/e23_operator.py",
+            "services/owner-memory-control/tests/test_trackb_e23_release_stages.py",
+            "services/owner-memory-control/tests/test_trackb_e23_operator.py",
+            "docs/architecture/trackb-e23-e5-adjudication.md",
+        )
+        this_pr = (*e23, "scripts/classify_dev_deployment.py", "scripts/test_classify_dev_deployment.py")
+        self.assertEqual(self.classify(*(changed(path) for path in this_pr)), gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("services/core-api/app.py"),                                   # Core API application code
+            changed("services/core-api/lilith_memory/privacy_anchor_contracts.py"),
+            changed("services/owner-memory-control/tools/e23_privacy_anchor_upgrade.py"),   # not exempted
+            changed("services/owner-memory-control/tools/e22_operator.py"),
+            changed("services/owner-memory-control/tools/unknown.py", "A", "000000"),
+            changed("docs/architecture/trackb-e23-transition.md"),
+            changed(e23[0], "D", "100644", "000000"),                              # a deletion
+            changed(e23[0], "M", "100644", "120000"),                              # a symlink swap
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*(changed(path) for path in this_pr[1:]), extra),
+                                 gate.DEPLOY_REQUIRED)
+        self.assertEqual(self.classify(changed("services/core-api/app.py")), gate.DEPLOY_REQUIRED)
+
     def test_symlink_and_mode_tricks_require_deploy(self):
         path = "scripts/memory_broker_stage2_control.py"
         for entry in (
