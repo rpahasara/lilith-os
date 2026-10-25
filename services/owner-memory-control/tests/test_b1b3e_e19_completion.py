@@ -138,12 +138,11 @@ class ReleaseBindingTests(unittest.TestCase):
         import mb12_readiness_inputs as RI
         self.assertEqual((V.RELEASE_SHA, V.RELEASE_CWD), (NEW, "/opt/lilith-authority-dev/releases/" + NEW))
         self.assertEqual(RBI.RELEASE_SHA, NEW)
-        # The readiness and PR-3 pins moved on to the E-22 release at E-22 V7 (record slice-15b2b-b1b3e-e22-completion.md).
-        import e22_judge_upgrade as J
-        self.assertEqual((PM.DEV_EXPECTED["releaseSha"], PM.DEV_EXPECTED["releaseManifestSha256"]),
-                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
-        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]),
-                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
+        # The readiness and PR-3 pins moved on to the E-22 release at E-22 V7 (record slice-15b2b-b1b3e-e22-completion.md),
+        # then to the E-23 release at E-23 E8 (record trackb-e23-completion.md).
+        import e23_privacy_anchor_upgrade as E23
+        self.assertEqual((PM.DEV_EXPECTED["releaseSha"], PM.DEV_EXPECTED["releaseManifestSha256"]), (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256))
+        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]), (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256))
         self.assertEqual(RI.E19_DEFECTIVE_RELEASES, frozenset({OLD}))
         # signer fragments are identical in OLD and NEW (the payload delta is pr1_acceptance only)
         self.assertNotIn("assets/lilith-authority-dev.service", E.PAYLOAD_DELTA)

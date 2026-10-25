@@ -60,7 +60,7 @@ sha256_hex = E22.sha256_hex
 OPERATOR = E22.T + "mb14_operator.py"
 TOOL_PINS = {
     **E22.TOOL_PINS,
-    E22.OPERATOR: "7a04d4567ea6d8ea5d4f9074ba4d61d51beeb17cd61c366edfcaddfa8ba3452b",
+    E22.OPERATOR: "f8fe66dc8ce0f9ac7706a4d05fee07cbf5cb4479b3366ba501f45bad52ae51c1",
 }
 
 # The owner-accepted M-B12 / M-B13 binding (record slice-15b2b-b1b3e-mb12-completion-mb13-preparation.md).

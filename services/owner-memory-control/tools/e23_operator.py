@@ -59,7 +59,7 @@ OPERATOR = T + "e23_operator.py"
 CONTRACT = T + "e23_privacy_anchor_upgrade.py"
 STAGES = T + "e23_release_stages.py"
 TOOL_PINS = {
-    E22OP.OPERATOR: "7a04d4567ea6d8ea5d4f9074ba4d61d51beeb17cd61c366edfcaddfa8ba3452b",
+    E22OP.OPERATOR: "f8fe66dc8ce0f9ac7706a4d05fee07cbf5cb4479b3366ba501f45bad52ae51c1",
     CONTRACT: "8d3b7baa2552d6268af19deed385348311da0c3777b5e0747538b1807a69301a",
     STAGES: "9b408961b03e3314fa4e1e45e2c08403f5a2cabcf27a8f4bd6d051dbfec95f46",
 }

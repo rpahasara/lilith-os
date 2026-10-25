@@ -527,3 +527,15 @@ Record `slice-15b2b-b1b3e-e22-completion.md` §7. No operator behaviour changes.
 | `mb12_readiness_inputs.py` | `8f50d92415f0a34b4670d10465367e61c55cd0ee9e0c1e7bdd8bf57155b5a5d0` |
 | `mb12_pr3_material.py` | `71b1b6df92ac179e0d39bcfc51adde061d587664d6890357559fa7691a257fc3` |
 | `mb11_operator.py` | `aa8c93fc1aea676d7888e20b94cc5f471df2663f2dab9c6e82e7956cc97e1256` |
+
+## 25. Addendum (2026-10-26): E-23 E8 installed-release re-pin — re-pin only
+
+After the E-23 transition reached E8 (record `trackb-e23-completion.md`), the readiness and PR-3 pins name the installed
+E-23 release `57bff671fbfe5df4e59248d5d69338dc0ba05846` (manifest `fc29a23c…`). No operator behaviour changes; the M-B11
+start is consumed and stays historical. Pin cascade (supersedes §24):
+
+| Tool | SHA-256 |
+| --- | --- |
+| `mb12_readiness_inputs.py` | `bd25dbcde1e8fb125344f065fc1936393c9312abd44e007c45cfbdc9046ec296` |
+| `mb12_pr3_material.py` | `3847052fc5ab18a3453661e8c7a1f86ec7b4611424492addd59ef03702d2ff26` |
+| `mb11_operator.py` | `6f158db264e6df3927d589b81b0822f30fe0dab18c308aa4c60a855d0938f87a` |

@@ -85,8 +85,8 @@ DEV_EXPECTED = {
     "genesisPinDigest": "ac892dc2b14ca7db108400258abfcf2320ff498f2a674058058e16a8a6fb65e4",           # Package A
     "genesisPinFileSha256": "357477369ab53790245b42cbecbe2a630110477bede5b599696699e4f5c3a590",       # E-12 copy
     "authorizationRegisterFileSha256": "8d5ab87564d0e531b7d1467c18b6d106f2a468d5d155ce9f2acb64758df85575",
-    "releaseSha": "129f2bed617334be61dcac5204cd409946a7a566",                                          # E-22 V7
-    "releaseManifestSha256": "fc7dbf08bb5b8260716a762fd2fbccdb44fbf0e438e2e21d0cfddcd6f1a3348a",      # E-22 V7
+    "releaseSha": "57bff671fbfe5df4e59248d5d69338dc0ba05846",                                          # E-23 E8
+    "releaseManifestSha256": "fc29a23cbb411704f2799b418f8c7fd7fadf215489174e9ac9d370db2e78368c",      # E-23 E8
 }
 EXPECTED_FIELDS = frozenset(DEV_EXPECTED)
 # Owner PR-3 confirmations established by a merged owner record: candidate digest -> confirmation record SHA-256.

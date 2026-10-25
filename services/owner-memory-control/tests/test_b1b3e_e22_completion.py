@@ -83,10 +83,11 @@ class TargetTests(unittest.TestCase):
 
 class RepinTests(unittest.TestCase):
     def test_the_installed_release_pins_name_the_e22_release(self):
-        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]),
-                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
-        self.assertEqual((PM.DEV_EXPECTED["releaseSha"], PM.DEV_EXPECTED["releaseManifestSha256"]),
-                         (J.NEW_RELEASE, J.NEW_MANIFEST_SHA256))
+        # Moved on to the E-23 release at E-23 E8 (record trackb-e23-completion.md); E-22 NEW is the E-23 OLD.
+        import e23_privacy_anchor_upgrade as E23
+        self.assertEqual(E23.OLD_RELEASE, J.NEW_RELEASE)
+        self.assertEqual((RI.DEV_PINS["releaseSha"], RI.DEV_PINS["attestedManifestSha256"]), (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256))
+        self.assertEqual((PM.DEV_EXPECTED["releaseSha"], PM.DEV_EXPECTED["releaseManifestSha256"]), (E23.NEW_RELEASE, E23.NEW_MANIFEST_SHA256))
 
     def test_the_record_states_the_pins_and_the_live_results(self):
         text = (ROOT / "docs/architecture/slice-15b2b-b1b3e-e22-completion.md").read_text(encoding="utf-8")
