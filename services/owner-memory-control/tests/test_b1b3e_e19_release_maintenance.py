@@ -34,6 +34,7 @@ import mb10_dr5_target as T10  # noqa: E402
 import mb11_restart_boundary_install as RBI  # noqa: E402
 import mb12_readiness_inputs as RI  # noqa: E402
 import release_file_set as RFS  # noqa: E402
+import e23_installed as E23H  # noqa: E402  (Track B: the installed 129f2be payload from Git history)
 from lilith_owner_memory import pr1_acceptance as PA  # noqa: E402
 from lilith_owner_memory import successor_readiness as SR  # noqa: E402
 
@@ -155,7 +156,7 @@ class ReleasePinTests(unittest.TestCase):
 
     def test_the_new_payload_differs_from_aee323e_in_exactly_one_member(self):
         """Against the accepted aee323e module pins (mb6_operator; 38 release modules) and the CLI / unit pins."""
-        payloads = {**RFS.runtime_payloads(ROOT), E.PR1_ACCEPTANCE_MEMBER: E19_PR1_ACCEPTANCE_BYTES}
+        payloads = {**E23H.installed_payloads(), E.PR1_ACCEPTANCE_MEMBER: E19_PR1_ACCEPTANCE_BYTES}
         old_pins = {**M6.RELEASE_MODULES, **M6.PROVISION_MODULES}
         new_pins = E.new_release_module_pins(old_pins)
         self.assertEqual({k for k in old_pins if old_pins[k] != new_pins[k]}, {E.PR1_ACCEPTANCE_MEMBER})
@@ -178,8 +179,10 @@ class ReleasePinTests(unittest.TestCase):
         sources = {**{source: target for source, target in RFS.RUNTIME_SOURCE_MAP.items()},
                    **{source: member for member, source in RFS.CLI_SOURCES.items()}}
         for source, target in sorted(sources.items()):
+            if target in E23H.E23.PAYLOAD_ADDED:        # Track B E-23 additions: absent from aee323e and from the host
+                continue
             old = subprocess.run(["git", "-C", str(ROOT), "show", f"{OLD}:{source}"], capture_output=True, check=True)
-            if old.stdout != (ROOT / source).read_bytes():
+            if old.stdout != E23H.installed_source_bytes(source):          # the installed bytes, not the E-23 source
                 changed.append(target)
         self.assertEqual(changed, [E.PR1_ACCEPTANCE_MEMBER])
 

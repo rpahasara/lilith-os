@@ -26,6 +26,7 @@ from test_b1b3e_e19_transition import BUILD, I  # noqa: E402
 
 import e22_judge_upgrade as J  # noqa: E402
 import e22_release_stages as S  # noqa: E402
+import installed_layout as IL  # noqa: E402  (Track B: fixtures build the installed V1 layout)
 
 OLD = J.OLD_RELEASE
 NEW = "e22" + "0" * 37
@@ -82,7 +83,7 @@ class StageTests(unittest.TestCase):
         house = stack.enter_context(T19.stand_in_wheels())
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.out = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-        self.new_payloads = BUILD.build_payloads(ROOT, house)                        # the merged judge (d3df4cfc)
+        self.new_payloads = IL.installed_build_payloads(ROOT, house)                        # the merged judge (d3df4cfc)
         self.assertEqual(T19.sha(self.new_payloads[S.DELTA_MEMBER]), S.DELTA_NEW_SHA256)
         self.old_payloads = {**self.new_payloads, S.DELTA_MEMBER: E19_BYTES}          # the installed E-19 judge
         self.host = E22Host(self.root, self.old_payloads)

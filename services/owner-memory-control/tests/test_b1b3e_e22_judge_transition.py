@@ -24,6 +24,7 @@ import mb6_operator as M6  # noqa: E402
 import mb12_readiness_inputs as RI  # noqa: E402
 import mb12_secret_hygiene_proof as SH  # noqa: E402
 import release_file_set as RFS  # noqa: E402
+import e23_installed as E23H  # noqa: E402  (Track B: the installed 129f2be payload from Git history)
 from lilith_owner_memory import pr1_acceptance as PA  # noqa: E402
 
 E19_BYTES = (HERE / "fixtures/e19_new_pr1_acceptance.py.txt").read_bytes()      # installed judge (0d2e6cca)
@@ -42,7 +43,7 @@ def installed_pins() -> dict[str, str]:
 def installed_payload_pins() -> dict[str, str]:
     """The COMPLETE installed payload map (member -> SHA-256): the repository payload with the judge at its installed
     E-19 bytes. Its module members are exactly the accepted installed module pins (checked below)."""
-    pins = {member: sha(data) for member, data in RFS.runtime_payloads(ROOT).items()}
+    pins = {member: sha(data) for member, data in E23H.installed_payloads().items()}
     pins[J.PR1_ACCEPTANCE_MEMBER] = sha(E19_BYTES)
     return pins
 
@@ -78,7 +79,7 @@ class ReleaseAndDeltaTests(unittest.TestCase):
             self.assertEqual(caught.exception.reason, "E22_SOURCE_NOT_PINNED")
 
     def test_the_repository_payload_differs_from_the_installed_release_in_exactly_one_member(self):
-        payloads = RFS.runtime_payloads(ROOT)
+        payloads = E23H.installed_payloads()
         pins = installed_pins()
         expected = J.new_release_module_pins(pins)
         self.assertEqual({member for member in pins if pins[member] != expected[member]}, {J.PR1_ACCEPTANCE_MEMBER})
@@ -87,7 +88,7 @@ class ReleaseAndDeltaTests(unittest.TestCase):
         J.check_payload(payloads, complete)                                       # the merged tree is the candidate
 
     def test_any_other_payload_is_refused(self):
-        payloads = RFS.runtime_payloads(ROOT)
+        payloads = E23H.installed_payloads()
         pins = installed_payload_pins()
         other = next(member for member in sorted(pins) if member != J.PR1_ACCEPTANCE_MEMBER)
         cases = {
@@ -106,7 +107,7 @@ class ReleaseAndDeltaTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "PAYLOAD_MEMBER_MISSING")
 
     def test_an_unexpected_extra_member_is_refused(self):
-        payloads = RFS.runtime_payloads(ROOT)
+        payloads = E23H.installed_payloads()
         pins = installed_payload_pins()
         for extra in ("lilith_owner_memory/extra.py", "lilith_authority_dev/__pycache__/x.pyc", "assets/extra"):
             with self.subTest(extra=extra), self.assertRaises(J.Refused) as caught:
@@ -125,7 +126,7 @@ def inspection(source: str, *, judge: bytes, installed: bool = False, **changes)
     """A synthetic build inspection of the real payload map (the attest tool's identity shape)."""
     import json
     files = {member: {"sha256": sha(data), "size": len(data), "installMode": "0644"}
-             for member, data in RFS.runtime_payloads(ROOT).items()}
+             for member, data in E23H.installed_payloads().items()}
     files[J.PR1_ACCEPTANCE_MEMBER] = {"sha256": sha(judge), "size": len(judge), "installMode": "0644"}
     identity = {
         "sourceCommit": source, "releaseRole": "lilith-authority-dev",

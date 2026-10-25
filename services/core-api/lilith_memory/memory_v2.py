@@ -1172,18 +1172,22 @@ class L18V2PrivacyErasureOwner:
 
 
 def restore_gated_hold_resolver(
-    privacy_store: Any, cognitive_path: Path, *, capture_evidence_path: Optional[Path] = None
+    privacy_store: Any, cognitive_path: Path, *, freshness: Any, capture_evidence_path: Optional[Path] = None
 ) -> Any:
     """The privacy_hold_resolver every memory-serving component of a cognitive database must be given: Privacy's
-    answers behind the read-only restore-suppression gate over this database's L04 and L18 V2 rows (and the First
-    Interaction capture copy, given the same path the relay uses). Erasure is not reachable through it."""
+    answers behind the Track B Privacy freshness gate (``freshness``: a ``privacy_freshness.PrivacyFreshnessGate``;
+    required, so a stale or restored Privacy store can never answer) and the read-only restore-suppression gate over
+    this database's L04 and L18 V2 rows (and the First Interaction capture copy, given the same path the relay
+    uses). Erasure is not reachable through it."""
     try:
+        from . import privacy_freshness as F
         from . import privacy_governance as P
     except ImportError:  # deploy-exact flat-directory tests
+        import privacy_freshness as F
         import privacy_governance as P
     gate = P.RestoreSuppressionGate(
         privacy_store,
         L04PrivacyErasureOwner(cognitive_path, privacy_store),
         L18V2PrivacyErasureOwner(cognitive_path, privacy_store, capture_evidence_path=capture_evidence_path),
     )
-    return P.GatedPrivacyHoldResolver(privacy_store, gate)
+    return F.FreshPrivacyHoldResolver(P.GatedPrivacyHoldResolver(privacy_store, gate), freshness)

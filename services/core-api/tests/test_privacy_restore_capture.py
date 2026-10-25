@@ -15,6 +15,7 @@ from test_privacy_forget_capture import (CAPTURE_TABLES, FAULTED_TEXT, SEALED_TE
                                          CaptureForgetCase)
 from test_first_interaction_l04 import fi_value
 
+from privacy_freshness_fixture import AlwaysFresh
 from lilith_memory import canonical_store
 from lilith_memory import memory_action_v2 as MA
 from lilith_memory import memory_v2
@@ -85,7 +86,8 @@ class RestoreCaptureTests(RestoreCaptureCase):
         self.assertGreater(self.capture_counts()["fi_capture_session"], 0)
 
     def test_a_restored_capture_copy_blocks_gated_memory_serving_until_maintenance(self):
-        resolver = memory_v2.restore_gated_hold_resolver(self.privacy, self.db, capture_evidence_path=self.capture_db)
+        resolver = memory_v2.restore_gated_hold_resolver(self.privacy, self.db, freshness=AlwaysFresh(),
+                                                       capture_evidence_path=self.capture_db)
         resolver.require_ready()                                                   # erased: ready
         shutil.copyfile(self.capture_copy, self.capture_db)                       # cognitive database is clean
         with self.assertRaises(privacy.RestoreSuppressionNotReady) as caught:

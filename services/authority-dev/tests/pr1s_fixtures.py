@@ -228,7 +228,9 @@ def stand_in_wheels():
 def release_payloads(wheelhouse: Path) -> dict[str, bytes]:
     import build_authority_dev_release as BR
 
-    return BR.build_payloads(ROOT, wheelhouse)
+    import installed_layout as IL
+
+    return IL.installed_build_payloads(ROOT, wheelhouse)   # Track B: the installed V1 layout
 
 
 def install_release(root: Path, sha: str, payloads: dict[str, bytes], *, host_copies: bool = True) -> dict:

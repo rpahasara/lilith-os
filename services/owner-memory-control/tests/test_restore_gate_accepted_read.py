@@ -14,6 +14,7 @@ import unittest
 import synthetic_b1b3b as T
 from lilith_memory import canonical_contracts as C
 from lilith_memory import memory_v2
+from lilith_memory import privacy_freshness as F
 from lilith_memory import privacy_governance as P
 from lilith_memory import slice15b2a_migration
 from lilith_owner_memory import accepted_read_v2 as AR
@@ -24,6 +25,16 @@ import synthetic_authority as SA
 
 TEST_ONLY_PRIVACY_SECRET = b"TEST_ONLY restore-gate accepted-read privacy secret"
 IDENTITY = (T.L04_CLASS, T.L04_NAMESPACE, T.L04_KEY)
+
+
+class AlwaysFresh(F.PrivacyFreshnessGate):
+    """TEST_ONLY double: Track B freshness is outside this suite's subject (the restore-suppression gate)."""
+
+    def __init__(self):
+        pass
+
+    def check(self):
+        return F.FreshnessCheck(F.READY)
 
 
 class GatedAcceptedReadTests(unittest.TestCase):
@@ -40,7 +51,7 @@ class GatedAcceptedReadTests(unittest.TestCase):
 
     def reader(self):
         l04 = self.flow.l04
-        resolver = memory_v2.restore_gated_hold_resolver(self.privacy, l04.db)
+        resolver = memory_v2.restore_gated_hold_resolver(self.privacy, l04.db, freshness=AlwaysFresh())
         facade = memory_v2.CanonicalMemoryReadFacade(
             l04.store(privacy_hold_resolver=resolver), registry=l04.tuple_registry, consent_store=l04.consent,
             privacy_hold_resolver=resolver, actor_resolver=lambda actor: actor == l04.actor.ACTOR)

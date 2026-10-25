@@ -30,7 +30,8 @@ ROOT = HERE.parents[2]
 E19_PR1_ACCEPTANCE_BYTES = (HERE / "fixtures/e19_new_pr1_acceptance.py.txt").read_bytes()
 TOOLS = ROOT / "services/owner-memory-control/tools"
 for _p in (TOOLS, ROOT / "services/authority-dev/ceremony", ROOT / "services/authority-dev",
-           ROOT / "services/owner-memory-control", ROOT / "services/core-api", HERE):
+           ROOT / "services/owner-memory-control", ROOT / "services/core-api", HERE,
+           ROOT / "services/authority-dev/tests"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -42,6 +43,7 @@ import e19_release_stages as S  # noqa: E402
 import install_authority_dev as I  # noqa: E402
 import mb6_operator as M6  # noqa: E402
 import test_b1b3e_e19_maintenance_observer as OT  # noqa: E402  (helpers only: SyntheticHost, acceptances)
+import installed_layout as IL  # noqa: E402  (Track B: fixtures build the installed V1 layout)
 
 POSIX = os.name == "posix"
 OLD = E.OLD_RELEASE
@@ -291,7 +293,7 @@ class InstallerStageTests(unittest.TestCase):
         house = stack.enter_context(stand_in_wheels())
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.out = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-        self.new_payloads = BUILD.build_payloads(ROOT, house)                       # the REAL E-19 payload
+        self.new_payloads = IL.installed_build_payloads(ROOT, house)                       # the REAL E-19 payload
         self.new_payloads[S.DELTA_MEMBER] = E19_PR1_ACCEPTANCE_BYTES               # the judge as installed at E-19
         self.assertEqual(sha(self.new_payloads[S.DELTA_MEMBER]), S.DELTA_NEW_SHA256)
         self.old_payloads = dict(self.new_payloads)

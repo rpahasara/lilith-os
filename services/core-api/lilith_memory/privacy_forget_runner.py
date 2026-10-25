@@ -22,7 +22,7 @@ Interim V1 (HMAC) path: refused outside DEV_SYNTHETIC. No HTTP route, no privile
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 try:
     from . import canonical_contracts as C
@@ -77,14 +77,22 @@ def first_interaction_forget_action(actor_ref_id: str) -> C.FrozenMemoryActionV1
 
 
 class FirstInteractionForgetRunner:
-    def __init__(self, privacy_authority: Any, owners: Mapping[str, Any], *, deployment_environment: str):
+    def __init__(self, privacy_authority: Any, owners: Mapping[str, Any], *, deployment_environment: str,
+                 durability_barrier: Optional[Callable[[], Optional[str]]] = None):
+        """``durability_barrier`` (Track B, durable-before-erase): called before any owner erases; None means the
+        current suppression set is anchored and owner-checkpointed, anything else is a refusal code and the FORGET
+        stays INCOMPLETE_HOLD_ACTIVE with nothing erased (``resume`` continues once the checkpoint is applied). The
+        F9c2 DEV_SYNTHETIC drill ran without one (Track A: no anchor, not live-eligible)."""
         if deployment_environment != DEV_SYNTHETIC:
             raise ForgetRunnerError("INTERIM_V1_PATH_DEV_SYNTHETIC_ONLY")
         for name, owner in owners.items():
             if name not in P.OWNER_SET or getattr(owner, "OWNER", None) != name:
                 raise ForgetRunnerError("OWNER_ADAPTER_INVALID")
+        if durability_barrier is not None and not callable(durability_barrier):
+            raise ForgetRunnerError("DURABILITY_BARRIER_INVALID")
         self.privacy_authority = privacy_authority
         self.owners = dict(owners)
+        self.durability_barrier = durability_barrier
 
     def _policy_owners(self) -> Tuple[str, ...]:
         """Family owners plus the governed floor; refuses unless the floor is provisioned exactly as F9-C requires."""
@@ -137,6 +145,13 @@ class FirstInteractionForgetRunner:
             return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, failure_code="PRIVACY_ERASURE_NOT_AUTHORIZED")
         if set(authorization.resource_owners) != set(policy):
             return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, failure_code="AUTHORIZATION_OWNER_SET_MISMATCH")
+        if self.durability_barrier is not None:
+            try:
+                refusal = self.durability_barrier()
+            except Exception as exc:                                        # an unverifiable barrier is a refusal
+                refusal = "DURABILITY_BARRIER:" + type(exc).__name__
+            if refusal is not None:
+                return ForgetRunResult(INCOMPLETE_HOLD_ACTIVE, ref, (), policy, failure_code=str(refusal))
         completed, results = [], {}
         for position, owner in enumerate(policy):
             status = self.privacy_authority.owner_result(ref, nonce, owner)

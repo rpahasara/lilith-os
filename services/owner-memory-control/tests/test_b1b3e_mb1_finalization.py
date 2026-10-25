@@ -27,6 +27,7 @@ FINAL = ROOT / "docs/architecture/slice-15b2b-b1b3e-mb1-final-package-pins.md"
 sys.path.insert(0, str(ROOT / "services/owner-memory-control"))
 
 from lilith_owner_memory import burned_identities as BI  # noqa: E402
+from accepted_judge_lineage import closure_delta_is_the_accepted_judge  # noqa: E402  (E-19 + E-22 judge only)
 
 V3_SCRIPT_SHA = "a63bf5aa97d6a098923afc52fb9f71ebc0939c8526de28a1afb4271c4a84599e"
 R1_SCRIPT_SHA = "4e463796ced5c8375fd45bbf318cee9c7222ab9e5d9b9e20190ab451a470c091"   # superseded by r2
@@ -131,7 +132,8 @@ class SourceCommitTests(unittest.TestCase):
 
     def test_source_commit_is_an_ancestor_and_the_closure_is_unchanged(self):
         _git("merge-base", "--is-ancestor", SRC, "HEAD")
-        self.assertEqual(_git("diff", "--name-only", SRC, "HEAD", "--", *BUILD.CLOSURE).stdout, b"")
+        closure_delta_is_the_accepted_judge(
+            self, SRC, _git("diff", "--name-only", SRC, "HEAD", "--", *BUILD.CLOSURE).stdout.decode("utf-8"))
 
     def test_bundle_source_commit_and_members(self):
         with tempfile.TemporaryDirectory() as directory:

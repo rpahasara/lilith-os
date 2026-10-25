@@ -8,6 +8,12 @@ systemd passes (`LISTEN_FDNAMES=owner:signer`, from
   host-root execution, not human-owner authentication);
 - `signer.sock`: only the uid of `lilith-authority-dev`.
 
+Track B B2: on the owner socket only, a frame carrying the Privacy anchor
+protocol id (`privacy_anchor.PROTOCOL`) is served by the separate
+`PrivacyAnchorServiceV1` (its own key K-PAN, its own state). Every other
+frame, and every frame on the signer socket, is parsed by `protocol.py`
+unchanged, which refuses that protocol id.
+
 One request per connection, one instance, served sequentially: the store
 lock is the single-writer boundary and requests never interleave.
 
@@ -33,9 +39,10 @@ from typing import Callable
 
 from lilith_authority_host import inputs as HI
 
+from . import privacy_anchor as PAN
 from . import protocol as W
 from .core import RecoveryWitnessCoreV1, authority_public_keys
-from .credential import CREDENTIAL_ABSENT, WitnessCredentialError, load_witness_signing_key
+from .credential import CREDENTIAL_ABSENT, WitnessCredentialError, load_privacy_anchor_key, load_witness_signing_key
 from .profile import (DISTINCT_PRINCIPALS, ENVIRONMENT, OWNER_SOCKET_PATH, SERVICE_GROUP, SERVICE_USER,
                       SIGNER_PEER_USER, SIGNER_SOCKET_PATH, STATE_DIR)
 from .storage import FilesystemWitnessStorageV1
@@ -81,7 +88,8 @@ def _read_exact(conn: socket.socket, size: int, deadline: float) -> bytes:
 
 def serve_connection(conn: socket.socket, core: RecoveryWitnessCoreV1, *, role: str, authorized_uid: int,
                      peer_uid_reader: Callable[[socket.socket], int] = kernel_peer_uid,
-                     timeout: float = CONNECTION_TIMEOUT_SECONDS) -> None:
+                     timeout: float = CONNECTION_TIMEOUT_SECONDS,
+                     anchor: PAN.PrivacyAnchorServiceV1 | None = None) -> None:
     """One frame, one result, close. A denied or malformed peer gets nothing."""
     try:
         peer_uid = peer_uid_reader(conn)
@@ -93,10 +101,13 @@ def serve_connection(conn: socket.socket, core: RecoveryWitnessCoreV1, *, role: 
         if not 0 < length <= W.MAX_FRAME_BYTES:
             raise ServerError("INVALID_FRAME_LENGTH")
         frame = header + _read_exact(conn, length, deadline)
-        result = core.dispatch(role, W.parse_frame(frame, role=role))
+        if role == W.OWNER and anchor is not None and PAN.is_anchor_frame(frame):
+            response = PAN.encode_response(anchor.dispatch(PAN.parse_frame(frame)))
+        else:
+            response = W.encode_response(core.dispatch(role, W.parse_frame(frame, role=role)))
         conn.settimeout(max(deadline - time.monotonic(), 0.1))
-        conn.sendall(W.encode_response(result))
-    except (OSError, W.ProtocolError, ServerError, ValueError, TypeError):
+        conn.sendall(response)
+    except (OSError, W.ProtocolError, PAN.AnchorProtocolError, ServerError, ValueError, TypeError):
         pass  # no request, payload, or exception text is serialized back
     finally:
         conn.close()
@@ -122,7 +133,8 @@ def inherited_listeners() -> dict[str, socket.socket]:
     return listeners
 
 
-def serve_forever(core: RecoveryWitnessCoreV1, listeners: dict[str, socket.socket], *, signer_uid: int) -> None:
+def serve_forever(core: RecoveryWitnessCoreV1, listeners: dict[str, socket.socket], *, signer_uid: int,
+                  anchor: PAN.PrivacyAnchorServiceV1 | None = None) -> None:
     selector = selectors.DefaultSelector()
     uids = {"owner": 0, "signer": signer_uid}
     for name, listener in listeners.items():
@@ -130,7 +142,7 @@ def serve_forever(core: RecoveryWitnessCoreV1, listeners: dict[str, socket.socke
     while True:
         for key, _ in selector.select():
             conn, _ = key.fileobj.accept()
-            serve_connection(conn, core, role=ROLE_BY_NAME[key.data], authorized_uid=uids[key.data])
+            serve_connection(conn, core, role=ROLE_BY_NAME[key.data], authorized_uid=uids[key.data], anchor=anchor)
 
 
 def check_environment(environ: dict[str, str]) -> None:
@@ -193,6 +205,18 @@ def build_core(signing_key, *, state_dir: str = STATE_DIR, read_inputs=None, clo
     return RecoveryWitnessCoreV1(writer=writer, storage=storage, inputs=reader, clock=clock)
 
 
+def build_anchor_service(witness_key, credentials_directory: str | None, *, state_dir: str = PAN.STATE_DIR,
+                         clock=utc_now) -> PAN.PrivacyAnchorServiceV1:
+    """K-PAN is optional for the witness: absent -> every anchor operation refuses ANCHOR_KEY_ABSENT (the Core API
+    freshness gate then refuses memory), while RecoveryWitnessV2 serving is unaffected. An invalid K-PAN, or one equal
+    to K-WIT, is refused the same way, never used."""
+    try:
+        key = load_privacy_anchor_key(credentials_directory, witness_key=witness_key)
+    except WitnessCredentialError:
+        key = None
+    return PAN.PrivacyAnchorServiceV1(store=PAN.AnchorStoreV1(state_dir), signing_key=key, clock=clock)
+
+
 def startup_recovery(core: RecoveryWitnessCoreV1, storage: FilesystemWitnessStorageV1, inputs: HI.HostInputsV1):
     """Prep A recovery at start. UNINITIALIZED is left alone (no auto-bootstrap);
     every non-automatic classification fails the start closed."""
@@ -220,7 +244,8 @@ def main() -> int:
         print(f"lilith-recovery-witness: STORE_FAIL_CLOSED {run.after.classification}", file=sys.stderr)
         return EXIT_STORE_FAIL_CLOSED
     try:
-        serve_forever(core, inherited_listeners(), signer_uid=signer_uid)
+        serve_forever(core, inherited_listeners(), signer_uid=signer_uid,
+                      anchor=build_anchor_service(key, os.environ.get("CREDENTIALS_DIRECTORY")))
     except ServerError as exc:
         print(f"lilith-recovery-witness: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED

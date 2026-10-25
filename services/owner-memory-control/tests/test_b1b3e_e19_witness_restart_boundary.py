@@ -28,6 +28,8 @@ for _p in (TOOLS, ROOT / "services/authority-dev", ROOT / "services/owner-memory
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import e23_installed as E23H  # noqa: E402  (Track B: the installed 129f2be payload from Git history)
+
 import e19_maintenance_observer as O  # noqa: E402
 import e19_p1b10_upgrade as E  # noqa: E402
 import e19_witness_restart_boundary_install as W  # noqa: E402
@@ -125,7 +127,7 @@ class BoundaryTestCase(unittest.TestCase):
         unit_dir.mkdir(parents=True)
         for unit in W.UNITS:
             target = unit_dir / unit
-            shutil.copyfile(ROOT / "services/recovery-witness/deploy" / unit, target)
+            target.write_bytes(E23H.installed_source_bytes(f"services/recovery-witness/deploy/{unit}"))  # host: OLD
             os.chmod(target, 0o644)
         self.systemd = FakeSystemd(self.root)
         self.tail = cursor("1f4a")
@@ -398,10 +400,11 @@ class PinAndStaticTests(unittest.TestCase):
         self.assertEqual({W.candidate_path(u): pin for u, (_n, pin) in W.DROPINS.items()}, dict(E.WITNESS_DROPINS))
         for unit in W.UNITS:
             self.assertEqual(sha(W.candidate_bytes(unit)), W.DROPINS[unit][1])
-            self.assertEqual(sha((ROOT / "services/recovery-witness/deploy" / unit).read_bytes()), W.FRAGMENTS[unit])
+            self.assertEqual(sha(E23H.installed_source_bytes(f"services/recovery-witness/deploy/{unit}")),
+                             W.FRAGMENTS[unit])                               # the installed fragments
         import release_file_set as RFS
 
-        payloads = RFS.runtime_payloads(ROOT)
+        payloads = E23H.installed_payloads()
         for unit in W.UNITS:
             self.assertEqual(sha(payloads[f"assets/{unit}"]), W.FRAGMENTS[unit])
         self.assertEqual(W.SHADOW_BASES, O.SHADOW_BASES)

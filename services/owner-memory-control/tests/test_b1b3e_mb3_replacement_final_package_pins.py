@@ -18,6 +18,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from accepted_judge_lineage import closure_delta_is_the_accepted_judge  # noqa: E402  (E-19 + E-22 judge only)
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / "services/owner-memory-control/tools"
@@ -132,7 +133,7 @@ class SourceTests(unittest.TestCase):
         build = _load("build_mb3_registry_bundle_replacement2", TOOLS / "build_mb3_registry_bundle.py")
         changed = _git("diff", "--name-only", SOURCE, "HEAD", "--", *build.CLOSURE, build.PHONE_SCRIPT)
         self.assertEqual(changed.returncode, 0)
-        self.assertEqual(changed.stdout.strip(), "")
+        closure_delta_is_the_accepted_judge(self, SOURCE, changed.stdout)
 
 
 if __name__ == "__main__":

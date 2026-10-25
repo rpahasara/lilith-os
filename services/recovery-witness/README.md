@@ -23,6 +23,11 @@ K-WIT signs only `RecoveryWitnessV2` documents the pure planners produce.
 There is no generic signing, OwnerEvidence, registry, authorization, or
 Privacy signing path.
 
+Track B B2 (SOURCE PREPARED / NOT INSTALLED) adds a second, separate key,
+K-PAN (`kpan.dev-synthetic.01`), which signs only `PrivacyAnchorV1` strict
+extensions over opaque Privacy suppression entries. It never sees Privacy
+content, and K-WIT and K-PAN can never sign each other's documents.
+
 | Path | Role |
 | --- | --- |
 | `lilith_recovery_witness/profile.py` | the fixed witness identity (from `pr1_bootstrap`) and sockets |
@@ -32,6 +37,7 @@ Privacy signing path.
 | `lilith_recovery_witness/protocol.py` | the closed two-socket protocol |
 | `lilith_recovery_witness/core.py` | dispatch over fixed on-host inputs |
 | `lilith_recovery_witness/server.py` | inherited-socket adapter and entrypoint (never auto-bootstraps) |
+| `lilith_recovery_witness/privacy_anchor.py` | Track B B2: the K-PAN Privacy rollback anchor (owner socket only, own protocol id, own key `privacy-anchor-signing-key`, own state `/var/lib/lilith-privacy-anchor`; strict extensions only) |
 | `deploy/` | the service, owner and signer sockets, tmpfiles (inert; never enabled) |
 | `witness_release_file_set.py` | this tree's file set and its own manifest identity |
 | `tests/` | repository tests (also run from the authority-dev suite) |

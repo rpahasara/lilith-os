@@ -17,6 +17,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from accepted_judge_lineage import closure_delta_is_the_accepted_judge  # noqa: E402  (E-19 + E-22 judge only)
 
 ROOT = Path(__file__).resolve().parents[3]
 TOOLS = ROOT / "services/owner-memory-control/tools"
@@ -121,7 +122,7 @@ class SourceTests(unittest.TestCase):
         build = _load("build_mb3_registry_bundle_final2", TOOLS / "build_mb3_registry_bundle.py")
         changed = _git("diff", "--name-only", CONTROL, "HEAD", "--", *build.CLOSURE)
         self.assertEqual(changed.returncode, 0)
-        self.assertEqual(changed.stdout.strip(), "")
+        closure_delta_is_the_accepted_judge(self, CONTROL, changed.stdout)
         # The phone script (outside the bundle) differs from the control commit only by the attempt-1 fix.
         incident = _load("mb3_incident_tests_for_ancestry", Path(__file__).resolve().with_name("test_b1b3e_mb3_sign_incident.py"))
         at_control = subprocess.run(["git", "-C", str(ROOT), "show", f"{CONTROL}:{build.PHONE_SCRIPT}"],
