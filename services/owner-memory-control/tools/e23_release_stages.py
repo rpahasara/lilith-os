@@ -181,12 +181,15 @@ def witness_units_state(system: I.System, reload_pending: str | None) -> str:
     new = [E23.PAYLOAD_DELTA[member][1] for member in WITNESS_HOST_FILES]
     if reload_pending != "no":
         return "MIXED"
-    anchor, state = path_meta(system, ANCHOR_DIR), path_meta(system, I.WITNESS_STATE)
+    anchor = path_meta(system, ANCHOR_DIR)
     if shas == old:
         return "OLD" if anchor is None else "MIXED"
-    if shas == new and anchor is not None and state is not None \
-            and (anchor["kind"], anchor["uid"], anchor["gid"], anchor["mode"]) == ("dir", state["uid"], state["gid"],
-                                                                                   "0700"):
+    # The tmpfiles line: `d ANCHOR_DIR 0700 lilith-recovery-witness lilith-recovery-witness`, i.e. the installer's
+    # witness principal (`wit`: the witness user and its primary group). Never the witness STATE directory's group,
+    # which is the signer group by contract (`wit:svc 2750`).
+    witness = (I._principal(system, "wit", owner=True), I._principal(system, "wit", owner=False))
+    if shas == new and anchor is not None \
+            and (anchor["kind"], anchor["uid"], anchor["gid"], anchor["mode"]) == ("dir", *witness, "0700"):
         return "NEW"
     return "MIXED"
 

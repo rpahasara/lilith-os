@@ -62,6 +62,13 @@ class E23Host(T19.StageHost):
             self.write(target, old_payloads[member])
         self.loaded = self.unit_sha()                                # what systemd last loaded
         (root / "var/lib/lilith-recovery-witness").mkdir(parents=True)
+        # DEV facts (read-only stat, 2026-10-25): the witness user is 994 with primary group 984; the anchor directory
+        # is 994:984 0700 (tmpfiles); the witness STATE directory is 994:985 2750 (group = the signer's, by contract).
+        # Here the fake tmpfiles creates as this process, so the witness principal is this process's uid/gid, and as
+        # root the state directory gets another group, as on DEV.
+        self.witness = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        if os.geteuid() == 0:
+            os.chown(root / "var/lib/lilith-recovery-witness", -1, os.getgid() + 4242)
         self.custody = {p: f"synthetic {p}".encode() for p in (
             "/etc/credstore.encrypted/lilith-authority-dev.owner-actor.cred", S.KWIT_BLOB,
             "/var/lib/lilith-authority-dev/authority_ledger.db", "/var/lib/lilith-recovery-witness/witness.json")}
@@ -70,6 +77,10 @@ class E23Host(T19.StageHost):
         os.chmod(self.p(S.KWIT_BLOB), 0o600)
         self.running(S.ENDING_WITNESS_INCARNATION, OLD)
         self.signer_running(S.ENDING_SIGNER_INCARNATION, OLD)
+
+    def system(self, **overrides) -> I.System:
+        """The installer's account lookup knows the witness user (`wit` principal); every other name is unknown."""
+        return super().system(**{"user": lambda name: self.witness if name == I.WITNESS_USER else None, **overrides})
 
     def p(self, absolute: str) -> Path:
         return self.root / absolute.lstrip("/")
@@ -289,6 +300,36 @@ class StageTests(unittest.TestCase):
         report = self.status()
         self.assertEqual(report["phase"], S.STOP_UNITS)                    # reload pending: never E5
         self.refused("E23_PRE_PHASE:" + S.STOP_UNITS, self.units)          # never re-run, never repaired
+
+    def test_the_anchor_is_judged_by_the_witness_principal_not_the_state_directory_group(self):
+        """The 2026-10-25 DEV STOP: anchor 994:984 0700 next to a witness state directory 994:985 2750 is E5."""
+        if os.geteuid() != 0:
+            self.skipTest("the differing state-directory group needs root (WSL)")
+        state = os.stat(self.host.p(I.WITNESS_STATE))
+        self.to_e4()
+        self.host.keygen()
+        report = self.units()
+        anchor = os.stat(self.host.p(S.ANCHOR_DIR))
+        self.assertNotEqual(anchor.st_gid, state.st_gid)                  # the DEV shape: two different groups
+        self.assertEqual((anchor.st_uid, anchor.st_gid), (self.host.witness.pw_uid, self.host.witness.pw_gid))
+        self.assertEqual((report["witnessUnits"], report["phase"]), ("NEW", S.E5))
+
+    def test_an_anchor_not_owned_by_the_witness_principal_is_a_stop(self):
+        self.to_e4()
+        self.host.keygen()
+        self.assertEqual(self.units()["phase"], S.E5)
+        for field, value in (("pw_gid", self.host.witness.pw_gid + 1), ("pw_uid", self.host.witness.pw_uid + 1)):
+            with self.subTest(field=field):
+                saved = getattr(self.host.witness, field)
+                setattr(self.host.witness, field, value)
+                try:
+                    self.assertEqual(self.status()["phase"], S.STOP_UNITS)
+                finally:
+                    setattr(self.host.witness, field, saved)
+        os.chmod(self.host.p(S.ANCHOR_DIR), 0o750)
+        self.assertEqual(self.status()["phase"], S.STOP_UNITS)
+        unknown = S.e23_status(self.host.system(user=lambda _n: None), OLD, NEW, status=self.host.status)
+        self.assertEqual(unknown["phase"], S.STOP_UNITS)                   # no witness account: fail closed
 
     def test_a_pending_reload_at_e5_is_a_stop(self):
         self.to_e4()
