@@ -37,6 +37,7 @@ from cryptography.hazmat.primitives.serialization import (  # noqa: E402
 
 import build_authority_dev_release as B  # noqa: E402
 import install_authority_dev as I  # noqa: E402
+import installed_layout as IL  # noqa: E402  (Track B: fixtures build the installed V1 layout)
 import lilith_authority_keygen_dev as G  # noqa: E402
 import release_file_set as RFS  # noqa: E402
 from lilith_authority_dev import credential as CRED  # noqa: E402
@@ -168,7 +169,7 @@ def fake_wheels():
 
 
 def build_archive(directory: Path, wheelhouse: Path) -> tuple[Path, Path, bytes]:
-    payloads = B.build_payloads(ROOT, wheelhouse)
+    payloads = IL.installed_build_payloads(ROOT, wheelhouse)
     manifest = I.manifest_for(SHA, payloads)
     raw = I.write_archive(payloads, manifest)
     archive, attestation = directory / "release.tar.gz", directory / "release.json"
@@ -702,7 +703,7 @@ class ProvenanceAndPreservationTests(unittest.TestCase):
 
     def test_control_tooling_is_never_release_payload(self):
         with fake_wheels() as wheels:
-            payloads = B.build_payloads(ROOT, wheels)
+            payloads = IL.installed_build_payloads(ROOT, wheels)
         control = [INSTALLER_SOURCE.encode(),
                    (HERE / "build_authority_dev_release.py").read_bytes(),
                    (ROOT / "scripts/verify_broker_dev_current_incarnation.py").read_bytes(),
@@ -728,7 +729,11 @@ class ReleaseArchiveTests(unittest.TestCase):
     """Req 8, 9, 15: deterministic, pinned, no custody material."""
 
     def test_layout_pins(self):
-        self.assertEqual(I.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        import install_authority_dev_v2 as I2      # Track B: archive layout v2; installer V1 stays byte-identical
+        self.assertEqual(I2.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        self.assertEqual(I.RUNTIME_PATHS, I2.RUNTIME_PATHS - I2.ADDED_RUNTIME_PATHS)
+        self.assertEqual(hashlib.sha256((ROOT / "services/authority-dev/ceremony/install_authority_dev.py").read_bytes())
+                         .hexdigest(), "fe10d9a37c53d4a32ca49d79ee5987c6546866feeebcee3c882087f51ed55487")
         import memory_broker_os_release as BR
         import probe_needrestart_lilith_override as NR
         self.assertEqual(I.WHEEL_HASHES, BR.WHEEL_HASHES)
@@ -758,7 +763,7 @@ class ReleaseArchiveTests(unittest.TestCase):
             archive, attestation, raw = build_archive(Path(out), wheels)
             with self.assertRaises(I.InstallError):
                 I.verify_archive(archive, attestation, "0" * 40)
-            payloads = B.build_payloads(ROOT, wheels)
+            payloads = IL.installed_build_payloads(ROOT, wheels)
             for extra in ({"credstore/lilith-authority-dev.owner-actor.cred": b"x"},
                           {"lilith_authority_dev/core.py": payloads["lilith_authority_dev/core.py"]
                            + b"\n# -----" + b"BEGIN " + b"PRIVATE" + b" KEY-----\n"}):

@@ -30,6 +30,7 @@ for _p in (TOOLS, Path(__file__).resolve().parent):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import e23_installed as E23H  # noqa: E402  (Track B: the installed 129f2be payload from Git history)
 import mb6_dr5_target as T  # noqa: E402
 import mb6_ledger_verifier as V  # noqa: E402
 import mb6_operator as O  # noqa: E402
@@ -305,7 +306,7 @@ class PackageTests(unittest.TestCase):
                    "lilith_authority_root": "services/authority-dev", "lilith_owner_memory": "services/owner-memory-control",
                    "lilith_memory": "services/core-api", "lilith_recovery_witness": "services/recovery-witness"}
         for module, pin in rows.items():                                               # control bytes = the pins
-            data = (ROOT / sources[module.split("/")[0]] / module).read_bytes()
+            data = E23H.installed_source_bytes(f"{sources[module.split('/')[0]]}/{module}")   # host: 129f2be bytes
             if module == E19.PR1_ACCEPTANCE_MEMBER:          # historical aee323e pin, from the E-19 bytes
                 data = E19.reverse_e19(E19_PR1_ACCEPTANCE_BYTES)
             self.assertEqual(sha(data), pin, module)
@@ -448,6 +449,11 @@ class ReadinessProbeTests(unittest.TestCase):
             for package, base in sources.items():
                 shutil.copytree(ROOT / base / package, release / package,
                                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            for changed in E23H.E23.PAYLOAD_DELTA:              # the installed (pre-E-23) bytes, from Git history
+                if not changed.startswith("assets/"):
+                    (release / changed).write_bytes(E23H.old_bytes(changed))
+            for added in E23H.E23.PAYLOAD_ADDED:
+                (release / added).unlink()
             member = release / E19.PR1_ACCEPTANCE_MEMBER        # the installed aee323e bytes, not the E-19 source
             member.write_bytes(E19.reverse_e19(E19_PR1_ACCEPTANCE_BYTES))
             wrapper = Path(work) / "lilith-authority-ledger-dev"

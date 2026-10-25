@@ -19,6 +19,7 @@ from test_canonical_runtime import TEST_CLASS, TEST_KEY, TEST_NAMESPACE, stamp_t
 from test_first_interaction_l04 import FirstInteractionCase
 from test_privacy_forget_runner import FAREWELL, FI, HERMES, CountingOwner
 from test_privacy_hermes_owner_v2 import SECRET
+from privacy_freshness_fixture import AlwaysFresh
 from test_privacy_restore_suppression import CODENAME, RestoreCase, SkippingOwner
 
 from lilith_memory import canonical_contracts as contracts
@@ -36,7 +37,7 @@ class GatedPathMixin:
     """The DEV memory read path, assembled exactly as a serving runtime must: one gated resolver for every component."""
 
     def gated(self, store=None):
-        return memory_v2.restore_gated_hold_resolver(store or self.privacy, self.db)
+        return memory_v2.restore_gated_hold_resolver(store or self.privacy, self.db, freshness=AlwaysFresh())
 
     def serving(self, resolver=None):
         resolver = resolver or self.gated()
@@ -70,7 +71,7 @@ class CleanStartupTests(GatedPathMixin, FirstInteractionCase):
         self.privacy = privacy.PrivacyGovernanceStore(self.privacy_db, SECRET, self.actor, now_fn=lambda: self.now)
 
     def test_a_clean_database_is_ready_and_serves(self):
-        self.assertTrue(self.gated()._gate.check().ready_to_serve)
+        self.assertTrue(self.gated()._inner._gate.check().ready_to_serve)
         self.assertIsNone(self.read(CODENAME))
         self.assertIsNone(self.read(FI))
         self.create()                                                             # a codename written ...
@@ -99,7 +100,7 @@ class GateTests(GatedPathMixin, RestoreCase):
         result = self.forget(self.runner(self.owners(L04=stalled)))
         self.assert_incomplete(result, "RuntimeError")
         self.assertTrue(self.fi_present())
-        self.assertTrue(self.gated()._gate.check().ready_to_serve)
+        self.assertTrue(self.gated()._inner._gate.check().ready_to_serve)
         self.assertIsNone(self.read(FI))
         self.assertIn("SYNTH-ALPHA", self.read(CODENAME)["normalized_value_json"])
 
@@ -215,10 +216,10 @@ class SeparationTests(GatedPathMixin, RestoreCase):
 
     def test_the_serving_objects_expose_no_erasure(self):
         resolver = self.gated()
-        for obj in (resolver, resolver._gate):
+        for obj in (resolver, resolver._inner, resolver._inner._gate):
             public = {name for name in dir(obj) if not name.startswith("_")}
             self.assertFalse({n for n in public if "erase" in n or "apply" in n or "forget" in n}, public)
-        self.assertEqual({fn.__name__ for pair in resolver._gate._probes for fn in pair},
+        self.assertEqual({fn.__name__ for pair in resolver._inner._gate._probes for fn in pair},
                          {"list_identities", "restore_residue"})
         source = inspect.getsource(privacy.RestoreSuppressionGate) + inspect.getsource(privacy.GatedPrivacyHoldResolver)
         self.assertNotIn("erase_restore_suppressed(", source)

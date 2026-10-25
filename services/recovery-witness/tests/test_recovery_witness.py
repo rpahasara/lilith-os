@@ -694,15 +694,18 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(S.startup_recovery(None, h.storage, HI.HostInputsV1(environment=X.ENV)))
 
     def test_server_source_has_no_bind_or_generic_signing(self):
-        for name in ("server.py", "core.py", "writer.py", "storage.py", "protocol.py"):
+        for name in ("server.py", "core.py", "writer.py", "storage.py", "protocol.py", "privacy_anchor.py"):
             text = (SERVICE / "lilith_recovery_witness" / name).read_text(encoding="utf-8")
             for needle in (".bind(", "AF_INET", "listen(", "sign_bytes", "sign_digest", "evidence_minter",
                            "lilith_authority_signer", "synthetic_", "Ed25519PrivateKey.generate",
                            "authority_ledger.db"):
                 self.assertNotIn(needle, text, f"{name}: {needle}")
         credential = (SERVICE / "lilith_recovery_witness/credential.py").read_text(encoding="utf-8")
-        self.assertEqual(credential.count(".sign("), 1)
-        self.assertIn("RC.witness_v2_signing_bytes", credential)
+        # K-WIT signs V2 bodies only; K-PAN (Track B B2) signs PrivacyAnchorV1 bodies only, each under its own domain
+        self.assertEqual(credential.count(".sign("), 2)
+        self.assertEqual(credential.count("self.__key.sign(message)"), 1)
+        self.assertIn("message = RC.witness_v2_signing_bytes(dict(unsigned))", credential)
+        self.assertEqual(credential.count('self.__key.sign(PA.signing_bytes("anchor", dict(unsigned)))'), 1)
 
 
 # ----------------------------------------------------------------- units ---
@@ -717,7 +720,11 @@ class UnitTests(unittest.TestCase):
 
     def test_dedicated_identity_and_one_k_wit_credential(self):
         self.assertEqual((self.one("User"), self.one("Group")), ("lilith-recovery-witness", "lilith-recovery-witness"))
-        self.assertEqual(self.one("LoadCredentialEncrypted"), f"{PR.CREDENTIAL_NAME}:{PR.CREDENTIAL_SOURCE}")
+        # exactly K-WIT and (Track B B2) K-PAN, each from its own root-owned encrypted blob
+        self.assertEqual(_values(self.service["Service"], "LoadCredentialEncrypted"),
+                         [f"{PR.CREDENTIAL_NAME}:{PR.CREDENTIAL_SOURCE}",
+                          f"{CRED.PRIVACY_ANCHOR_CREDENTIAL_NAME}:/etc/lilith-recovery-witness/credentials/"
+                          "lilith-recovery-witness.privacy-anchor.cred"])
         for key in ("LoadCredential", "SetCredential", "SetCredentialEncrypted", "ImportCredential",
                     "SupplementaryGroups", "DynamicUser", "StateDirectory", "EnvironmentFile", "PassEnvironment",
                     "BindPaths", "BindReadOnlyPaths", "ExecStartPre"):
@@ -731,7 +738,8 @@ class UnitTests(unittest.TestCase):
                      "/var/lib/lilith-authority-custody", "-/var/lib/lilith-authority-dev", "/etc/lilith-memory-broker",
                      "/var/lib/lilith-memory-broker", "/etc/lilith-os-dev"):
             self.assertIn(path, denied)
-        self.assertEqual(self.one("ReadWritePaths"), "/var/lib/lilith-recovery-witness")
+        # the RecoveryWitnessV2 store and (Track B B2) the separate anchor store, nothing else
+        self.assertEqual(self.one("ReadWritePaths"), "/var/lib/lilith-recovery-witness /var/lib/lilith-privacy-anchor")
         self.assertEqual(self.one("ReadOnlyPaths").split(), ["/opt/lilith-authority-dev", "/etc/lilith-authority-dev"])
         for key, value in {"NoNewPrivileges": "yes", "ProtectSystem": "strict", "PrivateNetwork": "yes",
                            "RestrictAddressFamilies": "AF_UNIX", "IPAddressDeny": "any", "CapabilityBoundingSet": "",
@@ -754,7 +762,8 @@ class UnitTests(unittest.TestCase):
             for key in ("WantedBy", "RequiredBy", "UpheldBy", "Alias", "Also"):
                 self.assertNotRegex(text, rf"(?m)^{key}=")
         self.assertEqual((SERVICE / "deploy/lilith-recovery-witness.tmpfiles.conf").read_text(encoding="utf-8"),
-                         "d /run/lilith-recovery-witness 0710 root lilith-authority-dev -\n")
+                         "d /run/lilith-recovery-witness 0710 root lilith-authority-dev -\n"
+                         "d /var/lib/lilith-privacy-anchor 0700 lilith-recovery-witness lilith-recovery-witness -\n")
 
     def test_paths_are_the_shared_host_paths(self):
         self.assertEqual(PR.CREDENTIAL_SOURCE, HP.WITNESS_BLOB)

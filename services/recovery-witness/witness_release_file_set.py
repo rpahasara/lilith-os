@@ -29,10 +29,11 @@ from pathlib import Path
 SERVICE = "services/recovery-witness"
 RUNTIME_PACKAGE = SERVICE + "/lilith_recovery_witness"
 RUNTIME_MODULES = frozenset({"__init__.py", "profile.py", "credential.py", "storage.py", "writer.py", "protocol.py",
-                             "core.py", "server.py"})
+                             "core.py", "server.py", "privacy_anchor.py"})
 DEPLOY_ASSETS = frozenset({"lilith-recovery-witness.service", "lilith-recovery-witness-owner.socket",
                            "lilith-recovery-witness-signer.socket", "lilith-recovery-witness.tmpfiles.conf"})
-TEST_FILES = frozenset({"test_recovery_witness.py", "test_recovery_witness_units.py", "witness_fixtures.py"})
+TEST_FILES = frozenset({"test_recovery_witness.py", "test_recovery_witness_units.py", "witness_fixtures.py",
+                        "test_privacy_anchor.py"})
 SOURCE_FILES = frozenset(
     {f"{RUNTIME_PACKAGE}/{name}" for name in RUNTIME_MODULES}
     | {f"{SERVICE}/deploy/{name}" for name in DEPLOY_ASSETS}

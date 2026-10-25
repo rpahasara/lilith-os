@@ -36,6 +36,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 import install_authority_dev as I  # noqa: E402
 import lilith_authority_keygen_dev as G  # noqa: E402
 import release_file_set as RFS  # noqa: E402
+import installed_layout as IL  # noqa: E402  (Track B: fixtures build the installed V1 layout)
 from lilith_authority_dev import profile as PR  # noqa: E402
 from lilith_owner_memory import rotation_contracts as RC  # noqa: E402
 from lilith_owner_memory import successor_custody as SC  # noqa: E402
@@ -568,7 +569,7 @@ class ReleaseFileSetTests(unittest.TestCase):
         self.assertNotIn("cli/lilith-authority-keygen-dev", payloads)  # the keygen is a separate CLI member
         with fake_wheels() as wheels:
             import build_authority_dev_release as BUILD
-            release = BUILD.build_payloads(ROOT, wheels)
+            release = IL.installed_build_payloads(ROOT, wheels)
         self.assertEqual(release[I.CLI_PATH], KEYGEN_SOURCE.encode())
         self.assertEqual(set(release), I.EXPECTED_PATHS)
         for marker in (b".generate()", b"Ed25519PrivateKey.generate", b"lilith_owner_memory.successor"):
