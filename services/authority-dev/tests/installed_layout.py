@@ -71,3 +71,17 @@ def _build_v2(root: Path, wheelhouse: Path) -> dict[str, bytes]:
         payloads[member] = old_source_bytes(source, E23_RELEASE) if source is not None else data
     I2.check_payloads(payloads)                         # a valid archive layout v2 release
     return payloads
+
+
+FM1_RELEASE = "e2324a5f89200aa5f374c4a43a13cb76b36376f9"         # the installed FM-1 NEW release (archive layout v3)
+
+
+def build_fm1(root: Path, wheelhouse: Path) -> dict[str, bytes]:
+    """The FM-1 NEW payload (archive layout v3): the build with every runtime member at its e2324a5 bytes. The tree
+    has moved on (relationship origin changes `lilith_authority_dev/protocol.py`), as it moved past 57bff671."""
+    import build_authority_dev_release as B
+    import release_file_set as RFS
+
+    source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
+    return {member: old_source_bytes(source_of[member], FM1_RELEASE) if member in source_of else data
+            for member, data in B.build_payloads(root, wheelhouse).items()}

@@ -14,12 +14,17 @@ from typing import FrozenSet, Optional
 
 try:
     from .canonical_contracts import CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE
+    from .memory_action_v2 import CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE
 except ImportError:  # deploy-exact flat-directory regression staging
     from canonical_contracts import CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE
+    from memory_action_v2 import CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE
 
 
 CONFIG_ENV = "LILITH_CANONICAL_CONFIG_FILE"
-ALLOWED_CAPABILITIES = frozenset({CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE})
+# Capabilities a root-owned config file may name. Naming one is not enabling it: the file must also set
+# canonicalLtmEnabled, and each family is gated again by its tuple registry and the signer's purpose allowlist.
+# The First Interaction capability is never allowed (its identity is permanently suppressed).
+ALLOWED_CAPABILITIES = frozenset({CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE, CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE})
 _CONFIG_KEYS = frozenset(
     {"schemaVersion", "canonicalLtmEnabled", "activeCapabilities"}
 )

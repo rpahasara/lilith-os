@@ -2,7 +2,7 @@
 
 Record: docs/architecture/first-memory-fm1-release-transition.md. TEST-ONLY: the host is the E-23 synthetic root
 (`test_trackb_e23_release_stages.E23Host`) moved to the post-E-23 shape (57bff671 installed, E-23 witness units loaded,
-K-PAN present, the Privacy anchor v1 chain written); NEW is the repository (e2324a5) payload in archive layout v3. The
+K-PAN present, the Privacy anchor v1 chain written); NEW is the e2324a5 payload (git bytes) in archive layout v3. The
 operator's transport seams deliver every BOOT bundle to the REAL stage tool and every reviewed unit command to the
 fake units. Nothing contacts DEV, runs systemctl, opens a socket or touches a credential.
 """
@@ -79,10 +79,8 @@ class Base(unittest.TestCase):
         house = stack.enter_context(T19.stand_in_wheels())
         self.root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
         self.out = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-        import build_authority_dev_release as B
-
         self.old_payloads = IL._build_v2(ROOT, house)                   # the installed 57bff671 payload
-        self.new_payloads = B.build_payloads(ROOT, house)                # the e2324a5 payload (layout v3)
+        self.new_payloads = IL.build_fm1(ROOT, house)                    # the e2324a5 payload (layout v3)
         self.host = FM1Host(self.root, self.old_payloads)
         self.system = self.host.system()
         with S.layout_v3():
@@ -558,12 +556,15 @@ class PinTests(unittest.TestCase):
             self.assertIn(digest, record, step)
         self.assertEqual(OP.CLIENT_EXIT_CRASH, 3221225477)
 
-    def test_the_delta_is_the_git_bytes_of_57bff671_against_the_repository(self):
+    def test_the_delta_is_the_git_bytes_of_57bff671_against_e2324a5(self):
         import install_authority_dev_v3 as V3
         import release_file_set as RFS
 
         source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
-        repo = RFS.runtime_payloads(ROOT)
+        current = RFS.runtime_payloads(ROOT)
+        repo = {m: IL.old_source_bytes(source_of[m], IL.FM1_RELEASE) for m in current}   # FM-1 NEW, as merged
+        # The tree has moved past e2324a5 by exactly the relationship-origin signer change (a later transition).
+        self.assertEqual({m for m in current if current[m] != repo[m]}, {"lilith_authority_dev/protocol.py"})
         for member, (before, after) in FM1.PAYLOAD_DELTA.items():
             self.assertEqual(sha(IL.old_source_bytes(source_of[member], IL.E23_RELEASE)), before, member)
             self.assertEqual(sha(repo[member]), after, member)

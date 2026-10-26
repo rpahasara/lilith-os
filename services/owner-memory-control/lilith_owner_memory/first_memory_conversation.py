@@ -11,6 +11,15 @@ storage alone (no session, transcript or Hermes state is read or written here).
                                 L04's internal rows (Actor, Policy, Consent, intent, candidate, proposal) created
                                 and the unchanged `L04V2AdmissionAdapter` asked to admit. A refusal writes nothing.
     recall(session, text)       "what is my project codename" -> `AcceptedMemoryReadFacadeV2.read_accepted`.
+    recall_authorized(session)  every configured kind through the same accepted read (the Hermes context adapter);
+                                a kind that is not ACCEPTED is simply absent, never guessed.
+
+Kinds (closed; each its own governed tuple, purpose and capability):
+
+    codename                    "remember my project codename is X" / "what is my project codename"
+    relationship origin         "remember our origin: <the owner's own statement>" / "what is our origin"
+                                (only when the composition is given the relationship-origin tuple; the statement is
+                                stored exactly as the owner wrote it, NFC and trimmed, USER_ASSERTED, OWNER_PERSONAL)
 
 Composition only. Every rule stays with its owner: the issuer verifies the owner proof and signs; the adapter
 re-verifies the evidence, the Privacy hold and every L04 rule; the accepted read re-verifies the whole chain. This
@@ -22,7 +31,8 @@ truth), and the current-boot `PrivacyFreshnessGate` READY. The same binding supp
 that the L04 stores and the read facade must be built with (`memory_v2.restore_gated_hold_resolver`).
 
 The First Interaction identity is permanently suppressed (F9c2 FORGET) and is refused at construction; this module
-only composes the codename tuple the installed signer supports (`LONG_TERM_PERSONAL_PROJECT_RECALL`).
+composes only the codename tuple and, when given, the relationship-origin tuple (the two purposes in the signer's own
+allowlist, `lilith_authority_dev.protocol.SIGNER_PURPOSES`).
 """
 
 from __future__ import annotations
@@ -64,11 +74,38 @@ NOTHING_RECALLED = "NOTHING_RECALLED"
 _REMEMBER = re.compile(r"\A\s*remember\s+(?:that\s+)?my\s+project\s+codename\s+is\s+(?P<value>\S(?:.*\S)?)\s*\Z",
                        re.IGNORECASE | re.DOTALL)
 _RECALL = re.compile(r"\A\s*what\s+is\s+my\s+project\s+codename\s*\??\s*\Z", re.IGNORECASE)
+_REMEMBER_ORIGIN = re.compile(r"\A\s*remember\s+our\s+origin\s*:\s*(?P<value>\S(?:.*\S)?)\s*\Z",
+                              re.IGNORECASE | re.DOTALL)
+_RECALL_ORIGIN = re.compile(r"\A\s*what\s+is\s+our\s+origin\s*\??\s*\Z", re.IGNORECASE)
 _SESSION = re.compile(r"\A[A-Za-z0-9._:-]{1,128}\Z")
 # Trusted challenge context: the deployment's owner, RP, authority domain, policy and ledger (never from a request).
 CHALLENGE_CONTEXT_FIELDS = frozenset({
     "protocol", "schemaVersion", "ownerPrincipal", "privacyNoticeVersion", "rpId", "deploymentEnvironment",
     "authorityDomain", "logicalOwnerId", "policyVersion", "registryTupleVersion", "ledgerEpoch"})
+
+
+@dataclass(frozen=True)
+class MemoryKindV1:
+    """One closed conversational kind: its directive grammar and the governed family it composes."""
+
+    name: str
+    remember: "re.Pattern[str]"
+    recall: "re.Pattern[str]"
+    value_key: str
+    value_schema: str
+    purpose: str
+    capability: str
+    normalize: Callable[[Mapping[str, Any]], tuple]
+
+
+CODENAME = MemoryKindV1("codename", _REMEMBER, _RECALL, "codename", learning_v2.VALUE_SCHEMA,
+                        C.LONG_TERM_PERSONAL_PROJECT_RECALL, C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
+                        learning_v2.normalize_project_codename)
+RELATIONSHIP_ORIGIN = MemoryKindV1("relationship-origin", _REMEMBER_ORIGIN, _RECALL_ORIGIN, "statement",
+                                   MA.RELATIONSHIP_ORIGIN_VALUE_SCHEMA, MA.LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL,
+                                   MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE,
+                                   learning_v2.normalize_relationship_origin)
+KINDS = (CODENAME, RELATIONSHIP_ORIGIN)
 
 
 class FirstMemoryRefused(RuntimeError):
@@ -160,6 +197,8 @@ class OfferV1:
     codename: Optional[str] = None
     challenge_json: Optional[bytes] = None
     webauthn_challenge: Optional[bytes] = None      # what the owner's authenticator signs
+    kind: Optional[str] = None
+    value: Optional[str] = None                     # exactly what would be stored (codename or statement)
 
 
 @dataclass(frozen=True)
@@ -174,12 +213,27 @@ class RecallResultV1:
     status: str
     codename: Optional[str] = None
     reason: Optional[str] = None
+    kind: Optional[str] = None
+    value: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RecalledMemoryV1:
+    """One ACCEPTED canonical memory for a conversation context: the value plus where it came from."""
+
+    kind: str
+    value: str
+    epistemic_basis: str
+    sensitivity: str
+    admission_id: str
+    revision_id: str
 
 
 @dataclass(frozen=True)
 class _Pending:
     session_id: str
-    codename: str
+    kind: MemoryKindV1
+    value: str
     action: C.FrozenMemoryActionV1
     encoded: str
     challenge: K.OwnerMemoryChallengeV2
@@ -193,14 +247,23 @@ class FirstMemoryConversationV1:
                  adapter: Callable[[], AD.L04V2AdmissionAdapter],
                  reader: Callable[[], AR.AcceptedMemoryReadFacadeV2], issuer: OwnerEvidenceIssuerV1,
                  tuple_policy: memory_v2.MemoryTuplePolicyV1, challenge_context: Mapping[str, Any],
-                 now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 origin_policy: Optional[memory_v2.MemoryTuplePolicyV1] = None):
         _need(isinstance(privacy, PrivacyBindingV1), "PRIVACY_BINDING_REQUIRED")
         _need(tuple(tuple_policy.identity) != tuple(MA.FIRST_INTERACTION_IDENTITY),
               "FIRST_INTERACTION_IDENTITY_SUPPRESSED")                       # F9c2: never reused
         _need(tuple_policy.value_schema == learning_v2.VALUE_SCHEMA
               and tuple_policy.capability == C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE
               and tuple_policy.read_allowed and tuple_policy.write_allowed, "TUPLE_NOT_A_CODENAME_TUPLE")
+        _need(origin_policy is None or (
+            tuple(origin_policy.identity) == MA.RELATIONSHIP_ORIGIN_IDENTITY
+            and origin_policy.value_schema == MA.RELATIONSHIP_ORIGIN_VALUE_SCHEMA
+            and origin_policy.capability == MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE
+            and origin_policy.read_allowed and origin_policy.write_allowed), "TUPLE_NOT_THE_ORIGIN_TUPLE")
         _need(set(challenge_context) == CHALLENGE_CONTEXT_FIELDS, "CHALLENGE_CONTEXT_INVALID")
+        self._policies = {CODENAME.name: tuple_policy}
+        if origin_policy is not None:
+            self._policies[RELATIONSHIP_ORIGIN.name] = origin_policy
         self._privacy, self._l04, self._adapter, self._reader = privacy, l04, adapter, reader
         self._issuer, self._tuple, self._context, self._now = issuer, tuple_policy, dict(challenge_context), now_fn
         self._pending: dict[str, _Pending] = {}
@@ -210,20 +273,20 @@ class FirstMemoryConversationV1:
     def offer(self, session_id: str, text: str) -> OfferV1:
         self._privacy.require_ready()
         _need(isinstance(session_id, str) and _SESSION.match(session_id) is not None, "SESSION_INVALID")
-        match = _REMEMBER.match(text) if isinstance(text, str) else None
+        kind, match = self._match(text, "remember")
         if match is None:
             return OfferV1(NOT_A_MEMORY_REQUEST)
         try:
-            encoded, payload_digest = learning_v2.normalize_project_codename({"codename": match.group("value")})
+            encoded, payload_digest = kind.normalize({kind.value_key: match.group("value")})
         except learning_v2.LearningV2Error as exc:
             raise FirstMemoryRefused("VALUE_REFUSED") from exc
-        identity = self._tuple.identity
+        identity = self._policies[kind.name].identity
         _need(not self._privacy.resolver.is_held(*identity), "IDENTITY_HELD_OR_SUPPRESSED")
-        action = C.FrozenMemoryActionV1(
+        action = MA.action_from_fields(
             schema_version=1, actor_ref_id=self._l04.actor.ACTOR.actor_ref_id, operation=C.CREATE,
             memory_class=identity[0], subject_namespace=identity[1], subject_key=identity[2],
-            value_schema=learning_v2.VALUE_SCHEMA, payload_digest=payload_digest, expected_active_revision_id=None,
-            restore_revision_id=None, purpose=C.LONG_TERM_PERSONAL_PROJECT_RECALL)
+            value_schema=kind.value_schema, payload_digest=payload_digest, expected_active_revision_id=None,
+            restore_revision_id=None, purpose=kind.purpose)
         action.validate()
         offer_id = "och.fm1." + secrets.token_hex(16)
         issued = self._now()
@@ -240,9 +303,20 @@ class FirstMemoryConversationV1:
             "expiresAt": _instant(issued + CHALLENGE_TTL)})
         challenge_json = challenge.canonical_bytes()
         self._issuer.prepare(challenge_json)
-        codename = json.loads(encoded)["codename"]
-        self._pending[offer_id] = _Pending(session_id, codename, action, encoded, challenge, challenge_json)
-        return OfferV1(OFFERED, offer_id, session_id, codename, challenge_json, challenge.webauthn_challenge())
+        value = json.loads(encoded)[kind.value_key]
+        self._pending[offer_id] = _Pending(session_id, kind, value, action, encoded, challenge, challenge_json)
+        return OfferV1(OFFERED, offer_id, session_id, value if kind is CODENAME else None, challenge_json,
+                       challenge.webauthn_challenge(), kind.name, value)
+
+    def _match(self, text: Any, which: str) -> tuple:
+        """The first configured kind whose closed grammar matches exactly, else (None, None)."""
+        if not isinstance(text, str):
+            return None, None
+        for kind in KINDS:
+            match = getattr(kind, which).match(text) if kind.name in self._policies else None
+            if match is not None:
+                return kind, match
+        return None, None
 
     # --------------------------------------------------------------------------------------------- consent ---
 
@@ -270,7 +344,7 @@ class FirstMemoryConversationV1:
         action, nonce = pending.action, pending.challenge["challengeId"]
         evidence = actor.issue(action=action, request_digest=pending.challenge["requestDigest"], nonce=nonce)
         decision = policy.decide(action=action, actor_evidence_ref_id=evidence.actor_evidence_ref_id,
-                                 capability=self._tuple.capability)
+                                 capability=self._policies[pending.kind.name].capability)
         challenge = consent.create_challenge(action=action, actor_evidence_ref_id=evidence.actor_evidence_ref_id,
                                              policy_decision_ref_id=decision.decision_ref_id)
         intent_ref_id = "intent." + nonce
@@ -292,11 +366,33 @@ class FirstMemoryConversationV1:
     def recall(self, session_id: str, text: str) -> RecallResultV1:
         self._privacy.require_ready()
         _need(isinstance(session_id, str) and _SESSION.match(session_id) is not None, "SESSION_INVALID")
-        if not isinstance(text, str) or _RECALL.match(text) is None:
+        kind, match = self._match(text, "recall")
+        if match is None:
             return RecallResultV1(NOT_A_MEMORY_REQUEST)
-        identity = self._tuple.identity
-        result = self._reader().read_accepted(actor=self._l04.actor.ACTOR, memory_class=identity[0],
-                                              subject_namespace=identity[1], subject_key=identity[2])
+        result = self._read(kind)
         if result.status != V2.ACCEPTED_MEMORY:
-            return RecallResultV1(NOTHING_RECALLED, reason=result.reason)
-        return RecallResultV1(RECALLED, json.loads(result.row["normalized_value_json"])["codename"])
+            return RecallResultV1(NOTHING_RECALLED, reason=result.reason, kind=kind.name)
+        value = json.loads(result.row["normalized_value_json"])[kind.value_key]
+        return RecallResultV1(RECALLED, value if kind is CODENAME else None, None, kind.name, value)
+
+    def recall_authorized(self, session_id: str) -> tuple:
+        """Every configured kind that is ACCEPTED canonical memory now, as `RecalledMemoryV1` (read-only)."""
+        self._privacy.require_ready()
+        _need(isinstance(session_id, str) and _SESSION.match(session_id) is not None, "SESSION_INVALID")
+        recalled = []
+        for kind in KINDS:
+            if kind.name not in self._policies:
+                continue
+            result = self._read(kind)
+            if result.status != V2.ACCEPTED_MEMORY:
+                continue
+            recalled.append(RecalledMemoryV1(
+                kind.name, json.loads(result.row["normalized_value_json"])[kind.value_key],
+                str(result.facts["epistemicBasis"]), MA.SENSITIVITY_BY_PURPOSE[kind.purpose],
+                str(result.facts["admissionId"]), str(result.facts["revisionId"])))
+        return tuple(recalled)
+
+    def _read(self, kind: MemoryKindV1) -> Any:
+        identity = self._policies[kind.name].identity
+        return self._reader().read_accepted(actor=self._l04.actor.ACTOR, memory_class=identity[0],
+                                            subject_namespace=identity[1], subject_key=identity[2])

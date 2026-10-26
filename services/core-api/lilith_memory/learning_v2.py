@@ -33,7 +33,8 @@ V2_PROPOSAL_FAMILY = "OWNER_DIRECTED_PROJECT_CODENAME_V1"
 V1_PROPOSAL_FAMILY = "L18_V1_CAREER"
 FIRST_INTERACTION_PROPOSAL_FAMILY = "OWNER_DIRECTED_FIRST_INTERACTION_V1"
 # Families whose proposals L04 V2 applies (V1 stays historical and unchanged).
-L04_V2_FAMILIES = frozenset({V2_PROPOSAL_FAMILY, FIRST_INTERACTION_PROPOSAL_FAMILY})
+L04_V2_FAMILIES = frozenset({V2_PROPOSAL_FAMILY, FIRST_INTERACTION_PROPOSAL_FAMILY,
+                             MA.RELATIONSHIP_ORIGIN.proposal_family})
 CANDIDATE_CLASS = "OWNER_DIRECTED_MEMORY_CANDIDATE"
 SOURCE_STREAM = "home_owner_memory_intents"
 VALUE_SCHEMA = "HomelabCodenameV1"
@@ -246,112 +247,139 @@ LEARNING_V2_MIGRATION_STATEMENTS = (
 )
 
 
-# FM-02 First Interaction family (schema v2, applied only by first_interaction_migration). The five tables are
-# additive and pinned to the one approved tuple, CREATE-only, RECORDED_INTERACTION. The codename tables above are
-# unchanged; learning_proposal_ref is the one shared table the migration rebuilds, because L04 rows reference it.
-_FI_CLASS, _FI_NAMESPACE, _FI_KEY = MA.FIRST_INTERACTION_IDENTITY
-_FI_SCOPE = (
-    f"operation TEXT NOT NULL CHECK(operation='CREATE'), "
-    f"memory_class TEXT NOT NULL CHECK(memory_class='{_FI_CLASS}'), "
-    f"subject_namespace TEXT NOT NULL CHECK(subject_namespace='{_FI_NAMESPACE}'), "
-    f"subject_key TEXT NOT NULL CHECK(subject_key='{_FI_KEY}'), "
-    f"value_schema TEXT NOT NULL CHECK(value_schema='{MA.FIRST_INTERACTION_VALUE_SCHEMA}'), "
-)
-_FI_PURPOSE = f"purpose TEXT NOT NULL CHECK(purpose='{MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION}'), "
-_FI_NO_REVISION = (
-    "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
-    "restore_revision_id TEXT CHECK(restore_revision_id IS NULL), "
-)
+# Versioned families (memory_action_v2.VERSIONED_FAMILIES). Each has five additive L18 tables, pinned to its one exact
+# tuple, CREATE-only, with its own fixed epistemic basis. The codename tables above are unchanged; learning_proposal_ref
+# is the one shared table a family migration rebuilds, because L04 rows reference it.
+# - FM-02 First Interaction: schema v2, applied only by first_interaction_migration;
+# - relationship origin: schema v3, applied only by relationship_origin_migration (v1 or v2 -> v3).
+def family_tables(family: MA.VersionedFamilyV1) -> frozenset:
+    return frozenset(f"{family.table_prefix}_{name}_v1"
+                     for name in ("intent", "candidate", "candidate_source", "assessment", "proposal"))
 
-FIRST_INTERACTION_TABLES = frozenset({
-    "learning_fi_intent_v1",
-    "learning_fi_candidate_v1",
-    "learning_fi_candidate_source_v1",
-    "learning_fi_assessment_v1",
-    "learning_fi_proposal_v1",
-})
-FIRST_INTERACTION_SCHEMA_OBJECTS = frozenset({
-    *FIRST_INTERACTION_TABLES,
-    "learning_fi_intent_v1_action",
-    "learning_fi_candidate_v1_idempotency",
-    "learning_fi_candidate_v1_action",
-    "learning_fi_proposal_v1_candidate",
-    "learning_fi_proposal_v1_fingerprint",
-    *(f"{table}_no_{verb}" for table in FIRST_INTERACTION_TABLES for verb in ("update", "delete")),
-})
+
+def family_schema_objects(family: MA.VersionedFamilyV1) -> frozenset:
+    tables = family_tables(family)
+    p = family.table_prefix
+    return frozenset({
+        *tables,
+        f"{p}_intent_v1_action",
+        f"{p}_candidate_v1_idempotency",
+        f"{p}_candidate_v1_action",
+        f"{p}_proposal_v1_candidate",
+        f"{p}_proposal_v1_fingerprint",
+        *(f"{table}_no_{verb}" for table in tables for verb in ("update", "delete")),
+    })
+
+
+def family_migration_statements(family: MA.VersionedFamilyV1) -> Tuple[str, ...]:
+    """The family's additive L18 DDL. For the First Interaction family this is byte-identical to the FM-02 v2 DDL."""
+    p = family.table_prefix
+    memory_class, namespace, key = family.identity
+    scope = (
+        f"operation TEXT NOT NULL CHECK(operation='CREATE'), "
+        f"memory_class TEXT NOT NULL CHECK(memory_class='{memory_class}'), "
+        f"subject_namespace TEXT NOT NULL CHECK(subject_namespace='{namespace}'), "
+        f"subject_key TEXT NOT NULL CHECK(subject_key='{key}'), "
+        f"value_schema TEXT NOT NULL CHECK(value_schema='{family.value_schema}'), "
+    )
+    purpose = f"purpose TEXT NOT NULL CHECK(purpose='{family.purpose}'), "
+    no_revision = (
+        "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
+        "restore_revision_id TEXT CHECK(restore_revision_id IS NULL), "
+    )
+    return (
+        f"CREATE TABLE {p}_intent_v1 ("
+        "intent_ref_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+        "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
+        "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
+        "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, " + scope
+        + "normalized_value_json TEXT NOT NULL, payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+        + no_revision + purpose
+        + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), created_at TEXT NOT NULL)",
+        f"CREATE UNIQUE INDEX {p}_intent_v1_action ON {p}_intent_v1(actor_evidence_ref_id,action_digest)",
+        f"CREATE TABLE {p}_candidate_v1 ("
+        "candidate_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+        "candidate_class TEXT NOT NULL CHECK(candidate_class='OWNER_DIRECTED_MEMORY_CANDIDATE'), "
+        f"descriptor_family TEXT NOT NULL CHECK(descriptor_family='{family.descriptor_family}'), "
+        "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, "
+        f"intent_ref_id TEXT NOT NULL REFERENCES {p}_intent_v1(intent_ref_id), "
+        "policy_decision_ref_id TEXT NOT NULL, consent_ref_id TEXT NOT NULL, "
+        "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+        "admission_basis TEXT NOT NULL CHECK(admission_basis='OWNER_DIRECTED_EXACT_ACTION'), "
+        f"epistemic_basis TEXT NOT NULL CHECK(epistemic_basis='{family.epistemic_basis}'), "
+        "validation_state TEXT NOT NULL CHECK(validation_state IN ('VALID','INVALID')), "
+        "idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, " + scope
+        + "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+        "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
+        "restore_revision_id TEXT CHECK(restore_revision_id IS NULL))",
+        f"CREATE UNIQUE INDEX {p}_candidate_v1_idempotency ON {p}_candidate_v1(idempotency_key)",
+        f"CREATE UNIQUE INDEX {p}_candidate_v1_action ON {p}_candidate_v1(action_digest)",
+        f"CREATE TABLE {p}_candidate_source_v1 ("
+        f"candidate_id TEXT PRIMARY KEY REFERENCES {p}_candidate_v1(candidate_id), "
+        "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
+        "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
+        f"source_ref_id TEXT NOT NULL REFERENCES {p}_intent_v1(intent_ref_id), "
+        "source_digest TEXT NOT NULL CHECK(length(source_digest)=64), "
+        "UNIQUE(source_owner,source_stream,source_ref_id,source_digest))",
+        f"CREATE TABLE {p}_assessment_v1 ("
+        f"candidate_id TEXT PRIMARY KEY REFERENCES {p}_candidate_v1(candidate_id), "
+        "schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+        "outcome TEXT NOT NULL CHECK(outcome IN ('REAL_ELIGIBLE','REJECTED','DEFERRED')), "
+        "reason_code TEXT NOT NULL, assessed_at TEXT NOT NULL)",
+        f"CREATE TABLE {p}_proposal_v1 ("
+        "proposal_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+        f"candidate_id TEXT NOT NULL REFERENCES {p}_candidate_v1(candidate_id), "
+        f"intent_ref_id TEXT NOT NULL REFERENCES {p}_intent_v1(intent_ref_id), "
+        "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, policy_decision_ref_id TEXT NOT NULL, "
+        "consent_ref_id TEXT NOT NULL, rollback_authorization_ref_id TEXT CHECK(rollback_authorization_ref_id IS NULL), "
+        + scope + "proposed_value_json TEXT NOT NULL, "
+        "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), " + no_revision + purpose
+        + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+        "proposal_fingerprint TEXT NOT NULL CHECK(length(proposal_fingerprint)=64), created_at TEXT NOT NULL)",
+        f"CREATE UNIQUE INDEX {p}_proposal_v1_candidate ON {p}_proposal_v1(candidate_id)",
+        f"CREATE UNIQUE INDEX {p}_proposal_v1_fingerprint ON {p}_proposal_v1(proposal_fingerprint)",
+        *(
+            f"CREATE TRIGGER {table}_no_{verb} BEFORE {verb.upper()} ON {table} BEGIN "
+            f"SELECT RAISE(ABORT,'{message}'); END"
+            for table in sorted(family_tables(family))
+            for verb, message in (("update", f"{family.label} L18 row is immutable"),
+                                  ("delete", f"{family.label} L18 deletion requires Privacy authority"))
+        ),
+    )
+
+
+FIRST_INTERACTION_TABLES = family_tables(MA.FIRST_INTERACTION)
+FIRST_INTERACTION_SCHEMA_OBJECTS = family_schema_objects(MA.FIRST_INTERACTION)
 LEARNING_V2_SCHEMA_OBJECTS_V2 = LEARNING_V2_SCHEMA_OBJECTS | FIRST_INTERACTION_SCHEMA_OBJECTS
+FIRST_INTERACTION_MIGRATION_STATEMENTS = family_migration_statements(MA.FIRST_INTERACTION)
 
-FIRST_INTERACTION_MIGRATION_STATEMENTS = (
-    "CREATE TABLE learning_fi_intent_v1 ("
-    "intent_ref_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
-    "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
-    "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
-    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, " + _FI_SCOPE
-    + "normalized_value_json TEXT NOT NULL, payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
-    + _FI_NO_REVISION + _FI_PURPOSE
-    + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), created_at TEXT NOT NULL)",
-    "CREATE UNIQUE INDEX learning_fi_intent_v1_action ON learning_fi_intent_v1(actor_evidence_ref_id,action_digest)",
-    "CREATE TABLE learning_fi_candidate_v1 ("
-    "candidate_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
-    "candidate_class TEXT NOT NULL CHECK(candidate_class='OWNER_DIRECTED_MEMORY_CANDIDATE'), "
-    "descriptor_family TEXT NOT NULL CHECK(descriptor_family='FIRST_INTERACTION_V1'), "
-    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, "
-    "intent_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
-    "policy_decision_ref_id TEXT NOT NULL, consent_ref_id TEXT NOT NULL, "
-    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
-    "admission_basis TEXT NOT NULL CHECK(admission_basis='OWNER_DIRECTED_EXACT_ACTION'), "
-    "epistemic_basis TEXT NOT NULL CHECK(epistemic_basis='RECORDED_INTERACTION'), "
-    "validation_state TEXT NOT NULL CHECK(validation_state IN ('VALID','INVALID')), "
-    "idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, " + _FI_SCOPE
-    + "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
-    "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
-    "restore_revision_id TEXT CHECK(restore_revision_id IS NULL))",
-    "CREATE UNIQUE INDEX learning_fi_candidate_v1_idempotency ON learning_fi_candidate_v1(idempotency_key)",
-    "CREATE UNIQUE INDEX learning_fi_candidate_v1_action ON learning_fi_candidate_v1(action_digest)",
-    "CREATE TABLE learning_fi_candidate_source_v1 ("
-    "candidate_id TEXT PRIMARY KEY REFERENCES learning_fi_candidate_v1(candidate_id), "
-    "source_owner TEXT NOT NULL CHECK(source_owner='MEMORY_INTERACTION_AUTHORITY'), "
-    "source_stream TEXT NOT NULL CHECK(source_stream='home_owner_memory_intents'), "
-    "source_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
-    "source_digest TEXT NOT NULL CHECK(length(source_digest)=64), "
-    "UNIQUE(source_owner,source_stream,source_ref_id,source_digest))",
-    "CREATE TABLE learning_fi_assessment_v1 ("
-    "candidate_id TEXT PRIMARY KEY REFERENCES learning_fi_candidate_v1(candidate_id), "
-    "schema_version INTEGER NOT NULL CHECK(schema_version=1), "
-    "outcome TEXT NOT NULL CHECK(outcome IN ('REAL_ELIGIBLE','REJECTED','DEFERRED')), "
-    "reason_code TEXT NOT NULL, assessed_at TEXT NOT NULL)",
-    "CREATE TABLE learning_fi_proposal_v1 ("
-    "proposal_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
-    "candidate_id TEXT NOT NULL REFERENCES learning_fi_candidate_v1(candidate_id), "
-    "intent_ref_id TEXT NOT NULL REFERENCES learning_fi_intent_v1(intent_ref_id), "
-    "actor_ref_id TEXT NOT NULL, actor_evidence_ref_id TEXT NOT NULL, policy_decision_ref_id TEXT NOT NULL, "
-    "consent_ref_id TEXT NOT NULL, rollback_authorization_ref_id TEXT CHECK(rollback_authorization_ref_id IS NULL), "
-    + _FI_SCOPE + "proposed_value_json TEXT NOT NULL, "
-    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), " + _FI_NO_REVISION + _FI_PURPOSE
-    + "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
-    "proposal_fingerprint TEXT NOT NULL CHECK(length(proposal_fingerprint)=64), created_at TEXT NOT NULL)",
-    "CREATE UNIQUE INDEX learning_fi_proposal_v1_candidate ON learning_fi_proposal_v1(candidate_id)",
-    "CREATE UNIQUE INDEX learning_fi_proposal_v1_fingerprint ON learning_fi_proposal_v1(proposal_fingerprint)",
-    *(
-        f"CREATE TRIGGER {table}_no_{verb} BEFORE {verb.upper()} ON {table} BEGIN "
-        f"SELECT RAISE(ABORT,'{message}'); END"
-        for table in sorted(FIRST_INTERACTION_TABLES)
-        for verb, message in (("update", "First Interaction L18 row is immutable"),
-                              ("delete", "First Interaction L18 deletion requires Privacy authority"))
-    ),
-)
+RELATIONSHIP_ORIGIN_PROPOSAL_FAMILY = MA.RELATIONSHIP_ORIGIN.proposal_family
+RELATIONSHIP_ORIGIN_TABLES = family_tables(MA.RELATIONSHIP_ORIGIN)
+RELATIONSHIP_ORIGIN_SCHEMA_OBJECTS = family_schema_objects(MA.RELATIONSHIP_ORIGIN)
+LEARNING_V2_SCHEMA_OBJECTS_V3 = LEARNING_V2_SCHEMA_OBJECTS_V2 | RELATIONSHIP_ORIGIN_SCHEMA_OBJECTS
+RELATIONSHIP_ORIGIN_MIGRATION_STATEMENTS = family_migration_statements(MA.RELATIONSHIP_ORIGIN)
+VERSIONED_FAMILY_TABLES = frozenset().union(*(family_tables(family) for family in MA.VERSIONED_FAMILIES))
 
-# The rebuilt shared reference table: the closed family set gains exactly the First Interaction family.
-LEARNING_PROPOSAL_REF_V2_DDL = (
-    "CREATE TABLE learning_proposal_ref ("
-    "proposal_ref_id TEXT PRIMARY KEY, "
-    "proposal_family TEXT NOT NULL CHECK(proposal_family IN "
-    f"('{V1_PROPOSAL_FAMILY}','{V2_PROPOSAL_FAMILY}','{FIRST_INTERACTION_PROPOSAL_FAMILY}')), "
-    "proposal_schema_version INTEGER NOT NULL CHECK(proposal_schema_version=1), "
-    "family_proposal_id TEXT NOT NULL, "
-    "immutable_fingerprint TEXT NOT NULL CHECK(length(immutable_fingerprint)=64), "
-    "created_at TEXT NOT NULL, UNIQUE(proposal_family,family_proposal_id))"
-)
+
+def _proposal_ref_ddl(families: Tuple[str, ...]) -> str:
+    return (
+        "CREATE TABLE learning_proposal_ref ("
+        "proposal_ref_id TEXT PRIMARY KEY, "
+        "proposal_family TEXT NOT NULL CHECK(proposal_family IN "
+        "(" + ",".join(f"'{family}'" for family in families) + ")), "
+        "proposal_schema_version INTEGER NOT NULL CHECK(proposal_schema_version=1), "
+        "family_proposal_id TEXT NOT NULL, "
+        "immutable_fingerprint TEXT NOT NULL CHECK(length(immutable_fingerprint)=64), "
+        "created_at TEXT NOT NULL, UNIQUE(proposal_family,family_proposal_id))"
+    )
+
+
+# The rebuilt shared reference table: the closed family set gains exactly the First Interaction family (v2), then
+# exactly the relationship-origin family (v3).
+LEARNING_PROPOSAL_REF_V2_DDL = _proposal_ref_ddl(
+    (V1_PROPOSAL_FAMILY, V2_PROPOSAL_FAMILY, FIRST_INTERACTION_PROPOSAL_FAMILY))
+LEARNING_PROPOSAL_REF_V3_DDL = _proposal_ref_ddl(
+    (V1_PROPOSAL_FAMILY, V2_PROPOSAL_FAMILY, FIRST_INTERACTION_PROPOSAL_FAMILY, RELATIONSHIP_ORIGIN_PROPOSAL_FAMILY))
 
 
 class LearningV2Error(RuntimeError):
@@ -362,6 +390,29 @@ def is_first_interaction(purpose: str) -> bool:
     return purpose == MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION
 
 
+RELATIONSHIP_ORIGIN_MAX_CHARS = 600
+
+
+def normalize_relationship_origin(value: Any) -> Tuple[str, str]:
+    """`OwnerRelationshipOriginV1`: exactly the owner's own statement, NFC and trimmed, never rewritten.
+
+    One paragraph of ordinary text (any script, ordinary punctuation including commas). Control, format, private-use,
+    surrogate and line/paragraph-separator characters are refused, so the stored value cannot carry hidden markup."""
+    if not isinstance(value, Mapping) or set(value) != {"statement"}:
+        raise LearningV2Error("OwnerRelationshipOriginV1 requires exactly statement")
+    raw = value.get("statement")
+    if not isinstance(raw, str):
+        raise LearningV2Error("statement must be text")
+    normalized = unicodedata.normalize("NFC", raw.strip())
+    if not 1 <= len(normalized) <= RELATIONSHIP_ORIGIN_MAX_CHARS:
+        raise LearningV2Error("statement length is invalid")
+    if any(unicodedata.category(ch) in {"Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"} for ch in normalized):
+        raise LearningV2Error("statement contains prohibited characters")
+    encoded = json.dumps({"statement": normalized}, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                         allow_nan=False)
+    return encoded, hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+
 def normalize_for_purpose(purpose: str, value: Any) -> Tuple[str, str]:
     """The family normalizer for a (validated) action purpose; codename behaviour is unchanged."""
     if is_first_interaction(purpose):
@@ -369,6 +420,8 @@ def normalize_for_purpose(purpose: str, value: Any) -> Tuple[str, str]:
             return FI.normalize_first_interaction_episode(value)
         except FI.FirstMemoryContractViolation as exc:
             raise LearningV2Error(f"FirstInteractionEpisodeV1 is invalid: {exc}") from exc
+    if MA.is_relationship_origin(purpose):
+        return normalize_relationship_origin(value)
     return normalize_project_codename(value)
 
 
@@ -378,6 +431,8 @@ def normalize_for_schema(value_schema: Any, value: Any) -> Tuple[str, str]:
         return normalize_project_codename(value)
     if value_schema == MA.FIRST_INTERACTION_VALUE_SCHEMA:
         return normalize_for_purpose(MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION, value)
+    if value_schema == MA.RELATIONSHIP_ORIGIN_VALUE_SCHEMA:
+        return normalize_relationship_origin(value)
     raise LearningV2Error("value schema is unsupported")
 
 
@@ -426,6 +481,11 @@ def normalize_project_codename(value: Mapping[str, Any]) -> Tuple[str, str]:
         allow_nan=False,
     )
     return encoded, hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+
+def _candidate_prefix(family: Optional[MA.VersionedFamilyV1]) -> str:
+    # "candidate.fi." for First Interaction (unchanged), "candidate.ro." for relationship origin.
+    return "candidate.v2." if family is None else "candidate." + family.table_prefix.split("_", 1)[1] + "."
 
 
 @dataclass(frozen=True)
@@ -484,8 +544,8 @@ def _authorizer(
 ) -> int:
     del arg2, database, trigger
     table = str(arg1 or "")
-    readable = LEARNING_V2_TABLES | FIRST_INTERACTION_TABLES | {"learning_proposal", "sqlite_master"}
-    writable = (LEARNING_V2_TABLES | FIRST_INTERACTION_TABLES) - {"learning_v2_schema_migration"}
+    readable = LEARNING_V2_TABLES | VERSIONED_FAMILY_TABLES | {"learning_proposal", "sqlite_master"}
+    writable = (LEARNING_V2_TABLES | VERSIONED_FAMILY_TABLES) - {"learning_v2_schema_migration"}
     if action == sqlite3.SQLITE_READ:
         return sqlite3.SQLITE_OK if table in readable else sqlite3.SQLITE_DENY
     if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE}:
@@ -549,18 +609,23 @@ class LearningV2Store:
         return conn
 
     @staticmethod
-    def has_first_interaction_schema(conn: sqlite3.Connection) -> bool:
+    def has_family_schema(conn: sqlite3.Connection, family: MA.VersionedFamilyV1) -> bool:
         names = {
             str(row[0])
             for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'learning_fi_%'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+                (family.table_prefix + "_%",),
             )
         }
-        return FIRST_INTERACTION_TABLES.issubset(names)
+        return family_tables(family).issubset(names)
 
-    def _require_first_interaction_schema(self, conn: sqlite3.Connection) -> None:
-        if not self.has_first_interaction_schema(conn):
-            raise LearningV2Error("First Interaction schema is unavailable")
+    @staticmethod
+    def has_first_interaction_schema(conn: sqlite3.Connection) -> bool:
+        return LearningV2Store.has_family_schema(conn, MA.FIRST_INTERACTION)
+
+    def _require_family_schema(self, conn: sqlite3.Connection, family: MA.VersionedFamilyV1) -> None:
+        if not self.has_family_schema(conn, family):
+            raise LearningV2Error(f"{family.label} schema is unavailable")
 
     def _require_first_interaction_evidence(self, action: C.FrozenMemoryActionV1,
                                             normalized_value_json: Optional[str]) -> None:
@@ -603,12 +668,10 @@ class LearningV2Store:
                 raise LearningV2Error("intent payload/action digest mismatch")
         elif normalized_value_json is not None:
             raise LearningV2Error("RESTORE intent cannot carry plaintext")
-        if is_first_interaction(action.purpose):
+        family = MA.family_for_purpose(action.purpose)
+        if family is MA.FIRST_INTERACTION:
             self._require_first_interaction_evidence(action, normalized_value_json)
-        intent_table = (
-            "learning_fi_intent_v1" if is_first_interaction(action.purpose)
-            else "learning_memory_intent_v2"
-        )
+        intent_table = f"{family.table_prefix}_intent_v1" if family else "learning_memory_intent_v2"
         intent = MemoryIntentV1(
             intent_ref_id=intent_ref_id or ("intent." + uuid.uuid4().hex),
             action=action,
@@ -618,8 +681,8 @@ class LearningV2Store:
         )
         conn = self.connect()
         try:
-            if is_first_interaction(action.purpose):
-                self._require_first_interaction_schema(conn)
+            if family is not None:
+                self._require_family_schema(conn, family)
             conn.execute(
                 f"INSERT INTO {intent_table} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -668,14 +731,14 @@ class LearningV2Store:
             C.require_id(value, field)
         if validation_state not in {"VALID", "INVALID"}:
             raise LearningV2Error("candidate validation state is unsupported")
-        first = is_first_interaction(action.purpose)
+        family = MA.family_for_purpose(action.purpose)
         conn = self.connect()
         try:
-            if first:
-                self._require_first_interaction_schema(conn)
+            if family is not None:
+                self._require_family_schema(conn, family)
             intent = conn.execute(
                 "SELECT * FROM %s WHERE intent_ref_id=?"
-                % ("learning_fi_intent_v1" if first else "learning_memory_intent_v2"),
+                % (f"{family.table_prefix}_intent_v1" if family else "learning_memory_intent_v2"),
                 (intent_ref_id,),
             ).fetchone()
             exact_intent = (
@@ -695,7 +758,7 @@ class LearningV2Store:
             )
             if not exact_intent:
                 raise LearningV2Error("candidate intent/action mismatch")
-            if first:
+            if family is MA.FIRST_INTERACTION:
                 self._require_first_interaction_evidence(action, intent["normalized_value_json"])
             if self.actor_authority is None or self.policy_store is None or self.consent_store is None:
                 raise LearningV2Error("L18 V2 authority resolvers are unavailable")
@@ -721,7 +784,7 @@ class LearningV2Store:
             if getattr(consent, "status", None) != "CONFIRMED":
                 raise LearningV2Error("candidate Consent binding is invalid")
             candidate = LearningCandidateV2(
-                candidate_id=("candidate.fi." if first else "candidate.v2.") + uuid.uuid4().hex,
+                candidate_id=_candidate_prefix(family) + uuid.uuid4().hex,
                 action=action,
                 actor_evidence_ref_id=actor_evidence_ref_id,
                 intent_ref_id=intent_ref_id,
@@ -732,15 +795,15 @@ class LearningV2Store:
                 created_at=utc_now(self.now_fn()),
             )
             conn.execute("BEGIN IMMEDIATE")
-            if first:
+            if family is not None:
                 conn.execute(
-                    "INSERT INTO learning_fi_candidate_v1 VALUES "
+                    f"INSERT INTO {family.table_prefix}_candidate_v1 VALUES "
                     "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
-                        candidate.candidate_id, 1, CANDIDATE_CLASS, "FIRST_INTERACTION_V1",
+                        candidate.candidate_id, 1, CANDIDATE_CLASS, family.descriptor_family,
                         action.actor_ref_id, actor_evidence_ref_id, intent_ref_id,
                         policy_decision_ref_id, consent_ref_id, action.action_digest,
-                        "OWNER_DIRECTED_EXACT_ACTION", MA.RECORDED_INTERACTION, validation_state,
+                        "OWNER_DIRECTED_EXACT_ACTION", family.epistemic_basis, validation_state,
                         candidate.idempotency_key, candidate.created_at, action.operation,
                         action.memory_class, action.subject_namespace, action.subject_key,
                         action.value_schema, action.payload_digest,
@@ -748,7 +811,7 @@ class LearningV2Store:
                     ),
                 )
                 conn.execute(
-                    "INSERT INTO learning_fi_candidate_source_v1 VALUES (?,?,?,?,?)",
+                    f"INSERT INTO {family.table_prefix}_candidate_source_v1 VALUES (?,?,?,?,?)",
                     (candidate.candidate_id, C.MEMORY_INTERACTION_AUTHORITY, SOURCE_STREAM,
                      intent_ref_id, action.action_digest),
                 )
@@ -822,12 +885,14 @@ class LearningV2Store:
                 (candidate_id,),
             ).fetchone()
             assessment_table = "learning_assessment_v2"
-            if candidate is None and self.has_first_interaction_schema(conn):
+            for family in MA.VERSIONED_FAMILIES:
+                if candidate is not None or not self.has_family_schema(conn, family):
+                    continue
                 candidate = conn.execute(
-                    "SELECT * FROM learning_fi_candidate_v1 WHERE candidate_id=?",
+                    f"SELECT * FROM {family.table_prefix}_candidate_v1 WHERE candidate_id=?",
                     (candidate_id,),
                 ).fetchone()
-                assessment_table = "learning_fi_assessment_v1"
+                assessment_table = f"{family.table_prefix}_assessment_v1"
             if candidate is None:
                 raise LearningV2Error("candidate not found")
             held = False
@@ -862,15 +927,16 @@ class LearningV2Store:
         rollback_authorization_ref_id: Optional[str] = None,
     ) -> Tuple[MemoryWriteProposalV2, ProposalRefV1]:
         action.validate()
-        first = is_first_interaction(action.purpose)
+        family = MA.family_for_purpose(action.purpose)
         conn = self.connect()
         try:
-            if first:
-                self._require_first_interaction_schema(conn)
+            if family is not None:
+                self._require_family_schema(conn, family)
+                p = family.table_prefix
                 row = conn.execute(
-                    "SELECT c.*,i.normalized_value_json,a.outcome FROM learning_fi_candidate_v1 c "
-                    "JOIN learning_fi_intent_v1 i ON i.intent_ref_id=c.intent_ref_id "
-                    "JOIN learning_fi_assessment_v1 a ON a.candidate_id=c.candidate_id "
+                    f"SELECT c.*,i.normalized_value_json,a.outcome FROM {p}_candidate_v1 c "
+                    f"JOIN {p}_intent_v1 i ON i.intent_ref_id=c.intent_ref_id "
+                    f"JOIN {p}_assessment_v1 a ON a.candidate_id=c.candidate_id "
                     "WHERE c.candidate_id=?",
                     (candidate_id,),
                 ).fetchone()
@@ -934,7 +1000,7 @@ class LearningV2Store:
             )
             proposal_ref = ProposalRefV1(
                 proposal_ref_id="proposal-ref." + uuid.uuid4().hex,
-                proposal_family=FIRST_INTERACTION_PROPOSAL_FAMILY if first else V2_PROPOSAL_FAMILY,
+                proposal_family=family.proposal_family if family else V2_PROPOSAL_FAMILY,
                 proposal_schema_version=1,
                 family_proposal_id=proposal_id,
                 immutable_fingerprint=proposal.proposal_fingerprint,
@@ -943,7 +1009,7 @@ class LearningV2Store:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 "INSERT INTO %s VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-                % ("learning_fi_proposal_v1" if first else "learning_proposal_v2"),
+                % (f"{family.table_prefix}_proposal_v1" if family else "learning_proposal_v2"),
                 (
                     proposal.proposal_id,
                     1,
@@ -1030,10 +1096,11 @@ class LearningV2Store:
                     "SELECT * FROM learning_proposal_v2 WHERE proposal_id=?",
                     (ref.family_proposal_id,),
                 ).fetchone()
-            elif ref.proposal_family == FIRST_INTERACTION_PROPOSAL_FAMILY:
-                self._require_first_interaction_schema(conn)
+            elif MA.family_for_proposal_family(ref.proposal_family) is not None:
+                family = MA.family_for_proposal_family(ref.proposal_family)
+                self._require_family_schema(conn, family)
                 proposal = conn.execute(
-                    "SELECT * FROM learning_fi_proposal_v1 WHERE proposal_id=?",
+                    f"SELECT * FROM {family.table_prefix}_proposal_v1 WHERE proposal_id=?",
                     (ref.family_proposal_id,),
                 ).fetchone()
             elif ref.proposal_family == V1_PROPOSAL_FAMILY:

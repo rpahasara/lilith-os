@@ -73,7 +73,7 @@ _READ_TABLES = _MEMORY_TABLES | frozenset(
         "rollback_authorization",
         "sqlite_master",
     }
-) | L.FIRST_INTERACTION_TABLES
+) | L.VERSIONED_FAMILY_TABLES
 
 
 def _authorizer(
@@ -260,17 +260,19 @@ class CanonicalMemoryStoreV2:
     ) -> bool:
         conn = self.learning_store.connect()
         try:
-            if L.is_first_interaction(action.purpose):
+            family = MA.family_for_purpose(action.purpose)
+            if family is not None:
+                p = family.table_prefix
                 row = conn.execute(
                     "SELECT c.action_digest,c.actor_ref_id,c.actor_evidence_ref_id,"
                     "c.policy_decision_ref_id,c.consent_ref_id,a.outcome,s.source_digest,"
                     "c.operation,c.memory_class,c.subject_namespace,c.subject_key,c.value_schema,"
                     "c.payload_digest,c.expected_active_revision_id,c.restore_revision_id "
-                    "FROM learning_fi_candidate_v1 c "
-                    "JOIN learning_fi_assessment_v1 a ON a.candidate_id=c.candidate_id "
-                    "JOIN learning_fi_candidate_source_v1 s ON s.candidate_id=c.candidate_id "
+                    f"FROM {p}_candidate_v1 c "
+                    f"JOIN {p}_assessment_v1 a ON a.candidate_id=c.candidate_id "
+                    f"JOIN {p}_candidate_source_v1 s ON s.candidate_id=c.candidate_id "
                     "WHERE c.candidate_id=? AND c.epistemic_basis=?",
-                    (str(proposal["candidate_id"]), MA.RECORDED_INTERACTION),
+                    (str(proposal["candidate_id"]), family.epistemic_basis),
                 ).fetchone()
             else:
                 row = conn.execute(
@@ -320,11 +322,11 @@ class CanonicalMemoryStoreV2:
             raise CanonicalStoreError("V1_DISPATCH_UNAVAILABLE")
         action = self._action(proposal)
         action.validate()
-        # Family, purpose and (below) capability must agree; the First Interaction family is CREATE-only.
-        first = ref.proposal_family == L.FIRST_INTERACTION_PROPOSAL_FAMILY
-        if first != L.is_first_interaction(action.purpose):
+        # Family, purpose and (below) capability must agree; every versioned family is CREATE-only.
+        family = MA.family_for_proposal_family(ref.proposal_family)
+        if family is not MA.family_for_purpose(action.purpose):
             raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
-        if first and action.operation != C.CREATE:
+        if family is not None and action.operation != C.CREATE:
             raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
         if (
             ref.immutable_fingerprint != str(proposal["proposal_fingerprint"])
@@ -593,16 +595,16 @@ class CanonicalMemoryStoreV2:
                     now,
                 ),
             )
-            first = L.is_first_interaction(action.purpose)
+            family = MA.family_for_purpose(action.purpose)
             source = conn.execute(
                 "SELECT source_owner,source_stream,source_ref_id,source_digest FROM %s WHERE candidate_id=?"
-                % ("learning_fi_candidate_source_v1" if first else "learning_candidate_source_v2"),
+                % (f"{family.table_prefix}_candidate_source_v1" if family else "learning_candidate_source_v2"),
                 (str(proposal["candidate_id"]),),
             ).fetchone()
             source_record_id = int(str(source["source_digest"])[:15], 16) + 1
             intent = conn.execute(
                 "SELECT created_at FROM %s WHERE intent_ref_id=?"
-                % ("learning_fi_intent_v1" if first else "learning_memory_intent_v2"),
+                % (f"{family.table_prefix}_intent_v1" if family else "learning_memory_intent_v2"),
                 (str(source["source_ref_id"]),),
             ).fetchone()
             conn.execute(
