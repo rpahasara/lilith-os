@@ -60,7 +60,9 @@ TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_prepar
                         # RR-39: governed issuance and the First Memory offline proof.
                         "test_rr39_issuance.py", "test_rr39_layout_v3.py",
                         # First Memory: the DEV vertical slice end to end.
-                        "test_first_memory_dev_vertical.py", "test_first_memory_bridge.py"})
+                        "test_first_memory_dev_vertical.py", "test_first_memory_bridge.py",
+                        # Relationship origin: the same vertical with the origin family.
+                        "test_relationship_origin_dev_vertical.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",

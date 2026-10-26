@@ -24,10 +24,17 @@ one complete snapshot fits.
 First Memory adds the authority-side evidence-use transport the L04 V2 adapter needs (B1b-3b lifecycle, now on the
 signer's durable ledger): `RESERVE_EVIDENCE_USE`, `CONFIRM_EVIDENCE_USE`, `ABANDON_EVIDENCE_USE` (each with the
 complete root hold-store snapshot, like recovery) and the read-only `LOOKUP_EVIDENCE_USE`. None of them signs.
+
+Relationship origin: besides the project codename, the signer attests exactly one more purpose, the owner-provided
+relationship origin, and only as CREATE of its one tuple (`RelationshipOriginActionV1`). The rule is stated here, in
+the signer's own payload, rather than imported: the Core API module that defines the family
+(`lilith_memory.memory_action_v2`) is not release payload, and a test pins the two definitions equal. The First
+Interaction purpose stays refused: its identity is permanently suppressed (F9c2 FORGET).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import struct
 from dataclasses import dataclass
@@ -70,10 +77,32 @@ _USE_DIGEST_FIELDS = frozenset({"evidenceDigest", "actionDigest"})
 # RR-39: the governed issuance form adds the exact owner challenge and the complete root hold-store snapshot (the
 # recovery-handler pattern). The legacy form above stays parseable and is always refused (no challenge to verify).
 GOVERNED_ISSUE_FIELDS = _PAYLOAD_FIELDS[ISSUE_OWNER_EVIDENCE] | {"challenge", "holdStore"}
+# The relationship-origin family as the signer attests it (equal to memory_action_v2.RELATIONSHIP_ORIGIN).
+RELATIONSHIP_ORIGIN_PURPOSE = "LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL"
+RELATIONSHIP_ORIGIN_IDENTITY = ("OWNER_PROVIDED_RELATIONSHIP_ORIGIN", "lilith.core.relationship",
+                                "origin.owner-statement")
+RELATIONSHIP_ORIGIN_VALUE_SCHEMA = "OwnerRelationshipOriginV1"
+# The only purposes this signer attests. Each is also gated by L04's canonical config and tuple registry.
+SIGNER_PURPOSES = frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, RELATIONSHIP_ORIGIN_PURPOSE})
 _ACTION_FIELDS = frozenset({
     "schemaVersion", "actorRefId", "operation", "memoryClass", "subjectNamespace", "subjectKey",
     "valueSchema", "payloadDigest", "expectedActiveRevisionId", "restoreRevisionId", "purpose",
 })
+
+
+@dataclass(frozen=True)
+class RelationshipOriginActionV1(C.FrozenMemoryActionV1):
+    """A relationship-origin action: the unchanged `FrozenMemoryActionV1` fields and digest encoding; valid only as
+    CREATE of the one tuple with its value schema (every other field checked by the unchanged base validator)."""
+
+    def validate(self) -> None:
+        if self.purpose != RELATIONSHIP_ORIGIN_PURPOSE:
+            raise C.ContractError("purpose is unsupported")
+        fields = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+        C.FrozenMemoryActionV1(**{**fields, "purpose": C.LONG_TERM_PERSONAL_PROJECT_RECALL}).validate()
+        if (self.operation, tuple(self.identity), self.value_schema) != (
+                C.CREATE, RELATIONSHIP_ORIGIN_IDENTITY, RELATIONSHIP_ORIGIN_VALUE_SCHEMA):
+            raise C.ContractError("relationship origin is CREATE of its one tuple only")
 
 
 class ProtocolError(ValueError):
@@ -191,12 +220,18 @@ def parse_issue_request(payload: dict[str, Any]) -> IssueOwnerEvidenceRequestV1:
     raw_action = payload["action"]
     if not isinstance(raw_action, dict) or set(raw_action) != _ACTION_FIELDS:
         raise ProtocolError("INVALID_ACTION")
+    purpose = raw_action["purpose"]
+    if not isinstance(purpose, str) or purpose not in SIGNER_PURPOSES:
+        raise ProtocolError("INVALID_ACTION")
+    action_type = RelationshipOriginActionV1 if purpose == RELATIONSHIP_ORIGIN_PURPOSE else C.FrozenMemoryActionV1
     try:
-        action = C.FrozenMemoryActionV1(*(raw_action[key] for key in (
+        action = action_type(*(raw_action[key] for key in (
             "schemaVersion", "actorRefId", "operation", "memoryClass", "subjectNamespace", "subjectKey",
             "valueSchema", "payloadDigest", "expectedActiveRevisionId", "restoreRevisionId", "purpose",
         )))
         action.validate()
+        if action_type is C.FrozenMemoryActionV1 and tuple(action.identity) == RELATIONSHIP_ORIGIN_IDENTITY:
+            raise C.ContractError("purpose and memory tuple do not match")
     except (C.ContractError, TypeError, ValueError) as exc:
         raise ProtocolError("INVALID_ACTION") from exc
     if action.operation == C.FORGET:

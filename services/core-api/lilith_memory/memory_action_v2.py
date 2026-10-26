@@ -1,34 +1,61 @@
-"""Versioned memory-action contract layer for the FM-02 First Interaction family.
+"""Versioned memory-action contract layer for the families beyond the project codename.
 
 `canonical_contracts` stays byte-identical: it is a governed shared module of the signer and broker releases
 (sha256 f93d26d8...). Codename actions keep using its unchanged `FrozenMemoryActionV1`, so their meaning and every
-digest are unchanged. This module adds exactly one second family on top:
+digest are unchanged. This module adds a closed set of versioned families on top, each exactly one tuple, one purpose,
+one capability, one value schema and one epistemic basis, CREATE only (FORGET stays Privacy-owned):
 
-- purpose `OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION`, capability `canonical_memory.first_interaction.create`,
-  epistemic basis `RECORDED_INTERACTION`, value schema `FirstInteractionEpisodeV1`;
-- the one tuple (`OWNER_DIRECTED_FIRST_INTERACTION`, `lilith.core.autobiographical`, `episode.first-interaction`);
-- CREATE only (FORGET stays Privacy-owned).
+- FM-02 First Interaction: purpose `OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION`, capability
+  `canonical_memory.first_interaction.create`, basis `RECORDED_INTERACTION`, value schema `FirstInteractionEpisodeV1`,
+  tuple (`OWNER_DIRECTED_FIRST_INTERACTION`, `lilith.core.autobiographical`, `episode.first-interaction`). Its identity
+  is permanently suppressed (F9c2 FORGET); the family exists so that suppression and erasure stay exact.
+- Relationship origin: purpose `LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL`, capability
+  `canonical_memory.relationship_origin.create`, basis `USER_ASSERTED` (the owner's own words, never a transcript or an
+  inference), value schema `OwnerRelationshipOriginV1`, tuple (`OWNER_PROVIDED_RELATIONSHIP_ORIGIN`,
+  `lilith.core.relationship`, `origin.owner-statement`), sensitivity `OWNER_PERSONAL`.
 
-`FirstInteractionActionV1` subclasses `FrozenMemoryActionV1` without new fields: `semantic_dict` and `action_digest` are
+A family action subclasses `FrozenMemoryActionV1` without new fields: `semantic_dict` and `action_digest` are
 inherited, so the encoding is identical. Its `validate` runs the unchanged base `validate` on a codename-purpose copy
 (the only purpose-dependent base check is the purpose allowlist) and then applies the family rules. Build every action
-through `action_from_fields`: it returns the subclass for this purpose, the unchanged class otherwise, and refuses the
-First Interaction tuple under any other purpose.
+through `action_from_fields`: it returns the family subclass for a family purpose, the unchanged class otherwise, and
+refuses a family tuple under any other purpose.
 
-Nothing here activates the family. The installed signer still validates with `canonical_contracts` only and refuses
-this purpose until a reviewed signer release adopts this module.
+Nothing here activates a family. The canonical config, the tuple registry and the signer's own purpose allowlist each
+gate it separately.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from types import MappingProxyType
-from typing import Any, Mapping, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 try:
     from . import canonical_contracts as C
 except ImportError:  # deploy-exact flat-directory tests
     import canonical_contracts as C
+
+
+USER_ASSERTED = "USER_ASSERTED"
+RECORDED_INTERACTION = "RECORDED_INTERACTION"
+OWNER_PERSONAL = "OWNER_PERSONAL"
+PROJECT_FACT = "PROJECT_FACT"
+
+
+@dataclasses.dataclass(frozen=True)
+class VersionedFamilyV1:
+    """One closed versioned family. `label` names it in refusals; `table_prefix` names its L18 tables."""
+
+    label: str
+    purpose: str
+    capability: str
+    identity: Tuple[str, str, str]
+    value_schema: str
+    epistemic_basis: str
+    sensitivity: str
+    proposal_family: str
+    descriptor_family: str
+    table_prefix: str
 
 
 OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION = "OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION"
@@ -39,25 +66,74 @@ FIRST_INTERACTION_IDENTITY = (
     "episode.first-interaction",
 )
 FIRST_INTERACTION_VALUE_SCHEMA = "FirstInteractionEpisodeV1"
-USER_ASSERTED = "USER_ASSERTED"
-RECORDED_INTERACTION = "RECORDED_INTERACTION"
 
-PURPOSES = frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION})
+LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL = "LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL"
+CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE = "canonical_memory.relationship_origin.create"
+RELATIONSHIP_ORIGIN_IDENTITY = (
+    "OWNER_PROVIDED_RELATIONSHIP_ORIGIN",
+    "lilith.core.relationship",
+    "origin.owner-statement",
+)
+RELATIONSHIP_ORIGIN_VALUE_SCHEMA = "OwnerRelationshipOriginV1"
+
+FIRST_INTERACTION = VersionedFamilyV1(
+    label="First Interaction", purpose=OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION,
+    capability=CANONICAL_MEMORY_FIRST_INTERACTION_CREATE, identity=FIRST_INTERACTION_IDENTITY,
+    value_schema=FIRST_INTERACTION_VALUE_SCHEMA, epistemic_basis=RECORDED_INTERACTION, sensitivity=OWNER_PERSONAL,
+    proposal_family="OWNER_DIRECTED_FIRST_INTERACTION_V1", descriptor_family="FIRST_INTERACTION_V1",
+    table_prefix="learning_fi")
+RELATIONSHIP_ORIGIN = VersionedFamilyV1(
+    label="Relationship origin", purpose=LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL,
+    capability=CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE, identity=RELATIONSHIP_ORIGIN_IDENTITY,
+    value_schema=RELATIONSHIP_ORIGIN_VALUE_SCHEMA, epistemic_basis=USER_ASSERTED, sensitivity=OWNER_PERSONAL,
+    proposal_family="OWNER_DIRECTED_RELATIONSHIP_ORIGIN_V1", descriptor_family="RELATIONSHIP_ORIGIN_V1",
+    table_prefix="learning_ro")
+VERSIONED_FAMILIES = (FIRST_INTERACTION, RELATIONSHIP_ORIGIN)
+_FAMILY_BY_PURPOSE = MappingProxyType({family.purpose: family for family in VERSIONED_FAMILIES})
+_FAMILY_BY_IDENTITY = MappingProxyType({family.identity: family for family in VERSIONED_FAMILIES})
+
+PURPOSES = frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, *_FAMILY_BY_PURPOSE})
 # Closed, read-only per-purpose maps. The purpose is inside the signed action digest, so everything derived from it is bound
 # to signed content.
 CAPABILITY_BY_PURPOSE = MappingProxyType({
     C.LONG_TERM_PERSONAL_PROJECT_RECALL: C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
-    OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION: CANONICAL_MEMORY_FIRST_INTERACTION_CREATE,
+    **{family.purpose: family.capability for family in VERSIONED_FAMILIES},
 })
 EPISTEMIC_BASIS_BY_PURPOSE = MappingProxyType({
     C.LONG_TERM_PERSONAL_PROJECT_RECALL: USER_ASSERTED,
-    OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION: RECORDED_INTERACTION,
+    **{family.purpose: family.epistemic_basis for family in VERSIONED_FAMILIES},
+})
+SENSITIVITY_BY_PURPOSE = MappingProxyType({
+    C.LONG_TERM_PERSONAL_PROJECT_RECALL: PROJECT_FACT,
+    **{family.purpose: family.sensitivity for family in VERSIONED_FAMILIES},
 })
 KNOWN_CAPABILITIES = frozenset(CAPABILITY_BY_PURPOSE.values())
 
 
+def family_for_purpose(purpose: Any) -> Optional[VersionedFamilyV1]:
+    try:
+        return _FAMILY_BY_PURPOSE.get(purpose)
+    except TypeError:
+        return None
+
+
+def family_for_identity(identity: Any) -> Optional[VersionedFamilyV1]:
+    try:
+        return _FAMILY_BY_IDENTITY.get(tuple(identity))
+    except TypeError:
+        return None
+
+
+def family_for_proposal_family(proposal_family: Any) -> Optional[VersionedFamilyV1]:
+    return next((family for family in VERSIONED_FAMILIES if family.proposal_family == proposal_family), None)
+
+
 def is_first_interaction(purpose: Any) -> bool:
     return purpose == OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION
+
+
+def is_relationship_origin(purpose: Any) -> bool:
+    return purpose == LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL
 
 
 def capability_for_purpose(purpose: Any) -> str:
@@ -75,12 +151,12 @@ def epistemic_basis_for_purpose(purpose: Any) -> str:
 
 
 def require_family_scope(purpose: Any, operation: Any, identity: Tuple[str, str, str]) -> None:
-    """The First Interaction purpose and tuple imply each other; the family is CREATE (or Privacy FORGET) only."""
-    first = is_first_interaction(purpose)
-    if first != (tuple(identity) == FIRST_INTERACTION_IDENTITY):
+    """A family purpose and its tuple imply each other; every family is CREATE (or Privacy FORGET) only."""
+    family = family_for_purpose(purpose)
+    if family != family_for_identity(identity):
         raise C.ContractError("purpose and memory tuple do not match")
-    if first and operation not in {C.CREATE, C.FORGET}:
-        raise C.ContractError("First Interaction memory is CREATE-only")
+    if family is not None and operation not in {C.CREATE, C.FORGET}:
+        raise C.ContractError(f"{family.label} memory is CREATE-only")
 
 
 def _as_codename(value: Any, **extra: Any) -> Any:
@@ -99,23 +175,51 @@ def _base_type(value: Any) -> type:
 
 
 @dataclasses.dataclass(frozen=True)
-class FirstInteractionActionV1(C.FrozenMemoryActionV1):
-    """A First Interaction action: same fields and digest encoding as `FrozenMemoryActionV1`."""
+class VersionedFamilyActionV1(C.FrozenMemoryActionV1):
+    """A versioned-family action: same fields and digest encoding as `FrozenMemoryActionV1`."""
+
+    def validate(self) -> None:
+        family = family_for_purpose(self.purpose)
+        if family is None:
+            raise C.ContractError("purpose is unsupported")
+        _as_codename(self).validate()
+        require_family_scope(self.purpose, self.operation, self.identity)
+        if self.operation == C.CREATE and self.value_schema != family.value_schema:
+            raise C.ContractError(f"{family.label} value schema is invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class FirstInteractionActionV1(VersionedFamilyActionV1):
+    """A First Interaction action (the FM-02 name, kept for its callers)."""
 
     def validate(self) -> None:
         if not is_first_interaction(self.purpose):
             raise C.ContractError("purpose is unsupported")
-        _as_codename(self).validate()
-        require_family_scope(self.purpose, self.operation, self.identity)
-        if self.operation == C.CREATE and self.value_schema != FIRST_INTERACTION_VALUE_SCHEMA:
-            raise C.ContractError("First Interaction value schema is invalid")
+        super().validate()
+
+
+@dataclasses.dataclass(frozen=True)
+class RelationshipOriginActionV1(VersionedFamilyActionV1):
+    """A relationship-origin action."""
+
+    def validate(self) -> None:
+        if not is_relationship_origin(self.purpose):
+            raise C.ContractError("purpose is unsupported")
+        super().validate()
+
+
+_ACTION_CLASS = MappingProxyType({
+    OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION: FirstInteractionActionV1,
+    LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL: RelationshipOriginActionV1,
+})
 
 
 def action_from_fields(**fields: Any) -> C.FrozenMemoryActionV1:
-    """The one constructor for actions that may belong to either family."""
-    cls = FirstInteractionActionV1 if is_first_interaction(fields.get("purpose")) else C.FrozenMemoryActionV1
+    """The one constructor for actions that may belong to any family."""
+    purpose = fields.get("purpose")
+    cls = _ACTION_CLASS.get(purpose, C.FrozenMemoryActionV1) if isinstance(purpose, str) else C.FrozenMemoryActionV1
     action = cls(**fields)
-    if not is_first_interaction(action.purpose) and tuple(action.identity) == FIRST_INTERACTION_IDENTITY:
+    if family_for_purpose(action.purpose) is None and family_for_identity(action.identity) is not None:
         raise C.ContractError("purpose and memory tuple do not match")
     return action
 
@@ -137,34 +241,34 @@ def action_from_row(row: Mapping[str, Any]) -> C.FrozenMemoryActionV1:
 
 
 def validate_consent(consent: C.ConsentRefV1) -> None:
-    """Codename consents: the unchanged `validate_shape`. First Interaction consents: the same checks on a codename
-    copy, plus the family scope (exact tuple, CREATE)."""
-    if not is_first_interaction(consent.purpose):
+    """Codename consents: the unchanged `validate_shape`. Family consents: the same checks on a codename copy, plus
+    the family scope (exact tuple, CREATE)."""
+    identity = (consent.memory_class, consent.subject_namespace, consent.subject_key)
+    family = family_for_purpose(consent.purpose)
+    if family is None:
         consent.validate_shape()
-        identity = (consent.memory_class, consent.subject_namespace, consent.subject_key)
-        if identity == FIRST_INTERACTION_IDENTITY:
+        if family_for_identity(identity) is not None:
             raise C.ContractError("purpose and memory tuple do not match")
         return
     _as_codename(consent).validate_shape()
-    require_family_scope(consent.purpose, consent.operation,
-                         (consent.memory_class, consent.subject_namespace, consent.subject_key))
+    require_family_scope(consent.purpose, consent.operation, identity)
     if consent.operation != C.CREATE:
-        raise C.ContractError("First Interaction consent is CREATE-only")
+        raise C.ContractError(f"{family.label} consent is CREATE-only")
 
 
 def validate_policy(decision: C.PolicyDecisionRefV1) -> None:
-    """Codename decisions: the unchanged `validate_shape`. First Interaction decisions: the paired capability, the
-    same checks on a codename copy, plus the family scope."""
-    if not is_first_interaction(decision.purpose):
+    """Codename decisions: the unchanged `validate_shape`. Family decisions: the paired capability, the same checks
+    on a codename copy, plus the family scope."""
+    identity = (decision.memory_class, decision.subject_namespace, decision.subject_key)
+    family = family_for_purpose(decision.purpose)
+    if family is None:
         decision.validate_shape()
-        identity = (decision.memory_class, decision.subject_namespace, decision.subject_key)
-        if identity == FIRST_INTERACTION_IDENTITY:
+        if family_for_identity(identity) is not None:
             raise C.ContractError("purpose and memory tuple do not match")
         return
-    if decision.capability != CANONICAL_MEMORY_FIRST_INTERACTION_CREATE:
+    if decision.capability != family.capability:
         raise C.ContractError("policy capability is unsupported")
     _as_codename(decision, capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE).validate_shape()
-    require_family_scope(decision.purpose, decision.operation,
-                         (decision.memory_class, decision.subject_namespace, decision.subject_key))
+    require_family_scope(decision.purpose, decision.operation, identity)
     if decision.operation != C.CREATE:
-        raise C.ContractError("First Interaction policy is CREATE-only")
+        raise C.ContractError(f"{family.label} policy is CREATE-only")

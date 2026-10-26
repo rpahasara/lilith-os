@@ -134,12 +134,15 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(base.semantic_dict.__func__, action.semantic_dict.__func__)  # inherited encoding
 
     def test_maps_are_closed_and_paired(self):
-        self.assertEqual(MA.PURPOSES, frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, FI_PURPOSE}))
+        # Closed: codename, First Interaction and (relationship_origin_migration, schema v3) relationship origin.
+        RO_PURPOSE = MA.LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL
+        self.assertEqual(MA.PURPOSES, frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, FI_PURPOSE, RO_PURPOSE}))
         self.assertEqual(MA.CAPABILITY_BY_PURPOSE, {
             C.LONG_TERM_PERSONAL_PROJECT_RECALL: C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
-            FI_PURPOSE: FI_CAPABILITY})
+            FI_PURPOSE: FI_CAPABILITY, RO_PURPOSE: "canonical_memory.relationship_origin.create"})
         self.assertEqual(MA.EPISTEMIC_BASIS_BY_PURPOSE, {
-            C.LONG_TERM_PERSONAL_PROJECT_RECALL: "USER_ASSERTED", FI_PURPOSE: "RECORDED_INTERACTION"})
+            C.LONG_TERM_PERSONAL_PROJECT_RECALL: "USER_ASSERTED", FI_PURPOSE: "RECORDED_INTERACTION",
+            RO_PURPOSE: "USER_ASSERTED"})
         self.assertEqual(learning_v2.FIRST_INTERACTION_PROPOSAL_FAMILY, "OWNER_DIRECTED_FIRST_INTERACTION_V1")
         self.assertEqual(MA.FIRST_INTERACTION_IDENTITY, ("OWNER_DIRECTED_FIRST_INTERACTION",
                                                         "lilith.core.autobiographical", "episode.first-interaction"))
@@ -148,8 +151,11 @@ class ContractTests(unittest.TestCase):
                 MA.capability_for_purpose(bad)
 
     def test_family_is_not_live_activatable(self):
-        # The live capability configuration stays codename-only; the production tuple registry must stay empty.
-        self.assertEqual(config.ALLOWED_CAPABILITIES, frozenset({C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE}))
+        # The live capability configuration can never name the First Interaction capability (the relationship-origin
+        # one is the only addition); the production tuple registry must stay empty.
+        self.assertEqual(config.ALLOWED_CAPABILITIES, frozenset({C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
+                                                                 MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE}))
+        self.assertNotIn(FI_CAPABILITY, config.ALLOWED_CAPABILITIES)
         entry = memory_v2.MemoryTuplePolicyV1(FI_CLASS, FI_NAMESPACE, FI_KEY, FI.VALUE_SCHEMA, FI_CAPABILITY,
                                               True, True)
         with self.assertRaises(ValueError):

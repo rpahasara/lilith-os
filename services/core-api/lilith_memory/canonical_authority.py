@@ -332,6 +332,62 @@ POLICY_DECISION_V2_DDL = (
 )
 
 
+# Schema v3 (applied only by relationship_origin_migration): the same two tables, rebuilt so the closed set gains the
+# relationship-origin pair as well. Every versioned family is paired with exactly its own CREATE-only tuple, and the
+# codename purpose can name no family tuple.
+def _row_scope(family: MA.VersionedFamilyV1) -> str:
+    memory_class, namespace, key = family.identity
+    return (f"operation='CREATE' AND memory_class='{memory_class}' AND subject_namespace='{namespace}' "
+            f"AND subject_key='{key}' AND expected_active_revision_id IS NULL AND restore_revision_id IS NULL")
+
+
+def _not_tuple(family: MA.VersionedFamilyV1) -> str:
+    memory_class, namespace, key = family.identity
+    return f"NOT (memory_class='{memory_class}' AND subject_namespace='{namespace}' AND subject_key='{key}')"
+
+
+_CODENAME_SCOPE_V3 = " AND ".join(_not_tuple(family) for family in MA.VERSIONED_FAMILIES)
+CONSENT_GRANT_V3_DDL = (
+    "CREATE TABLE consent_grant ("
+    "consent_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "authority TEXT NOT NULL CHECK(authority='LOCAL_CONSENT_AUTHORITY_V1'), actor_ref_id TEXT NOT NULL, "
+    "actor_evidence_ref_id TEXT NOT NULL REFERENCES actor_evidence_ref(actor_evidence_ref_id), "
+    "memory_class TEXT NOT NULL, subject_namespace TEXT NOT NULL, subject_key TEXT NOT NULL, "
+    "operation TEXT NOT NULL CHECK(operation IN ('CREATE','SUPERSEDE','RESTORE')), "
+    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    "expected_active_revision_id TEXT, restore_revision_id TEXT, "
+    "purpose TEXT NOT NULL CHECK(purpose IN ("
+    + ",".join(f"'{purpose}'" for purpose in (_CODENAME_PURPOSE, *(f.purpose for f in MA.VERSIONED_FAMILIES)))
+    + ")), "
+    "granted_at TEXT NOT NULL, issuer_type TEXT NOT NULL CHECK(issuer_type='USER_CONFIRMATION'), "
+    "issuer_ref TEXT NOT NULL, intent_ref_id TEXT NOT NULL, privacy_notice_version TEXT NOT NULL, "
+    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), "
+    "consent_fingerprint TEXT NOT NULL CHECK(length(consent_fingerprint)=64), "
+    f"CHECK((purpose='{_CODENAME_PURPOSE}' AND {_CODENAME_SCOPE_V3})"
+    + "".join(f" OR (purpose='{f.purpose}' AND {_row_scope(f)})" for f in MA.VERSIONED_FAMILIES)
+    + "))"
+)
+POLICY_DECISION_V3_DDL = (
+    "CREATE TABLE policy_decision ("
+    "decision_ref_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK(schema_version=1), "
+    "actor_ref_id TEXT NOT NULL, "
+    "actor_evidence_ref_id TEXT NOT NULL REFERENCES actor_evidence_ref(actor_evidence_ref_id), "
+    "capability TEXT NOT NULL, "
+    "operation TEXT NOT NULL CHECK(operation IN ('CREATE','SUPERSEDE','RESTORE')), "
+    "memory_class TEXT NOT NULL, subject_namespace TEXT NOT NULL, subject_key TEXT NOT NULL, "
+    "payload_digest TEXT NOT NULL CHECK(length(payload_digest)=64), "
+    "expected_active_revision_id TEXT, restore_revision_id TEXT, purpose TEXT NOT NULL, "
+    "policy_version TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('ALLOWED','DENIED')), "
+    "action_digest TEXT NOT NULL CHECK(length(action_digest)=64), created_at TEXT NOT NULL, "
+    "decision_fingerprint TEXT NOT NULL CHECK(length(decision_fingerprint)=64), "
+    f"CHECK((capability='{C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE}' AND purpose='{_CODENAME_PURPOSE}' "
+    f"AND {_CODENAME_SCOPE_V3})"
+    + "".join(f" OR (capability='{f.capability}' AND purpose='{f.purpose}' AND {_row_scope(f)})"
+              for f in MA.VERSIONED_FAMILIES)
+    + "))"
+)
+
+
 class AuthorityError(RuntimeError):
     code = INVALID
 

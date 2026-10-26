@@ -527,10 +527,10 @@ class L04PrivacyErasureOwner:
         }
         if "proposal_ref_id" not in admission_columns:
             return ()
-        # Each L04 V2 family keeps its proposals in its own table; First Interaction only after schema v2.
+        # Each L04 V2 family keeps its proposals in its own table; a versioned family only after its migration.
         families = [(L.V2_PROPOSAL_FAMILY, "learning_proposal_v2")]
-        if L.LearningV2Store.has_first_interaction_schema(conn):
-            families.append((L.FIRST_INTERACTION_PROPOSAL_FAMILY, "learning_fi_proposal_v1"))
+        families.extend((family.proposal_family, f"{family.table_prefix}_proposal_v1")
+                        for family in MA.VERSIONED_FAMILIES if L.LearningV2Store.has_family_schema(conn, family))
         refs = set()
         for family, table in families:
             refs.update(
@@ -854,8 +854,10 @@ class L18V2PrivacyErasureOwner:
         "learning_proposal_ref_no_delete",
         "learning_proposal_v2_no_delete",
     )
-    # Present only after first_interaction_migration (schema v2); then all are required.
-    _FI_TRIGGERS = tuple(sorted(f"{table}_no_delete" for table in L.FIRST_INTERACTION_TABLES))
+    # A versioned family's triggers are present only after its migration; then all of them are required.
+    @staticmethod
+    def _family_triggers(family: MA.VersionedFamilyV1) -> Tuple[str, ...]:
+        return tuple(sorted(f"{table}_no_delete" for table in L.family_tables(family)))
     # F4: the relay's separate First Interaction capture database (app.py ConversationCaptureStore), children first.
     # Every capture session exists only for the single First Interaction identity, so a FORGET of that identity
     # erases all of them: sealed, unfinished, faulted and never-admitted alike.
@@ -922,40 +924,41 @@ class L18V2PrivacyErasureOwner:
             f"DELETE FROM {table} WHERE memory_class=? AND subject_namespace=? AND subject_key=?", identity)
 
     @staticmethod
-    def _erase_first_interaction(conn: sqlite3.Connection, identity: Tuple[str, str, str]) -> int:
-        """Erase every First Interaction L18 row for one identity, including the plaintext intent and
+    def _erase_family(conn: sqlite3.Connection, family: MA.VersionedFamilyV1, identity: Tuple[str, str, str]) -> int:
+        """Erase every L18 row of one versioned family for one identity, including the plaintext intent and
         proposal values. Triggers are already dropped by the caller."""
+        p = family.table_prefix
         candidate_ids = tuple(
             str(row[0])
             for row in conn.execute(
-                "SELECT candidate_id FROM learning_fi_candidate_v1 "
+                f"SELECT candidate_id FROM {p}_candidate_v1 "
                 "WHERE memory_class=? AND subject_namespace=? AND subject_key=?",
                 identity,
             )
         )
         if not candidate_ids:
-            L18V2PrivacyErasureOwner._erase_identity_intents(conn, "learning_fi_intent_v1", identity)
+            L18V2PrivacyErasureOwner._erase_identity_intents(conn, f"{p}_intent_v1", identity)
             return 0
         marks = ",".join("?" for _ in candidate_ids)
         intent_ids = tuple(str(row[0]) for row in conn.execute(
-            f"SELECT intent_ref_id FROM learning_fi_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids))
+            f"SELECT intent_ref_id FROM {p}_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids))
         proposal_ids = tuple(str(row[0]) for row in conn.execute(
-            f"SELECT proposal_id FROM learning_fi_proposal_v1 WHERE candidate_id IN ({marks})", candidate_ids))
+            f"SELECT proposal_id FROM {p}_proposal_v1 WHERE candidate_id IN ({marks})", candidate_ids))
         if proposal_ids:
             pmarks = ",".join("?" for _ in proposal_ids)
             conn.execute(
                 f"DELETE FROM learning_proposal_ref WHERE proposal_family=? AND family_proposal_id IN ({pmarks})",
-                (L.FIRST_INTERACTION_PROPOSAL_FAMILY, *proposal_ids),
+                (family.proposal_family, *proposal_ids),
             )
-            conn.execute(f"DELETE FROM learning_fi_proposal_v1 WHERE proposal_id IN ({pmarks})", proposal_ids)
-        for table in ("learning_fi_assessment_v1", "learning_fi_candidate_source_v1"):
+            conn.execute(f"DELETE FROM {p}_proposal_v1 WHERE proposal_id IN ({pmarks})", proposal_ids)
+        for table in (f"{p}_assessment_v1", f"{p}_candidate_source_v1"):
             conn.execute(f"DELETE FROM {table} WHERE candidate_id IN ({marks})", candidate_ids)
         deleted = conn.execute(
-            f"DELETE FROM learning_fi_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids).rowcount
+            f"DELETE FROM {p}_candidate_v1 WHERE candidate_id IN ({marks})", candidate_ids).rowcount
         if intent_ids:
             imarks = ",".join("?" for _ in intent_ids)
-            conn.execute(f"DELETE FROM learning_fi_intent_v1 WHERE intent_ref_id IN ({imarks})", intent_ids)
-        L18V2PrivacyErasureOwner._erase_identity_intents(conn, "learning_fi_intent_v1", identity)
+            conn.execute(f"DELETE FROM {p}_intent_v1 WHERE intent_ref_id IN ({imarks})", intent_ids)
+        L18V2PrivacyErasureOwner._erase_identity_intents(conn, f"{p}_intent_v1", identity)
         return int(deleted)
 
     def _erase_identity(self, identity: Tuple[str, str, str]) -> int:
@@ -966,8 +969,9 @@ class L18V2PrivacyErasureOwner:
         conn.execute("PRAGMA secure_delete=ON")
         try:
             conn.execute("BEGIN EXCLUSIVE")
-            first_interaction = L.LearningV2Store.has_first_interaction_schema(conn)
-            triggers = self._TRIGGERS + (self._FI_TRIGGERS if first_interaction else ())
+            families = tuple(family for family in MA.VERSIONED_FAMILIES
+                             if L.LearningV2Store.has_family_schema(conn, family))
+            triggers = self._TRIGGERS + tuple(name for family in families for name in self._family_triggers(family))
             trigger_sql = {
                 str(row[0]): str(row[1])
                 for row in conn.execute(
@@ -1047,8 +1051,8 @@ class L18V2PrivacyErasureOwner:
                     intent_ids,
                 )
             self._erase_identity_intents(conn, "learning_memory_intent_v2", identity)
-            if first_interaction:
-                deleted += self._erase_first_interaction(conn, identity)
+            for family in families:
+                deleted += self._erase_family(conn, family, identity)
             for name in triggers:
                 conn.execute(trigger_sql[name])
             if conn.execute("PRAGMA foreign_key_check").fetchall():
@@ -1081,11 +1085,12 @@ class L18V2PrivacyErasureOwner:
         return result
 
     # Restore suppression (maintenance only, driven by Privacy's RestoreSuppressionVerifier before a restored
-    # cognitive database may serve). Tables whose rows carry the exact memory identity; the First Interaction ones
-    # exist after first_interaction_migration and CHECK the single First Interaction identity, so every row of that
-    # family (children included) belongs to it.
+    # cognitive database may serve). Tables whose rows carry the exact memory identity; a versioned family's exist
+    # after its migration and CHECK its single identity, so every row of that family (children included) belongs to
+    # it.
     _IDENTITY_TABLES = ("learning_memory_intent_v2", "learning_project_codename_candidate_v1", "learning_proposal_v2")
-    _FI_IDENTITY_TABLES = ("learning_fi_intent_v1", "learning_fi_candidate_v1", "learning_fi_proposal_v1")
+    _FAMILY_IDENTITY_TABLES = tuple(f"{family.table_prefix}_{name}_v1" for family in MA.VERSIONED_FAMILIES
+                                    for name in ("intent", "candidate", "proposal"))
 
     @staticmethod
     def _read_only(path: Path) -> sqlite3.Connection:
@@ -1098,14 +1103,14 @@ class L18V2PrivacyErasureOwner:
         return frozenset(str(r[0]) for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"))
 
     @classmethod
-    def _first_interaction_rows(cls, conn: sqlite3.Connection) -> int:
-        """Every First Interaction family row, including children and its proposal references."""
-        if not L.LearningV2Store.has_first_interaction_schema(conn):
+    def _family_rows(cls, conn: sqlite3.Connection, family: MA.VersionedFamilyV1) -> int:
+        """Every row of one versioned family, including children and its proposal references."""
+        if not L.LearningV2Store.has_family_schema(conn, family):
             return 0
         rows = sum(int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-                   for table in sorted(L.FIRST_INTERACTION_TABLES))
+                   for table in sorted(L.family_tables(family)))
         return rows + int(conn.execute("SELECT COUNT(*) FROM learning_proposal_ref WHERE proposal_family=?",
-                                       (L.FIRST_INTERACTION_PROPOSAL_FAMILY,)).fetchone()[0])
+                                       (family.proposal_family,)).fetchone()[0])
 
     def _capture_rows(self) -> int:
         """Rows of the separate First Interaction capture copy (sessions, turns, faults, sealed transcripts)."""
@@ -1125,13 +1130,12 @@ class L18V2PrivacyErasureOwner:
         conn = self._read_only(self.path)
         try:
             present = self._tables(conn)
-            for table in self._IDENTITY_TABLES + self._FI_IDENTITY_TABLES:
+            for table in self._IDENTITY_TABLES + self._FAMILY_IDENTITY_TABLES:
                 if table in present:
                     identities.update(
                         (str(r[0]), str(r[1]), str(r[2])) for r in conn.execute(
                             f"SELECT DISTINCT memory_class,subject_namespace,subject_key FROM {table}"))
-            if self._first_interaction_rows(conn):
-                identities.add(MA.FIRST_INTERACTION_IDENTITY)
+            identities.update(family.identity for family in MA.VERSIONED_FAMILIES if self._family_rows(conn, family))
         finally:
             conn.close()
         if self._capture_rows():
@@ -1148,9 +1152,10 @@ class L18V2PrivacyErasureOwner:
             rows = sum(
                 int(conn.execute(f"SELECT COUNT(*) FROM {table} WHERE memory_class=? AND subject_namespace=? "
                                  "AND subject_key=?", identity).fetchone()[0])
-                for table in self._IDENTITY_TABLES + self._FI_IDENTITY_TABLES if table in present)
-            if identity == MA.FIRST_INTERACTION_IDENTITY:
-                rows += self._first_interaction_rows(conn)
+                for table in self._IDENTITY_TABLES + self._FAMILY_IDENTITY_TABLES if table in present)
+            family = MA.family_for_identity(identity)
+            if family is not None:
+                rows += self._family_rows(conn, family)
         finally:
             conn.close()
         if identity == MA.FIRST_INTERACTION_IDENTITY:

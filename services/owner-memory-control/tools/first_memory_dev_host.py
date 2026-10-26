@@ -8,9 +8,10 @@ accepted `first_memory_conversation.FirstMemoryConversationV1` with real DEV com
   `PrivacyFreshnessGate` (`PrivacyBindingV1`: the stale Core API path, a changed boot, an older store or a pending
   FORGET refuse explicitly);
 - the F9c2 cognitive (L04) DB with the durable admission link (`first_memory_l04_migration.py`);
-- the governed project-codename tuple (`GOVERNED_TUPLE`; never the suppressed First Interaction identity) and the
-  server-owned canonical config (`lilith_memory.config.load`): memory creation stays DISABLED until the owner sets
-  `canonicalLtmEnabled` and the codename capability in that root-owned file;
+- the governed project-codename tuple (`GOVERNED_TUPLE`) and the owner-provided relationship-origin tuple
+  (`ORIGIN_TUPLE`; schema v3, `relationship_origin_migration`), never the suppressed First Interaction identity, and
+  the server-owned canonical config (`lilith_memory.config.load`): creation of each kind stays DISABLED until the
+  owner sets `canonicalLtmEnabled` and that kind's capability in that root-owned file;
 - the root-installed owner registration (`/etc/lilith-owner-proof-dev/owner-registration.json`) for the owner
   principal, RP, settings and registered PUBLIC credentials;
 - the installed K-ROOT trust anchor and registry (`/etc/lilith-authority-dev`) for the L04 V2 authority contexts;
@@ -27,7 +28,8 @@ regain root nor change the code root runs. Every database file it touches is wri
 Closed forms (one turn per invocation; text on stdin, one JSON object per line on stdout):
 
     remember <session>    stdin: the utterance, then (after the printed offer) the owner's assertion JSON
-    recall   <session>    stdin: the utterance
+    recall   <session>    stdin: the utterance, or exactly `hermes_memory_context.CONTEXT_REQUEST` for the read-only
+                          canonical memory context of a new conversation (every ACCEPTED kind, never chat history)
 
 Nothing here signs, holds a key, chooses a signed digest, or reads a private key. A refusal is explicit.
 
@@ -61,6 +63,7 @@ from lilith_memory import canonical_contracts as C  # noqa: E402
 from lilith_memory import canonical_store  # noqa: E402
 from lilith_memory import config as CONFIG  # noqa: E402
 from lilith_memory import learning_v2  # noqa: E402
+from lilith_memory import memory_action_v2 as MA  # noqa: E402
 from lilith_memory import memory_v2  # noqa: E402
 from lilith_memory import owner_proof as OP  # noqa: E402
 from lilith_memory import privacy_freshness as F  # noqa: E402
@@ -69,6 +72,7 @@ from lilith_owner_memory import accepted_read_v2 as AR  # noqa: E402
 from lilith_owner_memory import authority_contracts as A  # noqa: E402
 from lilith_owner_memory import contracts as K  # noqa: E402
 from lilith_owner_memory import first_memory_conversation as FMC  # noqa: E402
+from lilith_owner_memory import hermes_memory_context as HMC  # noqa: E402
 from lilith_owner_memory import l04_v2_adapter as AD  # noqa: E402
 from lilith_owner_memory import recovery_contracts as R  # noqa: E402
 
@@ -79,6 +83,12 @@ GOVERNED_TUPLE = memory_v2.MemoryTuplePolicyV1(
     memory_class="SYNTHETIC_PROJECT_CODENAME_FACT", subject_namespace="project.synthetic", subject_key="codename",
     value_schema=learning_v2.VALUE_SCHEMA, capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE,
     read_allowed=True, write_allowed=True)
+# The owner-provided relationship-origin tuple (memory_action_v2.RELATIONSHIP_ORIGIN); its statement is the owner's.
+ORIGIN_TUPLE = memory_v2.MemoryTuplePolicyV1(
+    *MA.RELATIONSHIP_ORIGIN_IDENTITY, value_schema=MA.RELATIONSHIP_ORIGIN_VALUE_SCHEMA,
+    capability=MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE, read_allowed=True, write_allowed=True)
+TUPLES = (GOVERNED_TUPLE, ORIGIN_TUPLE)
+KIND_CAPABILITY = {FMC.CODENAME.name: GOVERNED_TUPLE.capability, FMC.RELATIONSHIP_ORIGIN.name: ORIGIN_TUPLE.capability}
 
 
 @dataclass(frozen=True)
@@ -260,6 +270,7 @@ class ComposedV1:
     conversation: FMC.FirstMemoryConversationV1
     creation_enabled: bool                                 # the root-owned canonical config, read for this turn
     registered_credentials: tuple[Mapping[str, Any], ...]  # the registered owner PUBLIC credentials
+    enabled_kinds: frozenset = frozenset()                 # the kinds whose capability that config activates
 
 
 class FirstMemoryDevHostV1:
@@ -299,7 +310,7 @@ class FirstMemoryDevHostV1:
         binding = FMC.PrivacyBindingV1(paths.privacy_db, privacy_store, paths.cognitive_db,
                                        authoritative=paths.authoritative_privacy_db, stale=paths.stale_privacy_db,
                                        freshness=self._freshness)
-        capabilities = frozenset({GOVERNED_TUPLE.capability}) & settings.active_capabilities
+        capabilities = frozenset(t.capability for t in TUPLES) & settings.active_capabilities
         policy = CA.MemoryPolicyStore(paths.cognitive_db, actor, active_capabilities=capabilities)
         consent = CA.ConsentStore(paths.cognitive_db, actor, policy_store=policy)
         rollback = CA.RollbackAuthority(paths.cognitive_db, actor, consent)
@@ -307,7 +318,7 @@ class FirstMemoryDevHostV1:
             paths.cognitive_db, privacy_hold_resolver=binding.resolver,
             containment_ready=lambda: settings.canonical_ltm_config_valid, actor_authority=actor,
             policy_store=policy, consent_store=consent)
-        tuples = memory_v2.CanonicalTupleRegistry((GOVERNED_TUPLE,))
+        tuples = memory_v2.CanonicalTupleRegistry(TUPLES)
         links = AD.L04AdmissionLinkStoreV1(paths.cognitive_db)
         uses = SignerEvidenceUseLedgerV1(self._transport)
         ledger_epoch = R.ledger_epoch_id(epoch, ENVIRONMENT)
@@ -330,8 +341,10 @@ class FirstMemoryDevHostV1:
                 enabled_provider=lambda: settings.canonical_ltm_enabled,
                 capability_provider=settings.capability_active,
                 family_registry=memory_v2.ProposalFamilyRegistry(
-                    (learning_v2.V2_PROPOSAL_FAMILY, learning_v2.V1_PROPOSAL_FAMILY)),
-                memory_registry=tuples, containment_ready=lambda identity: identity == GOVERNED_TUPLE.identity,
+                    (learning_v2.V2_PROPOSAL_FAMILY, learning_v2.V1_PROPOSAL_FAMILY,
+                     learning_v2.RELATIONSHIP_ORIGIN_PROPOSAL_FAMILY)),
+                memory_registry=tuples,
+                containment_ready=lambda identity: identity in {t.identity for t in TUPLES},
                 actor_authority=actor, policy_store=policy, consent_store=consent, rollback_authority=rollback,
                 privacy_hold_resolver=binding.resolver)
             values.update(overrides)
@@ -362,24 +375,27 @@ class FirstMemoryDevHostV1:
         conversation = FMC.FirstMemoryConversationV1(
             privacy=binding, l04=FMC.L04ComponentsV1(actor, policy, consent, learning), adapter=adapter,
             reader=reader, issuer=SignerIssuerV1(self._transport), tuple_policy=GOVERNED_TUPLE,
-            challenge_context=challenge_context, now_fn=self._now)
-        return ComposedV1(conversation, settings.canonical_ltm_enabled
-                          and settings.capability_active(GOVERNED_TUPLE.capability), tuple(registration.credentials))
+            challenge_context=challenge_context, now_fn=self._now, origin_policy=ORIGIN_TUPLE)
+        enabled = frozenset(kind for kind, capability in KIND_CAPABILITY.items()
+                            if settings.canonical_ltm_enabled and settings.capability_active(capability))
+        return ComposedV1(conversation, bool(enabled), tuple(registration.credentials), enabled)
 
 
 # ---------------------------------------------------------------------------------------------- the turn ---
 
 def remember(host: FirstMemoryDevHostV1, session: str, text: str,
              owner_assertion: Callable[[Mapping[str, Any]], Mapping[str, Any]]) -> dict[str, Any]:
-    """One "remember my project codename is X" turn: offer -> the owner's assertion over the printed challenge ->
-    governed admission. Memory creation stays refused while the canonical config does not enable it."""
+    """One "remember ..." turn (a closed kind): offer -> the owner's assertion over the printed challenge ->
+    governed admission. Creation stays refused while the canonical config does not enable that kind."""
     composed = host.compose()
     _need(composed.creation_enabled, "MEMORY_CREATION_NOT_AUTHORIZED")
     conversation = composed.conversation
     offer = conversation.offer(session, text)
     if offer.status != FMC.OFFERED:
         return {"status": offer.status}
+    _need(offer.kind in composed.enabled_kinds, "MEMORY_CREATION_NOT_AUTHORIZED")
     answer = owner_assertion({"status": offer.status, "offerId": offer.offer_id, "codename": offer.codename,
+                              "kind": offer.kind, "value": offer.value,
                               "webauthnChallenge": offer.webauthn_challenge.hex()})
     _need(isinstance(answer, Mapping) and set(answer) == {"assertion", "credentialRecordId"}, "OWNER_ANSWER_INVALID")
     credential = next((c for c in composed.registered_credentials
@@ -390,9 +406,14 @@ def remember(host: FirstMemoryDevHostV1, session: str, text: str,
 
 
 def recall(host: FirstMemoryDevHostV1, session: str, text: str) -> dict[str, Any]:
-    """One "what is my project codename" turn on a fresh composition: canonical storage only."""
-    result = host.compose().conversation.recall(session, text)
-    return {"status": result.status, "codename": result.codename, "reason": result.reason}
+    """One recall turn on a fresh composition: canonical storage only. The exact context request returns the
+    read-only canonical memory context for a new (Hermes) conversation instead."""
+    conversation = host.compose().conversation
+    if text == HMC.CONTEXT_REQUEST:
+        return HMC.context_payload(conversation, session)
+    result = conversation.recall(session, text)
+    return {"status": result.status, "codename": result.codename, "reason": result.reason, "kind": result.kind,
+            "value": result.value}
 
 
 def main(argv: list[str]) -> int:
