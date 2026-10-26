@@ -216,6 +216,26 @@ class DevGateClassifierTests(unittest.TestCase):
                                  gate.DEPLOY_REQUIRED)
         self.assertEqual(self.classify(changed("services/core-api/app.py")), gate.DEPLOY_REQUIRED)
 
+    def test_fm1_transition_tooling_is_control_only_and_nothing_else_is(self):
+        fm1 = (
+            "services/owner-memory-control/tools/fm1_signer_upgrade.py",
+            "services/owner-memory-control/tools/fm1_release_stages.py",
+            "services/owner-memory-control/tools/fm1_operator.py",
+            "services/owner-memory-control/tests/test_first_memory_fm1_transition.py",
+            "docs/architecture/first-memory-fm1-release-transition.md",
+        )
+        this_pr = (*(changed(path, "A", "000000") for path in fm1), changed("scripts/classify_dev_deployment.py"),
+                   changed("scripts/test_classify_dev_deployment.py"))
+        self.assertEqual(self.classify(*this_pr), gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("services/authority-dev/lilith_authority_dev/issuance.py"),     # release payload
+            changed("services/owner-memory-control/tools/first_memory_dev_host.py"),
+            changed("services/owner-memory-control/tools/fm1_operator.py", "M", "100644", "120000"),   # symlink swap
+            changed(fm1[0], "D", "100644", "000000"),                              # a deletion
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
+
     def test_symlink_and_mode_tricks_require_deploy(self):
         path = "scripts/memory_broker_stage2_control.py"
         for entry in (
