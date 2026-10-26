@@ -52,20 +52,59 @@ root bridge forms (`first-memory remember|recall`). `canonical_contracts.py` is 
   channel is the owner's. Any refusal (Privacy not READY included) yields no note.
 
 Tests: the FM-1 transition fixtures now build the e2324a5 payload from its git bytes (`installed_layout.build_fm1`),
-as the E-23 fixtures do for 57bff671. A pin records that the tree differs from e2324a5 in exactly one signer member,
-`lilith_authority_dev/protocol.py`.
+as the E-23 fixtures do for 57bff671. A pin records that the tree differs from e2324a5 in exactly the successor signer
+members (below).
 
-## Activation still needs (each a separate owner go)
+## Readiness slice (after #263)
 
-1. A reviewed **signer release** from the merge commit, then a signer-only transition like FM-1. The installed
-   `e2324a5` signer refuses this purpose (`INVALID_ACTION`). The DR-5 target names the signer release path, so it
-   must be re-derived.
-2. The **host tree** update (`/opt/lilith-first-memory-dev/current`) and **schema v3** on the F9c2 cognitive DB,
-   after a verified backup.
-3. A governed **FORGET path for this identity**. The erasure owners and Privacy already handle it (tested), but the
-   operator runner and its durable intent are First Interaction-only.
-4. The owner's exact statement, then one `remember` turn under a single-use go with the origin capability enabled,
-   then disabled again.
-5. **Hermes**: a platform-adapter hook that calls `render_context_note` on a context payload obtained through the
-   root bridge. The Hermes gateway runs unprivileged and cannot invoke the root bridge itself, so this needs an
-   owner decision on the read route. No provider call is needed to prove the note; the Groq budget stays untouched.
+**FORGET.** `privacy_forget_runner` and `privacy_forget_intent` take one closed `ForgetProfileV1`.
+- First Interaction is the default and is unchanged.
+- The relationship-origin profile is owned by L04 and L18_V2. It writes its own labelled
+  `relationship-origin.intent`, and only one FORGET may be held at a time.
+- Hold-first, durable-before-erase, Privacy authorization, replay refusal and suppression are all unchanged.
+- Privacy admits `HERMES_DEV_CONVERSATION` only where the required-owner floor provisions it, so Hermes joins this
+  FORGET exactly when the owner provisions that floor for the origin scope.
+- The root hold executor in the Hermes gateway package must also hold and release the new intent. The patch is
+  staged outside this repository with its tests; it is a Hermes package change, not part of this source.
+
+**Hermes read route.** `lilith-authority-ledger-dev first-memory-context` is a new closed root CLI form. A
+socket-activated unit (`tools/hermes_context/`) runs it once per connection.
+- It runs the trusted host's `recall` with only the context token, and the bridge forwards only
+  `LOOKUP_EVIDENCE_USE`.
+- Owner-personal memory leaves root only when both hold:
+  - a root-owned, owner-approved grant (`/etc/lilith-first-memory-dev/hermes-owner-channel.json`, at most 7 days)
+    names exactly that `lilith_os` session;
+  - the Privacy floor makes Hermes an erasure owner of that memory.
+- Anything not READY answers UNAVAILABLE with no memories.
+- The Hermes `lilith_os` adapter sets the note as the turn's `channel_prompt`. Hermes applies that at call time and
+  never persists it. Codename memory is a project fact and needs neither the grant nor the floor.
+
+**Successor signer payload** against e2324a5 (layout v3, no added member, no witness member):
+`lilith_authority_dev/protocol.py` (the origin purpose) and `lilith_authority_root/cli.py` (the context form). The
+FM-1 transition tooling pins OLD 57bff671, NEW e2324a5 and the E-23 incarnations. Like FM-1 after #258, the
+successor's transition contract is pinned after merge, from the attested build of the merge commit.
+
+**L04 schema v3.** `tools/relationship_origin_l04_migration.py plan|apply` is the operator path. It first requires
+the canonical runtime schema, the reviewed admission-link table and known owner ledgers. It then takes a verified
+backup, applies only the v3 migration, and requires every canonical row (items, revisions, admissions, active
+revisions, audits, links, consent, policy, proposal references) to be byte-identical afterwards.
+
+## Activation (each step its own owner go; no PROD)
+
+1. Review and merge this source. The routine Core API DEV deploy follows (runtime code).
+2. Build the successor release from the merge commit (A = B, attested). Then open a control-only PR with its
+   transition contract (the FM-1 shape with OLD e2324a5) and run that one signer-only transition, which restarts
+   the witness from NEW as FM-1 did. Re-derive the DR-5 target.
+3. Install the new First Memory host tree. Run `relationship_origin_l04_migration.py apply` on the F9c2 cognitive
+   DB. Keep the canonical config DISABLED.
+4. Hermes package: install the executor patch, then run `install_f9c.sh --repin`, because the executor's frozen Core
+   API copy must know the origin identity. Confirm Privacy READY and an empty intent directory.
+5. The owner supplies the origin statement (at most 600 characters). The normalized text is shown before any offer.
+6. Enable only `canonical_memory.relationship_origin.create`, run one `remember our origin: …` turn with the owner
+   credential, then disable creation again.
+7. Recall it from a fresh host session (`what is our origin?`).
+8. Hermes (separately authorized): install the context socket units and the adapter patch. The codename then
+   reaches new Hermes sessions. The origin statement reaches Hermes only after two more things: a Hermes floor for
+   its scope, and an owner grant for one `lilith_os` session. No tool provisions that floor yet:
+   `privacy_schema_v2.provision_hermes_owner_floor` and its database triggers cover only the First Interaction
+   scope. Extending them is a separate, reviewed Privacy change.

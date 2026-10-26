@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import unittest
 
-from test_privacy_forget_intent import HOLDER, FakeGateway
 from test_privacy_forget_runner import DURABLE_FOR_TEST, FI, HERMES, CountingOwner, RunnerCase
 from test_relationship_origin_l04 import STATEMENT, OriginCase
 
@@ -22,6 +21,17 @@ from lilith_memory import privacy_forget_intent as I
 from lilith_memory import privacy_forget_runner as R
 
 RO = MA.RELATIONSHIP_ORIGIN_IDENTITY
+HOLDER = 4242                                     # the simulated root holder uid (as test_privacy_forget_intent)
+
+
+class FakeGateway:
+    """The gateway as the hold-first runner sees it (test_privacy_forget_intent's fake, without the relay app)."""
+
+    def __init__(self, stopped: bool = True):
+        self.is_stopped = stopped
+
+    def stopped(self) -> bool:
+        return self.is_stopped
 
 
 class OriginForgetCase(RunnerCase):

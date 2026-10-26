@@ -80,7 +80,7 @@ class UnitAssetTests(unittest.TestCase):
                          "CAP_DAC_READ_SEARCH", "AmbientCapabilities="):
             self.assertIn(expected, service)
         import release_file_set as RFS
-        self.assertFalse(any("hermes_context" in path for path in RFS.input_files()))     # not release payload
+        self.assertFalse(any("tools/hermes_context/" in path for path in RFS.input_files()))  # not release payload
 
 
 @unittest.skipUnless(X.POSIX, "the root CLI is POSIX")
