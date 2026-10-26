@@ -11,6 +11,9 @@ B1b-3b `OwnerEvidenceRequestV1` shape: a challenge reference plus the owner's
 assertion and public credential over a frozen action. Every signed value is
 derived by the signer, never taken from the request.
 
+RR-39 adds a governed form of `ISSUE_OWNER_EVIDENCE` that also carries the exact owner challenge and the
+complete root hold-store snapshot; the legacy form stays parseable and is always refused.
+
 B1b-3e PR-1S adds exactly three recovery operations (preflight §15), each a
 ledger journal write gated by the pure C-4 recovery gate, never a signature:
 `RECOVERY_ADVANCE_EPOCH` (the exact K-ROOT epoch-advance authorization plus
@@ -48,6 +51,9 @@ _PAYLOAD_FIELDS = {
     RECOVERY_VOID_CHALLENGE: frozenset({"holdStore"}),
     RECOVERY_QUARANTINE_USE: frozenset({"holdStore"}),
 }
+# RR-39: the governed issuance form adds the exact owner challenge and the complete root hold-store snapshot (the
+# recovery-handler pattern). The legacy form above stays parseable and is always refused (no challenge to verify).
+GOVERNED_ISSUE_FIELDS = _PAYLOAD_FIELDS[ISSUE_OWNER_EVIDENCE] | {"challenge", "holdStore"}
 _ACTION_FIELDS = frozenset({
     "schemaVersion", "actorRefId", "operation", "memoryClass", "subjectNamespace", "subjectKey",
     "valueSchema", "payloadDigest", "expectedActiveRevisionId", "restoreRevisionId", "purpose",
@@ -74,6 +80,13 @@ class IssueOwnerEvidenceRequestV1:
     action: C.FrozenMemoryActionV1
     assertion: OwnerAssertionV1
     owner_credential: OwnerCredentialV1
+    challenge: dict[str, Any] | None = None       # governed form only (RR-39)
+    hold_store: dict[str, Any] | None = None      # governed form only (RR-39)
+    raw_assertion: dict[str, Any] | None = None
+
+    @property
+    def governed(self) -> bool:
+        return self.challenge is not None and self.hold_store is not None
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -121,7 +134,8 @@ def parse_frame(frame: bytes) -> AuthorityMessageV1:
     payload = value["payload"]
     if not isinstance(payload, dict):
         raise ProtocolError("INVALID_PAYLOAD")
-    if set(payload) != _PAYLOAD_FIELDS[operation]:
+    if set(payload) != _PAYLOAD_FIELDS[operation] and not (
+            operation == ISSUE_OWNER_EVIDENCE and set(payload) == GOVERNED_ISSUE_FIELDS):
         raise ProtocolError("INVALID_PAYLOAD_FIELDS")
     if operation == ISSUE_OWNER_EVIDENCE:
         parse_issue_request(payload)
@@ -134,7 +148,8 @@ def parse_frame(frame: bytes) -> AuthorityMessageV1:
 
 
 def parse_issue_request(payload: dict[str, Any]) -> IssueOwnerEvidenceRequestV1:
-    if not isinstance(payload, dict) or set(payload) != _PAYLOAD_FIELDS[ISSUE_OWNER_EVIDENCE]:
+    if not isinstance(payload, dict) or set(payload) not in (_PAYLOAD_FIELDS[ISSUE_OWNER_EVIDENCE],
+                                                             GOVERNED_ISSUE_FIELDS):
         raise ProtocolError("INVALID_PAYLOAD_FIELDS")
     challenge_id = payload["challengeId"]
     if not isinstance(challenge_id, str) or not challenge_id.startswith("och.") or len(challenge_id) > 128:
@@ -161,6 +176,13 @@ def parse_issue_request(payload: dict[str, Any]) -> IssueOwnerEvidenceRequestV1:
         credential = OwnerCredentialV1.from_dict(payload["ownerCredential"])
     except (OwnerProofError, TypeError, KeyError) as exc:
         raise ProtocolError("INVALID_OWNER_CREDENTIAL") from exc
+    if set(payload) == GOVERNED_ISSUE_FIELDS:
+        if not isinstance(payload["challenge"], dict):
+            raise ProtocolError("INVALID_CHALLENGE")
+        if not isinstance(payload["holdStore"], dict):
+            raise ProtocolError("INVALID_HOLD_STORE")
+        return IssueOwnerEvidenceRequestV1(challenge_id, action, assertion, credential, dict(payload["challenge"]),
+                                           dict(payload["holdStore"]), dict(payload["assertion"]))
     return IssueOwnerEvidenceRequestV1(challenge_id, action, assertion, credential)
 
 

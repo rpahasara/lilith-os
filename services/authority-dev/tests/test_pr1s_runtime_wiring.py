@@ -263,8 +263,9 @@ class DurableLedgerTests(unittest.TestCase):
         for needle in ("owner_control", "synthetic_evidence", "l04", "memory-broker", "L04_", "lilith_memory_broker"):
             self.assertNotIn(needle, source)
         public = {name for name in dir(L.DurableAuthorityLedgerV1) if not name.startswith("_")}
+        # RR-39 adds exactly one writer: one challenge's PREPARE, CONSUME, ISSUE (never RESERVE/CONFIRM/ABANDON).
         self.assertEqual(public, {"open_existing", "provision", "close", "journal", "observe", "replay",
-                                  "append_recovery"})
+                                  "append_recovery", "append_issuance"})
         self.assertEqual(L.SCHEMA_FINGERPRINT, L.schema_fingerprint_of(L.SCHEMA))
         self.assertEqual(P.AUTHORITY_LEDGER, "/var/lib/lilith-authority-dev/authority_ledger.db")
 

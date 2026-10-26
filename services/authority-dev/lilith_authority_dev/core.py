@@ -19,7 +19,8 @@ minter: a readiness self-view (`state.self_view`, always NOT_READY: the
 signer cannot observe its credential inventory or the root hold store, and
 issuance is unwired, RR-39) and the narrow C-4 recovery handler
 (`recovery.RecoveryHandlerV1`), reachable only through the three closed
-recovery operations. `ISSUE_OWNER_EVIDENCE` is refused in every state.
+recovery operations. `ISSUE_OWNER_EVIDENCE` is refused in every state unless an RR-39 governed
+issuance handler is constructed (`issuance.py`); the DEV runtime constructs none (`server.build_core`).
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from . import protocol as W
-from .credential import CREDENTIAL_ABSENT, CREDENTIAL_INVALID, CredentialStatusV1
+from .credential import CREDENTIAL_ABSENT, CREDENTIAL_INVALID, CREDENTIAL_PRESENT_UNVERIFIED, CredentialStatusV1
 from .profile import PROFILE, SIGNING_DOMAIN
 
 SERVICE_AVAILABLE = "SERVICE_AVAILABLE"
@@ -54,12 +55,13 @@ def readiness_reasons(credential: CredentialStatusV1) -> tuple[str, ...]:
 
 class DevAuthoritySignerCoreV1:
     def __init__(self, credential: CredentialStatusV1, *, recovery: Any = None,
-                 self_view: Callable[[], dict[str, Any]] | None = None):
+                 self_view: Callable[[], dict[str, Any]] | None = None, issuance: Any = None):
         if not isinstance(credential, CredentialStatusV1):
             raise TypeError("credential status is required")
         self._credential = credential
         self._recovery = recovery
         self._self_view = self_view
+        self._issuance = issuance          # RR-39 governed path; None in the DEV runtime until provisioned
 
     def _reasons(self) -> list[str]:
         if self._self_view is None:
@@ -89,12 +91,15 @@ class DevAuthoritySignerCoreV1:
             if self._recovery is None:
                 return {"status": REFUSED, "reason": "RECOVERY_NOT_WIRED"}
             return self._recovery.handle(message.operation, message.payload)
-        # ISSUE_OWNER_EVIDENCE: re-validate the structured request, then refuse.
-        # L1 has no path from here to a key: readiness is never READY.
+        # ISSUE_OWNER_EVIDENCE: re-validate the structured request. Without the governed handler (or for the
+        # legacy request form) refuse: no path from here to a key. The handler re-derives every readiness fact.
         try:
-            W.parse_issue_request(message.payload)
+            request = W.parse_issue_request(message.payload)
         except W.ProtocolError as exc:
             return {"status": REFUSED, "reason": exc.code}
+        if self._issuance is not None and request.governed \
+                and self._credential.state == CREDENTIAL_PRESENT_UNVERIFIED:
+            return self._issuance.handle(request)
         return {
             "status": REFUSED,
             "reason": SIGNING_NOT_AVAILABLE,

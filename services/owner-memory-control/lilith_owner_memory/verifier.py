@@ -10,8 +10,10 @@ memory's content is true, and it never changes the epistemic basis.
 
 The verifier only reads the artifacts it is given. It writes nothing, mints
 nothing, repairs nothing, calls no model, runtime or network, and infers no
-missing link. In this slice it refuses any context other than the synthetic
-TEST environment with a `.invalid` relying party.
+missing link. It refuses any context other than the synthetic TEST
+environment with a `.invalid` relying party; the V2 owner-proof entry point
+`verify_owner_proof` (RR-39) also admits exactly the fixed DEV_SYNTHETIC owner
+identity pinned by `owner_proof`.
 """
 
 from __future__ import annotations
@@ -258,21 +260,34 @@ def verify_owner_proof(
     owner_credential: Mapping[str, Any] | None,
 ) -> OwnerProofResultV1:
     """Verify only the owner-proof part of the chain (steps 1-6), with the same
-    rules and reasons as `verify_accepted_memory`."""
+    rules and reasons as `verify_accepted_memory`. This V2 owner-proof entry point
+    (the L04 V2 adapter, accepted read and the RR-39 signer) also admits exactly
+    the fixed DEV_SYNTHETIC owner identity; `verify_accepted_memory` does not."""
     try:
         return OwnerProofResultV1(VERIFIED_OWNER_PROOF, None, _verify_owner_proof(
-            context, action, challenge_json, challenge_record, assertion, owner_credential))
+            context, action, challenge_json, challenge_record, assertion, owner_credential,
+            dev_synthetic_owner=True))
     except _Reject as rejected:
         return OwnerProofResultV1(NOT_ACCEPTED, rejected.reason)
 
 
+def _dev_synthetic_owner(context: K.AcceptanceContextV1) -> bool:
+    """RR-39: the one DEV owner context admitted, the fixed DEV_SYNTHETIC owner identity that
+    `owner_proof.DevSyntheticOwnerProofVerifier` already pins (synthetic principal, `.invalid` RP and origin).
+    Never a live or production owner policy."""
+    return context.deployment_environment == "dev" and (context.owner_principal, context.rp_id, context.origin) == (
+        P._DEV_SYNTHETIC_OWNER, P.SYNTHETIC_RP_ID, P.SYNTHETIC_ORIGIN)
+
+
 def _verify_owner_proof(context, action, challenge_json, challenge_record, assertion,
-                        owner_credential) -> VerifiedOwnerProofV1:
-    # 1. Trusted context. B2a supports only the synthetic TEST environment.
+                        owner_credential, *, dev_synthetic_owner: bool = False) -> VerifiedOwnerProofV1:
+    # 1. Trusted context: the synthetic TEST environment; on the V2 owner-proof path only, also exactly the fixed
+    #    DEV_SYNTHETIC owner (RR-39).
     _require(isinstance(context, K.AcceptanceContextV1), "MALFORMED_ARTIFACT")
     _parse(lambda value: value.validate(), context)
-    _require(context.deployment_environment == "test" and context.rp_id.endswith(".invalid")
-             and context.origin == "https://" + context.rp_id, "ENVIRONMENT_NOT_SUPPORTED")
+    _require((context.deployment_environment == "test" and context.rp_id.endswith(".invalid")
+              and context.origin == "https://" + context.rp_id)
+             or (dev_synthetic_owner and _dev_synthetic_owner(context)), "ENVIRONMENT_NOT_SUPPORTED")
 
     # 2. The intended operation (the frozen action) is required and must be valid.
     _require(action is not None, "ACTION_MISSING")

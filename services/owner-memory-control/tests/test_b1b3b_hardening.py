@@ -477,23 +477,32 @@ class B2aEquivalenceTests(unittest.TestCase):
         seen = []
         original = B2A_TESTS.verify
 
+        current = [None]
+
         def both(chain, **replace):
             kwargs = chain.kwargs(**replace)
             full = B2A.verify_accepted_memory(**kwargs)
             owner = B2A.verify_owner_proof(**{k: kwargs[k] for k in (
                 "context", "action", "challenge_json", "challenge_record", "assertion", "owner_credential")})
-            seen.append((full.reason, owner.status, owner.reason))
+            seen.append((current[0], full.reason, owner.status, owner.reason))
             return full
 
         B2A_TESTS.verify = both
         try:
             for name, run, reason in B2A_TESTS.CASES:
+                current[0] = name
                 with self.subTest(case=name):
                     self.assertEqual(run().reason, reason)
         finally:
             B2A_TESTS.verify = original
         self.assertEqual(len(seen), len(B2A_TESTS.CASES))
-        for full_reason, owner_status, owner_reason in seen:
+        for name, full_reason, owner_status, owner_reason in seen:
+            if name == "context-not-test":
+                # RR-39, the one intentional divergence: the B2a chain stays TEST-only, while the V2 owner-proof
+                # entry point admits exactly the fixed DEV_SYNTHETIC owner (this case's synthetic principal and RP).
+                self.assertEqual(full_reason, "ENVIRONMENT_NOT_SUPPORTED")
+                self.assertNotEqual(owner_reason, "ENVIRONMENT_NOT_SUPPORTED")
+                continue
             if owner_status == B2A.NOT_ACCEPTED:
                 # Steps 1-6 failed: the full verifier failed first, identically.
                 self.assertEqual(owner_reason, full_reason)

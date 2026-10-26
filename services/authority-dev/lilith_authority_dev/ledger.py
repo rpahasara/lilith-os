@@ -20,9 +20,10 @@ provisioning action: it refuses an existing file (or WAL / SHM sidecar),
 requires the signer-owned `0700` state directory, creates the file `0600`
 exclusively, and writes exactly one `GENESIS` operation (sequence 1).
 
-The public writer accepts only the C-4 recovery operations (`ADVANCE_EPOCH`,
-`VOID_CHALLENGE`, `QUARANTINE_USE`). Nothing here can prepare, consume,
-issue, reserve, confirm, or abandon: issuance stays unwired (RR-39). The
+The public writers accept only the C-4 recovery operations (`ADVANCE_EPOCH`,
+`VOID_CHALLENGE`, `QUARANTINE_USE`) and, for the RR-39 issuance path, exactly
+one challenge's `PREPARE`, `CONSUME`, `ISSUE`. Nothing here can reserve,
+confirm, or abandon an evidence use. The
 ledger never touches the broker ledgers or L04.
 """
 
@@ -381,6 +382,24 @@ class DurableAuthorityLedgerV1:
         ops = [dict(op) for op in ops]
         if not ops or any(op.get("op") not in J.RECOVERY_OPERATIONS for op in ops):
             raise LedgerError("LEDGER_OPERATION_NOT_PERMITTED")
+        return self._append(ops, expected_sequence=expected_sequence, expected_head=expected_head)
+
+    def append_issuance(self, ops: Sequence[Mapping[str, Any]], *, expected_sequence: int,
+                        expected_head: str) -> RC.AuthorityLedgerObservationV1:
+        """RR-39: journal exactly one owner challenge's PREPARE, CONSUME, ISSUE in ONE transaction.
+
+        The shared pure journal enforces single use (a known challenge, an issued
+        evidence id or digest), the current epoch, and the order; a ledger that
+        moved writes nothing.
+        """
+        ops = [dict(op) for op in ops]
+        if [op.get("op") for op in ops] != [J.PREPARE, J.CONSUME, J.ISSUE] \
+                or len({op.get("challengeId") for op in ops}) != 1:
+            raise LedgerError("LEDGER_OPERATION_NOT_PERMITTED")
+        return self._append(ops, expected_sequence=expected_sequence, expected_head=expected_head)
+
+    def _append(self, ops: list[dict[str, Any]], *, expected_sequence: int,
+                expected_head: str) -> RC.AuthorityLedgerObservationV1:
         try:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
