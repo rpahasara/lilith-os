@@ -127,3 +127,47 @@ reached for the step chain only:
 - it never runs again, because its marker stays consumed;
 - the next step (SIGNER_STOP) still needs its own owner go and a fresh read-only gate reading `F1_NEW_STAGED`;
 - any other record digest, or any other STOP, still blocks the chain.
+
+## 5. WITNESS_START STOP: owner adjudication and the post-check re-read (PROPOSED until merged)
+
+On 2026-10-26, FM1-GO-WITNESS-START (canonical go `b8d5a6049b08b1f95210ebc64d4979adf8e387260429204161413570954c1315`,
+control `33b3ab4`) ran **once**. Evidence is in `C:\Users\edufo\lilith-fm1-transition-7702b01\`
+(`SHA256SUMS.seal-4-witness-start-stop` `0cba8257…`).
+
+| Item | Value |
+| --- | --- |
+| Gate | observation 12: `F4_NEW_SELECTED`; K-WIT inode 262585 and K-PAN inode 262565, as named in the go |
+| Marker | `attempts/fm1-witness-start.json`, consumed |
+| Remote | one `systemctl start lilith-recovery-witness.service`, rc 0 |
+| Post | observation 13: local exit `3221225477` (`0xC0000005`), judged `STATUS_NOT_RECEIVED`. The complete output re-judges to `F5_WITNESS_RUNNING` |
+| Step record | `steps/05-WITNESS_START/STEP.json`, result `FM1_WITNESS_START_STOP`, SHA-256 `61e7624d971c1e5eddfd15b46a0ebfcbe0a17245c68eff8385d0a5555d62c2fa` |
+| Re-observation | observation 14, one read-only `status`: rc 0, `F5_WITNESS_RUNNING`. Its bytes (`8c627c55…`) are identical to observation 13 |
+
+Observation 14 shows:
+
+- the replacement witness `efa7040c6ad94de69bfeadd496ba1ac3` / 294978, running from `releases/e2324a5…`, with
+  `NRestarts` 0;
+- credentials `privacy-anchor-signing-key` and `recovery-witness-signing-key`;
+- K-WIT and K-PAN metadata, the anchor chain v1 and the foreign incarnations all unchanged;
+- no process using OLD;
+- the signer stopped.
+
+No retry and no repair was made.
+
+**Adjudication.** `ADJUDICATED_STEPS["WITNESS_START"]` pins exactly that digest. The start never runs again: the marker
+stays consumed and the witness is never restarted. `verify WITNESS` must still pass fresh against the preflight
+baseline, and the owner's verbatim witness acceptance is still a separate step.
+
+**The re-read rule (`CLIENT_EXIT_CRASH`).** The crash is in the pinned Cloud SDK plink 0.83, which both reviewed
+routes run (`gcloud compute ssh` and the direct-plink stdin route). It happens on exit, after the remote command has
+completed. It hit two of about 16 DEV reads in this transition. There is no other reviewed DEV route, and adding one
+(new keys or host trust) would change the trust boundary.
+
+The operator therefore handles it inside `_step` only:
+
+- If the mutation returned 0 and the post-status read exits with exactly `0xC0000005`, its output is still never
+  judged. The step takes **one** independent read-only re-read (`<STEP>_POST_RECHECK`, recorded as `postRecheck`).
+- The step is reached only if that re-read is clean (rc 0, PASS) and reads exactly the expected post-phase.
+- A second crash, any other code, or any other phase is a STOP. There is no third read.
+- A mutation that itself exits with the crash code stays a STOP, with no re-read.
+- Nothing changes in gates, markers, gos, commands, the transport or trust.

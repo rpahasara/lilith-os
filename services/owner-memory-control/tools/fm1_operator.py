@@ -107,8 +107,15 @@ ORDER = [step for step, _p, _q, _m in STEPS.values()]
 # Owner-adjudicated STOP records (docs/architecture/first-memory-fm1-release-transition.md §4, PROPOSED until merged):
 # step -> SHA-256 of its exact consumed `STEP.json`. Such a step counts as reached for the step chain ONLY; it never
 # re-runs, and the next step's own fresh gate must still read its post-phase. The 2026-10-26 STAGE STOP was the local
-# plink exit crash (0xC0000005) on the post-status read; the remote stage reported F1 and a clean re-read is F1.
-ADJUDICATED_STEPS = {"STAGE": "b82b4a5b94451313b84818860a5b8d0e06fc4815c275966c8b35d252f5e7fb4e"}
+# plink exit crash (0xC0000005) on the post-status read; the remote stage reported F1 and a clean re-read is F1. The
+# 2026-10-26 WITNESS_START STOP was the same crash (§5): a clean independent re-read is F5, byte-identical.
+ADJUDICATED_STEPS = {"STAGE": "b82b4a5b94451313b84818860a5b8d0e06fc4815c275966c8b35d252f5e7fb4e",
+                     "WITNESS_START": "61e7624d971c1e5eddfd15b46a0ebfcbe0a17245c68eff8385d0a5555d62c2fa"}
+# The pinned Cloud SDK plink 0.83 (both reviewed routes run it) can crash with this access violation on exit, after
+# the remote command completed (record §5). A post-status read that exits with exactly this code is never judged from
+# its own output: the step takes ONE independent read-only re-read, and only a clean re-read at the exact post-phase
+# counts. A mutation invocation exiting with it stays a STOP (its effect is not re-observed into success).
+CLIENT_EXIT_CRASH = 0xC0000005
 
 GO_COMMON = ("Mode: " + FM1.MODE + " (FM-1, DEV_SYNTHETIC, lilith-dev-01 only). OLD release {old}; NEW release {new}, "
              "manifest SHA-256 {manifest}, archive SHA-256 {archive}.",
@@ -422,9 +429,13 @@ class Operator(E22OP.Operator):
         self._one_attempt(workdir, marker, raw)                                           # the go is consumed HERE
         code = self._save(out, marker, self._invoke_once(command, stdin))
         post_dir, phase, _ = self._status(repo, workdir, f"{step}_POST")
+        recheck = None
+        if code == 0 and _json(post_dir / "VERDICT.json", "VERDICT_INVALID").get("code") == CLIENT_EXIT_CRASH:
+            recheck_dir, phase, _ = self._status(repo, workdir, f"{step}_POST_RECHECK")      # one; read-only
+            recheck = recheck_dir.name
         reached = code == 0 and phase == post_phase
         record = {"step": step, "marker": marker, "goSha256": sha256_hex(raw), "gate": gate.name, "code": code,
-                  "post": post_dir.name, "postPhase": phase, "expected": post_phase,
+                  "post": post_dir.name, "postRecheck": recheck, "postPhase": phase, "expected": post_phase,
                   "result": f"FM1_{step}_" + ("REACHED_" + post_phase if reached else "STOP")}
         self._record(out / STEP_FILE, record)
         return dict(record, next="nothing further is authorized by this; the next step needs its own owner go"

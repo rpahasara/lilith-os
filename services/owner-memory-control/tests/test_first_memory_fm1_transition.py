@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -403,27 +404,104 @@ class OperatorTests(Base):
         self.stop("LATEST_PREFLIGHT_NOT_EXACT", self.op.render, self.repo, self.work, "STAGE")
         self.assertEqual(self.dev.mutations, [])
 
+    def crash_post_reads(self, count: int, before_recheck=None, mutation_code: int | None = None,
+                         read_code: int = 0xC0000005) -> None:
+        """After the next mutation, the next `count` clean status reads return complete output with the local plink
+        exit crash (0xC0000005). `before_recheck` runs before the second post read; `mutation_code` replaces the
+        mutation's own exit code; `read_code` replaces the crash code (another failure)."""
+        plink, invoke = self.dev.plink, self.dev.invoke
+        state = {"armed": 0, "reads": 0}
+
+        def arm(result):
+            state["armed"], state["reads"] = count, 0
+            return result if mutation_code is None else done(mutation_code, out=result.stdout, err=result.stderr)
+
+        def crash_plink(command, payload):
+            if "fm1-status" not in command:
+                return arm(plink(command, payload))
+            state["reads"] += 1
+            if state["reads"] == 2 and before_recheck is not None:
+                before_recheck()
+            result = plink(command, payload)
+            if state["armed"] and result.returncode == 0:
+                state["armed"] -= 1
+                return done(read_code, out=result.stdout)       # complete output; the local client crashed on exit
+            return result
+
+        self.dev.plink, self.dev.invoke = crash_plink, lambda command: arm(invoke(command))
+
+    def restore_transport(self) -> None:
+        self.dev.plink, self.dev.invoke = Dev.plink.__get__(self.dev), Dev.invoke.__get__(self.dev)
+
+    def post_reads(self, step: str) -> list[str]:
+        return sorted(p.name for p in (self.work / OP.OBS_DIR).iterdir() if p.name.split("-", 1)[1].startswith(
+            step + "_POST"))
+
+    def test_a_crashed_post_read_counts_only_after_one_clean_independent_recheck(self):
+        self.to("SELECT")
+        self.op.status(self.repo, self.work, "F4")
+        go = self.go("WITNESS_START")
+        self.crash_post_reads(1)
+        record = self.op._step(self.repo, self.work, "WITNESS_START", go)
+        self.restore_transport()
+        self.assertEqual((record["result"], record["postPhase"]), ("FM1_WITNESS_START_REACHED_F5_WITNESS_RUNNING", S.F5))
+        self.assertTrue(record["postRecheck"].endswith("WITNESS_START_POST_RECHECK"))
+        crashed = json.loads((self.work / OP.OBS_DIR / record["post"] / "VERDICT.json").read_text(encoding="utf-8"))
+        self.assertEqual((crashed["code"], crashed["phase"]), (OP.CLIENT_EXIT_CRASH, "STATUS_NOT_RECEIVED"))
+        self.assertEqual(self.dev.mutations.count(OP.WITNESS_START_COMMAND), 1)              # never restarted
+        self.assertEqual(self.op.verify(self.repo, self.work, "WITNESS")["result"], "FM1_WITNESS_VERIFIED")
+
+    def test_a_second_crash_on_the_recheck_is_a_stop_and_there_is_no_third_read(self):
+        self.to("SIGNER_STOP")
+        self.op.status(self.repo, self.work, "F2")
+        go = self.go("WITNESS_STOP")
+        self.crash_post_reads(2)
+        record = self.op._step(self.repo, self.work, "WITNESS_STOP", go)
+        self.restore_transport()
+        self.assertEqual((record["result"], record["postPhase"]), ("FM1_WITNESS_STOP_STOP", "STATUS_NOT_RECEIVED"))
+        self.assertEqual(len(self.post_reads("WITNESS_STOP")), 2)                             # one recheck only
+        self.assertEqual(self.status()["phase"], S.F3)                                        # host moved; record STOP
+        self.stop("STEP_NOT_REACHED:WITNESS_STOP", self.op.render, self.repo, self.work, "SELECT")
+
+    def test_a_clean_recheck_at_another_phase_is_a_stop(self):
+        self.to("STAGE")
+        self.op.status(self.repo, self.work, "F1")
+        go = self.go("SIGNER_STOP")
+        self.crash_post_reads(1, before_recheck=lambda: self.host.stopped())                 # the host moved on
+        record = self.op._step(self.repo, self.work, "SIGNER_STOP", go)
+        self.restore_transport()
+        self.assertEqual((record["result"], record["postPhase"]), ("FM1_SIGNER_STOP_STOP", S.F3))
+
+    def test_no_recheck_for_a_crashed_mutation_or_another_read_failure(self):
+        self.to("STAGE")
+        for label, kwargs, code in (("crashed mutation", {"mutation_code": OP.CLIENT_EXIT_CRASH}, OP.CLIENT_EXIT_CRASH),
+                                    ("another read failure", {"read_code": 255}, 0)):
+            with self.subTest(label):
+                self.op.status(self.repo, self.work, "F1")
+                go = self.go("SIGNER_STOP")
+                self.crash_post_reads(1, **kwargs)                    # the post read fails as well
+                record = self.op._step(self.repo, self.work, "SIGNER_STOP", go)
+                self.restore_transport()
+                self.assertEqual((record["result"], record["code"], record["postRecheck"], record["postPhase"]),
+                                 ("FM1_SIGNER_STOP_STOP", code, None, "STATUS_NOT_RECEIVED"))
+                self.assertEqual(len(self.post_reads("SIGNER_STOP")), 1)
+                (self.work / OP.M6.ATTEMPT_DIR / "fm1-signer-stop.json").unlink()      # reset for the next case
+                for directory in (self.work / OP.STEP_DIR, self.work / OP.OBS_DIR):
+                    for run in directory.iterdir():
+                        if "SIGNER_STOP" in run.name:
+                            shutil.rmtree(run)
+                self.host.signer_running(S.ENDING_SIGNER_INCARNATION, OLD)
+
     def test_an_owner_adjudicated_stage_stop_continues_only_from_an_exact_fresh_gate(self):
         """The 2026-10-26 recovery: the stage ran (F1) but the post-status read crashed locally, so STEP.json says STOP.
         Only the pinned record digest unblocks the chain; the next step still needs its own fresh F1 gate; the stage
-        never re-runs."""
+        never re-runs. (Both post reads crash here: with one, the clean recheck would reach F1.)"""
         self.assertEqual(self.op.preflight(self.repo, self.work)["result"], "FM1_PREFLIGHT_EXACT")
         self.op.status(self.repo, self.work, "STAGE_GATE")
         go = self.go("STAGE")
-        original = self.dev.plink
-
-        def crash_post(command, payload, state={"stage": False}):
-            result = original(command, payload)
-            if "fm1-stage" in command:
-                state["stage"] = True
-            elif state["stage"] and "fm1-status" in command and result.returncode == 0:
-                state["stage"] = False
-                return done(0xC0000005, out=result.stdout)    # complete output; the local client crashed on exit
-            return result
-
-        self.dev.plink = crash_post
+        self.crash_post_reads(2)
         record = self.op._step(self.repo, self.work, "STAGE", go)
-        self.dev.plink = original
+        self.restore_transport()
         self.assertEqual((record["result"], record["code"], record["postPhase"]),
                          ("FM1_STAGE_STOP", 0, "STATUS_NOT_RECEIVED"))
         self.assertEqual(self.status()["phase"], S.F1)                    # the host is exactly F1
@@ -447,13 +525,38 @@ class OperatorTests(Base):
         self.assertEqual(self.dev.mutations.count("fm1-stage"), 1)
         self.assertFalse((self.root / f"opt/lilith-authority-dev/releases/{OLD}").exists())
 
+    def test_an_owner_adjudicated_witness_start_stop_resumes_at_verify_without_a_restart(self):
+        """The 2026-10-26 WITNESS_START STOP: the witness started (F5); only the pinned record digest lets `verify
+        WITNESS` and the owner's acceptance proceed; the witness is never started again."""
+        self.to("SELECT")
+        self.op.status(self.repo, self.work, "F4")
+        go = self.go("WITNESS_START")
+        self.crash_post_reads(2)
+        self.assertEqual(self.op._step(self.repo, self.work, "WITNESS_START", go)["result"], "FM1_WITNESS_START_STOP")
+        self.restore_transport()
+        digest = sha((next((self.work / OP.STEP_DIR).glob("*-WITNESS_START")) / OP.STEP_FILE).read_bytes())
+        self.stop("STEP_NOT_REACHED:WITNESS_START", self.op.verify, self.repo, self.work, "WITNESS")
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"WITNESS_START": "0" * 64}):
+            self.stop("STEP_NOT_REACHED:WITNESS_START", self.op.verify, self.repo, self.work, "WITNESS")
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"WITNESS_START": digest}):
+            self.accept("WITNESS")                                        # fresh verify, then the owner statement
+            for step in ("SIGNER_START", "RETIRE"):
+                if step == "RETIRE":
+                    self.accept("SIGNER")
+                self.assertTrue(self.run_step(step)["result"].startswith(f"FM1_{step}_REACHED"), step)
+            self.stop("ATTEMPT_ALREADY_CONSUMED:fm1-witness-start", self.op._step, self.repo, self.work,
+                      "WITNESS_START", go)
+        self.assertEqual(self.dev.mutations.count(OP.WITNESS_START_COMMAND), 1)
+
 
 class PinTests(unittest.TestCase):
-    def test_the_only_adjudication_is_the_recorded_stage_stop(self):
-        self.assertEqual(set(OP.ADJUDICATED_STEPS), {"STAGE"})
-        self.assertRegex(OP.ADJUDICATED_STEPS["STAGE"], r"\A[0-9a-f]{64}\Z")
+    def test_the_only_adjudications_are_the_recorded_stage_and_witness_start_stops(self):
+        self.assertEqual(set(OP.ADJUDICATED_STEPS), {"STAGE", "WITNESS_START"})
         record = (ROOT / "docs/architecture/first-memory-fm1-release-transition.md").read_text(encoding="utf-8")
-        self.assertIn(OP.ADJUDICATED_STEPS["STAGE"], record)
+        for step, digest in OP.ADJUDICATED_STEPS.items():
+            self.assertRegex(digest, r"\A[0-9a-f]{64}\Z", step)
+            self.assertIn(digest, record, step)
+        self.assertEqual(OP.CLIENT_EXIT_CRASH, 3221225477)
 
     def test_the_delta_is_the_git_bytes_of_57bff671_against_the_repository(self):
         import install_authority_dev_v3 as V3
