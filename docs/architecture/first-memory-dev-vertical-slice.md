@@ -32,9 +32,10 @@ new conversation ──recall──▶ accepted read (owner proof → evidence �
 | Root clients | `lilith_authority_root.clients.signer_issue` / `signer_use` |
 | L04 migration | `owner-memory-control/tools/first_memory_l04_migration.py`: read-only `plan`; `apply` = verified online backup (`backup.create_backup`, role cognitive), then exactly `l04_v2_adapter.LINK_DDL` in one IMMEDIATE transaction, re-verified. One empty table; nothing else |
 | Governed tuple + config | `GOVERNED_TUPLE` = `SYNTHETIC_PROJECT_CODENAME_FACT / project.synthetic / codename`, capability `canonical_memory.project_codename.mutate` (never the suppressed First Interaction identity). Creation is governed by the server-owned `lilith_memory.config` file `/etc/lilith-first-memory-dev/canonical-config.json`: absent, malformed, `canonicalLtmEnabled=false` or without the capability ⇒ `MEMORY_CREATION_NOT_AUTHORIZED` before any signer call |
-| Runtime host | `owner-memory-control/tools/first_memory_dev_host.py`: a narrow owner-run host, separate from `/os/conversation`, Hermes and the UI. It composes the accepted `first_memory_conversation` with the F9c2 Privacy DB and current-boot freshness gate, the F9c2 cognitive DB, the registration, the installed K-ROOT trust anchor and registry, and the signer transport. Started by root, it runs as `lilith` and regains uid 0 only around the signer socket and the root hold-store read. A fresh composition per turn |
+| Runtime host | `owner-memory-control/tools/first_memory_dev_host.py`: a narrow owner-run host, separate from `/os/conversation`, Hermes and the UI. It composes the accepted `first_memory_conversation` with the F9c2 Privacy DB and current-boot freshness gate, the F9c2 cognitive DB, the registration, the installed K-ROOT trust anchor and registry, and the signer transport. It holds **no** root privilege: it refuses to run with any uid or gid 0 and reaches the signer only through the root bridge on inherited fd 3, sending no hold snapshot. A fresh composition per turn |
+| Root bridge | `lilith-authority-ledger-dev first-memory <remember\|recall> <session>` (`lilith_authority_root.cli`, release code only, root). It refuses unless the fixed host tree `/opt/lilith-first-memory-dev/current` and its parents are root-owned, not group/other-writable and symlink-free; forks the host and drops it **permanently** to `lilith` (real, effective and saved uid/gid; no supplementary groups; verified, and regaining uid 0 must fail) before exec of the release venv Python with `-I`; never imports host code. Over one inherited socket pair it forwards only `ISSUE_OWNER_EVIDENCE` and the four evidence-use operations (each re-validated by the signer's own frame parser), refuses any caller `holdStore`, and adds the complete hold-store snapshot it reads itself. No listener, path, command or file argument |
 | Owner device | `owner-memory-control/tools/first_memory_owner_credential_dev.py`: `create` (a P-256 software credential; the private key stays in a 0600 file on the owner device), `assert` (one assertion over a printed challenge), `registration <release-sha> <public>…` (verifies each proof of possession; prints the root-installable document) |
-| Release layout | Unchanged (archive layout v3). The payload moves by exactly: 9 changed members (`lilith_authority_dev/{core,credential,ledger,protocol,profile,server}.py`, `lilith_authority_host/{inputs,paths}.py`, `lilith_authority_root/clients.py`) and the 2 v3 additions (`issuance.py`, `lilith_owner_memory/verifier.py`), pinned by `test_rr39_layout_v3` |
+| Release layout | Unchanged (archive layout v3). The payload moves by exactly: 10 changed members (`lilith_authority_dev/{core,credential,ledger,protocol,profile,server}.py`, `lilith_authority_host/{inputs,paths}.py`, `lilith_authority_root/{clients,cli}.py`) and the 2 v3 additions (`issuance.py`, `lilith_owner_memory/verifier.py`), pinned by `test_rr39_layout_v3` |
 
 ## 3. Owner authentication: what this does and does not prove
 
@@ -64,6 +65,13 @@ real L04 / Privacy / freshness):
 6. the historical First Interaction FORGET stays held and its identity cannot be composed;
 7. the signer's HEALTH stays `NOT_READY`; recovery and use operations without their handlers refuse.
 
+The end-to-end flow above runs through the real root bridge on a socket pair. `authority-dev/tests/test_first_memory_bridge.py`
+(13, as root with the system `nobody` account) proves the boundary: a dropped process cannot regain uid 0 by any
+setuid/seteuid/setresuid/setgid/setgroups call; a host tree another principal can change (writable file or directory,
+symlink, wrong owner) is refused and never executed; the forked host runs with all ids unprivileged and reaches only
+the bridge; malformed, duplicate-key, extra-field, non-allowed (HEALTH, recovery, SIGN) and caller-`holdStore`
+requests never reach the signer; writes carry root's own, freshly read hold-store snapshot.
+
 ## 5. Shortest DEV activation (future; every step owner-authorized unless marked read-only)
 
 1. Merge; build the release from the merge commit with the v3 tooling (A = B, attested), and pin it.
@@ -71,9 +79,10 @@ real L04 / Privacy / freshness):
    unchanged, so the witness keeps running.
 3. Read-only: confirm the governing custody hold is RELEASED under FULL_READINESS (else the existing release ceremony).
 4. Owner device: `create`; then `registration <release-sha> <public>`.
-5. One root session: install the registration file; stage the exact-SHA source tree for the host; as `lilith`, run the
-   L04 migration `apply` (backup first). Creation is still disabled.
+5. One root session: install the registration file; stage the exact-SHA source tree for the host at
+   `/opt/lilith-first-memory-dev/current` (root-owned, `0755`/`0644`); as `lilith`, run the L04 migration `apply`
+   (backup first). Creation is still disabled.
 6. Per boot: the existing Privacy unlock (freshness READY).
 7. Authorize creation: write the canonical config (`canonicalLtmEnabled=true` + the codename capability).
-8. `remember <session>` (the owner signs the printed challenge within 60 s), then `recall <new-session>` in a new
-   invocation. Optionally set creation back to disabled.
+8. As root: `lilith-authority-ledger-dev first-memory remember <session>` (the owner signs the printed challenge within
+   60 s), then `… first-memory recall <new-session>` in a new invocation. Optionally set creation back to disabled.

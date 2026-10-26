@@ -5,6 +5,8 @@ Everything below is the real code path the DEV host will run, with only the host
 - the real authority signer core with the DEV runtime wiring (`dev_runtime_profile`, the per-request owner
   registration, the RR-39 governed issuance and the evidence-use transport), on a synthetic PR-1 host (K-ROOT
   registry, witness chain, durable ledger, RELEASED governing hold), reached through its real frame protocol;
+- the root bridge (`lilith_authority_root.cli.serve_bridge`, which adds root's own hold snapshot) on a real socket
+  pair to the unprivileged host's `BridgeTransportV1`;
 - the First Memory DEV host (`tools/first_memory_dev_host.py`) composing `first_memory_conversation` with the L04 V2
   adapter and accepted read on a canonical-migrated L04 DB whose admission link was installed by the reviewed
   migration tool (`tools/first_memory_l04_migration.py`);
@@ -17,9 +19,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +52,7 @@ from lilith_authority_dev import state as STATE  # noqa: E402
 from lilith_authority_dev.profile import dev_runtime_profile  # noqa: E402
 from lilith_authority_host import inputs as HI  # noqa: E402
 from lilith_authority_host import paths as P  # noqa: E402
+from lilith_authority_root import cli as ROOT_CLI  # noqa: E402
 from lilith_memory import canonical_contracts as C  # noqa: E402
 from lilith_memory import learning_v2  # noqa: E402
 from lilith_memory import memory_v2  # noqa: E402
@@ -64,26 +69,37 @@ ASK = "What is my project codename?"
 RELEASE_SHA = "1" * 40                                       # TEST stand-in for the accepted signer release
 
 
-class InProcessSignerTransport:
-    """The root owner socket, replaced by the same frames in process (request and response both on the wire)."""
+class RootBridgeHarness:
+    """The real root bridge on a real socket pair; only the signer socket itself is replaced by in-process frames.
+    `hold` is root's own hold-store read (the synthetic host's genuine store)."""
 
     def __init__(self, case):
         self.case = case
         self.frames = []
+        self.hold = case.signer.released_snapshot
+        server, client = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.client = HOST.BridgeTransportV1(client)
+        self._sockets = (server, client)
+        self._thread = threading.Thread(target=ROOT_CLI.serve_bridge, args=(server,), kwargs=dict(
+            hold_snapshot=lambda: self.hold(), exchange=self.exchange, max_requests=10_000), daemon=True)
+        self._thread.start()
 
-    def hold_snapshot(self):
-        return self.case.signer.released_snapshot()
-
-    def _send(self, operation, payload):
-        self.frames.append(operation)
-        result = self.case.core.dispatch(W.parse_frame(W.encode_frame(operation, dict(payload))))
+    def exchange(self, frame):
+        message = W.parse_frame(frame)
+        self.frames.append(message.operation)
+        result = self.case.core.dispatch(message)
         return json.loads(W.encode_response(result)[4:])["payload"]
 
+    def close(self):
+        for conn in self._sockets:
+            conn.close()
+        self._thread.join(5)
+
     def issue(self, payload):
-        return self._send(W.ISSUE_OWNER_EVIDENCE, payload)
+        return self.client.issue(payload)
 
     def use(self, operation, payload):
-        return self._send(operation, payload)
+        return self.client.use(operation, payload)
 
 
 @unittest.skipUnless(X.POSIX, "ownership and modes are POSIX")
@@ -135,7 +151,8 @@ class FirstMemoryDevVerticalTests(unittest.TestCase):
         self.hermes = base / "hermes"
         self.hermes.mkdir()
         (self.hermes / "state.db").write_bytes(b"TEST_ONLY Hermes conversation history stand-in")
-        self.transport = InProcessSignerTransport(self)
+        self.transport = RootBridgeHarness(self)
+        self.addCleanup(self.transport.close)
 
     # ------------------------------------------------------------------------------------------ helpers ---
 
@@ -371,7 +388,7 @@ class FirstMemoryDevVerticalTests(unittest.TestCase):
             "OWNER_CREDENTIAL_NOT_REGISTERED")
         self.assertEqual(self.journal_ops(), ["GENESIS"])
         held = self.signer.released_snapshot(state=RR39.SC.HELD)
-        self.transport.hold_snapshot = lambda: held
+        self.transport.hold = lambda: held
         result, _ = self.remember()
         self.assertEqual(result["status"], FMC.NOT_ADMITTED)
         self.assertTrue(result["reason"].startswith("SIGNER_REFUSED:HOLD_NOT_RELEASED_FOR_ISSUANCE"), result)

@@ -34,7 +34,9 @@ RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/
                           # First Memory: the DEV runtime wiring and the evidence-use transport.
                           "lilith_authority_dev/profile.py", "lilith_authority_dev/server.py",
                           "lilith_authority_host/inputs.py", "lilith_authority_host/paths.py",
-                          "lilith_authority_root/clients.py"})
+                          "lilith_authority_root/clients.py",
+                          # First Memory privilege fix: the root bridge (`first-memory` form).
+                          "lilith_authority_root/cli.py"})
 
 
 def sha(data: bytes) -> str:

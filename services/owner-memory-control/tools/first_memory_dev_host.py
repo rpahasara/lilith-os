@@ -14,12 +14,15 @@ accepted `first_memory_conversation.FirstMemoryConversationV1` with real DEV com
 - the root-installed owner registration (`/etc/lilith-owner-proof-dev/owner-registration.json`) for the owner
   principal, RP, settings and registered PUBLIC credentials;
 - the installed K-ROOT trust anchor and registry (`/etc/lilith-authority-dev`) for the L04 V2 authority contexts;
-- the real authority signer over its root owner socket (`lilith_authority_root.clients`): governed
-  `ISSUE_OWNER_EVIDENCE` and the evidence-use transport, each write with the complete root hold-store snapshot.
+- the real authority signer, reached ONLY through the root bridge on inherited fd 3
+  (`lilith_authority_root.cli.run_first_memory`, form `lilith-authority-ledger-dev first-memory`): governed
+  `ISSUE_OWNER_EVIDENCE` and the evidence-use operations. The host never sends a hold snapshot; the bridge adds the
+  one it reads itself.
 
-Identity: started by root (the owner's host-root ceremony), it immediately runs with the L04 / Privacy owner's
-effective uid (`lilith`) and regains uid 0 only for the signer socket exchange and the root hold-store read
-(`RootPrivilegeV1`). Every database file it touches is therefore written as `lilith`.
+Identity: this process holds NO root privilege at any time. The root bridge (release code only) checks that this
+host's tree is root-controlled, then forks it and drops it permanently to `lilith` (real, effective and saved uid/gid;
+no supplementary groups) before exec. The host refuses to run if any of its uids or gids is 0, so it can neither
+regain root nor change the code root runs. Every database file it touches is written as `lilith`.
 
 Closed forms (one turn per invocation; text on stdin, one JSON object per line on stdout):
 
@@ -33,14 +36,15 @@ Nothing here signs, holds a key, chooses a signed digest, or reads a private key
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
+import socket
+import struct
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Optional, Protocol
+from typing import Any, Callable, Mapping, Optional, Protocol
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -69,7 +73,6 @@ from lilith_owner_memory import l04_v2_adapter as AD  # noqa: E402
 from lilith_owner_memory import recovery_contracts as R  # noqa: E402
 
 ENVIRONMENT = "dev"
-SERVICE_USER = "lilith"
 DRILL = Path("/home/lilith/.hermes/lilith-os-dev/f9-drill")
 # The governed DEV_SYNTHETIC project-codename tuple: the one identity the signer, L04 and the accepted read compose.
 GOVERNED_TUPLE = memory_v2.MemoryTuplePolicyV1(
@@ -109,71 +112,59 @@ def _need(condition: bool, code: str) -> None:
 
 # ------------------------------------------------------------------------------------------------- identity ---
 
-class RootPrivilegeV1:
-    """Run as the L04 / Privacy owner; regain uid 0 only around a signer or hold-store exchange (Linux)."""
-
-    def __init__(self, user: str = SERVICE_USER):
-        import pwd
-
-        entry = pwd.getpwnam(user)
-        self._uid, self._gid = entry.pw_uid, entry.pw_gid
-        _need(os.getuid() == 0, "HOST_MUST_BE_STARTED_BY_ROOT")
-        os.setgroups([])
-        os.setegid(self._gid)
-        os.seteuid(self._uid)
-
-    @contextlib.contextmanager
-    def as_root(self) -> Iterator[None]:
-        os.seteuid(0)
-        os.setegid(0)
-        try:
-            yield
-        finally:
-            os.setegid(self._gid)
-            os.seteuid(self._uid)
+BRIDGE_FD = 3                       # lilith_authority_root.cli.BRIDGE_FD
 
 
-class NoPrivilegeV1:
-    """TEST seam: the same calls, no identity change."""
-
-    @contextlib.contextmanager
-    def as_root(self) -> Iterator[None]:
-        yield
+def unprivileged_reason(resuid: tuple[int, int, int] | None = None,
+                        resgid: tuple[int, int, int] | None = None) -> str | None:
+    """None only when no real, effective or saved uid/gid is 0 (so root can never be regained)."""
+    resuid = os.getresuid() if resuid is None else resuid
+    resgid = os.getresgid() if resgid is None else resgid
+    return "HOST_HAS_ROOT_IDENTITY" if 0 in resuid or 0 in resgid else None
 
 
 # ------------------------------------------------------------------------------------------------- signer ---
 
 class SignerTransportV1(Protocol):
-    def hold_snapshot(self) -> dict[str, Any]: ...
-
     def issue(self, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
     def use(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
-class RootSignerTransportV1:
-    """The real signer owner socket and root hold store, reached only with uid 0."""
+class BridgeTransportV1:
+    """The host side of the root bridge: one length-prefixed JSON request, one response. No hold snapshot."""
 
-    def __init__(self, privilege: Any):
-        self._privilege = privilege
+    def __init__(self, conn: socket.socket):
+        self._conn = conn
 
-    def hold_snapshot(self) -> dict[str, Any]:
-        from lilith_authority_root.hold_store import HoldStoreV1
+    def _call(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        body = json.dumps({"operation": operation, "payload": dict(payload)}, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8")
+        _need(len(body) <= AP.MAX_FRAME_BYTES, "BRIDGE_REQUEST_TOO_LARGE")
+        self._conn.sendall(struct.pack(">I", len(body)) + body)
+        header = self._recv(4)
+        length = struct.unpack(">I", header)[0]
+        if not 0 < length <= AP.MAX_FRAME_BYTES:
+            raise ValueError("invalid bridge response length")
+        value = json.loads(self._recv(length))
+        if not isinstance(value, dict):
+            raise ValueError("invalid bridge response")
+        return value
 
-        with self._privilege.as_root():
-            return dict(HoldStoreV1(environment=ENVIRONMENT).observe().snapshot)
+    def _recv(self, size: int) -> bytes:
+        data = b""
+        while len(data) < size:
+            chunk = self._conn.recv(size - len(data))
+            if not chunk:
+                raise OSError("the bridge closed")
+            data += chunk
+        return data
 
     def issue(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        from lilith_authority_root import clients
-
-        with self._privilege.as_root():
-            return clients.signer_issue(payload)
+        return self._call(AP.ISSUE_OWNER_EVIDENCE, payload)
 
     def use(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        from lilith_authority_root import clients
-
-        with self._privilege.as_root():
-            return clients.signer_use(operation, payload)
+        return self._call(operation, payload)
 
 
 def action_dict(action: C.FrozenMemoryActionV1) -> dict[str, Any]:
@@ -204,8 +195,7 @@ class SignerIssuerV1:
         try:
             result = self._transport.issue({
                 "challengeId": challenge_id, "action": action_dict(action), "assertion": dict(assertion),
-                "ownerCredential": dict(credential), "challenge": challenge,
-                "holdStore": self._transport.hold_snapshot()})
+                "ownerCredential": dict(credential), "challenge": challenge})      # the bridge adds the hold snapshot
         except (OSError, ValueError) as exc:
             raise FMC.FirstMemoryRefused("SIGNER_UNREACHABLE:" + type(exc).__name__) from exc
         if not isinstance(result, Mapping) or result.get("status") != "ISSUED":
@@ -232,7 +222,7 @@ class SignerEvidenceUseLedgerV1:
 
     def _write(self, operation: str, expected: str, **fields: Any) -> UseResultV1:
         try:
-            result = self._transport.use(operation, {**fields, "holdStore": self._transport.hold_snapshot()})
+            result = self._transport.use(operation, dict(fields))             # the bridge adds the hold snapshot
         except (OSError, ValueError) as exc:
             return UseResultV1("REFUSED", "SIGNER_UNREACHABLE:" + type(exc).__name__)
         if not isinstance(result, Mapping) or result.get("status") != expected:
@@ -413,8 +403,11 @@ def main(argv: list[str]) -> int:
     try:
         if len(argv) != 2 or argv[0] not in ("remember", "recall"):
             raise HostRefused("USAGE")
-        privilege = RootPrivilegeV1()
-        host = FirstMemoryDevHostV1(transport=RootSignerTransportV1(privilege))
+        refused = unprivileged_reason()
+        _need(refused is None, str(refused))
+        bridge = socket.socket(fileno=BRIDGE_FD)
+        _need(bridge.family == socket.AF_UNIX, "BRIDGE_UNAVAILABLE")
+        host = FirstMemoryDevHostV1(transport=BridgeTransportV1(bridge))
         text = sys.stdin.readline().rstrip("\n")
         if argv[0] == "recall":
             emit(recall(host, argv[1], text))
