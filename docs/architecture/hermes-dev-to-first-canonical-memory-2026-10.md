@@ -260,7 +260,7 @@ A locally approved, narrowly scoped DEV root operation installed the Ubuntu acl 
 | Field | Owner-reported result |
 | --- | --- |
 | Owner's final value | **Hello Lilith. Your story begins here** |
-| Why a period | Commas were rejected by the closed codename normalizer. The exact final 35-character phrase passed unchanged |
+| Why a period | Commas were rejected by the closed codename normalizer. The exact final 36-character phrase passed unchanged |
 | Typed memory | SYNTHETIC_PROJECT_CODENAME_FACT / project.synthetic / codename |
 | Approved utterance | remember my project codename is Hello Lilith. Your story begins here |
 | Creation gate | Owner-authorized enable for the codename capability only; no new family or general transcript capture |
