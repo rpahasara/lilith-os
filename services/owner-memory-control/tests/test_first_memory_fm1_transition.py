@@ -403,8 +403,58 @@ class OperatorTests(Base):
         self.stop("LATEST_PREFLIGHT_NOT_EXACT", self.op.render, self.repo, self.work, "STAGE")
         self.assertEqual(self.dev.mutations, [])
 
+    def test_an_owner_adjudicated_stage_stop_continues_only_from_an_exact_fresh_gate(self):
+        """The 2026-10-26 recovery: the stage ran (F1) but the post-status read crashed locally, so STEP.json says STOP.
+        Only the pinned record digest unblocks the chain; the next step still needs its own fresh F1 gate; the stage
+        never re-runs."""
+        self.assertEqual(self.op.preflight(self.repo, self.work)["result"], "FM1_PREFLIGHT_EXACT")
+        self.op.status(self.repo, self.work, "STAGE_GATE")
+        go = self.go("STAGE")
+        original = self.dev.plink
+
+        def crash_post(command, payload, state={"stage": False}):
+            result = original(command, payload)
+            if "fm1-stage" in command:
+                state["stage"] = True
+            elif state["stage"] and "fm1-status" in command and result.returncode == 0:
+                state["stage"] = False
+                return done(0xC0000005, out=result.stdout)    # complete output; the local client crashed on exit
+            return result
+
+        self.dev.plink = crash_post
+        record = self.op._step(self.repo, self.work, "STAGE", go)
+        self.dev.plink = original
+        self.assertEqual((record["result"], record["code"], record["postPhase"]),
+                         ("FM1_STAGE_STOP", 0, "STATUS_NOT_RECEIVED"))
+        self.assertEqual(self.status()["phase"], S.F1)                    # the host is exactly F1
+        digest = sha((next((self.work / OP.STEP_DIR).glob("*-STAGE")) / OP.STEP_FILE).read_bytes())
+        self.op.status(self.repo, self.work, "F1_RECHECK")
+        self.stop("STEP_NOT_REACHED:STAGE", self.op.render, self.repo, self.work, "SIGNER_STOP")
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"STAGE": "0" * 64}):
+            self.stop("STEP_NOT_REACHED:STAGE", self.op.render, self.repo, self.work, "SIGNER_STOP")
+        with mock.patch.dict(OP.ADJUDICATED_STEPS, {"STAGE": digest}):
+            self.host.signer_stopped()                                   # not F1: the fresh gate refuses
+            self.op.status(self.repo, self.work, "NOT_F1")
+            self.stop("LATEST_STATUS_NOT_F1_NEW_STAGED", self.op.render, self.repo, self.work, "SIGNER_STOP")
+            self.host.signer_running(S.ENDING_SIGNER_INCARNATION, OLD)
+            for step in OP.ORDER[1:]:
+                if step == "SIGNER_START":
+                    self.accept("WITNESS")
+                if step == "RETIRE":
+                    self.accept("SIGNER")
+                self.assertTrue(self.run_step(step)["result"].startswith(f"FM1_{step}_REACHED"), step)
+            self.stop("ATTEMPT_ALREADY_CONSUMED:fm1-stage", self.op._step, self.repo, self.work, "STAGE", go)
+        self.assertEqual(self.dev.mutations.count("fm1-stage"), 1)
+        self.assertFalse((self.root / f"opt/lilith-authority-dev/releases/{OLD}").exists())
+
 
 class PinTests(unittest.TestCase):
+    def test_the_only_adjudication_is_the_recorded_stage_stop(self):
+        self.assertEqual(set(OP.ADJUDICATED_STEPS), {"STAGE"})
+        self.assertRegex(OP.ADJUDICATED_STEPS["STAGE"], r"\A[0-9a-f]{64}\Z")
+        record = (ROOT / "docs/architecture/first-memory-fm1-release-transition.md").read_text(encoding="utf-8")
+        self.assertIn(OP.ADJUDICATED_STEPS["STAGE"], record)
+
     def test_the_delta_is_the_git_bytes_of_57bff671_against_the_repository(self):
         import install_authority_dev_v3 as V3
         import release_file_set as RFS

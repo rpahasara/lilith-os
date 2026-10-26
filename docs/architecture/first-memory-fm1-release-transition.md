@@ -92,3 +92,38 @@ memory creation happens before F7.
 
 **Deferred, not needed for First Memory:** a post-F7 re-pin of the installed-release bindings (`DEV_PINS`,
 `DEV_EXPECTED`) and a DR-5 target. This is the E-23 completion pattern, and it is a separate change.
+
+## 4. STAGE STOP: owner adjudication (PROPOSED until merged)
+
+```text
+adjudicated STOP != reached step;  chain continuation != any go;  the next step still needs its own fresh gate and go
+```
+
+On 2026-10-26, FM1-GO-STAGE (canonical go `d62eeedd4b4b59445f1ff8d082d882170ea981946b985dfeca7ff5c1ab605da0`) ran
+**once** from control `7702b01`. Evidence is in `C:\Users\edufo\lilith-fm1-transition-7702b01\`
+(`SHA256SUMS.seal-2-stage-stop` `469c7b0a…`).
+
+| Item | Value |
+| --- | --- |
+| Gate | observation 02: `F0_OLD_EXACT` |
+| Marker | `attempts/fm1-stage.json`, consumed |
+| Remote | one `fm1-stage`, rc 0, mutation `STAGED`; its own post-check reported `F1_NEW_STAGED`, PASS |
+| Post | observation 03: local exit code `3221225477` (`0xC0000005`, the known Cloud SDK plink exit crash), so the operator judged `STATUS_NOT_RECEIVED`. The output was complete and re-judges to `F1_NEW_STAGED` |
+| Step record | `steps/01-STAGE/STEP.json`, result `FM1_STAGE_STOP`, SHA-256 `b82b4a5b94451313b84818860a5b8d0e06fc4815c275966c8b35d252f5e7fb4e` |
+| Re-observation | observation 04, one read-only `status` with no go and no marker: rc 0, `F1_NEW_STAGED`. Its bytes (`420f785a…`) are identical to observation 03 |
+
+The host is exactly F1:
+
+- releases `{57bff671, e2324a5}`, with `current` → OLD;
+- the NEW manifest is the pin `a2f32664…`;
+- signer `639a814d…`/281830 and witness `86ba4cc2…`/281470 are unchanged and still on OLD;
+- credentials, anchor and foreign units equal the preflight baseline.
+
+No retry and no repair was made.
+
+**Adjudication.** `fm1_operator.ADJUDICATED_STEPS` pins exactly that `STEP.json` digest. The STAGE step then counts as
+reached for the step chain only:
+
+- it never runs again, because its marker stays consumed;
+- the next step (SIGNER_STOP) still needs its own owner go and a fresh read-only gate reading `F1_NEW_STAGED`;
+- any other record digest, or any other STOP, still blocks the chain.
