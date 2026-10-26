@@ -73,6 +73,13 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tests/test_trackb_e23_release_stages.py",
         "services/owner-memory-control/tests/test_trackb_e23_operator.py",
         "docs/architecture/trackb-e23-e5-adjudication.md",
+        # First Memory FM-1 owner-side release-transition tooling, its tests and its record (never in the Core API
+        # bundle). A merge of these alone must not deploy: the transition baseline includes the Core API incarnation.
+        "services/owner-memory-control/tools/fm1_signer_upgrade.py",
+        "services/owner-memory-control/tools/fm1_release_stages.py",
+        "services/owner-memory-control/tools/fm1_operator.py",
+        "services/owner-memory-control/tests/test_first_memory_fm1_transition.py",
+        "docs/architecture/first-memory-fm1-release-transition.md",
     }
 )
 
