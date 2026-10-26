@@ -28,7 +28,7 @@ for path in (HERE, ROOT / "services/authority-dev"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import install_authority_dev_v2 as I  # noqa: E402  (Track B: archive layout v2; installer V1 byte-identical)
+import install_authority_dev_v3 as I  # noqa: E402  (RR-39: archive layout v3; installers V1 and V2 byte-identical)
 import release_file_set as RFS  # noqa: E402
 
 KEYGEN_SOURCE = "services/authority-dev/ceremony/lilith_authority_keygen_dev.py"

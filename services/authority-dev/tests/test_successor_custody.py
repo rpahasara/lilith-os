@@ -578,8 +578,13 @@ class ReleaseFileSetTests(unittest.TestCase):
         # PR-1S (S-10): the C-4 gate is wired into the signer ONLY through `recovery.py`, which imports no minter.
         wired = [name for name, data in payloads.items() if name.startswith("lilith_authority_dev/")
                  and b"successor_readiness" in data]
-        self.assertEqual(wired, ["lilith_authority_dev/recovery.py"])
+        # RR-39: the governed issuance path is the one other consumer, and the ONLY runtime module importing the
+        # minter (it re-derives the same readiness before signing); the DEV runtime constructs it nowhere.
+        self.assertEqual(sorted(wired), ["lilith_authority_dev/issuance.py", "lilith_authority_dev/recovery.py"])
         self.assertNotIn(b"evidence_minter", payloads["lilith_authority_dev/recovery.py"])
+        self.assertEqual([name for name, data in payloads.items() if b"from .evidence_minter import" in data],
+                         ["lilith_authority_dev/issuance.py"])
+        self.assertNotIn(b"issuance", payloads["lilith_authority_dev/server.py"])
 
     def test_source_release_identity_is_deterministic(self):
         first, second = source_release_identity(), source_release_identity()

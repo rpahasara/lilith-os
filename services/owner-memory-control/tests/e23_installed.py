@@ -3,6 +3,9 @@
 Tests that compare the repository against the installed release (the M-B6 module pins, the E-19 restart-boundary unit
 fragment, the E-19/E-22 delta guards) use these bytes for the E-23 members, because the repository now carries the
 proposed E-23 payload while the host still runs OLD. CI checks out the full history (`fetch-depth: 0`).
+
+RR-39 (archive layout v3) moved the repository on again: its four changed signer members are reverted the same way
+(E-23 left them untouched, so their 129f2be bytes are also the 57bff671 bytes) and its two added members are removed.
 """
 
 from __future__ import annotations
@@ -20,34 +23,51 @@ for _path in (ROOT / "services/core-api", ROOT / "services/owner-memory-control"
         sys.path.insert(0, str(_path))
 
 import e23_privacy_anchor_upgrade as E23  # noqa: E402
+import install_authority_dev_v3 as V3  # noqa: E402
 import release_file_set as RFS  # noqa: E402
 
 SOURCE_OF = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
+# The RR-39 source change to the signer runtime (pinned exactly by authority-dev `test_rr39_layout_v3`).
+RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/credential.py",
+                          "lilith_authority_dev/ledger.py", "lilith_authority_dev/protocol.py"})
+# Every repository member whose installed bytes differ, and every member the installed release does not carry.
+INSTALLED_DELTA = frozenset(E23.PAYLOAD_DELTA) | RR39_CHANGED
+NOT_INSTALLED = frozenset(E23.PAYLOAD_ADDED) | V3.ADDED_RUNTIME_PATHS
 
 
 @lru_cache(maxsize=None)
 def old_bytes(member: str) -> bytes:
-    """The installed bytes of one changed E-23 member (`git show <OLD_RELEASE>:<source>`)."""
-    if member not in E23.PAYLOAD_DELTA:
+    """The installed bytes of one changed E-23 or RR-39 member (`git show <OLD_RELEASE>:<source>`)."""
+    if member not in INSTALLED_DELTA:
         raise KeyError(member)
     out = subprocess.run(["git", "show", f"{E23.OLD_RELEASE}:{SOURCE_OF[member]}"], cwd=ROOT, capture_output=True,
                          check=True)
     return out.stdout
 
 
-def installed_payloads(root: Path = ROOT) -> dict[str, bytes]:
-    """The repository payload with every E-23 member at its installed bytes and the added members removed."""
+def e23_new_payloads(root: Path = ROOT) -> dict[str, bytes]:
+    """The E-23 NEW payload (archive layout v2): the repository payload with the RR-39 change reverted."""
     payloads = dict(RFS.runtime_payloads(root))
-    for member in E23.PAYLOAD_ADDED:
+    for member in V3.ADDED_RUNTIME_PATHS:
         payloads.pop(member)
-    for member in E23.PAYLOAD_DELTA:
+    for member in RR39_CHANGED:
+        payloads[member] = old_bytes(member)
+    return payloads
+
+
+def installed_payloads(root: Path = ROOT) -> dict[str, bytes]:
+    """The repository payload with every E-23 / RR-39 member at its installed bytes and the added members removed."""
+    payloads = dict(RFS.runtime_payloads(root))
+    for member in NOT_INSTALLED:
+        payloads.pop(member)
+    for member in INSTALLED_DELTA:
         payloads[member] = old_bytes(member)
     return payloads
 
 
 def installed_source_bytes(source: str) -> bytes:
-    """Installed bytes for a repository source path: OLD for an E-23 member, the repository bytes otherwise."""
+    """Installed bytes for a repository source path: OLD for an E-23 / RR-39 member, the repository bytes otherwise."""
     target = RFS.RUNTIME_SOURCE_MAP.get(source)
-    if target in E23.PAYLOAD_DELTA:
+    if target in INSTALLED_DELTA:
         return old_bytes(target)
     return (ROOT / source).read_bytes()

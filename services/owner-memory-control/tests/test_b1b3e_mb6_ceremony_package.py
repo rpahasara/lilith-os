@@ -449,10 +449,10 @@ class ReadinessProbeTests(unittest.TestCase):
             for package, base in sources.items():
                 shutil.copytree(ROOT / base / package, release / package,
                                 ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-            for changed in E23H.E23.PAYLOAD_DELTA:              # the installed (pre-E-23) bytes, from Git history
+            for changed in E23H.INSTALLED_DELTA:               # the installed (pre-E-23 / RR-39) bytes, from Git history
                 if not changed.startswith("assets/"):
                     (release / changed).write_bytes(E23H.old_bytes(changed))
-            for added in E23H.E23.PAYLOAD_ADDED:
+            for added in E23H.NOT_INSTALLED:
                 (release / added).unlink()
             member = release / E19.PR1_ACCEPTANCE_MEMBER        # the installed aee323e bytes, not the E-19 source
             member.write_bytes(E19.reverse_e19(E19_PR1_ACCEPTANCE_BYTES))

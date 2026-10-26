@@ -500,8 +500,9 @@ class B2aEquivalenceTests(unittest.TestCase):
             if name == "context-not-test":
                 # RR-39, the one intentional divergence: the B2a chain stays TEST-only, while the V2 owner-proof
                 # entry point admits exactly the fixed DEV_SYNTHETIC owner (this case's synthetic principal and RP).
+                # Step 1 admits it; the TEST-environment challenge is then refused exactly.
                 self.assertEqual(full_reason, "ENVIRONMENT_NOT_SUPPORTED")
-                self.assertNotEqual(owner_reason, "ENVIRONMENT_NOT_SUPPORTED")
+                self.assertEqual((owner_status, owner_reason), (B2A.NOT_ACCEPTED, "DEPLOYMENT_ENVIRONMENT_MISMATCH"))
                 continue
             if owner_status == B2A.NOT_ACCEPTED:
                 # Steps 1-6 failed: the full verifier failed first, identically.
@@ -514,6 +515,32 @@ class B2aEquivalenceTests(unittest.TestCase):
         chain = SC.Chain()
         self.assertEqual(B2A.verify_accepted_memory(**chain.kwargs()).facts["truthClaim"], False)
         self.assertEqual(B2A.verify_accepted_memory(**chain.kwargs()).facts["epistemicBasis"], "USER_ASSERTED")
+
+    def test_dev_owner_proof_admits_exactly_the_fixed_dev_synthetic_identity(self):
+        # RR-39: a DEV challenge signed by the synthetic owner verifies at the V2 owner-proof entry point only.
+        fields = ("context", "action", "challenge_json", "challenge_record", "assertion", "owner_credential")
+
+        def owner(chain, **context):
+            kwargs = chain.kwargs(context=SC.context(**context))
+            return B2A.verify_owner_proof(**{k: kwargs[k] for k in fields})
+
+        chain = SC.Chain(challenge_overrides={"deploymentEnvironment": "dev"})
+        result = owner(chain, deployment_environment="dev")
+        self.assertEqual((result.status, result.reason), (B2A.VERIFIED_OWNER_PROOF, None))
+        self.assertEqual(B2A.verify_accepted_memory(**chain.kwargs(context=SC.context(deployment_environment="dev")))
+                         .reason, "ENVIRONMENT_NOT_SUPPORTED")
+        for context in (dict(deployment_environment="prod"),
+                        dict(deployment_environment="dev", owner_principal="user:other@example.invalid"),
+                        dict(deployment_environment="dev", rp_id="other.lilith.invalid",
+                             origin="https://other.lilith.invalid"),
+                        dict(deployment_environment="dev", rp_id="owner.example.com",
+                             origin="https://owner.example.com"),
+                        dict(deployment_environment="dev", origin="https://other.lilith.invalid")):
+            with self.subTest(context=context):
+                self.assertEqual(owner(chain, **context).reason, "ENVIRONMENT_NOT_SUPPORTED")
+        # The admitted DEV identity still needs a real owner signature over the exact challenge.
+        forged = SC.Chain(challenge_overrides={"deploymentEnvironment": "dev"}, signing_owner=SC.owner_key(7))
+        self.assertEqual(owner(forged, deployment_environment="dev").reason, "OWNER_SIGNATURE_INVALID")
 
 
 # ------------------------------------------------ 9. policy equality ---

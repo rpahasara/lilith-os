@@ -58,7 +58,7 @@ TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_prepar
                         # Track B B4: the installed-layout fixture helper and the archive layout v2 tests.
                         "installed_layout.py", "test_trackb_layout_v2.py",
                         # RR-39: governed issuance and the First Memory offline proof.
-                        "test_rr39_issuance.py"})
+                        "test_rr39_issuance.py", "test_rr39_layout_v3.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
@@ -66,7 +66,9 @@ CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority
                             # B1b-3e PR-1A build gate: owner-workstation attestation and the fixed host observer.
                             "attest_authority_dev_build.py", "observe_authority_dev_host.py",
                             # Track B B4: the versioned installer successor (archive layout v2; V1 byte-identical).
-                            "install_authority_dev_v2.py"})
+                            "install_authority_dev_v2.py",
+                            # RR-39: the archive layout v3 successor (V1 and V2 byte-identical).
+                            "install_authority_dev_v3.py"})
 # The fixed root CLI wrappers (release members `cli/<name>`).
 CLI_FILES = frozenset({"lilith-authority-ledger-dev", "lilith-authority-hold-dev", "lilith-authority-verify-dev",
                        "lilith-authority-recovery-dev", "lilith-recovery-witness-owner-dev"})

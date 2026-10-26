@@ -1,5 +1,8 @@
 """Track B B4: archive layout v2 (`install_authority_dev_v2`) next to the byte-identical V1 installer.
-Repository only: temporary directories and stand-in wheels; nothing is installed."""
+Repository only: temporary directories and stand-in wheels; nothing is installed.
+
+RR-39 moved the tree on to archive layout v3 (`test_rr39_layout_v3`); v2 is judged on the E-23 NEW payload
+(`installed_layout._build_v2`, the 57bff671 bytes) and V2 itself stays byte-identical."""
 
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ for _p in (ROOT / "services/authority-dev/ceremony", ROOT / "services/authority-
 import build_authority_dev_release as B  # noqa: E402
 import install_authority_dev as V1  # noqa: E402
 import install_authority_dev_v2 as V2  # noqa: E402
+import install_authority_dev_v3 as V3  # noqa: E402
 import installed_layout as IL  # noqa: E402
 import pr1s_fixtures as FX  # noqa: E402
 import release_file_set as RFS  # noqa: E402
@@ -45,15 +49,19 @@ class LayoutTests(unittest.TestCase):
                                                   "lilith_memory/privacy_anchor_contracts.py"})
         self.assertEqual(V2.RUNTIME_PATHS - V1.RUNTIME_PATHS, V2.ADDED_RUNTIME_PATHS)
         self.assertEqual(V2.EXPECTED_PATHS - V1.EXPECTED_PATHS, V2.ADDED_RUNTIME_PATHS)
-        self.assertEqual(V2.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        self.assertEqual(V2.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()) - V3.ADDED_RUNTIME_PATHS)
         for name in ("stage_release", "status", "release_tree_failures", "manifest_for", "write_archive", "ROLE"):
             self.assertIs(getattr(V2, name), getattr(V1, name), name)       # everything else IS V1
-        self.assertIs(B.I, V2)
+        # RR-39: V2 is the E-23 (57bff671) bytes; the builder moved on to the v3 successor.
+        self.assertEqual(hashlib.sha256((ROOT / "services/authority-dev/ceremony/install_authority_dev_v2.py")
+                                        .read_bytes()).hexdigest(),
+                         "cf995dd15beeddae4f6991a62c06d7c3128f8746ba5e497a1a55248aa010e969")
+        self.assertIs(B.I, V3)
 
     def test_each_installer_refuses_the_other_layout(self):
         with FX.stand_in_wheels() as wheels, tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            new = B.build_payloads(ROOT, wheels)                             # the E-23 (v2) layout
+            new = IL._build_v2(ROOT, wheels)                                 # the E-23 (v2) layout
             old = IL.installed_build_payloads(ROOT, wheels)                  # the installed (v1) layout
             self.assertEqual(set(new) - set(old), V2.ADDED_RUNTIME_PATHS)
             before = V1.EXPECTED_PATHS
