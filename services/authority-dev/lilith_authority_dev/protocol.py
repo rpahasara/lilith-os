@@ -20,6 +20,10 @@ ledger journal write gated by the pure C-4 recovery gate, never a signature:
 the complete root hold-store snapshot), `RECOVERY_VOID_CHALLENGE` and
 `RECOVERY_QUARANTINE_USE` (the snapshot only). Frames are at most 64 KiB so
 one complete snapshot fits.
+
+First Memory adds the authority-side evidence-use transport the L04 V2 adapter needs (B1b-3b lifecycle, now on the
+signer's durable ledger): `RESERVE_EVIDENCE_USE`, `CONFIRM_EVIDENCE_USE`, `ABANDON_EVIDENCE_USE` (each with the
+complete root hold-store snapshot, like recovery) and the read-only `LOOKUP_EVIDENCE_USE`. None of them signs.
 """
 
 from __future__ import annotations
@@ -42,7 +46,13 @@ RECOVERY_ADVANCE_EPOCH = "RECOVERY_ADVANCE_EPOCH"
 RECOVERY_VOID_CHALLENGE = "RECOVERY_VOID_CHALLENGE"
 RECOVERY_QUARANTINE_USE = "RECOVERY_QUARANTINE_USE"
 RECOVERY_OPERATIONS = frozenset({RECOVERY_ADVANCE_EPOCH, RECOVERY_VOID_CHALLENGE, RECOVERY_QUARANTINE_USE})
-OPERATIONS = frozenset({HEALTH, ISSUE_OWNER_EVIDENCE}) | RECOVERY_OPERATIONS
+RESERVE_EVIDENCE_USE = "RESERVE_EVIDENCE_USE"
+CONFIRM_EVIDENCE_USE = "CONFIRM_EVIDENCE_USE"
+ABANDON_EVIDENCE_USE = "ABANDON_EVIDENCE_USE"
+LOOKUP_EVIDENCE_USE = "LOOKUP_EVIDENCE_USE"
+USE_WRITE_OPERATIONS = frozenset({RESERVE_EVIDENCE_USE, CONFIRM_EVIDENCE_USE, ABANDON_EVIDENCE_USE})
+USE_OPERATIONS = USE_WRITE_OPERATIONS | {LOOKUP_EVIDENCE_USE}
+OPERATIONS = frozenset({HEALTH, ISSUE_OWNER_EVIDENCE}) | RECOVERY_OPERATIONS | USE_OPERATIONS
 _ENVELOPE = frozenset({"protocol", "schemaVersion", "operation", "payload"})
 _PAYLOAD_FIELDS = {
     HEALTH: frozenset(),
@@ -50,7 +60,13 @@ _PAYLOAD_FIELDS = {
     RECOVERY_ADVANCE_EPOCH: frozenset({"epochAuthorization", "holdStore"}),
     RECOVERY_VOID_CHALLENGE: frozenset({"holdStore"}),
     RECOVERY_QUARANTINE_USE: frozenset({"holdStore"}),
+    RESERVE_EVIDENCE_USE: frozenset({"holdStore", "evidenceId", "evidenceDigest", "challengeId", "proposalRefId",
+                                     "actionDigest"}),
+    CONFIRM_EVIDENCE_USE: frozenset({"holdStore", "evidenceId", "proposalRefId", "admissionId", "revisionId"}),
+    ABANDON_EVIDENCE_USE: frozenset({"holdStore", "evidenceId", "proposalRefId"}),
+    LOOKUP_EVIDENCE_USE: frozenset({"evidenceId"}),
 }
+_USE_DIGEST_FIELDS = frozenset({"evidenceDigest", "actionDigest"})
 # RR-39: the governed issuance form adds the exact owner challenge and the complete root hold-store snapshot (the
 # recovery-handler pattern). The legacy form above stays parseable and is always refused (no challenge to verify).
 GOVERNED_ISSUE_FIELDS = _PAYLOAD_FIELDS[ISSUE_OWNER_EVIDENCE] | {"challenge", "holdStore"}
@@ -144,7 +160,25 @@ def parse_frame(frame: bytes) -> AuthorityMessageV1:
             raise ProtocolError("INVALID_HOLD_STORE")
         if operation == RECOVERY_ADVANCE_EPOCH and not isinstance(payload["epochAuthorization"], dict):
             raise ProtocolError("INVALID_EPOCH_AUTHORIZATION")
+    elif operation in USE_OPERATIONS:
+        parse_use_request(payload, operation)
     return AuthorityMessageV1(operation, payload)
+
+
+def parse_use_request(payload: dict[str, Any], operation: str) -> dict[str, Any]:
+    """Shape-only validation of an evidence-use request; every rule is the handler's and the journal's."""
+    if operation not in USE_OPERATIONS or not isinstance(payload, dict) or set(payload) != _PAYLOAD_FIELDS[operation]:
+        raise ProtocolError("INVALID_PAYLOAD_FIELDS")
+    for name, value in payload.items():
+        if name == "holdStore":
+            if not isinstance(value, dict):
+                raise ProtocolError("INVALID_HOLD_STORE")
+        elif name in _USE_DIGEST_FIELDS:
+            if not (isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)):
+                raise ProtocolError("INVALID_USE_DIGEST")
+        elif not (isinstance(value, str) and 0 < len(value) <= 128 and value.isascii() and value.isprintable()):
+            raise ProtocolError("INVALID_USE_IDENTIFIER")
+    return dict(payload)
 
 
 def parse_issue_request(payload: dict[str, Any]) -> IssueOwnerEvidenceRequestV1:

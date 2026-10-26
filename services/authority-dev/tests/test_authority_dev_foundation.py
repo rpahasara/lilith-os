@@ -234,11 +234,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, code)
 
     def test_only_health_and_structured_issue_exist(self):
-        # B1b-3e PR-1S adds exactly the three C-4 recovery operations (ledger journal writes, never signatures).
+        # B1b-3e PR-1S adds exactly the three C-4 recovery operations (ledger journal writes, never signatures);
+        # First Memory exactly the four evidence-use operations (journal writes and one read, never signatures).
         self.assertEqual(W.OPERATIONS, frozenset({"HEALTH", "ISSUE_OWNER_EVIDENCE", "RECOVERY_ADVANCE_EPOCH",
-                                                  "RECOVERY_VOID_CHALLENGE", "RECOVERY_QUARANTINE_USE"}))
+                                                  "RECOVERY_VOID_CHALLENGE", "RECOVERY_QUARANTINE_USE",
+                                                  "RESERVE_EVIDENCE_USE", "CONFIRM_EVIDENCE_USE",
+                                                  "ABANDON_EVIDENCE_USE", "LOOKUP_EVIDENCE_USE"}))
         for operation in ("SIGN", "SIGN_BYTES", "SIGN_MESSAGE", "SIGN_DIGEST", "SIGN_PRIVACY", "RAW",
-                          "EXPORT_KEY", "GET_KEY", "PREPARE", "CONSUME", "ADVANCE_EPOCH", "RECONCILE_DECISION"):
+                          "EXPORT_KEY", "GET_KEY", "PREPARE", "CONSUME", "ADVANCE_EPOCH", "RECONCILE_DECISION",
+                          "RESERVE", "CONFIRM", "ABANDON", "ISSUE"):
             self.assertRefused(frame(envelope(operation, {})), "UNSUPPORTED_OPERATION")
 
     def test_issue_payload_cannot_carry_signed_values(self):

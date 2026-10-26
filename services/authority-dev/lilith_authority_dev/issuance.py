@@ -29,6 +29,14 @@ In order, each a closed refusal (nothing is journalled or signed before the last
 Acceptance stays exclusively with the B1b-3a verifier (the signer never imports it): the minter's guards only
 narrow what is signed, and every consumer re-verifies the evidence against the registry.
 
+First Memory wiring: the DEV runtime constructs this handler (`server.build_core`) with fixed-path readers only. The
+owner-proof settings and the registered owner PUBLIC credentials are re-read per request from the root-installed owner
+registration (`lilith_authority_host.inputs.read_owner_registration`); absent or invalid, every request is refused
+before any other state is read. The ISSUE journal op also binds the challenge's `actionDigest`, so the evidence-use
+transport (`handle_use`: RESERVE / CONFIRM / ABANDON under the same readiness gate, and a read-only LOOKUP) reports
+exactly the action this evidence authorizes. A use write, like issuance, is released only after the witness records
+the new ledger position.
+
     loaded credential   != issuance permission
     issued evidence     != L04 admission != accepted memory
 """
@@ -56,6 +64,7 @@ from lilith_owner_memory import witness_readiness as WR
 from .evidence_minter import MinterConfigurationError, MintRefused, OwnerActorEvidenceMinterV1
 from .ledger import DurableAuthorityLedgerV1, LedgerError
 from .profile import DevSyntheticSignerProfileV1, ProfileError
+from . import protocol as W
 from .protocol import IssueOwnerEvidenceRequestV1
 from .recovery import SignerViewV1
 
@@ -65,6 +74,8 @@ LEDGER_AHEAD_OF_WITNESS = "LEDGER_AHEAD_OF_WITNESS"
 EVIDENCE_ID_DOMAIN_SEPARATOR = b"LILITH_AUTHORITY_DEV_OWNER_EVIDENCE_ID_V1\x00"
 
 ISSUANCE_REASONS = (
+    "OWNER_REGISTRATION_MISSING",
+    "OWNER_REGISTRATION_INVALID",
     "HOLD_SNAPSHOT_INVALID",
     "HOLD_INVALID",
     "SIGNER_INPUTS_INCOMPLETE",
@@ -87,7 +98,16 @@ ISSUANCE_REASONS = (
     "LOADED_KEY_NOT_REGISTRY_KEY",
     "MINT_REFUSED",
     "LEDGER_WRITE_REFUSED",
+    "USE_REQUEST_INVALID",
+    "EVIDENCE_NOT_ISSUED_HERE",
+    "EVIDENCE_BINDING_MISMATCH",
+    "USE_NOT_RESERVED_FOR_PROPOSAL",
 )
+RESERVED = "RESERVED"
+CONSUMED = "CONSUMED"
+ABANDONED = "ABANDONED"
+OK = "OK"
+_USE_RESULT = {W.RESERVE_EVIDENCE_USE: RESERVED, W.CONFIRM_EVIDENCE_USE: CONSUMED, W.ABANDON_EVIDENCE_USE: ABANDONED}
 
 
 @dataclass(frozen=True)
@@ -119,20 +139,29 @@ def _instant(value: str) -> datetime:
 class IssuanceHandlerV1:
     """Constructed only with fixed-path readers and trusted settings; holds no key between requests."""
 
-    def __init__(self, *, profile: DevSyntheticSignerProfileV1, owner_proof: OwnerProofSettingsV1,
-                 view: Callable[[], SignerViewV1], open_ledger: Callable[[], DurableAuthorityLedgerV1],
+    def __init__(self, *, profile: DevSyntheticSignerProfileV1, view: Callable[[], SignerViewV1],
+                 open_ledger: Callable[[], DurableAuthorityLedgerV1],
                  load_signing_key: Callable[[], Ed25519PrivateKey],
-                 registered_credentials: Callable[[], tuple[Mapping[str, Any], ...]],
                  record_ledger_advance: Callable[[str, int, str], Mapping[str, Any]],
+                 owner_proof: OwnerProofSettingsV1 | None = None,
+                 registered_credentials: Callable[[], tuple[Mapping[str, Any], ...]] | None = None,
+                 registration: Callable[[], tuple[Any, str | None]] | None = None,
                  now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  custody_profile: SC.CustodyProfileV1 | None = None):
+        """Either fixed `owner_proof` + `registered_credentials` (TEST seams), or `registration`, the per-request
+        reader of the root-installed owner registration (the DEV runtime). Never both, never neither."""
         if not isinstance(profile, DevSyntheticSignerProfileV1):
             raise ProfileError("a DEV_SYNTHETIC signer profile is required")
         profile.validate()
-        if not isinstance(owner_proof, OwnerProofSettingsV1):
+        fixed = owner_proof is not None or registered_credentials is not None
+        if registration is not None:
+            if fixed or not callable(registration):
+                raise ProfileError("owner registration is either fixed or read, never both")
+        elif not (isinstance(owner_proof, OwnerProofSettingsV1) and callable(registered_credentials)):
             raise ProfileError("owner-proof settings are required")
         self._profile = profile
         self._owner = owner_proof
+        self._registration = registration
         self._custody = SC.require_dev_synthetic(custody_profile or SC.custody_profile(profile.environment))
         self._view, self._open_ledger, self._load_key = view, open_ledger, load_signing_key
         self._credentials, self._record_ledger_advance, self._now = registered_credentials, record_ledger_advance, now_fn
@@ -142,10 +171,46 @@ class IssuanceHandlerV1:
 
     # -------------------------------------------------------------------------------------------- entry ---
 
+    def _owner_settings(self) -> tuple[OwnerProofSettingsV1, tuple[Mapping[str, Any], ...]] | dict[str, Any]:
+        """The trusted owner-proof settings and registered credentials, re-read per request (or the TEST seams)."""
+        if self._registration is None:
+            return self._owner, tuple(self._credentials())
+        try:
+            registration, reason = self._registration()
+        except (OSError, ValueError) as exc:
+            return _refused("OWNER_REGISTRATION_INVALID", type(exc).__name__)
+        if registration is None:
+            return _refused(reason if reason in ("OWNER_REGISTRATION_MISSING", "OWNER_REGISTRATION_INVALID")
+                            else "OWNER_REGISTRATION_INVALID")
+        settings = OwnerProofSettingsV1(registration.owner_principal, registration.rp_id, registration.origin,
+                                        registration.registry_tuple_version, registration.privacy_notice_version,
+                                        frozenset(registration.broker_releases))
+        return settings, tuple(registration.credentials)
+
     def handle(self, request: IssueOwnerEvidenceRequestV1) -> dict[str, Any]:
         if not isinstance(request, IssueOwnerEvidenceRequestV1) or not request.governed:
             return _refused("HOLD_SNAPSHOT_INVALID", "LEGACY_REQUEST_FORM")
-        holds, reason, detail = PA.parse_hold_snapshot(request.hold_store, environment=self._profile.environment)
+        owner = self._owner_settings()
+        if isinstance(owner, dict):
+            return owner
+        gated = self._gate(request.hold_store)
+        if isinstance(gated, dict):
+            return gated
+        view, history, record = gated
+        try:
+            ledger = self._open_ledger()
+        except LedgerError as exc:
+            return _refused("AUTHORITY_STATE_MISSING" if exc.reason == "AUTHORITY_STATE_MISSING"
+                            else "LEDGER_UNAVAILABLE", exc.reason)
+        try:
+            return self._issue(request, view, history, record, ledger, *owner)
+        finally:
+            ledger.close()
+
+    def _gate(self, hold_store: Any):
+        """Steps 1-2 (and the head-current key): the complete hold snapshot and the signer's own verified view.
+        Returns (view, history, record) or a refusal. Shared by issuance and every evidence-use write."""
+        holds, reason, detail = PA.parse_hold_snapshot(hold_store, environment=self._profile.environment)
         if holds is None:
             return _refused("HOLD_SNAPSHOT_INVALID", reason)
         parsed_holds, reason, detail = SC.parse_hold_store(holds, profile=self._custody)
@@ -173,20 +238,13 @@ class IssuanceHandlerV1:
         current = RC.current_issuance_keys(history.head_registry).get(SR.SCOPE, ())
         if record is None or tuple(current) != (self._profile.key_id,):
             return _refused("PROFILE_KEY_NOT_HEAD_CURRENT")
-        try:
-            ledger = self._open_ledger()
-        except LedgerError as exc:
-            return _refused("AUTHORITY_STATE_MISSING" if exc.reason == "AUTHORITY_STATE_MISSING"
-                            else "LEDGER_UNAVAILABLE", exc.reason)
-        try:
-            return self._issue(request, view, history, record, ledger)
-        finally:
-            ledger.close()
+        return view, history, record
 
     # -------------------------------------------------------------------------------------------- issue ---
 
     def _issue(self, request: IssueOwnerEvidenceRequestV1, view: SignerViewV1, history: SR.VerifiedHistoryV1,
-               record: A.AuthorityKeyRecordV1, ledger: DurableAuthorityLedgerV1) -> dict[str, Any]:
+               record: A.AuthorityKeyRecordV1, ledger: DurableAuthorityLedgerV1, owner: OwnerProofSettingsV1,
+               registered: tuple[Mapping[str, Any], ...]) -> dict[str, Any]:
         try:
             observation = ledger.observe()
             replayed = ledger.replay()
@@ -203,7 +261,7 @@ class IssuanceHandlerV1:
             return _refused("CHALLENGE_MALFORMED", getattr(exc, "code", None))
         if challenge["challengeId"] != request.challenge_id:
             return _refused("CHALLENGE_REFERENCE_MISMATCH")
-        profile, owner = self._profile, self._owner
+        profile = self._profile
         if (challenge["deploymentEnvironment"], challenge["authorityDomain"], challenge["logicalOwnerId"],
                 challenge["policyVersion"], challenge["ledgerEpoch"]) != (
                 profile.environment, profile.authority_domain, profile.logical_owner_id, profile.policy_version,
@@ -216,7 +274,7 @@ class IssuanceHandlerV1:
             return _refused("CHALLENGE_EXPIRED")
         credential = request.owner_credential.to_dict()
         if not any(isinstance(c, Mapping) and dict(c) == credential and c.get("status") == "ACTIVE"
-                   for c in self._credentials()):
+                   for c in registered):
             return _refused("OWNER_CREDENTIAL_NOT_REGISTERED")
         context = K.AcceptanceContextV1(
             deployment_environment=profile.environment, authority_domain=profile.authority_domain,
@@ -268,7 +326,9 @@ class IssuanceHandlerV1:
         ops = [{"op": J.PREPARE, "challengeId": challenge["challengeId"], "ledgerEpoch": ledger_epoch},
                {"op": J.CONSUME, "challengeId": challenge["challengeId"]},
                {"op": J.ISSUE, "challengeId": challenge["challengeId"], "evidenceId": evidence["evidenceId"],
-                "evidenceDigest": evidence_digest}]
+                "evidenceDigest": evidence_digest,
+                # First Memory: the authorized action, journalled (hash-chained) with the evidence it binds.
+                "actionDigest": challenge["actionDigest"]}]
         try:
             after = ledger.append_issuance(ops, expected_sequence=observation.sequence,
                                            expected_head=observation.head)
@@ -287,3 +347,106 @@ class IssuanceHandlerV1:
             return result
         result.update(evidence=evidence, challengeRecord=challenge_record, witness="RECORDED")
         return result
+
+    # ------------------------------------------------------------------------------------ evidence use ---
+
+    def handle_use(self, operation: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """The authority-side evidence-use transport for the L04 V2 adapter (B1b-3b lifecycle, durable here).
+
+        RESERVE / CONFIRM / ABANDON pass the same readiness gate as issuance, need the ledger exactly at the witness,
+        journal one op, and are released only after the witness records the new position. LOOKUP only reads."""
+        try:
+            request = W.parse_use_request(dict(payload), operation)
+        except (W.ProtocolError, TypeError):
+            return _refused("USE_REQUEST_INVALID")
+        if operation == W.LOOKUP_EVIDENCE_USE:
+            try:
+                ledger = self._open_ledger()
+            except LedgerError as exc:
+                return _refused("AUTHORITY_STATE_MISSING" if exc.reason == "AUTHORITY_STATE_MISSING"
+                                else "LEDGER_UNAVAILABLE", exc.reason)
+            try:
+                return {"status": OK, "use": use_record(ledger.replay(), ledger.journal(), request["evidenceId"]),
+                        "authorityGranted": False}
+            except (LedgerError, J.LedgerRefusal) as exc:
+                return _refused("LEDGER_UNAVAILABLE", getattr(exc, "reason", None))
+            finally:
+                ledger.close()
+        gated = self._gate(request["holdStore"])
+        if isinstance(gated, dict):
+            return gated
+        _view, history, _record = gated
+        try:
+            ledger = self._open_ledger()
+        except LedgerError as exc:
+            return _refused("AUTHORITY_STATE_MISSING" if exc.reason == "AUTHORITY_STATE_MISSING"
+                            else "LEDGER_UNAVAILABLE", exc.reason)
+        try:
+            return self._use(operation, request, history, ledger)
+        finally:
+            ledger.close()
+
+    def _use(self, operation: str, request: Mapping[str, Any], history: SR.VerifiedHistoryV1,
+             ledger: DurableAuthorityLedgerV1) -> dict[str, Any]:
+        try:
+            observation = ledger.observe()
+            replayed = ledger.replay()
+            journal = ledger.journal()
+        except (LedgerError, J.LedgerRefusal) as exc:
+            return _refused("LEDGER_UNAVAILABLE", getattr(exc, "reason", None))
+        position = RC.authority_ledger_position_reason(observation, history.head)
+        if position is not None:
+            return _refused("LEDGER_NOT_AT_WITNESS", position)
+        evidence_id = request["evidenceId"]
+        if operation == W.RESERVE_EVIDENCE_USE:
+            issued = replayed.issued.get(evidence_id)
+            if issued is None:
+                return _refused("EVIDENCE_NOT_ISSUED_HERE")
+            bound = use_record(replayed, journal, evidence_id, reserving=True)
+            if (issued["evidenceDigest"], issued["challengeId"], bound["actionDigest"]) != (
+                    request["evidenceDigest"], request["challengeId"], request["actionDigest"]):
+                return _refused("EVIDENCE_BINDING_MISMATCH")
+            op = {"op": J.RESERVE, "evidenceId": evidence_id, "evidenceDigest": issued["evidenceDigest"],
+                  "recoveryEpoch": replayed.epoch.to_dict(), "proposalRefId": request["proposalRefId"]}
+        else:
+            use = replayed.uses.get(evidence_id)
+            if use is None or use["state"] != RESERVED or use["proposalRefId"] != request["proposalRefId"]:
+                return _refused("USE_NOT_RESERVED_FOR_PROPOSAL")
+            op = ({"op": J.CONFIRM, "evidenceId": evidence_id, "admissionId": request["admissionId"],
+                   "revisionId": request["revisionId"]} if operation == W.CONFIRM_EVIDENCE_USE
+                  else {"op": J.ABANDON, "evidenceId": evidence_id})
+        try:
+            after = ledger.append_use(op, expected_sequence=observation.sequence, expected_head=observation.head)
+        except LedgerError as exc:
+            return _refused("LEDGER_WRITE_REFUSED", exc.detail or exc.reason)
+        result = {"status": _USE_RESULT[operation], "reason": None, "ledgerSequence": after.sequence,
+                  "ledgerHead": after.head, "authorityGranted": False}
+        try:
+            witnessed = self._record_ledger_advance(history.head.digest, after.sequence, after.head)
+        except (OSError, ValueError) as exc:
+            witnessed = {"status": REFUSED, "reason": type(exc).__name__}
+        if not isinstance(witnessed, Mapping) or witnessed.get("status") != "OK":
+            # Committed, not witnessed: fail closed (the caller sees no RESERVED / CONSUMED / ABANDONED).
+            result.update(status=LEDGER_AHEAD_OF_WITNESS, reason=LEDGER_AHEAD_OF_WITNESS,
+                          witness=dict(witnessed) if isinstance(witnessed, Mapping) else None)
+            return result
+        result.update(record=use_record(ledger.replay(), ledger.journal(), evidence_id), witness="RECORDED")
+        return result
+
+
+def use_record(replayed: J.JournalReplay, journal: tuple[Mapping[str, Any], ...], evidence_id: str, *,
+               reserving: bool = False) -> dict[str, Any] | None:
+    """The evidence-use record in the L04 V2 shape, derived only from the signer's own journal: the use row, the
+    issued evidence it names, and the `actionDigest` the ISSUE op bound. `reserving` describes an issued evidence
+    before its RESERVE (only its binding is meaningful)."""
+    issued = replayed.issued.get(evidence_id)
+    use = replayed.uses.get(evidence_id)
+    if issued is None or (use is None and not reserving):
+        return None
+    action_digest = next((op.get("actionDigest") for op in journal
+                          if op.get("op") == J.ISSUE and op.get("evidenceId") == evidence_id), None)
+    use = use or {}
+    return {"schemaVersion": 1, "evidenceId": evidence_id, "evidenceDigest": issued["evidenceDigest"],
+            "challengeId": issued["challengeId"], "proposalRefId": use.get("proposalRefId"),
+            "actionDigest": action_digest, "state": use.get("state"), "admissionId": use.get("admissionId"),
+            "revisionId": use.get("revisionId")}

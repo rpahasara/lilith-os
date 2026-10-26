@@ -20,7 +20,10 @@ signer cannot observe its credential inventory or the root hold store, and
 issuance is unwired, RR-39) and the narrow C-4 recovery handler
 (`recovery.RecoveryHandlerV1`), reachable only through the three closed
 recovery operations. `ISSUE_OWNER_EVIDENCE` is refused in every state unless an RR-39 governed
-issuance handler is constructed (`issuance.py`); the DEV runtime constructs none (`server.build_core`).
+issuance handler is constructed (`issuance.py`). First Memory: the DEV runtime constructs it (`server.build_core`)
+with fixed-path readers only, so every request re-derives readiness and refuses when any trusted input is missing;
+the same handler serves the four evidence-use operations, which are refused without it. The self-view and HEALTH are
+unchanged (always NOT_READY: the signer can never establish its own issuance readiness).
 """
 
 from __future__ import annotations
@@ -61,7 +64,7 @@ class DevAuthoritySignerCoreV1:
         self._credential = credential
         self._recovery = recovery
         self._self_view = self_view
-        self._issuance = issuance          # RR-39 governed path; None in the DEV runtime until provisioned
+        self._issuance = issuance          # RR-39 governed path (+ First Memory evidence use); None refuses both
 
     def _reasons(self) -> list[str]:
         if self._self_view is None:
@@ -91,6 +94,10 @@ class DevAuthoritySignerCoreV1:
             if self._recovery is None:
                 return {"status": REFUSED, "reason": "RECOVERY_NOT_WIRED"}
             return self._recovery.handle(message.operation, message.payload)
+        if message.operation in W.USE_OPERATIONS:
+            if self._issuance is None:
+                return {"status": REFUSED, "reason": "EVIDENCE_USE_NOT_WIRED"}
+            return self._issuance.handle_use(message.operation, message.payload)
         # ISSUE_OWNER_EVIDENCE: re-validate the structured request. Without the governed handler (or for the
         # legacy request form) refuse: no path from here to a key. The handler re-derives every readiness fact.
         try:

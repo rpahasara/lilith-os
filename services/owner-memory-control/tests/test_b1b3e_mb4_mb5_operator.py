@@ -37,6 +37,7 @@ for _p in (TOOLS, Path(__file__).resolve().parent):
         sys.path.insert(0, str(_p))
 
 import mb4_mb5_operator as O  # noqa: E402
+import e23_installed as E23H  # noqa: E402  (the installed release bytes; the repository moved on)
 import post_reboot_repin as RP  # noqa: E402
 
 HAVE_CRYPTO = all(importlib.util.find_spec(m) is not None for m in ("cryptography", "rfc8785", "fido2"))
@@ -97,7 +98,9 @@ class PinTests(unittest.TestCase):
                    "lilith_owner_memory/": "services/owner-memory-control/lilith_owner_memory/"}
         for module, pin in O.RELEASE_MODULES.items():
             prefix = next(p for p in mapping if module.startswith(p))
-            self.assertEqual(sha((ROOT / (mapping[prefix] + module[len(prefix):])).read_bytes()), pin, module)
+            # The installed bytes (First Memory changed `lilith_authority_host/{inputs,paths}.py` after E-23).
+            data = E23H.installed_source_bytes(mapping[prefix] + module[len(prefix):])
+            self.assertEqual(sha(data), pin, module)
         source = (ROOT / "services/authority-dev/release_file_set.py").read_text(encoding="utf-8")
         for module, pin in O.RELEASE_MODULES.items():
             if not module.startswith("lilith_authority_host/"):

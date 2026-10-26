@@ -84,3 +84,19 @@ class DevSyntheticSignerProfileV1:
             K._pattern(self.logical_owner_id, K._LOGICAL_OWNER, "logical_owner_id")
         except OwnerProofError as exc:
             raise ProfileError(exc.code) from exc
+
+
+# First Memory: the DEV runtime's one signer profile. The key id and policy are the K-ROOT registry's (M-B3: the sole
+# current OWNER_ACTOR key, `policy.dev-synthetic.v1`); the authority domain and logical owner are the fixed
+# DEV_SYNTHETIC logical context every First Memory challenge, evidence and L04 context names. Never PROD.
+DEV_POLICY_VERSION = "policy.dev-synthetic.v1"
+DEV_AUTHORITY_DOMAIN = "authority.dev-synthetic.memory"
+DEV_LOGICAL_OWNER = "owner.dev-synthetic.v1"
+
+
+def dev_runtime_profile() -> DevSyntheticSignerProfileV1:
+    profile = DevSyntheticSignerProfileV1(environment=ENVIRONMENT, key_id=PROPOSED_K_ACT_KEY_ID,
+                                          authority_domain=DEV_AUTHORITY_DOMAIN, logical_owner_id=DEV_LOGICAL_OWNER,
+                                          policy_version=DEV_POLICY_VERSION)
+    profile.validate()
+    return profile

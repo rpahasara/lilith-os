@@ -27,9 +27,14 @@ import release_file_set as RFS  # noqa: E402
 import test_trackb_layout_v2 as L2  # noqa: E402
 
 SHA = "1" * 40
-# The exact RR-39 source change to the signer runtime, against the installed E-23 NEW release.
+# The exact post-E-23 source change to the signer runtime (RR-39, then the First Memory DEV wiring), against the
+# installed E-23 NEW release.
 RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/credential.py",
-                          "lilith_authority_dev/ledger.py", "lilith_authority_dev/protocol.py"})
+                          "lilith_authority_dev/ledger.py", "lilith_authority_dev/protocol.py",
+                          # First Memory: the DEV runtime wiring and the evidence-use transport.
+                          "lilith_authority_dev/profile.py", "lilith_authority_dev/server.py",
+                          "lilith_authority_host/inputs.py", "lilith_authority_host/paths.py",
+                          "lilith_authority_root/clients.py"})
 
 
 def sha(data: bytes) -> str:
@@ -86,7 +91,8 @@ class LayoutV3Tests(unittest.TestCase):
         self.assertEqual(sha(payloads["lilith_owner_memory/verifier.py"]),
                          RFS.SHARED_HASHES["services/owner-memory-control/lilith_owner_memory/verifier.py"])
         self.assertFalse({m for m in RR39_CHANGED | V3.ADDED_RUNTIME_PATHS
-                          if not m.startswith(("lilith_authority_dev/", "lilith_owner_memory/"))})
+                          if not m.startswith(("lilith_authority_dev/", "lilith_owner_memory/", "lilith_authority_host/",
+                                               "lilith_authority_root/"))})
 
     def test_the_installed_layout_carries_no_successor_member(self):
         with FX.stand_in_wheels() as wheels:
