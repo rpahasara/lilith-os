@@ -236,6 +236,30 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
 
+    def test_fm2_transition_and_origin_forget_tooling_is_control_only_and_nothing_else_is(self):
+        fm2 = (
+            "services/owner-memory-control/tools/fm2_signer_upgrade.py",
+            "services/owner-memory-control/tools/fm2_release_stages.py",
+            "services/owner-memory-control/tools/fm2_operator.py",
+            "services/owner-memory-control/tools/relationship_origin_forget_dev.py",
+            "services/owner-memory-control/tests/fm2_transform.py",
+            "services/owner-memory-control/tests/test_personal_memory_fm2_transition.py",
+            "services/owner-memory-control/tests/test_relationship_origin_forget_dev.py",
+            "docs/architecture/personal-memory-fm2-dev-activation.md",
+        )
+        this_pr = (*(changed(path, "A", "000000") for path in fm2), changed("scripts/classify_dev_deployment.py"),
+                   changed("scripts/test_classify_dev_deployment.py"))
+        self.assertEqual(self.classify(*this_pr), gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("services/authority-dev/lilith_authority_dev/protocol.py"),     # release payload
+            changed("services/core-api/lilith_memory/privacy_forget_runner.py"),    # Core API runtime
+            changed("services/owner-memory-control/tools/first_memory_dev_host.py"),
+            changed(fm2[3], "M", "100644", "120000"),                              # symlink swap
+            changed(fm2[0], "D", "100644", "000000"),                              # a deletion
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
+
     def test_symlink_and_mode_tricks_require_deploy(self):
         path = "scripts/memory_broker_stage2_control.py"
         for entry in (
