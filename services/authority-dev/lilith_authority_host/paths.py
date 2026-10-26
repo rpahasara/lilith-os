@@ -38,6 +38,13 @@ AUTHORITY_RUNTIME = "/run/lilith-authority-dev"
 AUTHORITY_OWNER_SOCKET = AUTHORITY_RUNTIME + "/owner.sock"
 AUTHORITY_CREDENTIALS_RUNTIME = "/run/credentials/" + AUTHORITY_SERVICE
 
+# ------------------------------------- owner registration (First Memory, DEV_SYNTHETIC) ---
+# The registered owner WebAuthn PUBLIC credential(s) and the deployment's owner-proof settings, installed by root
+# (`root:root`, `0644` file in a `0755` directory) after an owner-authorized enrollment. Outside the installer's
+# exact `/etc/lilith-authority-dev` listings, readable by the signer under `ProtectSystem=strict`. Never a private key.
+OWNER_REGISTRATION_DIR = "/etc/lilith-owner-proof-dev"
+OWNER_REGISTRATION = OWNER_REGISTRATION_DIR + "/owner-registration.json"
+
 # ------------------------------------------------------ K-ACT custody ---
 CREDSTORE = "/etc/credstore.encrypted"
 CURRENT_SLOT = CREDSTORE + "/lilith-authority-dev.owner-actor.cred"

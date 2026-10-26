@@ -21,9 +21,9 @@ requires the signer-owned `0700` state directory, creates the file `0600`
 exclusively, and writes exactly one `GENESIS` operation (sequence 1).
 
 The public writers accept only the C-4 recovery operations (`ADVANCE_EPOCH`,
-`VOID_CHALLENGE`, `QUARANTINE_USE`) and, for the RR-39 issuance path, exactly
-one challenge's `PREPARE`, `CONSUME`, `ISSUE`. Nothing here can reserve,
-confirm, or abandon an evidence use. The
+`VOID_CHALLENGE`, `QUARANTINE_USE`), for the RR-39 issuance path exactly
+one challenge's `PREPARE`, `CONSUME`, `ISSUE`, and for the First Memory
+evidence-use transport exactly one `RESERVE`, `CONFIRM` or `ABANDON`. The
 ledger never touches the broker ledgers or L04.
 """
 
@@ -397,6 +397,18 @@ class DurableAuthorityLedgerV1:
                 or len({op.get("challengeId") for op in ops}) != 1:
             raise LedgerError("LEDGER_OPERATION_NOT_PERMITTED")
         return self._append(ops, expected_sequence=expected_sequence, expected_head=expected_head)
+
+    def append_use(self, op: Mapping[str, Any], *, expected_sequence: int,
+                   expected_head: str) -> RC.AuthorityLedgerObservationV1:
+        """First Memory: journal exactly one evidence-use `RESERVE`, `CONFIRM` or `ABANDON`.
+
+        The shared pure journal enforces single use (evidence issued here, its digest and current epoch, never
+        reserved twice; only a RESERVED use confirms or abandons); a ledger that moved writes nothing.
+        """
+        op = dict(op)
+        if op.get("op") not in (J.RESERVE, J.CONFIRM, J.ABANDON):
+            raise LedgerError("LEDGER_OPERATION_NOT_PERMITTED")
+        return self._append([op], expected_sequence=expected_sequence, expected_head=expected_head)
 
     def _append(self, ops: list[dict[str, Any]], *, expected_sequence: int,
                 expected_head: str) -> RC.AuthorityLedgerObservationV1:

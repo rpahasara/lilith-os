@@ -194,13 +194,23 @@ def _process_identity() -> tuple[int, int, list[int]]:
     return os.getuid(), os.getgid(), os.getgroups()  # Linux-only
 
 
-def build_core(credential: CredentialStatusV1) -> DevAuthoritySignerCoreV1:
+def build_core(credential: CredentialStatusV1, *, credentials_directory: str | None = None) -> DevAuthoritySignerCoreV1:
     """The PR-1S runtime: fixed-path readers, the durable ledger (never
     created here), the witness signer-socket client, and the C-4 handler.
-    Construction performs no I/O; every read happens per request."""
+    Construction performs no I/O; every read happens per request.
+
+    First Memory: the RR-39 governed issuance handler (and its evidence-use transport) is wired with the same
+    fixed-path readers, the root-installed owner registration (read per request), the systemd-delivered K-ACT
+    (loaded per request from `credentials_directory`, never retained) and the witness client. A missing trusted
+    input refuses that request explicitly; nothing defaults, and the self-view stays NOT_READY."""
+    from lilith_authority_host import inputs as HI
+
     from . import state
     from . import witness_client
+    from .credential import load_owner_actor_signing_key
+    from .issuance import IssuanceHandlerV1
     from .ledger import DurableAuthorityLedgerV1
+    from .profile import dev_runtime_profile
     from .recovery import RecoveryHandlerV1
 
     def view():
@@ -211,7 +221,12 @@ def build_core(credential: CredentialStatusV1) -> DevAuthoritySignerCoreV1:
 
     recovery = RecoveryHandlerV1(view=view, open_ledger=open_ledger,
                                  record_ledger_advance=witness_client.record_ledger_advance)
-    return DevAuthoritySignerCoreV1(credential, recovery=recovery,
+    issuance = IssuanceHandlerV1(
+        profile=dev_runtime_profile(), view=view, open_ledger=open_ledger,
+        load_signing_key=lambda: load_owner_actor_signing_key(credentials_directory),
+        record_ledger_advance=witness_client.record_ledger_advance,
+        registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT))
+    return DevAuthoritySignerCoreV1(credential, recovery=recovery, issuance=issuance,
                                     self_view=lambda: state.self_view(view(), open_ledger))
 
 
@@ -232,7 +247,7 @@ def main() -> int:
         print("lilith-authority-dev: CREDENTIAL_INVALID", file=sys.stderr)
         return EXIT_CREDENTIAL_INVALID
     try:
-        serve_forever(build_core(credential))
+        serve_forever(build_core(credential, credentials_directory=os.environ.get("CREDENTIALS_DIRECTORY")))
     except ServerError as exc:
         print(f"lilith-authority-dev: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED

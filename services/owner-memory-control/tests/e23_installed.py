@@ -27,9 +27,16 @@ import install_authority_dev_v3 as V3  # noqa: E402
 import release_file_set as RFS  # noqa: E402
 
 SOURCE_OF = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
-# The RR-39 source change to the signer runtime (pinned exactly by authority-dev `test_rr39_layout_v3`).
+# The post-E-23 source change to the signer runtime, RR-39 then First Memory (pinned exactly by authority-dev
+# `test_rr39_layout_v3`).
 RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/credential.py",
-                          "lilith_authority_dev/ledger.py", "lilith_authority_dev/protocol.py"})
+                          "lilith_authority_dev/ledger.py", "lilith_authority_dev/protocol.py",
+                          # First Memory: the DEV runtime wiring and the evidence-use transport.
+                          "lilith_authority_dev/profile.py", "lilith_authority_dev/server.py",
+                          "lilith_authority_host/inputs.py", "lilith_authority_host/paths.py",
+                          "lilith_authority_root/clients.py",
+                          # First Memory privilege fix: the root bridge (`first-memory` form).
+                          "lilith_authority_root/cli.py"})
 # Every repository member whose installed bytes differ, and every member the installed release does not carry.
 INSTALLED_DELTA = frozenset(E23.PAYLOAD_DELTA) | RR39_CHANGED
 NOT_INSTALLED = frozenset(E23.PAYLOAD_ADDED) | V3.ADDED_RUNTIME_PATHS

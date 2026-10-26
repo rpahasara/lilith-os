@@ -579,12 +579,16 @@ class ReleaseFileSetTests(unittest.TestCase):
         wired = [name for name, data in payloads.items() if name.startswith("lilith_authority_dev/")
                  and b"successor_readiness" in data]
         # RR-39: the governed issuance path is the one other consumer, and the ONLY runtime module importing the
-        # minter (it re-derives the same readiness before signing); the DEV runtime constructs it nowhere.
+        # minter (it re-derives the same readiness before signing). First Memory: the DEV runtime constructs it
+        # only with the per-request owner-registration reader (never fixed owner settings).
         self.assertEqual(sorted(wired), ["lilith_authority_dev/issuance.py", "lilith_authority_dev/recovery.py"])
         self.assertNotIn(b"evidence_minter", payloads["lilith_authority_dev/recovery.py"])
         self.assertEqual([name for name, data in payloads.items() if b"from .evidence_minter import" in data],
                          ["lilith_authority_dev/issuance.py"])
-        self.assertNotIn(b"issuance", payloads["lilith_authority_dev/server.py"])
+        server = payloads["lilith_authority_dev/server.py"]
+        self.assertIn(b"registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT)", server)
+        self.assertNotIn(b"owner_proof=", server)
+        self.assertNotIn(b"registered_credentials=", server)
 
     def test_source_release_identity_is_deterministic(self):
         first, second = source_release_identity(), source_release_identity()

@@ -195,3 +195,91 @@ def _read_registries(root: Path, *, environment: str, owner_uid: int, reasons: l
         documents[absolute] = raw
         registries.append(document)
     return tuple(registries)
+
+
+# ------------------------------------------------- owner registration (First Memory, DEV_SYNTHETIC) ---
+
+OWNER_REGISTRATION_PROTOCOL = "LILITH_OWNER_REGISTRATION_DEV"
+OWNER_REGISTRATION_FIELDS = frozenset({
+    "protocol", "schemaVersion", "environment", "ownerPrincipal", "rpId", "origin", "registryTupleVersion",
+    "privacyNoticeVersion", "brokerReleases", "credentials"})
+MAX_OWNER_CREDENTIALS = 8
+OWNER_REGISTRATION_MISSING = "OWNER_REGISTRATION_MISSING"
+OWNER_REGISTRATION_INVALID = "OWNER_REGISTRATION_INVALID"
+
+
+@dataclass(frozen=True)
+class OwnerRegistrationV1:
+    """The registered owner PUBLIC credentials and the deployment's owner-proof settings (root-installed).
+
+    Only the fixed DEV_SYNTHETIC owner identity is admissible (`owner_proof._DEV_SYNTHETIC_OWNER`, the `.invalid`
+    relying party): a synthetic owner, never proof of a real human identity. A registered credential is a host-root
+    installation of the owner's public key, not authority: every issuance still needs a fresh WebAuthn assertion
+    over the exact challenge.
+
+        registered credential != owner proof != issuance permission
+    """
+
+    owner_principal: str
+    rp_id: str
+    origin: str
+    registry_tuple_version: str
+    privacy_notice_version: str
+    broker_releases: frozenset[str]
+    credentials: tuple[dict[str, Any], ...]
+
+
+def parse_owner_registration(document: Mapping[str, Any], *, environment: str) -> OwnerRegistrationV1:
+    """Strict parse. Raises `ValueError` on any deviation; nothing is defaulted."""
+    from lilith_memory import owner_proof as OP
+
+    if not isinstance(document, Mapping) or set(document) != OWNER_REGISTRATION_FIELDS:
+        raise ValueError("OWNER_REGISTRATION_FIELDS")
+    if (document["protocol"], document["schemaVersion"], document["environment"]) != (
+            OWNER_REGISTRATION_PROTOCOL, 1, environment) or type(document["schemaVersion"]) is not int:
+        raise ValueError("OWNER_REGISTRATION_CONTEXT")
+    identity = (document["ownerPrincipal"], document["rpId"], document["origin"])
+    if identity != (OP._DEV_SYNTHETIC_OWNER, OP.SYNTHETIC_RP_ID, OP.SYNTHETIC_ORIGIN):
+        raise ValueError("OWNER_REGISTRATION_NOT_DEV_SYNTHETIC")
+    for name in ("registryTupleVersion", "privacyNoticeVersion"):
+        if not isinstance(document[name], str) or not 0 < len(document[name]) <= 128:
+            raise ValueError("OWNER_REGISTRATION_" + name.upper())
+    releases = document["brokerReleases"]
+    if not isinstance(releases, list) or not releases or releases != sorted(set(releases)) \
+            or not all(isinstance(r, str) and 0 < len(r) <= 128 for r in releases):
+        raise ValueError("OWNER_REGISTRATION_BROKER_RELEASES")
+    credentials = document["credentials"]
+    if not isinstance(credentials, list) or not 0 < len(credentials) <= MAX_OWNER_CREDENTIALS:
+        raise ValueError("OWNER_REGISTRATION_CREDENTIALS")
+    parsed = []
+    for value in credentials:
+        try:
+            credential = OP.OwnerCredentialV1.from_dict(value)
+        except (OwnerProofError, TypeError, KeyError) as exc:
+            raise ValueError("OWNER_REGISTRATION_CREDENTIAL") from exc
+        if (credential.owner_principal, credential.rp_id) != (OP._DEV_SYNTHETIC_OWNER, OP.SYNTHETIC_RP_ID):
+            raise ValueError("OWNER_REGISTRATION_CREDENTIAL_IDENTITY")
+        parsed.append(credential.to_dict())
+    if len({c["recordId"] for c in parsed}) != len(parsed) or len({c["credentialId"] for c in parsed}) != len(parsed):
+        raise ValueError("OWNER_REGISTRATION_DUPLICATE_CREDENTIAL")
+    return OwnerRegistrationV1(identity[0], identity[1], identity[2], document["registryTupleVersion"],
+                               document["privacyNoticeVersion"], frozenset(releases), tuple(parsed))
+
+
+def read_owner_registration(*, environment: str, root: Path | str = Path("/"),
+                            owner_uid: int = 0) -> tuple[OwnerRegistrationV1 | None, str | None]:
+    """(registration, None) or (None, OWNER_REGISTRATION_MISSING | OWNER_REGISTRATION_INVALID). Read per request.
+    `root` and `owner_uid` are TEST seams."""
+    root = Path(root)
+    if not _directory_ok(_host(root, P.OWNER_REGISTRATION_DIR), owner_uid=owner_uid):
+        return None, (OWNER_REGISTRATION_MISSING if not os.path.lexists(_host(root, P.OWNER_REGISTRATION_DIR))
+                      else OWNER_REGISTRATION_INVALID)
+    if sorted(os.listdir(_host(root, P.OWNER_REGISTRATION_DIR))) not in ([], ["owner-registration.json"]):
+        return None, OWNER_REGISTRATION_INVALID
+    document, _raw, status = _read_document(root, P.OWNER_REGISTRATION, owner_uid=owner_uid)
+    if status != "OK":
+        return None, OWNER_REGISTRATION_MISSING if status == "ABSENT" else OWNER_REGISTRATION_INVALID
+    try:
+        return parse_owner_registration(document, environment=environment), None
+    except ValueError:
+        return None, OWNER_REGISTRATION_INVALID

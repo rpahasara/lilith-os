@@ -448,11 +448,18 @@ class GovernedIssuanceTests(unittest.TestCase):
         self.assertEqual(self.issue(core=absent)["reason"], "SIGNING_NOT_AVAILABLE")
         self.assertEqual(self.journal_ops(), ["GENESIS"])
 
-    def test_the_dev_runtime_still_constructs_no_issuance_handler(self):
+    def test_the_dev_runtime_wires_the_handler_with_fixed_path_readers_only(self):
+        # First Memory: the DEV runtime constructs the governed handler, reading the owner registration per request
+        # (never a fixed TEST owner); without it every request refuses before any other state is read.
         from lilith_authority_dev import server
         core = server.build_core(CRED.CredentialStatusV1(CRED.CREDENTIAL_PRESENT_UNVERIFIED, "ab" * 32))
-        self.assertIsNone(core._issuance)
-        self.assertIn("ISSUANCE_UNWIRED", STATE.STRUCTURAL_SELF_VIEW_REASONS)
+        self.assertIsInstance(core._issuance, ISS.IssuanceHandlerV1)
+        self.assertIsNone(core._issuance._owner)
+        self.assertTrue(callable(core._issuance._registration))
+        if not os.path.lexists(P.OWNER_REGISTRATION_DIR):
+            result = core.dispatch(W.parse_frame(W.encode_frame(W.ISSUE_OWNER_EVIDENCE, self.payload())))
+            self.assertEqual((result["status"], result["reason"]), ("REFUSED", "OWNER_REGISTRATION_MISSING"))
+        self.assertIn("ISSUANCE_UNWIRED", STATE.STRUCTURAL_SELF_VIEW_REASONS)   # the self-view never claims READY
 
 
 # ===================================================== First Memory (2df33b8) with the real signer ===

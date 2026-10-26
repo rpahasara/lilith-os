@@ -804,10 +804,11 @@ class RecoveryGateTests(unittest.TestCase):
         wired = sorted(path.name for path in (ROOT / "services/authority-dev/lilith_authority_dev").rglob("*.py")
                        if "successor_readiness" in path.read_text(encoding="utf-8"))
         # RR-39: the governed issuance path re-derives the same readiness before signing; the DEV runtime
-        # (`server.py`) constructs no issuance handler.
+        # (`server.py`) constructs it only with the per-request owner-registration reader.
         self.assertEqual(wired, ["issuance.py", "recovery.py"])
-        self.assertNotIn("issuance", (ROOT / "services/authority-dev/lilith_authority_dev/server.py")
-                         .read_text(encoding="utf-8"))
+        server = (ROOT / "services/authority-dev/lilith_authority_dev/server.py").read_text(encoding="utf-8")
+        self.assertIn("registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT)", server)
+        self.assertNotIn("successor_readiness", server)
         for tree in ("services/core-api", "services/memory-broker"):
             for path in (ROOT / tree).rglob("*.py"):
                 if ".venv" not in path.parts:

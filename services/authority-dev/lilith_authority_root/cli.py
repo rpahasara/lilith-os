@@ -9,13 +9,21 @@ command prints one JSON object on stdout; a refusal prints
 
 | CLI | forms |
 | --- | --- |
-| `lilith-authority-ledger-dev` | `provision <registryVersion>`, `observe` (root); `provision-as-signer <registryVersion>` (signer uid, via runuser) |
+| `lilith-authority-ledger-dev` | `provision <registryVersion>`, `observe` (root); `provision-as-signer <registryVersion>` (signer uid, via runuser); `first-memory <remember\\|recall> <session>` (root; the First Memory bridge below) |
 | `lilith-authority-hold-dev` | `observe`, `create-initial-held`, `release-initial <approvedPackageDigest> <inputs.json>`, `create-successor-held <ROTATION\\|KEY_COMPROMISE_RECOVERY> <N>`, `create-maintenance-held <authorizationId> <targetRegistryVersion>`, `create-custody-debt-held <N>`, `release-ceremony <ceremonyId> <approvedReadinessDigest> <successor-inputs.json>` |
 | `lilith-authority-verify-dev` | `eligibility <inputs.json>`, `full <inputs.json>`, `genesis-candidate <registryVersion> <updatedAt>` |
 | `lilith-recovery-witness-owner-dev` | `health`, `read`, `bootstrap <registryVersion> <updatedAt>`, `execute-head-advance <authorization.json> <targetRegistryVersion>`, `execute-epoch-advance <authorization.json> <targetRegistryVersion>` |
 | `lilith-authority-recovery-dev` | `advance-epoch <authorization.json>`, `void-challenges`, `quarantine-uses` |
 
-Nothing here starts, enables, or reloads a unit, and nothing signs.
+Nothing here starts, enables, or reloads a unit, and nothing here signs.
+
+First Memory bridge (`first-memory`): the one root boundary between the unprivileged First Memory conversation host
+and the root-only signer owner socket. Root code runs only from this root-owned release tree. It refuses unless the
+fixed host tree (`FIRST_MEMORY_TREE`) is entirely root-owned and not group/other-writable, forks the host and drops
+it PERMANENTLY to `lilith` (real, effective and saved uid/gid; no supplementary groups) before exec, and never imports
+host code. Over one inherited socket pair it forwards only `ISSUE_OWNER_EVIDENCE` and the evidence-use operations;
+it rejects any caller `holdStore` and adds the complete hold-store snapshot it reads itself. No listener, no path,
+command or file argument, no other operation.
 """
 
 from __future__ import annotations
@@ -23,6 +31,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
+import stat
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -111,6 +122,8 @@ def _ledger(argv: list[str], euid: int) -> dict[str, Any]:
                                                    euid=euid, signer_uid=uid)
         return {"ledgerSequence": observed.sequence, "ledgerHead": observed.head, "authorityGranted": False}
     _require_root(euid)
+    if argv[:1] == ["first-memory"] and len(argv) == 3:
+        return run_first_memory(argv[1], argv[2])
     if argv[:1] == ["provision"] and len(argv) == 2:
         version = int(_arg(_VERSION, argv[1], "VERSION_INVALID"))
         uid, gid = _signer_ids()
@@ -226,6 +239,160 @@ def _witness(argv: list[str], euid: int) -> dict[str, Any]:
             "authorization": authorization, "targetRegistryVersion": version, "adoptionRecord": adoption,
             "ledgerSequence": observed.sequence, "ledgerHead": observed.head, "holdStore": snapshot}))
     raise Refused("USAGE")
+
+
+# ---------------------------------------------------------------- First Memory bridge ---
+
+FIRST_MEMORY_TREE = "/opt/lilith-first-memory-dev/current"
+FIRST_MEMORY_ENTRY = FIRST_MEMORY_TREE + "/services/owner-memory-control/tools/first_memory_dev_host.py"
+FIRST_MEMORY_PYTHON = P.CURRENT_RELEASE + "/venv/bin/python"
+FIRST_MEMORY_USER = "lilith"
+FIRST_MEMORY_FORMS = ("remember", "recall")
+BRIDGE_FD = 3
+BRIDGE_MAX_REQUESTS = 64
+BRIDGE_OPERATIONS = frozenset({AP.ISSUE_OWNER_EVIDENCE}) | AP.USE_OPERATIONS
+_SESSION = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z")
+BRIDGE_REFUSAL = {"status": "REFUSED", "reason": "BRIDGE_REQUEST_INVALID", "authorityGranted": False}
+
+
+def bridge_request(raw: bytes, *, hold_snapshot: Callable[[], dict[str, Any]],
+                   exchange: Callable[[bytes], dict[str, Any]]) -> dict[str, Any]:
+    """One host request -> one signer frame, or a refusal. The caller names an allowed operation and its owner
+    artifacts only; the hold snapshot is always root's own read."""
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
+        if not isinstance(value, dict) or set(value) != {"operation", "payload"}:
+            raise Refused("BRIDGE_REQUEST_INVALID")
+        operation, payload = value["operation"], value["payload"]
+        if operation not in BRIDGE_OPERATIONS or not isinstance(payload, dict) or "holdStore" in payload:
+            raise Refused("BRIDGE_REQUEST_INVALID")
+        if operation != AP.LOOKUP_EVIDENCE_USE:
+            payload = {**payload, "holdStore": dict(hold_snapshot())}
+        if operation == AP.ISSUE_OWNER_EVIDENCE and set(payload) != AP.GOVERNED_ISSUE_FIELDS:
+            raise Refused("BRIDGE_REQUEST_INVALID")
+        frame = AP.encode_frame(operation, payload)       # the signer's own strict parser, before anything is sent
+    except (Refused, AP.ProtocolError, UnicodeDecodeError, ValueError, TypeError):
+        return dict(BRIDGE_REFUSAL)
+    return dict(exchange(frame))
+
+
+def _recv_exact(conn: socket.socket, size: int) -> bytes | None:
+    data = b""
+    while len(data) < size:
+        chunk = conn.recv(size - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
+def serve_bridge(conn: socket.socket, *, hold_snapshot: Callable[[], dict[str, Any]],
+                 exchange: Callable[[bytes], dict[str, Any]], max_requests: int = BRIDGE_MAX_REQUESTS) -> int:
+    """Serve length-prefixed JSON requests until EOF; a malformed frame ends the bridge. Returns requests served."""
+    served = 0
+    while served < max_requests:
+        header = _recv_exact(conn, 4)
+        if header is None:
+            break
+        length = struct.unpack(">I", header)[0]
+        if not 0 < length <= AP.MAX_FRAME_BYTES:
+            break
+        raw = _recv_exact(conn, length)
+        if raw is None:
+            break
+        try:
+            response = bridge_request(raw, hold_snapshot=hold_snapshot, exchange=exchange)
+        except (OSError, ValueError) as exc:
+            response = {"status": "REFUSED", "reason": "SIGNER_UNREACHABLE:" + type(exc).__name__,
+                        "authorityGranted": False}
+        body = json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        conn.sendall(struct.pack(">I", len(body)) + body)
+        served += 1
+    return served
+
+
+def trusted_tree_failures(tree: str, *, owner_uid: int = 0) -> list[str]:
+    """Every path that would let a non-root principal change code run for root's bridge: the tree and its parents
+    must be root-owned, never group/other-writable, never a symlink."""
+    failures: list[str] = []
+    root = Path(tree)
+
+    def check(path: Path) -> None:
+        try:
+            meta = os.lstat(path)
+        except OSError:
+            failures.append("MISSING:" + str(path))
+            return
+        if stat.S_ISLNK(meta.st_mode) or meta.st_uid != owner_uid or meta.st_mode & 0o022:
+            failures.append("UNTRUSTED:" + str(path))
+
+    for parent in reversed(root.parents):
+        check(parent)
+    check(root)
+    if root.is_dir() and not root.is_symlink():
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            for name in dirnames + filenames:
+                check(Path(dirpath) / name)
+    return failures
+
+
+def drop_privileges(user: str) -> tuple[int, int]:
+    """Permanently become `user`: no supplementary groups, real = effective = saved uid/gid. Verified, then proven
+    irreversible (regaining uid 0 must fail)."""
+    import pwd
+
+    entry = pwd.getpwnam(user)
+    uid, gid = entry.pw_uid, entry.pw_gid
+    if uid == 0 or gid == 0:
+        raise Refused("FIRST_MEMORY_USER_IS_ROOT")
+    os.setgroups([])
+    os.setresgid(gid, gid, gid)
+    os.setresuid(uid, uid, uid)
+    if os.getresuid() != (uid, uid, uid) or os.getresgid() != (gid, gid, gid) or os.getgroups():
+        raise Refused("PRIVILEGE_DROP_INCOMPLETE")
+    try:
+        os.setuid(0)
+    except PermissionError:
+        return uid, gid
+    raise Refused("PRIVILEGE_DROP_REVERSIBLE")
+
+
+def run_first_memory(form: str, session: str, *, tree: str = FIRST_MEMORY_TREE, entry: str = FIRST_MEMORY_ENTRY,
+                     python: str = FIRST_MEMORY_PYTHON, user: str = FIRST_MEMORY_USER,
+                     hold_snapshot: Callable[[], dict[str, Any]] | None = None,
+                     exchange: Callable[[bytes], dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Fork the host as `user` (permanently) and serve its bridge. Keyword arguments are TEST seams; the CLI passes
+    none."""
+    if form not in FIRST_MEMORY_FORMS:
+        raise Refused("USAGE")
+    _arg(_SESSION, session, "SESSION_INVALID")
+    failures = trusted_tree_failures(tree)
+    if failures or not Path(entry).is_relative_to(tree):
+        raise Refused("FIRST_MEMORY_HOST_UNTRUSTED:" + ",".join(failures[:4]))
+    if hold_snapshot is None:
+        hold_snapshot = lambda: dict(HoldStoreV1(environment=ENVIRONMENT).observe().snapshot)  # noqa: E731
+    if exchange is None:
+        exchange = lambda frame: clients._authority_response(  # noqa: E731
+            clients._exchange(P.AUTHORITY_OWNER_SOCKET, frame, limit=AP.MAX_FRAME_BYTES))
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    pid = os.fork()
+    if pid == 0:                                                   # child: never returns into root code
+        try:
+            parent.close()
+            os.dup2(child.fileno(), BRIDGE_FD, inheritable=True)
+            os.chdir("/")
+            drop_privileges(user)
+            os.execve(python, [python, "-I", "-B", entry, form, session], dict(FIXED_ENV))
+        except BaseException:
+            pass
+        os._exit(127)
+    child.close()
+    try:
+        served = serve_bridge(parent, hold_snapshot=hold_snapshot, exchange=exchange)
+    finally:
+        parent.close()
+    _pid, status = os.waitpid(pid, 0)
+    return {"hostExit": os.waitstatus_to_exitcode(status), "bridgeRequests": served, "authorityGranted": False}
 
 
 def _recovery(argv: list[str], euid: int) -> dict[str, Any]:

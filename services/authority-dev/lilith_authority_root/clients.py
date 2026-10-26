@@ -2,7 +2,9 @@
 
 - the authority signer's `/run/lilith-authority-dev/owner.sock`: `HEALTH`
   (B4 for the verifier) and the three C-4 recovery operations, each sent
-  with the complete root hold-store snapshot;
+  with the complete root hold-store snapshot; First Memory adds the governed
+  `ISSUE_OWNER_EVIDENCE` and the evidence-use operations (writes carry the
+  snapshot the same way);
 - the recovery witness's `/run/lilith-recovery-witness/owner.sock`:
   `HEALTH`, `READ_WITNESS`, `BOOTSTRAP`, and the inert transition
   executions.
@@ -74,6 +76,23 @@ def signer_recovery(operation: str, *, hold_snapshot: Mapping[str, Any],
     if operation == AP.RECOVERY_ADVANCE_EPOCH:
         payload["epochAuthorization"] = dict(epoch_authorization or {})
     return _authority_response(_exchange(path, AP.encode_frame(operation, payload), limit=AP.MAX_FRAME_BYTES))
+
+
+def signer_issue(payload: Mapping[str, Any], *, path: str = P.AUTHORITY_OWNER_SOCKET) -> Mapping[str, Any]:
+    """First Memory: one governed `ISSUE_OWNER_EVIDENCE` (the caller supplies challenge, action, owner proof and the
+    complete hold snapshot; the signer derives and checks everything else)."""
+    if not AP.GOVERNED_ISSUE_FIELDS == set(payload):
+        raise ValueError("not a governed issuance request")
+    return _authority_response(_exchange(path, AP.encode_frame(AP.ISSUE_OWNER_EVIDENCE, dict(payload)),
+                                         limit=AP.MAX_FRAME_BYTES))
+
+
+def signer_use(operation: str, payload: Mapping[str, Any], *,
+               path: str = P.AUTHORITY_OWNER_SOCKET) -> Mapping[str, Any]:
+    """First Memory: one evidence-use operation (RESERVE / CONFIRM / ABANDON with the hold snapshot, or LOOKUP)."""
+    if operation not in AP.USE_OPERATIONS:
+        raise ValueError("not an evidence-use operation")
+    return _authority_response(_exchange(path, AP.encode_frame(operation, dict(payload)), limit=AP.MAX_FRAME_BYTES))
 
 
 def witness_owner(operation: str, payload: Mapping[str, Any], *,
