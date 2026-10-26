@@ -80,6 +80,16 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tools/fm1_operator.py",
         "services/owner-memory-control/tests/test_first_memory_fm1_transition.py",
         "docs/architecture/first-memory-fm1-release-transition.md",
+        # Personal memory FM-2: the same owner-side transition tooling moved to the successor pair, and the owner-run
+        # origin FORGET tool (installed only into the root-owned First Memory host tree, never the Core API bundle).
+        "services/owner-memory-control/tools/fm2_signer_upgrade.py",
+        "services/owner-memory-control/tools/fm2_release_stages.py",
+        "services/owner-memory-control/tools/fm2_operator.py",
+        "services/owner-memory-control/tools/relationship_origin_forget_dev.py",
+        "services/owner-memory-control/tests/fm2_transform.py",
+        "services/owner-memory-control/tests/test_personal_memory_fm2_transition.py",
+        "services/owner-memory-control/tests/test_relationship_origin_forget_dev.py",
+        "docs/architecture/personal-memory-fm2-dev-activation.md",
     }
 )
 
