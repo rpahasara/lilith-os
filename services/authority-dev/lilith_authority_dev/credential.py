@@ -85,6 +85,35 @@ def inspect_owner_actor_credential(credentials_directory: str | None, *,
     return _classify(raw)
 
 
+def load_owner_actor_signing_key(credentials_directory: str | None, *,
+                                  expected_directory: str = CREDENTIALS_DIRECTORY) -> Ed25519PrivateKey:
+    """RR-39: the delivered OWNER_ACTOR key for ONE governed issuance; the caller drops it after signing.
+
+    Same fixed source and refusals as `inspect_owner_actor_credential`. Raises
+    `ValueError` for an absent or unusable credential; never a fallback key.
+    """
+    if not credentials_directory or credentials_directory != expected_directory:
+        raise ValueError(CREDENTIAL_ABSENT if not credentials_directory else CREDENTIAL_INVALID)
+    path = Path(credentials_directory) / CREDENTIAL_NAME
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CREDENTIAL_BYTES:
+            raise ValueError(CREDENTIAL_INVALID)
+        raw = os.read(fd, MAX_CREDENTIAL_BYTES + 1)
+    finally:
+        os.close(fd)
+    if not raw or len(raw) > MAX_CREDENTIAL_BYTES:
+        raise ValueError(CREDENTIAL_INVALID)
+    try:
+        key = load_der_private_key(raw, password=None)
+    except Exception as exc:  # malformed DER, encrypted PKCS#8, unsupported algorithm
+        raise ValueError(CREDENTIAL_INVALID) from exc
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValueError(CREDENTIAL_INVALID)
+    return key
+
+
 def _classify(raw: bytes) -> CredentialStatusV1:
     if not raw or len(raw) > MAX_CREDENTIAL_BYTES:
         return CredentialStatusV1(CREDENTIAL_INVALID)

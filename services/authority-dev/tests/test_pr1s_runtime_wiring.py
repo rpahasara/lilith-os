@@ -263,8 +263,9 @@ class DurableLedgerTests(unittest.TestCase):
         for needle in ("owner_control", "synthetic_evidence", "l04", "memory-broker", "L04_", "lilith_memory_broker"):
             self.assertNotIn(needle, source)
         public = {name for name in dir(L.DurableAuthorityLedgerV1) if not name.startswith("_")}
+        # RR-39 adds exactly one writer: one challenge's PREPARE, CONSUME, ISSUE (never RESERVE/CONFIRM/ABANDON).
         self.assertEqual(public, {"open_existing", "provision", "close", "journal", "observe", "replay",
-                                  "append_recovery"})
+                                  "append_recovery", "append_issuance"})
         self.assertEqual(L.SCHEMA_FINGERPRINT, L.schema_fingerprint_of(L.SCHEMA))
         self.assertEqual(P.AUTHORITY_LEDGER, "/var/lib/lilith-authority-dev/authority_ledger.db")
 
@@ -624,7 +625,7 @@ class ReleaseIdentityTests(unittest.TestCase):
                        "lilith_authority_host/paths.py", "lilith_owner_memory/successor_readiness.py",
                        "assets/lilith-recovery-witness.service"):
             self.assertIn(member, files)
-        import install_authority_dev_v2 as I      # Track B: archive layout v2 (installer V1 byte-identical)
+        import install_authority_dev_v3 as I      # RR-39: archive layout v3 (installers V1 and V2 byte-identical)
         self.assertEqual(frozenset(RFS.RUNTIME_SOURCE_MAP.values()), I.RUNTIME_PATHS)
         self.assertEqual(set(RFS.CLI_SOURCES), set(I.CLI_TARGETS))
         members = {**files, **{name: hashlib.sha256(data).hexdigest() for name, data in RFS.cli_payloads(ROOT).items()}}

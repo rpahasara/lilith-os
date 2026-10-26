@@ -730,7 +730,9 @@ class ReleaseArchiveTests(unittest.TestCase):
 
     def test_layout_pins(self):
         import install_authority_dev_v2 as I2      # Track B: archive layout v2; installer V1 stays byte-identical
-        self.assertEqual(I2.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        import install_authority_dev_v3 as I3      # RR-39: archive layout v3; V1 and V2 stay byte-identical
+        self.assertEqual(I3.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        self.assertEqual(I2.RUNTIME_PATHS, I3.RUNTIME_PATHS - I3.ADDED_RUNTIME_PATHS)
         self.assertEqual(I.RUNTIME_PATHS, I2.RUNTIME_PATHS - I2.ADDED_RUNTIME_PATHS)
         self.assertEqual(hashlib.sha256((ROOT / "services/authority-dev/ceremony/install_authority_dev.py").read_bytes())
                          .hexdigest(), "fe10d9a37c53d4a32ca49d79ee5987c6546866feeebcee3c882087f51ed55487")

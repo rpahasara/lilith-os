@@ -55,7 +55,7 @@ for path in (HERE, ROOT / "services/authority-dev"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-import install_authority_dev_v2 as I  # noqa: E402  (Track B: archive layout v2; installer V1 byte-identical)
+import install_authority_dev_v3 as I  # noqa: E402  (RR-39: archive layout v3; installers V1 and V2 byte-identical)
 import release_file_set as RFS  # noqa: E402
 
 INSPECTION_TYPE = "LILITH_AUTHORITY_DEV_BUILD_INSPECTION"
@@ -66,6 +66,7 @@ RECIPE_FILES = (
     "services/authority-dev/ceremony/build_authority_dev_release.py",
     "services/authority-dev/ceremony/install_authority_dev.py",
     "services/authority-dev/ceremony/install_authority_dev_v2.py",
+    "services/authority-dev/ceremony/install_authority_dev_v3.py",
     "services/authority-dev/release_file_set.py",
     "services/recovery-witness/witness_release_file_set.py",
 )

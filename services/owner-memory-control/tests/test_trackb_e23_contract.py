@@ -34,7 +34,8 @@ class ContractTests(unittest.TestCase):
         installed = {member: sha(data) for member, data in H.installed_payloads().items()}
         pinned = {target: subprocess.run(["git", "show", f"{E23.NEW_RELEASE}:{source}"], cwd=ROOT,
                                          capture_output=True, check=True).stdout
-                  for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
+                  for source, target in RFS.RUNTIME_SOURCE_MAP.items()
+                  if target not in H.V3.ADDED_RUNTIME_PATHS}            # RR-39 (layout v3) members postdate E-23
         E23.check_payload(pinned, installed)
 
     def test_the_pin_record_names_every_pin_and_is_not_approved(self):
@@ -45,15 +46,17 @@ class ContractTests(unittest.TestCase):
             self.assertIn(str(value), record)
 
     def test_the_repository_payload_is_the_installed_payload_moved_by_exactly_the_delta(self):
+        # RR-39 moved the repository on (archive layout v3, pinned by authority-dev `test_rr39_layout_v3`); its E-23
+        # part is the repository payload with that change reverted.
         installed = {member: sha(data) for member, data in H.installed_payloads().items()}
-        E23.check_payload(RFS.runtime_payloads(ROOT), installed)
+        E23.check_payload(H.e23_new_payloads(), installed)
         for member, (before, after) in E23.PAYLOAD_DELTA.items():
             self.assertEqual(sha(H.old_bytes(member)), before, member)          # proven against Git history
             self.assertEqual(sha(RFS.runtime_payloads(ROOT)[member]), after, member)
 
     def test_any_other_difference_is_refused(self):
         installed = {member: sha(data) for member, data in H.installed_payloads().items()}
-        payloads = dict(RFS.runtime_payloads(ROOT))
+        payloads = H.e23_new_payloads()
         other = next(m for m in sorted(payloads) if m not in E23.PAYLOAD_DELTA and m not in E23.PAYLOAD_ADDED)
         for mutate, reason in ((lambda p: p.__setitem__(other, p[other] + b"\n"), "PAYLOAD_DELTA_NOT_EXACT"),
                                (lambda p: p.__setitem__("lilith_x/extra.py", b""), "PAYLOAD_MEMBER_UNEXPECTED"),
@@ -74,7 +77,10 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(set(E23.PAYLOAD_ADDED) <= I.RUNTIME_PATHS)
         self.assertEqual(RFS.SHARED_HASHES["services/core-api/lilith_memory/privacy_anchor_contracts.py"],
                          E23.PAYLOAD_ADDED["lilith_memory/privacy_anchor_contracts.py"])
-        self.assertEqual(I.RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        # RR-39 moved the tree on to archive layout v3: exactly its two members on top of the E-23 layout.
+        import install_authority_dev_v3 as V3
+        self.assertEqual(I.RUNTIME_PATHS | V3.ADDED_RUNTIME_PATHS, frozenset(RFS.RUNTIME_SOURCE_MAP.values()))
+        self.assertEqual(V3.RUNTIME_PATHS - V3.ADDED_RUNTIME_PATHS, I.RUNTIME_PATHS)
 
     def test_unit_carries_the_k_pan_credential_and_anchor_state(self):
         unit = RFS.runtime_payloads(ROOT)[E23.WITNESS_UNIT].decode()

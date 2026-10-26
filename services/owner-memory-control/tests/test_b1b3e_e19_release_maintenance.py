@@ -179,7 +179,7 @@ class ReleasePinTests(unittest.TestCase):
         sources = {**{source: target for source, target in RFS.RUNTIME_SOURCE_MAP.items()},
                    **{source: member for member, source in RFS.CLI_SOURCES.items()}}
         for source, target in sorted(sources.items()):
-            if target in E23H.E23.PAYLOAD_ADDED:        # Track B E-23 additions: absent from aee323e and from the host
+            if target in E23H.NOT_INSTALLED:            # E-23 / RR-39 additions: absent from aee323e and from the host
                 continue
             old = subprocess.run(["git", "-C", str(ROOT), "show", f"{OLD}:{source}"], capture_output=True, check=True)
             if old.stdout != E23H.installed_source_bytes(source):          # the installed bytes, not the E-23 source

@@ -40,6 +40,8 @@ RUNTIME_PACKAGE = SERVICE + "/lilith_authority_dev"
 RUNTIME_MODULES = frozenset({
     "__init__.py", "profile.py", "credential.py", "evidence_minter.py", "protocol.py", "core.py", "server.py",
     "ledger.py", "recovery.py", "state.py", "witness_client.py",
+    # RR-39: the governed DEV_SYNTHETIC issuance path (unwired in the DEV runtime).
+    "issuance.py",
 })
 HOST_PACKAGE = SERVICE + "/lilith_authority_host"
 HOST_MODULES = frozenset({"__init__.py", "paths.py", "inputs.py", "store_observer.py"})
@@ -54,7 +56,9 @@ TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_prepar
                         "test_pr1s_root_tooling.py", "test_recovery_witness_suite.py", "pr1s_fixtures.py",
                         "test_pr1a_build_attestation.py",
                         # Track B B4: the installed-layout fixture helper and the archive layout v2 tests.
-                        "installed_layout.py", "test_trackb_layout_v2.py"})
+                        "installed_layout.py", "test_trackb_layout_v2.py",
+                        # RR-39: governed issuance and the First Memory offline proof.
+                        "test_rr39_issuance.py", "test_rr39_layout_v3.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
@@ -62,7 +66,9 @@ CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority
                             # B1b-3e PR-1A build gate: owner-workstation attestation and the fixed host observer.
                             "attest_authority_dev_build.py", "observe_authority_dev_host.py",
                             # Track B B4: the versioned installer successor (archive layout v2; V1 byte-identical).
-                            "install_authority_dev_v2.py"})
+                            "install_authority_dev_v2.py",
+                            # RR-39: the archive layout v3 successor (V1 and V2 byte-identical).
+                            "install_authority_dev_v3.py"})
 # The fixed root CLI wrappers (release members `cli/<name>`).
 CLI_FILES = frozenset({"lilith-authority-ledger-dev", "lilith-authority-hold-dev", "lilith-authority-verify-dev",
                        "lilith-authority-recovery-dev", "lilith-recovery-witness-owner-dev"})
@@ -118,6 +124,9 @@ SHARED_HASHES = {
     "services/owner-memory-control/lilith_owner_memory/authority_ledger_journal.py": "f0d554c53948723c80f5cfbfd638d60855e92ddb562137370d12f9c7eeec49ce",
     "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "9a09a4726bb473067e84e7664dca49d51b90ced1e012564526bae07656d3d5fd",
     "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py": "d3df4cfca975b31cbe526805d6573e7d4760ef376ad02f3cb8e0ac7cece4049b",
+    # RR-39: the B2a owner-proof verifier the issuance path imports (an addition; it now also admits exactly the
+    # fixed DEV_SYNTHETIC owner identity pinned in owner_proof.py). No existing entry is re-pinned.
+    "services/owner-memory-control/lilith_owner_memory/verifier.py": "4e119272430d529a64df0666b0dea4f70c413731d990f905f2dbb8784625789c",
     # Track B (B4): the pure Privacy anchor/checkpoint contract the witness K-PAN module imports. An addition only;
     # no existing entry is re-pinned. The signer never imports it.
     "services/core-api/lilith_memory/privacy_anchor_contracts.py": "58e954af7988115740fee8097d8d3248f47861a7b4046fc63bf9b0f3903fd768",
