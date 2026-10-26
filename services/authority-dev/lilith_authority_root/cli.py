@@ -9,7 +9,7 @@ command prints one JSON object on stdout; a refusal prints
 
 | CLI | forms |
 | --- | --- |
-| `lilith-authority-ledger-dev` | `provision <registryVersion>`, `observe` (root); `provision-as-signer <registryVersion>` (signer uid, via runuser); `first-memory <remember\\|recall> <session>` (root; the First Memory bridge below) |
+| `lilith-authority-ledger-dev` | `provision <registryVersion>`, `observe` (root); `provision-as-signer <registryVersion>` (signer uid, via runuser); `first-memory <remember\\|recall> <session>` (root; the First Memory bridge below); `first-memory-context` (root; the read-only Hermes context below) |
 | `lilith-authority-hold-dev` | `observe`, `create-initial-held`, `release-initial <approvedPackageDigest> <inputs.json>`, `create-successor-held <ROTATION\\|KEY_COMPROMISE_RECOVERY> <N>`, `create-maintenance-held <authorizationId> <targetRegistryVersion>`, `create-custody-debt-held <N>`, `release-ceremony <ceremonyId> <approvedReadinessDigest> <successor-inputs.json>` |
 | `lilith-authority-verify-dev` | `eligibility <inputs.json>`, `full <inputs.json>`, `genesis-candidate <registryVersion> <updatedAt>` |
 | `lilith-recovery-witness-owner-dev` | `health`, `read`, `bootstrap <registryVersion> <updatedAt>`, `execute-head-advance <authorization.json> <targetRegistryVersion>`, `execute-epoch-advance <authorization.json> <targetRegistryVersion>` |
@@ -24,6 +24,15 @@ it PERMANENTLY to `lilith` (real, effective and saved uid/gid; no supplementary 
 host code. Over one inherited socket pair it forwards only `ISSUE_OWNER_EVIDENCE` and the evidence-use operations;
 it rejects any caller `holdStore` and adds the complete hold-store snapshot it reads itself. No listener, no path,
 command or file argument, no other operation.
+
+Hermes context (`first-memory-context`, no arguments; a socket-activated root unit runs it per connection with the
+socket as stdin/stdout): the ONE read route from the unprivileged Hermes gateway to canonical memory. It reads one
+bounded request `{"v":1,"channel":…,"sessionId":…}`, runs the same trusted host's `recall` form with exactly the
+context token (`hermes_memory_context.CONTEXT_REQUEST`) on its stdin, forwards ONLY `LOOKUP_EVIDENCE_USE` over the
+bridge (no issuance, no use write, no recovery), and answers one JSON object. Owner-personal memories leave root only
+when a root-owned, owner-approved grant names exactly this `lilith_os` session (never a caller's flag) AND the host
+reports the Privacy floor makes Hermes an erasure owner of that memory. Anything not READY or not exact answers
+UNAVAILABLE with no memories.
 """
 
 from __future__ import annotations
@@ -124,6 +133,8 @@ def _ledger(argv: list[str], euid: int) -> dict[str, Any]:
     _require_root(euid)
     if argv[:1] == ["first-memory"] and len(argv) == 3:
         return run_first_memory(argv[1], argv[2])
+    if argv == ["first-memory-context"]:
+        return run_first_memory_context()
     if argv[:1] == ["provision"] and len(argv) == 2:
         version = int(_arg(_VERSION, argv[1], "VERSION_INVALID"))
         uid, gid = _signer_ids()
@@ -256,7 +267,8 @@ BRIDGE_REFUSAL = {"status": "REFUSED", "reason": "BRIDGE_REQUEST_INVALID", "auth
 
 
 def bridge_request(raw: bytes, *, hold_snapshot: Callable[[], dict[str, Any]],
-                   exchange: Callable[[bytes], dict[str, Any]]) -> dict[str, Any]:
+                   exchange: Callable[[bytes], dict[str, Any]],
+                   operations: frozenset = BRIDGE_OPERATIONS) -> dict[str, Any]:
     """One host request -> one signer frame, or a refusal. The caller names an allowed operation and its owner
     artifacts only; the hold snapshot is always root's own read."""
     try:
@@ -264,7 +276,7 @@ def bridge_request(raw: bytes, *, hold_snapshot: Callable[[], dict[str, Any]],
         if not isinstance(value, dict) or set(value) != {"operation", "payload"}:
             raise Refused("BRIDGE_REQUEST_INVALID")
         operation, payload = value["operation"], value["payload"]
-        if operation not in BRIDGE_OPERATIONS or not isinstance(payload, dict) or "holdStore" in payload:
+        if operation not in operations or not isinstance(payload, dict) or "holdStore" in payload:
             raise Refused("BRIDGE_REQUEST_INVALID")
         if operation != AP.LOOKUP_EVIDENCE_USE:
             payload = {**payload, "holdStore": dict(hold_snapshot())}
@@ -287,7 +299,8 @@ def _recv_exact(conn: socket.socket, size: int) -> bytes | None:
 
 
 def serve_bridge(conn: socket.socket, *, hold_snapshot: Callable[[], dict[str, Any]],
-                 exchange: Callable[[bytes], dict[str, Any]], max_requests: int = BRIDGE_MAX_REQUESTS) -> int:
+                 exchange: Callable[[bytes], dict[str, Any]], max_requests: int = BRIDGE_MAX_REQUESTS,
+                 operations: frozenset = BRIDGE_OPERATIONS) -> int:
     """Serve length-prefixed JSON requests until EOF; a malformed frame ends the bridge. Returns requests served."""
     served = 0
     while served < max_requests:
@@ -301,7 +314,7 @@ def serve_bridge(conn: socket.socket, *, hold_snapshot: Callable[[], dict[str, A
         if raw is None:
             break
         try:
-            response = bridge_request(raw, hold_snapshot=hold_snapshot, exchange=exchange)
+            response = bridge_request(raw, hold_snapshot=hold_snapshot, exchange=exchange, operations=operations)
         except (OSError, ValueError) as exc:
             response = {"status": "REFUSED", "reason": "SIGNER_UNREACHABLE:" + type(exc).__name__,
                         "authorityGranted": False}
@@ -360,9 +373,12 @@ def drop_privileges(user: str) -> tuple[int, int]:
 def run_first_memory(form: str, session: str, *, tree: str = FIRST_MEMORY_TREE, entry: str = FIRST_MEMORY_ENTRY,
                      python: str = FIRST_MEMORY_PYTHON, user: str = FIRST_MEMORY_USER,
                      hold_snapshot: Callable[[], dict[str, Any]] | None = None,
-                     exchange: Callable[[bytes], dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Fork the host as `user` (permanently) and serve its bridge. Keyword arguments are TEST seams; the CLI passes
-    none."""
+                     exchange: Callable[[bytes], dict[str, Any]] | None = None,
+                     operations: frozenset = BRIDGE_OPERATIONS, host_input: bytes | None = None,
+                     output_limit: int = 64 * 1024) -> dict[str, Any]:
+    """Fork the host as `user` (permanently) and serve its bridge. With `host_input`, the host's stdin is exactly
+    those bytes and its stdout (at most `output_limit` bytes) is returned as `hostOutput` instead of inherited. Keyword
+    arguments are TEST seams and the context form's settings; the CLI form passes none."""
     if form not in FIRST_MEMORY_FORMS:
         raise Refused("USAGE")
     _arg(_SESSION, session, "SESSION_INVALID")
@@ -375,10 +391,17 @@ def run_first_memory(form: str, session: str, *, tree: str = FIRST_MEMORY_TREE, 
         exchange = lambda frame: clients._authority_response(  # noqa: E731
             clients._exchange(P.AUTHORITY_OWNER_SOCKET, frame, limit=AP.MAX_FRAME_BYTES))
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    pipes = (os.pipe(), os.pipe()) if host_input is not None else None
     pid = os.fork()
     if pid == 0:                                                   # child: never returns into root code
         try:
             parent.close()
+            if pipes is not None:
+                (in_r, in_w), (out_r, out_w) = pipes
+                os.dup2(in_r, 0)
+                os.dup2(out_w, 1)
+                for fd in (in_r, in_w, out_r, out_w):
+                    os.close(fd)
             os.dup2(child.fileno(), BRIDGE_FD, inheritable=True)
             os.chdir("/")
             drop_privileges(user)
@@ -387,12 +410,137 @@ def run_first_memory(form: str, session: str, *, tree: str = FIRST_MEMORY_TREE, 
             pass
         os._exit(127)
     child.close()
+    output = b""
     try:
-        served = serve_bridge(parent, hold_snapshot=hold_snapshot, exchange=exchange)
+        if pipes is not None:
+            (in_r, in_w), (out_r, out_w) = pipes
+            os.close(in_r)
+            os.close(out_w)
+            os.write(in_w, host_input)                            # small and bounded: fits the pipe buffer
+            os.close(in_w)
+        served = serve_bridge(parent, hold_snapshot=hold_snapshot, exchange=exchange, operations=operations)
+        if pipes is not None:
+            while len(output) <= output_limit:
+                chunk = os.read(out_r, 4096)
+                if not chunk:
+                    break
+                output += chunk
+            os.close(out_r)
     finally:
         parent.close()
     _pid, status = os.waitpid(pid, 0)
-    return {"hostExit": os.waitstatus_to_exitcode(status), "bridgeRequests": served, "authorityGranted": False}
+    result = {"hostExit": os.waitstatus_to_exitcode(status), "bridgeRequests": served, "authorityGranted": False}
+    if pipes is not None:
+        result["hostOutput"] = output if len(output) <= output_limit else None
+    return result
+
+
+# ---------------------------------------------------------------- Hermes context (read-only) ---
+
+CONTEXT_REQUEST = "__lilith_canonical_memory_context_v1__"      # hermes_memory_context.CONTEXT_REQUEST (pinned)
+CONTEXT_SCHEMA = "LilithCanonicalMemoryContextV1"
+CONTEXT_OPERATIONS = frozenset({AP.LOOKUP_EVIDENCE_USE})
+CONTEXT_MAX_REQUEST = 512
+OWNER_CHANNEL = "lilith_os"
+OWNER_CHANNEL_GRANT = "/etc/lilith-first-memory-dev/hermes-owner-channel.json"
+OWNER_CHANNEL_GRANT_FIELDS = frozenset({"schemaVersion", "channel", "sessionId", "grantedAt", "expiresAt"})
+OWNER_CHANNEL_GRANT_MAX_SECONDS = 7 * 24 * 3600
+OWNER_PERSONAL = "OWNER_PERSONAL"
+_CHANNEL = re.compile(r"[a-z0-9_]{1,32}\Z")
+_CONTEXT_MEMORY_FIELDS = frozenset({"kind", "value", "epistemicBasis", "sensitivity", "admissionId", "revisionId",
+                                    "hermesErasable"})
+_CONTEXT_KINDS = frozenset({"codename", "relationship-origin"})
+
+
+def _unavailable(reason: str) -> dict[str, Any]:
+    return {"status": "UNAVAILABLE", "schema": CONTEXT_SCHEMA, "reason": reason, "memories": [],
+            "ownerChannel": False}
+
+
+def owner_channel_granted(channel: str, session: str, *, path: str = OWNER_CHANNEL_GRANT, owner_uid: int = 0,
+                          now: Callable[[], Any] | None = None) -> bool:
+    """True only for the exact `lilith_os` session a root-owned, unexpired (at most 7 days), owner-approved grant
+    names. A missing, foreign-owned, writable, malformed or expired grant is simply no grant."""
+    from datetime import datetime, timezone
+
+    if channel != OWNER_CHANNEL:
+        return False
+    try:
+        meta = os.lstat(path)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != owner_uid or meta.st_mode & 0o022 or meta.st_size > 1024:
+            return False
+        grant = json.loads(Path(path).read_text(encoding="ascii"), object_pairs_hook=_no_duplicates)
+        if not isinstance(grant, dict) or set(grant) != OWNER_CHANNEL_GRANT_FIELDS or grant["schemaVersion"] != 1:
+            return False
+        if grant["channel"] != OWNER_CHANNEL or not isinstance(grant["sessionId"], str) \
+                or not _SESSION.match(grant["sessionId"]):
+            return False
+        if not all(isinstance(grant[k], str) and _INSTANT.match(grant[k]) for k in ("grantedAt", "expiresAt")):
+            return False
+        granted, expires = (datetime.strptime(grant[k], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                            for k in ("grantedAt", "expiresAt"))
+        current = (now or (lambda: datetime.now(timezone.utc)))()
+        if not granted <= current < expires or (expires - granted).total_seconds() > OWNER_CHANNEL_GRANT_MAX_SECONDS:
+            return False
+        return grant["sessionId"] == session
+    except (OSError, ValueError, Refused, UnicodeDecodeError):
+        return False
+
+
+def context_response(raw: bytes, *, host_context: Callable[[str], Any],
+                     granted: Callable[[str, str], bool]) -> dict[str, Any]:
+    """One request -> the bounded context. `host_context(session)` returns the host's raw context output (bytes),
+    `granted(channel, session)` the grant decision. Owner-personal memories pass only with a grant AND the host's
+    statement that Hermes is an erasure owner of that memory; the internal flag never leaves."""
+    try:
+        if len(raw) > CONTEXT_MAX_REQUEST:
+            raise Refused("CONTEXT_REQUEST_INVALID")
+        request = json.loads(raw.decode("ascii"), object_pairs_hook=_no_duplicates)
+        if not isinstance(request, dict) or set(request) != {"v", "channel", "sessionId"} or request["v"] != 1:
+            raise Refused("CONTEXT_REQUEST_INVALID")
+        channel, session = request["channel"], request["sessionId"]
+        if not (isinstance(channel, str) and _CHANNEL.match(channel) and isinstance(session, str)
+                and _SESSION.match(session)):
+            raise Refused("CONTEXT_REQUEST_INVALID")
+    except (Refused, ValueError, UnicodeDecodeError):
+        return _unavailable("CONTEXT_REQUEST_INVALID")
+    try:
+        output = host_context(session)
+        payload = json.loads(output.decode("utf-8").strip().splitlines()[-1], object_pairs_hook=_no_duplicates)
+    except (Refused, OSError, ValueError, IndexError, UnicodeDecodeError, AttributeError):
+        return _unavailable("CONTEXT_HOST_UNAVAILABLE")
+    if not (isinstance(payload, dict) and payload.get("schema") == CONTEXT_SCHEMA):
+        return _unavailable("CONTEXT_HOST_INVALID")
+    if payload.get("status") != "CONTEXT":
+        reason = payload.get("reason")
+        return _unavailable(reason if isinstance(reason, str) and len(reason) <= 128 else "CONTEXT_NOT_READY")
+    memories = payload.get("memories")
+    if not isinstance(memories, list) or len(memories) > len(_CONTEXT_KINDS) or not all(
+            isinstance(m, dict) and set(m) == _CONTEXT_MEMORY_FIELDS and m["kind"] in _CONTEXT_KINDS
+            and isinstance(m["hermesErasable"], bool)
+            and all(isinstance(m[k], str) for k in _CONTEXT_MEMORY_FIELDS - {"hermesErasable"})
+            and 0 < len(m["value"]) <= 600 for m in memories):
+        return _unavailable("CONTEXT_HOST_INVALID")
+    owner = bool(granted(channel, session))
+    shown = [{k: v for k, v in m.items() if k != "hermesErasable"} for m in memories
+             if m["sensitivity"] != OWNER_PERSONAL or (owner and m["hermesErasable"] is True)]
+    return {"status": "CONTEXT", "schema": CONTEXT_SCHEMA, "reason": None, "memories": shown, "ownerChannel": owner}
+
+
+def run_first_memory_context(*, stdin: Any = None, **seams: Any) -> dict[str, Any]:
+    """The `first-memory-context` form: one bounded request on stdin, one context object returned (printed by main).
+    The host runs exactly as for `first-memory recall` but with the context token as its only input and the bridge
+    limited to `LOOKUP_EVIDENCE_USE`."""
+    raw = (stdin or sys.stdin.buffer).read(CONTEXT_MAX_REQUEST + 1)
+
+    def host_context(session: str) -> bytes:
+        result = run_first_memory("recall", session, operations=CONTEXT_OPERATIONS,
+                                  host_input=(CONTEXT_REQUEST + "\n").encode("ascii"), **seams)
+        if result["hostExit"] != 0 or result["hostOutput"] is None:
+            raise Refused("CONTEXT_HOST_UNAVAILABLE")
+        return result["hostOutput"]
+
+    return context_response(raw, host_context=host_context, granted=owner_channel_granted)
 
 
 def _recovery(argv: list[str], euid: int) -> dict[str, Any]:

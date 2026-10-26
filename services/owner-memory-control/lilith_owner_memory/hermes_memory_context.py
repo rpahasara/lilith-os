@@ -8,6 +8,15 @@ Two halves, one contract (`LilithCanonicalMemoryContextV1`):
                                              Privacy not READY (or any refusal) -> UNAVAILABLE with no memories.
     render_context_note(payload, ...)        conversation side (a Hermes platform adapter, before a session's first
                                              turn): one bounded, labelled system-context note, or None.
+    note_for_turn(socket, channel, session)  the Hermes adapter's one call: ask the root context service
+                                             (`lilith-authority-ledger-dev first-memory-context`, socket-activated)
+                                             and render its answer; the note goes into the turn's ephemeral
+                                             `channel_prompt`, which Hermes never persists to the transcript.
+
+The root service decides what leaves canonical storage: owner-personal memories only for the exact `lilith_os`
+session an owner-approved grant names AND only where the Privacy floor makes Hermes an erasure owner of that memory
+(`context_payload(..., hermes_erasable=...)` reports it). The adapter renders personal content only when the service
+itself says `ownerChannel`; a caller never sets it.
 
 What this is NOT: no write path (it never offers, consents or admits), no Hermes-local copy (nothing is cached or
 persisted; the note is rebuilt for each new conversation from canonical storage), no chat history (no session,
@@ -21,7 +30,8 @@ without the canonical runtime. `app.py` (the `/os/conversation` relay) never imp
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Optional
+import socket
+from typing import Any, Callable, Mapping, Optional
 
 CONTEXT_REQUEST = "__lilith_canonical_memory_context_v1__"
 CONTEXT_SCHEMA = "LilithCanonicalMemoryContextV1"
@@ -35,17 +45,22 @@ _MAX_VALUE_CHARS = 600
 _MAX_MEMORIES = len(_LABELS)
 
 
-def context_payload(conversation: Any, session: str) -> dict:
-    """The memory side. Read-only; fails closed to UNAVAILABLE (never a partial or guessed context)."""
+def context_payload(conversation: Any, session: str, *,
+                    hermes_erasable: Optional[Callable[[str], bool]] = None) -> dict:
+    """The memory side. Read-only; fails closed to UNAVAILABLE (never a partial or guessed context). With
+    `hermes_erasable(kind)` (the host's Privacy floor read), each memory also says whether a FORGET of it would erase
+    the Hermes conversation store; the root service uses it and strips it."""
     from .first_memory_conversation import FirstMemoryRefused
 
     try:
         recalled = conversation.recall_authorized(session)
+        memories = [{"kind": m.kind, "value": m.value, "epistemicBasis": m.epistemic_basis,
+                     "sensitivity": m.sensitivity, "admissionId": m.admission_id, "revisionId": m.revision_id,
+                     **({} if hermes_erasable is None else {"hermesErasable": bool(hermes_erasable(m.kind))})}
+                    for m in recalled]
     except FirstMemoryRefused as exc:
         return {"status": UNAVAILABLE, "schema": CONTEXT_SCHEMA, "reason": exc.code, "memories": []}
-    return {"status": CONTEXT, "schema": CONTEXT_SCHEMA, "reason": None, "memories": [
-        {"kind": m.kind, "value": m.value, "epistemicBasis": m.epistemic_basis, "sensitivity": m.sensitivity,
-         "admissionId": m.admission_id, "revisionId": m.revision_id} for m in recalled]}
+    return {"status": CONTEXT, "schema": CONTEXT_SCHEMA, "reason": None, "memories": memories}
 
 
 def _memories(payload: Any) -> Optional[list]:
@@ -88,3 +103,39 @@ def render_context_note(payload: Any, *, include_personal: bool) -> Optional[str
     for memory in shown:
         lines.append(f"- {_LABELS[memory['kind']]}: {json.dumps(memory['value'], ensure_ascii=False)}")
     return "\n".join(lines)
+
+
+DEFAULT_SOCKET = "/run/lilith-first-memory-context.sock"
+_MAX_RESPONSE = 16 * 1024
+
+
+def request_context(socket_path: str, *, channel: str, session: str, timeout: float = 30.0) -> dict:
+    """Ask the root context service once (one request, then half-close; one JSON answer). Any failure is
+    UNAVAILABLE: the conversation proceeds without canonical memory, never with a guessed one."""
+    unavailable = {"status": UNAVAILABLE, "schema": CONTEXT_SCHEMA, "reason": "CONTEXT_SERVICE_UNAVAILABLE",
+                   "memories": [], "ownerChannel": False}
+    request = json.dumps({"v": 1, "channel": channel, "sessionId": session}, separators=(",", ":")).encode("ascii")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(timeout)
+            conn.connect(socket_path)
+            conn.sendall(request)
+            conn.shutdown(socket.SHUT_WR)
+            data = b""
+            while len(data) <= _MAX_RESPONSE:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        if len(data) > _MAX_RESPONSE:
+            return unavailable
+        payload = json.loads(data.decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return unavailable
+    return payload if isinstance(payload, dict) else unavailable
+
+
+def note_for_turn(socket_path: str, *, channel: str, session: str, timeout: float = 30.0) -> Optional[str]:
+    """The Hermes adapter's one call per turn: the note for `MessageEvent.channel_prompt`, or None."""
+    payload = request_context(socket_path, channel=channel, session=session, timeout=timeout)
+    return render_context_note(payload, include_personal=payload.get("ownerChannel") is True)

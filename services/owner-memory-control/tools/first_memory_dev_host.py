@@ -271,6 +271,7 @@ class ComposedV1:
     creation_enabled: bool                                 # the root-owned canonical config, read for this turn
     registered_credentials: tuple[Mapping[str, Any], ...]  # the registered owner PUBLIC credentials
     enabled_kinds: frozenset = frozenset()                 # the kinds whose capability that config activates
+    hermes_floor: Callable[[str], bool] = lambda kind: False  # a FORGET of that kind also erases the Hermes store
 
 
 class FirstMemoryDevHostV1:
@@ -378,7 +379,13 @@ class FirstMemoryDevHostV1:
             challenge_context=challenge_context, now_fn=self._now, origin_policy=ORIGIN_TUPLE)
         enabled = frozenset(kind for kind, capability in KIND_CAPABILITY.items()
                             if settings.canonical_ltm_enabled and settings.capability_active(capability))
-        return ComposedV1(conversation, bool(enabled), tuple(registration.credentials), enabled)
+        identity_of = {FMC.CODENAME.name: GOVERNED_TUPLE.identity, FMC.RELATIONSHIP_ORIGIN.name: ORIGIN_TUPLE.identity}
+
+        def hermes_floor(kind: str) -> bool:
+            identity = identity_of[kind]
+            return PG.HERMES_DEV_CONVERSATION in privacy_store.required_owners(identity[0], identity[1])
+
+        return ComposedV1(conversation, bool(enabled), tuple(registration.credentials), enabled, hermes_floor)
 
 
 # ---------------------------------------------------------------------------------------------- the turn ---
@@ -408,9 +415,10 @@ def remember(host: FirstMemoryDevHostV1, session: str, text: str,
 def recall(host: FirstMemoryDevHostV1, session: str, text: str) -> dict[str, Any]:
     """One recall turn on a fresh composition: canonical storage only. The exact context request returns the
     read-only canonical memory context for a new (Hermes) conversation instead."""
-    conversation = host.compose().conversation
+    composed = host.compose()
+    conversation = composed.conversation
     if text == HMC.CONTEXT_REQUEST:
-        return HMC.context_payload(conversation, session)
+        return HMC.context_payload(conversation, session, hermes_erasable=composed.hermes_floor)
     result = conversation.recall(session, text)
     return {"status": result.status, "codename": result.codename, "reason": result.reason, "kind": result.kind,
             "value": result.value}

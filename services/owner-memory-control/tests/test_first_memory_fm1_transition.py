@@ -563,8 +563,10 @@ class PinTests(unittest.TestCase):
         source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
         current = RFS.runtime_payloads(ROOT)
         repo = {m: IL.old_source_bytes(source_of[m], IL.FM1_RELEASE) for m in current}   # FM-1 NEW, as merged
-        # The tree has moved past e2324a5 by exactly the relationship-origin signer change (a later transition).
-        self.assertEqual({m for m in current if current[m] != repo[m]}, {"lilith_authority_dev/protocol.py"})
+        # The tree has moved past e2324a5 by exactly the successor signer delta (a later transition): the
+        # relationship-origin purpose and the read-only Hermes context form of the root bridge.
+        self.assertEqual({m for m in current if current[m] != repo[m]},
+                         {"lilith_authority_dev/protocol.py", "lilith_authority_root/cli.py"})
         for member, (before, after) in FM1.PAYLOAD_DELTA.items():
             self.assertEqual(sha(IL.old_source_bytes(source_of[member], IL.E23_RELEASE)), before, member)
             self.assertEqual(sha(repo[member]), after, member)
