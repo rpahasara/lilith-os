@@ -125,5 +125,72 @@ class RelationshipOriginDevVerticalTests(unittest.TestCase):
         self.assertEqual(self.journal_ops(), ["GENESIS"])
 
 
+@unittest.skipUnless(X.POSIX, "ownership and modes are POSIX")
+class SchemaV3ActivationShapeTests(unittest.TestCase):
+    """The DEV order: the codename memory is already admitted at owner-ledger v1; the reviewed v3 tool runs; the
+    codename is unchanged and recalled; only then can one origin statement be admitted (creation off until named)."""
+
+    _HARNESS = V.FirstMemoryDevVerticalTests
+    copy_db = staticmethod(_HARNESS.copy_db)
+    setUp = _HARNESS.setUp
+    forget_first_interaction = _HARNESS.forget_first_interaction
+    register_owner = _HARNESS.register_owner
+    set_config = _HARNESS.set_config
+    make_core = _HARNESS.make_core
+    record_ledger_advance = _HARNESS.record_ledger_advance
+    paths = _HARNESS.paths
+    host = _HARNESS.host
+    owner_signs = _HARNESS.owner_signs
+    journal_ops = _HARNESS.journal_ops
+    canonical_counts = _HARNESS.canonical_counts
+    assertHostRefused = _HARNESS.assertHostRefused
+    remember = RelationshipOriginDevVerticalTests.remember
+
+    def test_the_reviewed_v3_tool_on_the_first_memory_shape(self):
+        import relationship_origin_l04_migration as TOOL
+
+        self.register_owner()
+        self.assertEqual(self.remember(V.REMEMBER, "sess.first")[0]["status"], FMC.ADMITTED)
+        self.set_config(enabled=False)                                     # creation DISABLED, as on DEV now
+        before = HOST.recall(self.host(), "sess.before", V.ASK)
+        planned = TOOL.plan(self.cognitive)
+        self.assertEqual((planned["schemaVersion"], planned["mutation"]), (1, "NONE"))
+        self.assertEqual(planned["preserved"]["memory_admission"][0], 1)
+        backups = Path(self.tmp.name) / "v3-backups"
+        backups.mkdir()
+        applied = TOOL.apply(self.cognitive, backups)
+        self.assertEqual((applied["mutation"], applied["fromVersion"], applied["schemaVersion"]),
+                         ("SCHEMA_V3_APPLIED", 1, 3))
+        self.assertEqual(applied["preserved"], planned["preserved"])       # every canonical row byte-identical
+        self.assertTrue(Path(applied["backup"]).is_file())
+        self.assertEqual(TOOL.apply(self.cognitive, backups)["mutation"], "NONE_ALREADY_V3")
+        self.assertEqual(HOST.recall(self.host(), "sess.after", V.ASK), before)
+        self.assertHostRefused(lambda: self.remember(ORIGIN, "sess.o"), "MEMORY_CREATION_NOT_AUTHORIZED")
+        self.set_config(enabled=True, capabilities=(MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE,))
+        self.assertHostRefused(lambda: self.remember(V.REMEMBER, "sess.c2"), "MEMORY_CREATION_NOT_AUTHORIZED")
+        self.assertEqual(self.remember(ORIGIN, "sess.o")[0]["status"], FMC.ADMITTED)
+        self.set_config(enabled=False)                                     # disabled again; reads still work
+        self.assertEqual(HOST.recall(self.host(), "sess.fresh", ASK_ORIGIN)["value"], STATEMENT)
+        self.assertEqual(HOST.recall(self.host(), "sess.fresh", V.ASK), before)
+        self.assertEqual(self.canonical_counts(), {"memory_admission": 2, "memory_admission_authority_link": 2})
+
+    def test_the_tool_refuses_without_the_admission_link(self):
+        import sqlite3
+
+        import relationship_origin_l04_migration as TOOL
+
+        other = Path(self.tmp.name) / "other.db"
+        self.copy_db(self.cognitive, other)
+        conn = sqlite3.connect(other)
+        try:
+            conn.execute(f"DROP TABLE {TOOL.LINK.AD.LINK_TABLE}")
+            conn.commit()
+        finally:
+            conn.close()
+        with self.assertRaises(TOOL.Refused) as caught:
+            TOOL.plan(other)
+        self.assertEqual(caught.exception.reason, "ADMISSION_LINK_TABLE_ABSENT")
+
+
 if __name__ == "__main__":
     unittest.main()

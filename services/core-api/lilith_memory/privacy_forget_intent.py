@@ -14,6 +14,10 @@ conversation front end is stopped.
 3. ``HoldFirstForgetRunner`` calls Privacy's ``begin_forget`` (through the Slice 3 runner) only when the intent is
    root-owned AND the gateway is observed stopped (unit inactive, port closed).
 
+One intent per governed identity (``privacy_forget_runner.PROFILES``): ``first-interaction.intent`` (unchanged) and
+``relationship-origin.intent``, each carrying its own identity label. A FORGET is refused while the other identity's
+intent is pending, so at most one FORGET is ever held at a time.
+
 The intent is removed only by root: the reconcile pass once Privacy itself proves the identity's FORGET COMPLETED with
 the Hermes owner, or an explicit operator cancel that refuses while an authorization is in flight. Evidence consumed
 by an attempt that never committed (``begin_forget`` consumes it before its transaction) leaves the intent pending and
@@ -44,6 +48,9 @@ except ImportError:  # deploy-exact flat-directory tests
 INTENT_DIR = Path("/var/lib/hermes-forget/intent")
 INTENT_NAME = "first-interaction.intent"
 IDENTITY_LABEL = "FIRST_INTERACTION"
+# Closed: the intent file name of each governed FORGET profile.
+INTENT_NAMES = {R.FIRST_INTERACTION_FORGET.label: INTENT_NAME,
+                R.RELATIONSHIP_ORIGIN_FORGET.label: "relationship-origin.intent"}
 INTENT_FIELDS = frozenset({"v", "identity", "intentRefId", "actorRefId", "recordedAt"})
 REF_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 MAX_INTENT_BYTES = 1024
@@ -61,10 +68,19 @@ class ForgetIntentError(RuntimeError):
 
 
 class ForgetIntentStore:
-    def __init__(self, intent_dir: Path = INTENT_DIR, *, holder_uid: int = 0):
+    def __init__(self, intent_dir: Path = INTENT_DIR, *, holder_uid: int = 0,
+                 profile: R.ForgetProfileV1 = R.FIRST_INTERACTION_FORGET):
+        if profile not in R.PROFILES:
+            raise ForgetIntentError("FORGET_PROFILE_UNKNOWN")
         self.intent_dir = Path(intent_dir)
-        self.path = self.intent_dir / INTENT_NAME
+        self.profile = profile
+        self.path = self.intent_dir / INTENT_NAMES[profile.label]
         self.holder_uid = holder_uid
+
+    def other_pending(self) -> bool:
+        """Another governed identity's intent exists (held or not): this identity's FORGET must wait."""
+        return any(name != self.path.name and (self.intent_dir / name).exists()
+                   for name in INTENT_NAMES.values())
 
     def read(self) -> Optional[Mapping[str, Any]]:
         try:
@@ -84,6 +100,8 @@ class ForgetIntentStore:
             raise ForgetIntentError("FORGET_INTENT_MALFORMED") from exc
         if not isinstance(intent, dict) or set(intent) != INTENT_FIELDS:
             raise ForgetIntentError("FORGET_INTENT_MALFORMED")
+        if intent.get("identity") != self.profile.label:                  # never another identity's intent
+            raise ForgetIntentError("FORGET_INTENT_MALFORMED")
         return intent
 
     def state(self) -> str:
@@ -97,15 +115,17 @@ class ForgetIntentStore:
         """Durably record the intent, or return the identical pending one; a different pending intent is refused."""
         if not REF_RE.fullmatch(str(intent_ref_id)) or not REF_RE.fullmatch(str(actor_ref_id)):
             raise ForgetIntentError("FORGET_INTENT_INVALID")
+        if self.other_pending():
+            raise ForgetIntentError("FORGET_INTENT_PENDING_OTHER_IDENTITY")
         existing = self.read()
         if existing is not None:
             if existing.get("intentRefId") != intent_ref_id or existing.get("actorRefId") != actor_ref_id:
                 raise ForgetIntentError("FORGET_INTENT_PENDING")
             return existing
-        intent = {"v": 1, "identity": IDENTITY_LABEL, "intentRefId": intent_ref_id, "actorRefId": actor_ref_id,
+        intent = {"v": 1, "identity": self.profile.label, "intentRefId": intent_ref_id, "actorRefId": actor_ref_id,
                   "recordedAt": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")}
         data = json.dumps(intent, sort_keys=True, separators=(",", ":")).encode("ascii")
-        tmp = self.intent_dir / f".{INTENT_NAME}.{uuid.uuid4().hex}.tmp"     # not matched by *.intent
+        tmp = self.intent_dir / f".{self.path.name}.{uuid.uuid4().hex}.tmp"  # not matched by *.intent
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
         try:
             os.write(fd, data)
@@ -154,6 +174,8 @@ class HoldFirstForgetRunner:
     def __init__(self, runner: R.FirstInteractionForgetRunner, intents: ForgetIntentStore, gateway: GatewayProbe, *,
                  hold_timeout_seconds: float = 120.0, poll_seconds: float = 1.0,
                  sleep: Callable[[float], None] = time.sleep, monotonic: Callable[[], float] = time.monotonic):
+        if intents.profile is not runner.profile:                         # one identity end to end
+            raise ForgetIntentError("FORGET_PROFILE_MISMATCH")
         self.runner, self.intents, self.gateway = runner, intents, gateway
         self.hold_timeout_seconds, self.poll_seconds = hold_timeout_seconds, poll_seconds
         self.sleep, self.monotonic = sleep, monotonic
@@ -172,10 +194,10 @@ class HoldFirstForgetRunner:
         self.intents.record(intent_ref_id=intent_ref_id, actor_ref_id=actor_ref_id)
         if not self._held():
             return R.ForgetRunResult(INTENT_RECORDED_HOLD_PENDING, failure_code="HOLD_NOT_ESTABLISHED")
-        privacy = self.runner.privacy_authority
-        if privacy.in_flight_authorization(R.IDENTITY) is not None:
+        privacy, identity = self.runner.privacy_authority, self.runner.identity
+        if privacy.in_flight_authorization(identity) is not None:
             return self.runner.resume()                                  # accepted earlier: finish it
-        if privacy.suppression_matches(R.IDENTITY):
+        if privacy.suppression_matches(identity):
             return R.ForgetRunResult(R.ALREADY_COMPLETE)                # root reconcile releases the intent
         try:
             return self.runner.forget(actor_ref_id=actor_ref_id, actor_evidence_ref_id=actor_evidence_ref_id,
@@ -186,7 +208,7 @@ class HoldFirstForgetRunner:
             # an explicit cancel. Any other Privacy refusal propagates (the intent stays as well).
             if not str(exc).startswith("ACTOR_"):
                 raise
-            if privacy.in_flight_authorization(R.IDENTITY) is not None:
+            if privacy.in_flight_authorization(identity) is not None:
                 return self.runner.resume()
             return R.ForgetRunResult(INTENT_STALLED_EVIDENCE_REFUSED, failure_code=str(exc))
 

@@ -1,0 +1,35 @@
+# LILITH First Memory: one read-only Hermes context request (DEV_SYNTHETIC). The release CLI checks the root-owned host
+# tree, drops the host permanently to lilith, gives it only the context token and forwards only LOOKUP_EVIDENCE_USE to
+# the signer. Owner-personal memories need the root-owned owner-channel grant and the Hermes Privacy floor.
+[Unit]
+Description=LILITH First Memory read-only Hermes context, one connection (DEV_SYNTHETIC)
+ConditionPathExists=/opt/lilith-first-memory-dev/current
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/sbin/lilith-authority-ledger-dev first-memory-context
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=90
+UMask=0077
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+AmbientCapabilities=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SyslogIdentifier=lilith-first-memory-context

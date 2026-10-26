@@ -1,0 +1,17 @@
+# LILITH First Memory: the read-only canonical-memory context for the Hermes gateway (DEV_SYNTHETIC).
+# One connection = one root `lilith-authority-ledger-dev first-memory-context` run (Accept=yes). Only uid/gid lilith
+# (the gateway, Core API and memory host identity) can connect; the service answers context only, never a write.
+[Unit]
+Description=LILITH First Memory read-only Hermes context (DEV_SYNTHETIC)
+
+[Socket]
+ListenStream=/run/lilith-first-memory-context.sock
+SocketUser=root
+SocketGroup=lilith
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+MaxConnectionsPerSource=2
+
+[Install]
+WantedBy=sockets.target
