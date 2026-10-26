@@ -104,6 +104,11 @@ STEPS = {
 }
 BY_STEP = {step: (form, pre, post, marker) for form, (step, pre, post, marker) in STEPS.items()}
 ORDER = [step for step, _p, _q, _m in STEPS.values()]
+# Owner-adjudicated STOP records (docs/architecture/first-memory-fm1-release-transition.md §4, PROPOSED until merged):
+# step -> SHA-256 of its exact consumed `STEP.json`. Such a step counts as reached for the step chain ONLY; it never
+# re-runs, and the next step's own fresh gate must still read its post-phase. The 2026-10-26 STAGE STOP was the local
+# plink exit crash (0xC0000005) on the post-status read; the remote stage reported F1 and a clean re-read is F1.
+ADJUDICATED_STEPS = {"STAGE": "b82b4a5b94451313b84818860a5b8d0e06fc4815c275966c8b35d252f5e7fb4e"}
 
 GO_COMMON = ("Mode: " + FM1.MODE + " (FM-1, DEV_SYNTHETIC, lilith-dev-01 only). OLD release {old}; NEW release {new}, "
              "manifest SHA-256 {manifest}, archive SHA-256 {archive}.",
@@ -348,7 +353,9 @@ class Operator(E22OP.Operator):
             return None
         _need(consumed and len(runs) == 1, "STEP_NOT_EXACTLY_ONE:" + step)
         record = _json(runs[0] / STEP_FILE, "STEP_INVALID:" + step)
-        _need(record.get("result") == f"FM1_{step}_REACHED_{post}", "STEP_NOT_REACHED:" + step)
+        adjudicated = record.get("result") == f"FM1_{step}_STOP" \
+            and ADJUDICATED_STEPS.get(step) == sha256_hex((runs[0] / STEP_FILE).read_bytes())
+        _need(record.get("result") == f"FM1_{step}_REACHED_{post}" or adjudicated, "STEP_NOT_REACHED:" + step)
         return record
 
     def _acceptance(self, workdir: Path, kind: str) -> tuple[dict, str] | None:
