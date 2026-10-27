@@ -90,13 +90,28 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tests/test_personal_memory_fm2_transition.py",
         "services/owner-memory-control/tests/test_relationship_origin_forget_dev.py",
         "docs/architecture/personal-memory-fm2-dev-activation.md",
+        # 2026-10 source consolidation record (ADR-0016). Documentation only, admitted at the exact reviewed
+        # revision pinned below; any other revision takes full deployment.
+        "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md",
+        "docs/adr/README.md",
+        "docs/engineering/source-consolidation-2026-10.md",
+        "docs/engineering/vm-only-source-gaps.md",
     }
 )
 
-# The installer is admitted only at the exact reviewed Stage-II revision.
-# Any later change to it takes full deployment.
+# Preserved Hermes runtime source (ADR-0016). Nothing under this prefix is packaged into the Core API bundle,
+# referenced by a workflow or installed on DEV. Only a brand-new regular file qualifies: a modification, deletion,
+# symlink or mode change under the prefix takes full deployment, as does any path outside it.
+PRESERVED_SOURCE_ADDITION_PREFIX = "integrations/hermes/"
+
+# The installer is admitted only at the exact reviewed Stage-II revision, and the source consolidation record
+# only at its exact reviewed revision. Any other revision of these paths takes full deployment.
 PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
+    "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "e63f413421d08950b00c8353c48fa34544c0fd62",
+    "docs/adr/README.md": "68adc83f384492e3010d2859068a8802f4a224d4",
+    "docs/engineering/source-consolidation-2026-10.md": "184cf8299b7aff60a939b5493db55b8b5fde9fc0",
+    "docs/engineering/vm-only-source-gaps.md": "5431e8e431cac727a843f0b055e0e0287a827a06",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,
@@ -178,6 +193,11 @@ def classify_entries(
             current = CONTROL_ONLY_NO_DEPLOY
         elif path in BROKER_CANDIDATE_PATHS:
             current = BROKER_CANDIDATE_VALIDATE_ONLY
+        elif (
+            path.startswith(PRESERVED_SOURCE_ADDITION_PREFIX)
+            and status == "A" and old_mode == "000000" and new_mode in ("100644", "100755")
+        ):
+            current = CONTROL_ONLY_NO_DEPLOY
         else:
             return DEPLOY_REQUIRED
         if mode is not None and current != mode:

@@ -260,6 +260,100 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
 
+    def test_source_consolidation_record_is_control_only_at_its_reviewed_revision(self):
+        record = {
+            "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "A",
+            "docs/adr/README.md": "M",
+            "docs/engineering/source-consolidation-2026-10.md": "A",
+            "docs/engineering/vm-only-source-gaps.md": "A",
+        }
+        reviewed = {path: gate.PINNED_CANDIDATE_BLOBS[path] for path in record}
+        entries = [changed(path, status, "000000" if status == "A" else "100644") for path, status in record.items()]
+        self.assertEqual(self.classify(*entries, blobs=reviewed), gate.CONTROL_ONLY_NO_DEPLOY)
+        for path in record:
+            with self.subTest(other_revision=path):
+                self.assertEqual(self.classify(*entries, blobs={**reviewed, path: "f" * 40}), gate.DEPLOY_REQUIRED)
+        self.assertEqual(self.classify(*entries), gate.DEPLOY_REQUIRED)               # revision unknown
+        for extra in (
+            changed("services/core-api/app.py"),
+            changed("docs/adr/0017-unreviewed.md", "A", "000000"),
+            changed("docs/engineering/development.md"),
+            changed("docs/adr/README.md", "D", "100644", "000000"),
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*entries[:1], extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
+
+    def test_new_preserved_hermes_source_is_control_only_and_nothing_else_is(self):
+        additions = [
+            changed("integrations/hermes/README.md", "A", "000000"),
+            changed("integrations/hermes/patches/dev-f9c2.patch", "A", "000000"),
+            changed("integrations/hermes/release/dev-f9c2/bin/install_f9c.sh", "A", "000000", "100755"),
+            changed("integrations/hermes/home/lilith_router/config.py", "A", "000000"),
+            changed("integrations/hermes/history/.gitattributes", "A", "000000"),
+        ]
+        self.assertEqual(self.classify(*additions), gate.CONTROL_ONLY_NO_DEPLOY)
+        record = "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md"
+        self.assertEqual(self.classify(*additions, changed(record, "A", "000000"),
+                                       blobs={record: gate.PINNED_CANDIDATE_BLOBS[record]}),
+                         gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("integrations/hermes/README.md"),                                  # modification
+            changed("integrations/hermes/README.md", "D", "100644", "000000"),          # deletion
+            changed("integrations/hermes/home/link.py", "A", "000000", "120000"),        # new symlink
+            changed("integrations/hermes/vendor", "A", "000000", "160000"),              # new submodule
+            changed("integrations/hermes/tools/run.sh", "M", "100644", "100755"),        # mode change
+            changed("integrations/hermesx/new.py", "A", "000000"),                       # sibling prefix
+            changed("integrations/other/new.py", "A", "000000"),
+            changed("integrations/README.md", "A", "000000"),
+            changed("services/core-api/lilith_memory/new_module.py", "A", "000000"),     # bundled by glob
+            changed("services/core-api/app.py"),
+            changed("scripts/new_tool.py", "A", "000000"),
+            changed(".github/workflows/hermes.yml", "A", "000000"),
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*additions, extra), gate.DEPLOY_REQUIRED)
+        self.assertEqual(
+            self.classify(changed("services/core-api/app.py", "D", "100644", "000000"),
+                          changed("integrations/hermes/app.py", "A", "000000")),
+            gate.DEPLOY_REQUIRED,
+        )
+
+    def test_preserved_hermes_source_is_not_deployed_by_any_path(self):
+        from scripts import build_core_api_bundle as bundle
+        root = Path(__file__).resolve().parents[1]
+        self.assertFalse(any(path.startswith(gate.PRESERVED_SOURCE_ADDITION_PREFIX) for path in bundle.FIXED_FILES))
+        for archive_name, source in bundle._sources(root):
+            with self.subTest(archive_name=archive_name):
+                self.assertTrue(source.resolve().is_relative_to(root / "services" / "core-api"))
+        for workflow in (root / ".github" / "workflows").glob("*.y*ml"):
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn("integrations/", workflow.read_text(encoding="utf-8"))
+
+    def test_preserved_hermes_addition_classifies_from_a_real_merge(self):
+        with tempfile.TemporaryDirectory() as temp:
+            def run(*args):
+                return subprocess.run(["git", "-C", temp, *args], check=True, capture_output=True,
+                                      text=True).stdout.strip()
+            run("init", "-q")
+            run("config", "user.email", "t@t.invalid")
+            run("config", "user.name", "t")
+            run("config", "core.autocrlf", "false")
+            (Path(temp) / "base.txt").write_text("base\n")
+            run("add", "-A")
+            run("commit", "-qm", "base")
+            base = run("rev-parse", "HEAD")
+            target = Path(temp) / "integrations" / "hermes" / "README.md"
+            target.parent.mkdir(parents=True)
+            target.write_text("preserved\n")
+            run("add", "-A")
+            run("commit", "-qm", "add")
+            candidate = run("rev-parse", "HEAD")
+            self.assertEqual(gate.classify_repository(Path(temp), base, candidate)[0], gate.CONTROL_ONLY_NO_DEPLOY)
+            target.write_text("changed\n")
+            run("commit", "-qam", "modify")
+            modified = run("rev-parse", "HEAD")
+            self.assertEqual(gate.classify_repository(Path(temp), candidate, modified)[0], gate.DEPLOY_REQUIRED)
+
     def test_symlink_and_mode_tricks_require_deploy(self):
         path = "scripts/memory_broker_stage2_control.py"
         for entry in (
