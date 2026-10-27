@@ -91,7 +91,8 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tests/test_relationship_origin_forget_dev.py",
         "docs/architecture/personal-memory-fm2-dev-activation.md",
         # 2026-10 source consolidation record (ADR-0016). Documentation only, admitted at the exact reviewed
-        # revision pinned below; any other revision takes full deployment.
+        # revision pinned below (the two engineering records at their PROD-recovery revision of 2026-10-27);
+        # any other revision takes full deployment.
         "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md",
         "docs/adr/README.md",
         "docs/engineering/source-consolidation-2026-10.md",
@@ -110,8 +111,8 @@ PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
     "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "74d279bf81fd0988d735600f582c998b27e06377",
     "docs/adr/README.md": "68adc83f384492e3010d2859068a8802f4a224d4",
-    "docs/engineering/source-consolidation-2026-10.md": "184cf8299b7aff60a939b5493db55b8b5fde9fc0",
-    "docs/engineering/vm-only-source-gaps.md": "5431e8e431cac727a843f0b055e0e0287a827a06",
+    "docs/engineering/source-consolidation-2026-10.md": "2600bb2a8344c98c4635367d5f1e1676bccd1dbb",
+    "docs/engineering/vm-only-source-gaps.md": "23c71977cd7a8a1879cd257cbc7af4f419d5691b",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,
