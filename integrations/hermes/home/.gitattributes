@@ -1,0 +1,4 @@
+# Byte-exact copies of deployed files (verified against MODULES.json); whitespace in them is content.
+lilith_router/** -whitespace
+plugins/** -whitespace
+variants/** -whitespace
