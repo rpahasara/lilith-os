@@ -1,7 +1,8 @@
-# Personal memory FM-2: DEV activation of one owner-provided relationship-origin memory (PROPOSED)
+# Personal memory FM-2: DEV activation of one owner-provided relationship-origin memory
 
-**Status:** source and offline proof only, 2026-10-26. Nothing in this record is authorized by the repository. Every
-DEV mutation below is its own owner go. No PROD, no provider call, no key generation, no memory written.
+**Status:** executed on DEV 2026-10-26/27 under per-step owner gos; `FIRST_PERSONAL_ORIGIN_MEMORY_DEV=PASS` (§7).
+§1-§6 are the plan as written before execution. Nothing in this record is authorized by the repository. No PROD, no
+provider call, no key generation.
 
 The goal is ONE meaningful canonical memory on DEV: the owner's own relationship-origin statement (at most 600
 characters, the owner's words, never proposed or paraphrased here), admitted once with governed signer evidence and
@@ -135,3 +136,69 @@ release but is not installed by this activation. Owner-personal content stays un
 floor provisions Hermes for the origin scope and the owner grants one `lilith_os` session; no tool provisions that
 floor. The codename can reach new Hermes sessions once the socket units and the adapter patch are installed under
 their own go.
+
+## 7. Live outcome (DEV, boot `cb0d71da`, 2026-10-26/27)
+
+Evidence: `C:\Users\edufo\lilith-fm2-transition-fda4fb7\` (control clone at `fda4fb7`; `workdir/`, `executor/`,
+`hosttree/`, `origin/`). Every mutation below had its own rendered go, its own owner authorization and a single-use
+attempt marker; none was retried.
+
+**FM-2 transition (§2): `F7_OLD_RETIRED`.** Gos TRANSFER `cefd4d89`, STAGE `8fd16bfe`, SIGNER_STOP `55b40e8a`,
+WITNESS_STOP `f9575689`, SELECT `3cafdbef`, WITNESS_START `7048519b`, SIGNER_START `b12e89fe`, RETIRE `cba16130`.
+Witness `1089ad88e0eb4c55b167a48cdb898aa1` / 308690 (owner acceptance `30d76087`); signer
+`c32457250aff4155bce1f54f1648945f` / 309023, the fifth K-ACT load (owner acceptance `7c13af66`). Only d82f7da is
+installed; nothing uses e2324a5; installed `protocol.py` `8a082a12…`.
+
+**Origin FORGET executor (§3b): PASS.** Go `15c0ffc7`. The first `mkdir` of the staging directory returned the known
+plink `0xC0000005`; it was treated as a STOP, re-observed read-only (an empty 0700 directory, nothing else changed),
+and continued under the owner-adjudicated go `82221572` without repeating the `mkdir`. The installer draft's Core API
+path was corrected to the deployed layout `releases/<sha>/lilith_memory` (stated in the go). Result: overlay
+`2dafbfec…`, three `60-origin-executor.conf` drop-ins, `executor.json` `82f8567b…`, the copy's `canonical_authority.py`
+`1d05aeaf…` and `memory_action_v2.py` `2132ac99…`; `load_privacy`: First Interaction completed with Hermes, origin not
+completed. No restart.
+
+**Host tree + L04 v3 (§4): PASS.** Go `9f8a3264`. The root session failed locally before reaching DEV (WinError 206,
+a 38,313-character command line); `mkdir` and the transfer had succeeded. After a read-only re-observation, it
+continued under go `d90db615` with the inline manifests replaced by their digests. Tree `d79c0618…` (96 files,
+root-owned, none writable) is `current`; the FM-1 tree is kept as `previous-fm1-e2324a5`. Migration
+`SCHEMA_V3_APPLIED` from v2 after the backup `…pre-relationship-origin-v3.20261026T184604Z.db` (`734cf870…`); all 9
+preserved table digests are equal; integrity ok; config still DISABLED (`4fa82ae6…`); the codename was recalled
+(session `pm-v3-recall-s3`).
+
+**Readiness (Phase 5): `PERSONAL_MEMORY_DEV_READY=PASS`.** The only difference from the post-F7 survey is the L04 DB
+hash from the migration.
+
+**The origin memory (§5): `FIRST_PERSONAL_ORIGIN_MEMORY_DEV=PASS`.**
+
+- Format: the owner's six paragraphs could not be stored with newline separators. `OwnerRelationshipOriginV1` refuses
+  control characters (`\n` is `Cc`), and the host reads one input line. With the owner's agreement they were joined by
+  single spaces, and no source was changed. 598 characters, ASCII.
+- Value: statement UTF-8 SHA-256 `047de4a8a58ad6ad5b5b7fc3a50e8e6ff70da258ebe0f544fa2da36b6ee8bbe4`; canonical value
+  digest `6806aa754b2c121415396840dacb8b6185cda65cca3aae1123c7a64dafc8c870`. The text itself is deliberately not
+  copied into this repository; it lives in L04 and the local evidence.
+- Go: `PM-GO-FIRST-ORIGIN-MEMORY` `66c3db0c…`. One root session ran the guards, then enabled only
+  `canonical_memory.relationship_origin.create` (`a20b1610…`) and ran one `first-memory remember pm-origin-s1`. The
+  offer was checked to be the approved value. The WSL owner-device credential `ocred.dev-synthetic.4b456d5206ba4bee`
+  signed the challenge `och.fm1.150938efd82402fd20d3a176eca05dd9`, and the session returned `ADMITTED`. The EXIT trap
+  then reported `CONFIG_DISABLED`.
+- Rows: admission `madm.46d3ed9ee90e4163bb1c58ea21d14ed2`, revision `mrev.142624befdac4d0eb8b668287e24d665`, item
+  `mitem.870647b0e2df4dbdaa234189e1e3ac58`, consent `consent.a2ebf96af092490d9fe3b26da9de3f2a`, proposal
+  `proposal-ref.1804b9fce8204be1aa1bbe0d927d9597`.
+- Evidence: authority evidence `aev.8e3dc093fb77366182de6aa6d743a464`, digest `8d24782d…`. The stored
+  `normalized_value_json` equals the canonical encoding, with epistemic basis USER_ASSERTED and purpose
+  `LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL`.
+- Table diff against the pre-read: exactly +1 in each of `consent_grant`, `policy_decision`, `learning_proposal_ref`,
+  `learning_ro_{intent,candidate,candidate_source,assessment,proposal}_v1`, `memory_item`, `memory_revision`,
+  `memory_revision_source`, `memory_active_revision`, `memory_admission`, `memory_admission_authority_link`,
+  `memory_apply_audit`, `actor_evidence_ref` and `actor_evidence_consumption`. Nothing else changed; integrity ok.
+- Ledger and services: signer ledger seq 6 -> 11, head `1935dd08…`, rows consistent; witness CONSISTENT. Signer,
+  witness, Core API, broker and Hermes all have unchanged PIDs and 0 restarts.
+- Privacy and FORGET: Privacy DB `429ae756…` unchanged; marker for this boot; stale path absent. FORGET status shows
+  freshness and durability READY, intent ABSENT and `originRows` 4, so the origin memory is now forgettable. The F9c2
+  receipt is unchanged and no intent is pending.
+- Recall: a fresh session `pm-origin-recall-s1` asked "what is our origin?" and got RECALLED with a value exactly
+  equal to the approved statement (SHA-256 `047de4a8…`). A fresh session `pm-origin-codename-s1` recalled the codename
+  unchanged (revision `mrev.633aeba3…`, value digest `269373e4…`).
+
+Not done: Hermes (§6) remains optional and is not installed; no transcript capture; the origin memory is not copied to
+Hermes.
