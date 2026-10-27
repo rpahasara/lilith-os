@@ -1,0 +1,77 @@
+{
+  "variant": "prod-lilith-01",
+  "recovered": "2026-10-27",
+  "note": "Files recovered from lilith-01 by the bounded read-only export. Combined with MODULES.json[prod-lilith-01] they form the complete deployed lilith_router code tree. Keys are relative to PROD HERMES_HOME (/home/lilith/.hermes); PROD keeps router.yaml inside lilith_router/.",
+  "files": {
+    "lilith_router/router.yaml": {
+      "sha256": "7d14b571abc73766782fbe2d534e85a4fb1fef628592b478b9747f7c76639586",
+      "template": "integrations/hermes/home/variants/prod-lilith-01/router.yaml.tmpl",
+      "template_sha256": "b18f668599ae17e8f4242b0ab1149d1590f40fb69f92c63273cf7dadac65ee89",
+      "placeholders": [
+        "__LILITH_DISCORD_CHANNEL_ID__"
+      ],
+      "source": null,
+      "status": "SANITIZED_FOR_GIT"
+    },
+    "lilith_router/tests/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/__init__.py"
+    },
+    "lilith_router/tests/test_canonical_ltm.py": {
+      "sha256": "870731860d21c80a4aa3026a50bfc2cbcc4e28722544d64ba900f624b84869a4",
+      "source": "docs/architecture/slice-15b1/test_canonical_ltm.py"
+    },
+    "lilith_router/tests/test_classifier.py": {
+      "sha256": "5cc2a77de2a7a62f64d472ec04e887de798b0d83e76f3c7b2444d8737d500e9f",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_classifier.py"
+    },
+    "lilith_router/tests/test_ethics.py": {
+      "sha256": "95032f37955b37cb6377e63e6e35783188cf58733162c987b43c0a5af64fe17b",
+      "source": "docs/architecture/slice-13/test_ethics.py"
+    },
+    "lilith_router/tests/test_goal_context.py": {
+      "sha256": "66163f55131c05202473160a29b2732a710d84fb35efa971487eee80beadf882",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_goal_context.py"
+    },
+    "lilith_router/tests/test_integration_failopen.py": {
+      "sha256": "613c9b0aa843a17c970165179e85ad7d0f1cb0288d4e865dc4090f464730ffb1",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_integration_failopen.py"
+    },
+    "lilith_router/tests/test_learning_consolidation.py": {
+      "sha256": "d3539a11f4be37f46c0f8f9c7ac4c3f43af8be1f422cfda06f98f4f3afd2c57c",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_learning_consolidation.py"
+    },
+    "lilith_router/tests/test_motivation.py": {
+      "sha256": "da630a29d3733c67a4bd1aa5b8e84b76619f4c7d820e66929569e4afdc072e6a",
+      "source": "docs/architecture/slice-11/test_motivation.py"
+    },
+    "lilith_router/tests/test_planning.py": {
+      "sha256": "94421cc837c4c9896462a9f59f0af1173ee805253f4aad6c1c4cf3f9b8971929",
+      "source": "docs/architecture/slice-12/test_planning.py"
+    },
+    "lilith_router/tests/test_reasoning.py": {
+      "sha256": "744736aafcaf788ca947d538598a98abffad9f2a87b56e2c7239e5e0bca991a6",
+      "source": "docs/architecture/slice-9/test_reasoning.py"
+    },
+    "lilith_router/tests/test_social_guard.py": {
+      "sha256": "bf24e569de059b1f463d9513a0cfc4814f7559702a9311bf3cc7bd48e76d8942",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_social_guard.py"
+    },
+    "lilith_router/tests/test_social_presence.py": {
+      "sha256": "9e1566b6d3316e83c6b369d30538dea8db90f601bdf6af1fb72f711b2f8cba25",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_social_presence.py"
+    },
+    "lilith_router/tests/test_workspace.py": {
+      "sha256": "56e36e55b3c9b601b010c1f52789f3d36953ade96929e1fa3d064021efd8a85f",
+      "source": "docs/architecture/slice-10/test_workspace.py"
+    },
+    "lilith_router/tests/test_world_context.py": {
+      "sha256": "afc7623db441ae53c26dfcbe7f933962e5edec2415aa29e50b96a9bbd7a1f621",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/tests/test_world_context.py"
+    },
+    "lilith_router/world_context.py": {
+      "sha256": "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/world_context.py"
+    }
+  }
+}
