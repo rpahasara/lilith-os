@@ -1,0 +1,1168 @@
+#!/home/lilith/.hermes/lilith-os/api-venv/bin/python
+
+import html
+import json
+import re
+import sqlite3
+import subprocess
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+
+from fastapi import FastAPI, HTTPException
+
+HOME = Path.home()
+DB = HOME / ".hermes/lilith-os/data/lilith.db"
+
+app = FastAPI(
+    title="LILITH OS API",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url=None,
+)
+
+
+def db():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "lilith-os-api",
+        "version": "0.1.0",
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "database": DB.exists(),
+    }
+
+
+@app.get("/career/applications")
+def career_applications():
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                ja.id,
+                COALESCE(c.name, 'Unknown') AS company,
+                ja.role_title AS role,
+                ja.stage,
+                ja.source_account,
+                ja.confidence,
+                ja.first_seen,
+                ja.last_activity,
+                COUNT(ca.id) AS activities,
+                p.name AS recruiter_name,
+                p.email AS recruiter_contact,
+                (
+                    SELECT title
+                    FROM career_activities x
+                    WHERE x.application_id = ja.id
+                    ORDER BY x.occurred_at DESC, x.id DESC
+                    LIMIT 1
+                ) AS last_activity_summary
+            FROM job_applications ja
+            LEFT JOIN companies c
+              ON c.id = ja.company_id
+            LEFT JOIN people p
+              ON p.id = ja.recruiter_id
+            LEFT JOIN career_activities ca
+              ON ca.application_id = ja.id
+            GROUP BY ja.id
+            ORDER BY ja.last_activity DESC
+        """).fetchall()
+
+        result = []
+        for row in rows:
+            d = dict(row)
+            # Contact linked to this application (recruiter_id -> people). This is
+            # raw CRM contact data, NOT a guaranteed human recruiter: it may be a
+            # noreply/self address. Surfaced as-is; not reinterpreted.
+            name = d.pop("recruiter_name", None)
+            contact = d.pop("recruiter_contact", None)
+            d["recruiter"] = (
+                {"name": name, "contact": contact}
+                if (name or contact)
+                else None
+            )
+            result.append(d)
+
+        return result
+
+    finally:
+        conn.close()
+
+
+@app.get("/career/pipeline")
+def career_pipeline():
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                stage,
+                COUNT(*) AS count
+            FROM job_applications
+            GROUP BY stage
+            ORDER BY count DESC
+        """).fetchall()
+
+        return {
+            row["stage"]: row["count"]
+            for row in rows
+        }
+
+    finally:
+        conn.close()
+
+
+@app.get("/career/activity")
+def career_activity(limit: int = 50):
+    limit = max(1, min(limit, 200))
+
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                ca.id,
+                ca.application_id,
+                ca.activity_type,
+                ca.title,
+                ca.occurred_at,
+                ca.confidence,
+                COALESCE(c.name, 'Unknown') AS company,
+                ja.role_title AS role
+            FROM career_activities ca
+            JOIN job_applications ja
+              ON ja.id = ca.application_id
+            LEFT JOIN companies c
+              ON c.id = ja.company_id
+            ORDER BY ca.occurred_at DESC, ca.id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+@app.get("/audit/recent")
+def audit_recent(limit: int = 50):
+    limit = max(1, min(limit, 200))
+
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                id,
+                timestamp,
+                app,
+                action,
+                entity_type,
+                entity_id,
+                actor,
+                confidence,
+                reason,
+                reversible
+            FROM os_audit_log
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+        # os_audit_log is the primary source. When it is empty, fall back to the
+        # real career_events rows (no fabrication) mapped into the audit shape.
+        if not rows:
+            rows = conn.execute("""
+                SELECT
+                    id,
+                    created_at AS timestamp,
+                    'career' AS app,
+                    event_type AS action,
+                    entity_type,
+                    entity_id,
+                    source AS actor,
+                    confidence,
+                    payload_json AS reason,
+                    1 AS reversible
+                FROM career_events
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+def _systemctl_show(unit, props):
+    proc = subprocess.run(
+        ["systemctl", "show", unit, "--no-pager"]
+        + ["--property=%s" % p for p in props],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return proc
+
+
+def _kv(stdout):
+    values = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values.setdefault(key, value)  # keep first occurrence
+    return values
+
+
+def _iso(ts):
+    """Parse a systemd timestamp string to ISO 8601 (UTC). None if absent."""
+    ts = (ts or "").strip()
+    if not ts or ts.lower().startswith("n/a"):
+        return None
+    m = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", ts)
+    if not m:
+        return None
+    try:
+        dt = datetime.strptime(
+            "%s %s" % (m.group(1), m.group(2)), "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except Exception:
+        return None
+
+
+def _schedule(stdout):
+    """Human cadence straight from systemd timer properties (no inference)."""
+    m = re.search(r"OnCalendar=([^;}\n]+)", stdout)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"OnUnitActiveUSec=([^;}\n]+)", stdout)
+    if m:
+        return "every %s" % m.group(1).strip()
+    m = re.search(r"OnBootUSec=([^;}\n]+)", stdout)
+    if m:
+        return "boot + %s" % m.group(1).strip()
+    return None
+
+
+def _int_or_none(v):
+    v = (v or "").strip()
+    return int(v) if v.isdigit() else None
+
+
+def systemctl_state(unit):
+    is_timer = unit.endswith(".timer")
+    props = [
+        "ActiveState", "SubState", "Result", "NRestarts",
+        "ExecMainStartTimestamp", "ExecMainExitTimestamp", "ExecMainStatus",
+    ]
+    if is_timer:
+        props += [
+            "LastTriggerUSec", "NextElapseUSecRealtime",
+            "TimersCalendar", "TimersMonotonic", "Unit",
+        ]
+
+    proc = _systemctl_show(unit, props)
+    if proc.returncode != 0:
+        return {"unit": unit, "available": False, "type": "timer" if is_timer else "service"}
+
+    v = _kv(proc.stdout)
+
+    state = {
+        "unit": unit,
+        "available": True,
+        "type": "timer" if is_timer else "service",
+        "active": v.get("ActiveState"),
+        "sub": v.get("SubState"),
+        "result": v.get("Result"),
+        "n_restarts": _int_or_none(v.get("NRestarts")),
+        "last_run": _iso(v.get("ExecMainStartTimestamp")),
+        "last_run_end": _iso(v.get("ExecMainExitTimestamp")),
+        "next_run": None,
+        "schedule": None,
+    }
+
+    if is_timer:
+        # schedule + next fire come from the timer itself...
+        state["schedule"] = _schedule(proc.stdout)
+        state["next_run"] = _iso(v.get("NextElapseUSecRealtime"))
+        state["last_run"] = _iso(v.get("LastTriggerUSec")) or state["last_run"]
+        # ...but the run RESULT lives on the paired .service (dead between runs).
+        paired = v.get("Unit")
+        if paired and paired.endswith(".service"):
+            sp = _systemctl_show(paired, [
+                "Result", "NRestarts", "ExecMainStartTimestamp",
+                "ExecMainExitTimestamp", "ExecMainStatus",
+                "ActiveState", "SubState",
+            ])
+            if sp.returncode == 0:
+                sv = _kv(sp.stdout)
+                state["result"] = sv.get("Result") or state["result"]
+                nr = _int_or_none(sv.get("NRestarts"))
+                if nr is not None:
+                    state["n_restarts"] = nr
+                state["last_run"] = _iso(sv.get("ExecMainStartTimestamp")) or state["last_run"]
+                state["last_run_end"] = _iso(sv.get("ExecMainExitTimestamp")) or state["last_run_end"]
+                state["service_active"] = sv.get("ActiveState")
+                state["service_sub"] = sv.get("SubState")
+
+    return state
+
+
+@app.get("/system/status")
+def system_status():
+    units = [
+        "hermes-gateway.service",
+        "lilith-gmail-watcher.timer",
+        "lilith-meeting-prep.timer",
+        "lilith-morning-brief.timer",
+        "lilith-career-watcher.timer",
+        "lilith-os-api.service",
+    ]
+
+    return {
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "services": [
+            systemctl_state(unit)
+            for unit in units
+        ],
+    }
+
+
+@app.get("/os/overview")
+def os_overview():
+    conn = db()
+
+    try:
+        total_apps = conn.execute(
+            "SELECT COUNT(*) FROM job_applications"
+        ).fetchone()[0]
+
+        pipeline_rows = conn.execute("""
+            SELECT stage, COUNT(*) AS count
+            FROM job_applications
+            GROUP BY stage
+        """).fetchall()
+
+        pipeline = {
+            row["stage"]: row["count"]
+            for row in pipeline_rows
+        }
+
+        recent_audit = conn.execute("""
+            SELECT
+                id,
+                timestamp,
+                app,
+                action,
+                entity_type,
+                entity_id,
+                actor,
+                confidence,
+                reason
+            FROM os_audit_log
+            ORDER BY id DESC
+            LIMIT 10
+        """).fetchall()
+
+        # Primary is os_audit_log; fall back to real career_events when empty.
+        if not recent_audit:
+            recent_audit = conn.execute("""
+                SELECT
+                    id,
+                    created_at AS timestamp,
+                    'career' AS app,
+                    event_type AS action,
+                    entity_type,
+                    entity_id,
+                    source AS actor,
+                    confidence,
+                    payload_json AS reason
+                FROM career_events
+                ORDER BY id DESC
+                LIMIT 10
+            """).fetchall()
+
+    finally:
+        conn.close()
+
+    units = [
+        "hermes-gateway.service",
+        "lilith-gmail-watcher.timer",
+        "lilith-meeting-prep.timer",
+        "lilith-morning-brief.timer",
+        "lilith-career-watcher.timer",
+        "lilith-os-api.service",
+    ]
+
+    services = [
+        systemctl_state(unit)
+        for unit in units
+    ]
+
+    healthy = sum(
+        1
+        for service in services
+        if (
+            service.get("available")
+            and service.get("active") == "active"
+        )
+    )
+
+    unhealthy = len(services) - healthy
+
+    return {
+        "lilith": {
+            "status": (
+                "online"
+                if unhealthy == 0
+                else "degraded"
+            ),
+            "os_version": "0.1.0",
+            "time_utc": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        },
+
+        "career": {
+            "applications": total_apps,
+            "pipeline": pipeline,
+        },
+
+        "automations": {
+            "total": len(services),
+            "healthy": healthy,
+            "unhealthy": unhealthy,
+            "services": services,
+        },
+
+        "recent_activity": [
+            dict(row)
+            for row in recent_audit
+        ],
+    }
+
+
+# =========================================================================
+# Memory (read-only) — LILITH's persistent cognitive memory.
+#
+# Sources (real data only):
+#   * career_activities (+ job_applications, companies) as career memories.
+#   * Hermes curated memory files under ~/.hermes/memories/ EXCLUDING USER.md
+#     (sensitive) and empty scaffolds.
+#   * people / companies / job_applications as entities + their real FK edges.
+#
+# NOT exposed in V1: USER.md raw content, and ~/.hermes/state.db conversation
+# history / FTS. All routes are GET-only. Absent confidence/importance/
+# last_accessed are returned as null — never fabricated.
+# =========================================================================
+
+MEM = HOME / ".hermes/memories"
+
+# curated-memory directory -> frontend category
+_MEM_DIR_CATEGORY = {
+    "projects": "projects",
+    "decisions": "work",
+    "relationships": "people",
+    "tasks": "work",
+}
+
+# zero-width / invisible padding chars that pollute scraped email bodies
+_ZW = dict.fromkeys(map(ord, "͏​‌‍﻿"), None)
+
+
+def _iso_dt(s):
+    """DB timestamp 'YYYY-MM-DD HH:MM:SS' -> ISO 8601 UTC. None if absent."""
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    if "T" in s:
+        return s
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2}:\d{2})", s)
+    if m:
+        return "%sT%s+00:00" % (m.group(1), m.group(2))
+    return s
+
+
+def _clean(text, limit=240):
+    """Unescape HTML, strip zero-width/padding chars, collapse whitespace."""
+    if not text:
+        return ""
+    t = html.unescape(str(text)).translate(_ZW)
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) > limit:
+        t = t[: limit - 1].rstrip() + "…"
+    return t
+
+
+def _pct(conf):
+    """0..1 (or 0..100) confidence -> 0..100 int, or None when unknown (<=0)."""
+    if conf is None:
+        return None
+    try:
+        c = float(conf)
+    except (TypeError, ValueError):
+        return None
+    if c <= 0:
+        return None
+    return round(c * 100) if c <= 1 else round(c)
+
+
+def _career_memory_records(conn):
+    """career_activities carry real human titles/details — the richest career
+    memory. (career_events is the underlying applied-signal table and would
+    duplicate these 1:1 by message id, so it is not re-emitted here.)"""
+    rows = conn.execute("""
+        SELECT
+            ca.id, ca.application_id, ca.activity_type, ca.title, ca.details,
+            ca.source, ca.occurred_at, ca.confidence,
+            ja.role_title, ja.company_id, ja.stage,
+            c.name AS company_name
+        FROM career_activities ca
+        JOIN job_applications ja ON ja.id = ca.application_id
+        LEFT JOIN companies c ON c.id = ja.company_id
+        ORDER BY ca.occurred_at DESC, ca.id DESC
+    """).fetchall()
+
+    records = []
+    for r in rows:
+        entities = [{
+            "id": "application_%s" % r["application_id"],
+            "type": "application",
+            "label": r["role_title"] or "Application",
+        }]
+        if r["company_id"] is not None:
+            entities.append({
+                "id": "company_%s" % r["company_id"],
+                "type": "company",
+                "label": r["company_name"] or "Company",
+            })
+        summary = _clean(r["title"], 140) or "Career activity"
+        content = _clean(r["details"], 320) or summary
+        at = _iso_dt(r["occurred_at"])
+        records.append({
+            "id": "career_activity_%s" % r["id"],
+            "summary": summary,
+            "content": content,
+            "category": "career",
+            "entity_type": "application",
+            "entities": entities,
+            "kind": "fact",
+            "confidence": _pct(r["confidence"]),
+            "importance": None,
+            "pinned": False,
+            "tags": [r["activity_type"]] if r["activity_type"] else [],
+            "provenance": {
+                "kind": "career_event",
+                "source_account": r["source"],
+                "label": "Career activity: %s" % (r["activity_type"] or "event"),
+                "at": at,
+            },
+            "created_at": at,
+            "updated_at": at,
+            "last_accessed": None,
+            "related": [],
+        })
+    return records
+
+
+def _curated_memory_records():
+    """Hermes curated markdown memories. USER.md is excluded (sensitive); empty
+    scaffolds are skipped. File-backed entries have no confidence/importance and
+    only a file-mtime timestamp (labelled as such)."""
+    records = []
+    if not MEM.exists():
+        return records
+    for path in sorted(MEM.rglob("*.md")):
+        if path.name == "USER.md":
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not raw.strip():
+            continue
+        rel = path.relative_to(MEM).as_posix()
+        parent = path.parent.name if path.parent != MEM else ""
+        category = _MEM_DIR_CATEGORY.get(parent, "knowledge")
+        mtime = datetime.fromtimestamp(
+            path.stat().st_mtime, tz=timezone.utc
+        ).isoformat()
+        entries = [e.strip() for e in raw.split("§")] if "§" in raw else [raw.strip()]
+        entries = [e for e in entries if e]
+        slug = re.sub(r"[^a-z0-9]+", "-", rel.lower())
+        for i, entry in enumerate(entries):
+            first = entry.lstrip("# ").splitlines()[0].strip()
+            records.append({
+                "id": "curated_%s_%d" % (slug, i),
+                "summary": _clean(first, 140),
+                "content": _clean(entry, 1000),
+                "category": category,
+                "entity_type": None,
+                "entities": [],
+                "kind": "fact",
+                "confidence": None,
+                "importance": None,
+                "pinned": False,
+                "tags": [],
+                "provenance": {
+                    "kind": "curated_memory",
+                    "source_account": "hermes · memories",
+                    "label": "%s (timestamp: file mtime)" % rel,
+                    "at": mtime,
+                },
+                "created_at": None,
+                "updated_at": mtime,
+                "last_accessed": None,
+                "related": [],
+            })
+    return records
+
+
+def _all_memory_records(conn):
+    records = _career_memory_records(conn) + _curated_memory_records()
+    records.sort(
+        key=lambda r: (r.get("updated_at") or r.get("created_at") or ""),
+        reverse=True,
+    )
+    return records
+
+
+def _memory_entities(conn, records):
+    counts = {}
+    for r in records:
+        for e in r["entities"]:
+            counts[e["id"]] = counts.get(e["id"], 0) + 1
+
+    entities = []
+
+    for p in conn.execute(
+        "SELECT id, name, email, company_id, role FROM people"
+    ).fetchall():
+        eid = "person_%s" % p["id"]
+        label = p["name"] or p["email"] or "Person %s" % p["id"]
+        entities.append({
+            "id": eid, "type": "person", "label": label,
+            "subtitle": p["role"] or (p["email"] if p["name"] else None),
+            "memory_count": counts.get(eid, 0),
+        })
+
+    for c in conn.execute("SELECT id, name, domain FROM companies").fetchall():
+        eid = "company_%s" % c["id"]
+        entities.append({
+            "id": eid, "type": "company",
+            "label": c["name"] or "Company %s" % c["id"],
+            "subtitle": c["domain"], "memory_count": counts.get(eid, 0),
+        })
+
+    for a in conn.execute(
+        "SELECT id, role_title, stage FROM job_applications"
+    ).fetchall():
+        eid = "application_%s" % a["id"]
+        entities.append({
+            "id": eid, "type": "application",
+            "label": a["role_title"] or "Application %s" % a["id"],
+            "subtitle": a["stage"], "memory_count": counts.get(eid, 0),
+        })
+
+    proj_dir = MEM / "projects"
+    if proj_dir.exists():
+        for path in sorted(proj_dir.glob("*.md")):
+            if path.name in ("README.md", "USER.md"):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if not text.strip():
+                continue
+            slug = re.sub(r"[^a-z0-9]+", "-", path.stem.lower())
+            eid = "project_%s" % slug
+            first = text.lstrip("# ").splitlines()[0].strip()
+            entities.append({
+                "id": eid, "type": "project", "label": _clean(first, 80),
+                "subtitle": "Curated project", "memory_count": counts.get(eid, 0),
+            })
+
+    return entities
+
+
+def _memory_relationships(conn):
+    rels = []
+    for p in conn.execute(
+        "SELECT id, company_id FROM people WHERE company_id IS NOT NULL"
+    ).fetchall():
+        rels.append({
+            "id": "rel_pc_%s" % p["id"],
+            "from": "person_%s" % p["id"],
+            "to": "company_%s" % p["company_id"],
+            "kind": "works at",
+        })
+    for a in conn.execute(
+        "SELECT id, company_id, recruiter_id FROM job_applications"
+    ).fetchall():
+        if a["company_id"] is not None:
+            rels.append({
+                "id": "rel_ac_%s" % a["id"],
+                "from": "application_%s" % a["id"],
+                "to": "company_%s" % a["company_id"],
+                "kind": "at",
+            })
+        if a["recruiter_id"] is not None:
+            rels.append({
+                "id": "rel_ap_%s" % a["id"],
+                "from": "application_%s" % a["id"],
+                "to": "person_%s" % a["recruiter_id"],
+                "kind": "contact",
+            })
+    return rels
+
+
+@app.get("/memory/records")
+def memory_records():
+    conn = db()
+    try:
+        return {"records": _all_memory_records(conn)}
+    finally:
+        conn.close()
+
+
+@app.get("/memory/entities")
+def memory_entities():
+    conn = db()
+    try:
+        records = _all_memory_records(conn)
+        entities = _memory_entities(conn, records)
+        ids = {e["id"] for e in entities}
+        rels = [
+            r for r in _memory_relationships(conn)
+            if r["from"] in ids and r["to"] in ids
+        ]
+        return {"entities": entities, "relationships": rels}
+    finally:
+        conn.close()
+
+
+@app.get("/memory/entity/{entity_id}")
+def memory_entity(entity_id: str):
+    conn = db()
+    try:
+        records = _all_memory_records(conn)
+        entities = _memory_entities(conn, records)
+        by_id = {e["id"]: e for e in entities}
+        entity = by_id.get(entity_id)
+        if entity is None:
+            raise HTTPException(status_code=404, detail="entity not found")
+        rels = [
+            r for r in _memory_relationships(conn)
+            if r["from"] == entity_id or r["to"] == entity_id
+        ]
+        related_ids = {
+            (r["to"] if r["from"] == entity_id else r["from"]) for r in rels
+        }
+        refs = [
+            r for r in records
+            if any(e["id"] == entity_id for e in r["entities"])
+        ]
+        return {
+            "entity": entity,
+            "relationships": rels,
+            "related_entities": [by_id[i] for i in related_ids if i in by_id],
+            "records": refs,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/memory/search")
+def memory_search(q: str = ""):
+    conn = db()
+    try:
+        records = _all_memory_records(conn)
+    finally:
+        conn.close()
+    query = (q or "").strip().lower()
+    if not query:
+        return {"query": q, "records": []}
+    out = []
+    for r in records:
+        hay = " ".join([
+            r["summary"], r["content"], r["category"],
+            " ".join(r["tags"]),
+            " ".join(e["label"] for e in r["entities"]),
+            r["provenance"]["label"],
+        ]).lower()
+        if query in hay:
+            out.append(r)
+    return {"query": q, "records": out}
+
+
+@app.get("/memory/overview")
+def memory_overview():
+    conn = db()
+    try:
+        records = _all_memory_records(conn)
+        entities = _memory_entities(conn, records)
+    finally:
+        conn.close()
+
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    def _ts(r):
+        return r.get("created_at") or r.get("updated_at")
+
+    def _recent(r):
+        t = _ts(r)
+        if not t:
+            return False
+        try:
+            return datetime.fromisoformat(t) >= week_ago
+        except ValueError:
+            return False
+
+    confs = [r["confidence"] for r in records if r["confidence"] is not None]
+    categories = {r["category"] for r in records}
+
+    recent_activity = [
+        {
+            "id": r["id"],
+            "at": _ts(r),
+            "text": r["summary"],
+            "category": r["category"],
+            "kind": "learned",
+        }
+        for r in records[:6]
+    ]
+
+    return {
+        "total": len(records),
+        "recently_learned": sum(1 for r in records if _recent(r)),
+        "pinned": sum(1 for r in records if r["pinned"]),
+        "categories": len(categories),
+        "entities": len(entities),
+        "avg_confidence": round(sum(confs) / len(confs)) if confs else 0,
+        "recent_activity": recent_activity,
+    }
+
+
+# =========================================================================
+# Meetings (read-only) — LILITH's meeting intelligence.
+#
+# Data comes ONLY from local state JSON that the background meeting-prep chain
+# and the agenda-snapshot timer already produce under
+# ~/.hermes/automation/productivity/. This API NEVER touches Google/Gmail or
+# OAuth tokens — the snapshot writer (a background systemd timer) is the sole
+# calendar reader. Attendee emails are masked; raw meeting descriptions and raw
+# Gmail snippets are never returned. GET-only.
+# =========================================================================
+
+PROD = HOME / ".hermes/automation/productivity"
+_AGENDA_PATH = PROD / "state/agenda.json"
+_CANDIDATE_PATH = PROD / "state/meeting_prep_candidate.json"
+_MCONTEXT_PATH = PROD / "state/meeting_context.json"
+_PREP_STATE_PATH = PROD / "state/meeting_prep_state.json"
+_FOLLOWUPS_PATH = PROD / "followups/followups.json"
+_BRIEFS_DIR = PROD / "state/meeting_prep_briefs"
+
+# Re-use the production redactor as defence-in-depth on any text we return.
+try:
+    import sys as _sys
+    if str(PROD) not in _sys.path:
+        _sys.path.insert(0, str(PROD))
+    from redact_sensitive import redact_sensitive as _redact  # type: ignore
+except Exception:
+    def _redact(v):
+        return "" if v is None else (v if isinstance(v, str) else str(v))
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _load_json(path, default):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return default
+
+
+def _mask_email(email):
+    if not email or "@" not in str(email):
+        return None
+    local, _, dom = str(email).partition("@")
+    local = local.strip()
+    if not local:
+        return None
+    masked = (local[0] + "***" + local[-1]) if len(local) > 2 else (local[:1] + "***")
+    return masked + "@" + dom
+
+
+def _email_domain(email):
+    return str(email).split("@")[-1] if email and "@" in str(email) else None
+
+
+def _mask_emails_in_text(text):
+    if not text:
+        return text
+    return _EMAIL_RE.sub(lambda m: _mask_email(m.group(0)) or "***", str(text))
+
+
+def _safe(text):
+    """Redact secrets AND mask any email address — for every free-text field a
+    meetings endpoint returns (subjects, follow-up text, briefs, keywords)."""
+    return _mask_emails_in_text(_redact(text if text is not None else ""))
+
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _prepared_ids():
+    return set(_load_json(_PREP_STATE_PATH, {}).get("prepared_event_ids", []))
+
+
+def _candidate_event_id():
+    cand = (_load_json(_CANDIDATE_PATH, {}) or {}).get("candidate") or {}
+    return cand.get("event_id")
+
+
+def _context_event_id():
+    return (_load_json(_MCONTEXT_PATH, {}) or {}).get("event_id")
+
+
+def _brief_exists(event_id):
+    return bool(event_id) and (_BRIEFS_DIR / ("%s.json" % event_id)).exists()
+
+
+def _event_status(ev, prepared, ctx_id, cand_id, now):
+    ended_at = _parse_iso(ev.get("end") or ev.get("start"))
+    if ended_at and ended_at < now:
+        return "completed"
+    eid = ev.get("event_id")
+    if eid in prepared:
+        return "delivered"
+    if eid and eid == ctx_id:
+        return "context_gathered"
+    if eid and eid == cand_id:
+        return "detected"
+    return "scheduled"
+
+
+def _norm_event(ev, prepared, ctx_id, cand_id, now):
+    eid = ev.get("event_id")
+    start = _parse_iso(ev.get("start"))
+    minutes_until = (
+        int((start - now).total_seconds() / 60) if start else None
+    )
+    return {
+        "id": eid,
+        # defence-in-depth: a Google primary calendar's name is the owner's email
+        "title": _mask_emails_in_text(ev.get("title") or "(Untitled event)"),
+        "calendar": _mask_emails_in_text(ev.get("calendar")),
+        "start": ev.get("start"),
+        "end": ev.get("end"),
+        "duration_minutes": ev.get("duration_minutes"),
+        "all_day": bool(ev.get("all_day")),
+        "minutes_until": minutes_until,
+        "join_link": ev.get("join_link"),
+        "has_description": bool(ev.get("has_description")),
+        "attendees": [
+            {
+                "display_name": a.get("display_name") or a.get("displayName"),
+                "email_masked": _mask_email(a.get("email")),
+                "domain": _email_domain(a.get("email")),
+            }
+            for a in ev.get("attendees", [])
+        ],
+        "attendee_count": ev.get("attendee_count")
+        if ev.get("attendee_count") is not None
+        else len(ev.get("attendees", [])),
+        "prep_status": _event_status(ev, prepared, ctx_id, cand_id, now),
+        "prepared": eid in prepared,
+        "brief_available": _brief_exists(eid),
+        "context_available": bool(eid) and eid == ctx_id,
+    }
+
+
+def _agenda_events():
+    agenda = _load_json(_AGENDA_PATH, {}) or {}
+    events = [e for e in agenda.get("events", []) if e.get("status") != "cancelled"]
+    events.sort(key=lambda e: str(e.get("start") or ""))
+    return agenda, events
+
+
+@app.get("/meetings/upcoming")
+def meetings_upcoming():
+    agenda, events = _agenda_events()
+    now = _now_utc()
+    prepared, ctx_id, cand_id = _prepared_ids(), _context_event_id(), _candidate_event_id()
+    return {
+        "generated_at": agenda.get("generated_at"),
+        "timezone": agenda.get("timezone"),
+        "window": agenda.get("window"),
+        "events": [_norm_event(e, prepared, ctx_id, cand_id, now) for e in events],
+    }
+
+
+@app.get("/meetings/next")
+def meetings_next():
+    agenda, events = _agenda_events()
+    now = _now_utc()
+    prepared, ctx_id, cand_id = _prepared_ids(), _context_event_id(), _candidate_event_id()
+
+    for e in events:
+        if e.get("all_day"):
+            continue
+        end = _parse_iso(e.get("end") or e.get("start"))
+        if end and end >= now:
+            return {"next": _norm_event(e, prepared, ctx_id, cand_id, now)}
+
+    # Fallback: the watcher's nearest-90-min candidate, if agenda is empty/stale.
+    cand = (_load_json(_CANDIDATE_PATH, {}) or {}).get("candidate")
+    if cand:
+        ev = {
+            "event_id": cand.get("event_id"),
+            "calendar": cand.get("calendar"),
+            "title": _redact(cand.get("summary") or "(Untitled event)"),
+            "start": cand.get("start"),
+            "end": None,
+            "duration_minutes": None,
+            "all_day": False,
+            "join_link": None,
+            "has_description": bool(cand.get("description")),
+            "attendees": cand.get("attendees", []),
+        }
+        return {"next": _norm_event(ev, prepared, ctx_id, cand_id, now)}
+
+    return {"next": None}
+
+
+@app.get("/meetings/context")
+def meetings_context():
+    ctx = _load_json(_MCONTEXT_PATH, {}) or {}
+    messages = []
+    for m in ctx.get("gmail_messages", []):
+        messages.append({
+            "account": m.get("account"),
+            "subject": _safe(m.get("subject") or ""),
+            "from": _safe(m.get("from") or ""),
+            "date": m.get("date"),
+            "relevance_score": m.get("relevance_score"),
+        })
+    followups = [_norm_followup(f) for f in ctx.get("followups", [])]
+    return {
+        "event_id": ctx.get("event_id"),
+        "generated_at": ctx.get("generated_at"),
+        "keywords": [_mask_emails_in_text(k) for k in ctx.get("keywords", [])],
+        "messages": messages,
+        "message_count": len(messages),
+        "followups": followups,
+    }
+
+
+def _norm_followup(f):
+    if f.get("due_date"):
+        due = f.get("due_date")
+        due_kind = "date"
+    elif f.get("due_window_start") and f.get("due_window_end"):
+        due = "%s .. %s" % (f.get("due_window_start"), f.get("due_window_end"))
+        due_kind = "window"
+    else:
+        due = None
+        due_kind = "none"
+    return {
+        "id": f.get("id"),
+        "title": _safe(f.get("title") or ""),
+        "source": f.get("source"),
+        "reason": _safe(f.get("reason") or ""),
+        "status": f.get("status"),
+        "due": due,
+        "due_kind": due_kind,
+        "due_confidence": f.get("due_confidence"),
+        "created_at": f.get("created_at"),
+        "updated_at": f.get("updated_at"),
+        "resolved_at": f.get("resolved_at"),
+        "resolution": _safe(f.get("resolution") or "") if f.get("resolution") else None,
+    }
+
+
+@app.get("/meetings/followups")
+def meetings_followups():
+    items = (_load_json(_FOLLOWUPS_PATH, {}) or {}).get("items", [])
+    norm = [_norm_followup(f) for f in items]
+    return {
+        "total": len(norm),
+        "pending": sum(1 for f in norm if f["status"] == "waiting"),
+        "followups": norm,
+    }
+
+
+@app.get("/meetings/overview")
+def meetings_overview():
+    agenda, events = _agenda_events()
+    now = _now_utc()
+    prepared = _prepared_ids()
+    ctx = _load_json(_MCONTEXT_PATH, {}) or {}
+    followups = (_load_json(_FOLLOWUPS_PATH, {}) or {}).get("items", [])
+
+    upcoming = [
+        e for e in events
+        if not e.get("all_day")
+        and (_parse_iso(e.get("end") or e.get("start")) or now) >= now
+    ]
+    today_str = now.astimezone(timezone.utc).date().isoformat()
+    today_total = sum(
+        1 for e in events
+        if str(e.get("start") or "").startswith(today_str)
+    )
+
+    nxt = None
+    if upcoming:
+        ev = _norm_event(upcoming[0], prepared, ctx.get("event_id"), _candidate_event_id(), now)
+        nxt = {
+            "id": ev["id"], "title": ev["title"], "start": ev["start"],
+            "minutes_until": ev["minutes_until"], "prep_status": ev["prep_status"],
+        }
+
+    return {
+        "generated_at": agenda.get("generated_at"),
+        "timezone": agenda.get("timezone"),
+        "counts": {
+            "upcoming_total": len(upcoming),
+            "today_total": today_total,
+            "prepared": len(prepared),
+            "followups_total": len(followups),
+            "followups_pending": sum(1 for f in followups if f.get("status") == "waiting"),
+            "context_messages": len(ctx.get("gmail_messages", [])),
+        },
+        "next": nxt,
+        "prep_timer": systemctl_state("lilith-meeting-prep.timer"),
+        "agenda_snapshot": systemctl_state("lilith-agenda-snapshot.timer"),
+    }
+
+
+@app.get("/meetings/{event_id}/prep")
+def meetings_prep(event_id: str):
+    path = _BRIEFS_DIR / ("%s.json" % event_id)
+    data = _load_json(path, None)
+    if not data:
+        raise HTTPException(status_code=404, detail="no prep brief for this event")
+    return {
+        "event_id": data.get("event_id", event_id),
+        "generated_at": data.get("generated_at"),
+        "brief": _safe(data.get("brief") or ""),
+        "source_counts": data.get("source_counts", {}),
+    }

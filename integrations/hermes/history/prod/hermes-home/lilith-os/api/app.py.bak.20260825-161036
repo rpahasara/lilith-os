@@ -1,0 +1,447 @@
+#!/home/lilith/.hermes/lilith-os/api-venv/bin/python
+
+import re
+import sqlite3
+import subprocess
+from pathlib import Path
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException
+
+HOME = Path.home()
+DB = HOME / ".hermes/lilith-os/data/lilith.db"
+
+app = FastAPI(
+    title="LILITH OS API",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url=None,
+)
+
+
+def db():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "lilith-os-api",
+        "version": "0.1.0",
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "database": DB.exists(),
+    }
+
+
+@app.get("/career/applications")
+def career_applications():
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                ja.id,
+                COALESCE(c.name, 'Unknown') AS company,
+                ja.role_title AS role,
+                ja.stage,
+                ja.source_account,
+                ja.confidence,
+                ja.first_seen,
+                ja.last_activity,
+                COUNT(ca.id) AS activities,
+                p.name AS recruiter_name,
+                p.email AS recruiter_contact,
+                (
+                    SELECT title
+                    FROM career_activities x
+                    WHERE x.application_id = ja.id
+                    ORDER BY x.occurred_at DESC, x.id DESC
+                    LIMIT 1
+                ) AS last_activity_summary
+            FROM job_applications ja
+            LEFT JOIN companies c
+              ON c.id = ja.company_id
+            LEFT JOIN people p
+              ON p.id = ja.recruiter_id
+            LEFT JOIN career_activities ca
+              ON ca.application_id = ja.id
+            GROUP BY ja.id
+            ORDER BY ja.last_activity DESC
+        """).fetchall()
+
+        result = []
+        for row in rows:
+            d = dict(row)
+            # Contact linked to this application (recruiter_id -> people). This is
+            # raw CRM contact data, NOT a guaranteed human recruiter: it may be a
+            # noreply/self address. Surfaced as-is; not reinterpreted.
+            name = d.pop("recruiter_name", None)
+            contact = d.pop("recruiter_contact", None)
+            d["recruiter"] = (
+                {"name": name, "contact": contact}
+                if (name or contact)
+                else None
+            )
+            result.append(d)
+
+        return result
+
+    finally:
+        conn.close()
+
+
+@app.get("/career/pipeline")
+def career_pipeline():
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                stage,
+                COUNT(*) AS count
+            FROM job_applications
+            GROUP BY stage
+            ORDER BY count DESC
+        """).fetchall()
+
+        return {
+            row["stage"]: row["count"]
+            for row in rows
+        }
+
+    finally:
+        conn.close()
+
+
+@app.get("/career/activity")
+def career_activity(limit: int = 50):
+    limit = max(1, min(limit, 200))
+
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                ca.id,
+                ca.application_id,
+                ca.activity_type,
+                ca.title,
+                ca.occurred_at,
+                ca.confidence,
+                COALESCE(c.name, 'Unknown') AS company,
+                ja.role_title AS role
+            FROM career_activities ca
+            JOIN job_applications ja
+              ON ja.id = ca.application_id
+            LEFT JOIN companies c
+              ON c.id = ja.company_id
+            ORDER BY ca.occurred_at DESC, ca.id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+@app.get("/audit/recent")
+def audit_recent(limit: int = 50):
+    limit = max(1, min(limit, 200))
+
+    conn = db()
+
+    try:
+        rows = conn.execute("""
+            SELECT
+                id,
+                timestamp,
+                app,
+                action,
+                entity_type,
+                entity_id,
+                actor,
+                confidence,
+                reason,
+                reversible
+            FROM os_audit_log
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+
+        # os_audit_log is the primary source. When it is empty, fall back to the
+        # real career_events rows (no fabrication) mapped into the audit shape.
+        if not rows:
+            rows = conn.execute("""
+                SELECT
+                    id,
+                    created_at AS timestamp,
+                    'career' AS app,
+                    event_type AS action,
+                    entity_type,
+                    entity_id,
+                    source AS actor,
+                    confidence,
+                    payload_json AS reason,
+                    1 AS reversible
+                FROM career_events
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    finally:
+        conn.close()
+
+
+def _systemctl_show(unit, props):
+    proc = subprocess.run(
+        ["systemctl", "show", unit, "--no-pager"]
+        + ["--property=%s" % p for p in props],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return proc
+
+
+def _kv(stdout):
+    values = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values.setdefault(key, value)  # keep first occurrence
+    return values
+
+
+def _iso(ts):
+    """Parse a systemd timestamp string to ISO 8601 (UTC). None if absent."""
+    ts = (ts or "").strip()
+    if not ts or ts.lower().startswith("n/a"):
+        return None
+    m = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})", ts)
+    if not m:
+        return None
+    try:
+        dt = datetime.strptime(
+            "%s %s" % (m.group(1), m.group(2)), "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except Exception:
+        return None
+
+
+def _schedule(stdout):
+    """Human cadence straight from systemd timer properties (no inference)."""
+    m = re.search(r"OnCalendar=([^;}\n]+)", stdout)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"OnUnitActiveUSec=([^;}\n]+)", stdout)
+    if m:
+        return "every %s" % m.group(1).strip()
+    m = re.search(r"OnBootUSec=([^;}\n]+)", stdout)
+    if m:
+        return "boot + %s" % m.group(1).strip()
+    return None
+
+
+def _int_or_none(v):
+    v = (v or "").strip()
+    return int(v) if v.isdigit() else None
+
+
+def systemctl_state(unit):
+    is_timer = unit.endswith(".timer")
+    props = [
+        "ActiveState", "SubState", "Result", "NRestarts",
+        "ExecMainStartTimestamp", "ExecMainExitTimestamp", "ExecMainStatus",
+    ]
+    if is_timer:
+        props += [
+            "LastTriggerUSec", "NextElapseUSecRealtime",
+            "TimersCalendar", "TimersMonotonic", "Unit",
+        ]
+
+    proc = _systemctl_show(unit, props)
+    if proc.returncode != 0:
+        return {"unit": unit, "available": False, "type": "timer" if is_timer else "service"}
+
+    v = _kv(proc.stdout)
+
+    state = {
+        "unit": unit,
+        "available": True,
+        "type": "timer" if is_timer else "service",
+        "active": v.get("ActiveState"),
+        "sub": v.get("SubState"),
+        "result": v.get("Result"),
+        "n_restarts": _int_or_none(v.get("NRestarts")),
+        "last_run": _iso(v.get("ExecMainStartTimestamp")),
+        "last_run_end": _iso(v.get("ExecMainExitTimestamp")),
+        "next_run": None,
+        "schedule": None,
+    }
+
+    if is_timer:
+        # schedule + next fire come from the timer itself...
+        state["schedule"] = _schedule(proc.stdout)
+        state["next_run"] = _iso(v.get("NextElapseUSecRealtime"))
+        state["last_run"] = _iso(v.get("LastTriggerUSec")) or state["last_run"]
+        # ...but the run RESULT lives on the paired .service (dead between runs).
+        paired = v.get("Unit")
+        if paired and paired.endswith(".service"):
+            sp = _systemctl_show(paired, [
+                "Result", "NRestarts", "ExecMainStartTimestamp",
+                "ExecMainExitTimestamp", "ExecMainStatus",
+                "ActiveState", "SubState",
+            ])
+            if sp.returncode == 0:
+                sv = _kv(sp.stdout)
+                state["result"] = sv.get("Result") or state["result"]
+                nr = _int_or_none(sv.get("NRestarts"))
+                if nr is not None:
+                    state["n_restarts"] = nr
+                state["last_run"] = _iso(sv.get("ExecMainStartTimestamp")) or state["last_run"]
+                state["last_run_end"] = _iso(sv.get("ExecMainExitTimestamp")) or state["last_run_end"]
+                state["service_active"] = sv.get("ActiveState")
+                state["service_sub"] = sv.get("SubState")
+
+    return state
+
+
+@app.get("/system/status")
+def system_status():
+    units = [
+        "hermes-gateway.service",
+        "lilith-gmail-watcher.timer",
+        "lilith-meeting-prep.timer",
+        "lilith-morning-brief.timer",
+        "lilith-career-watcher.timer",
+        "lilith-os-api.service",
+    ]
+
+    return {
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "services": [
+            systemctl_state(unit)
+            for unit in units
+        ],
+    }
+
+
+@app.get("/os/overview")
+def os_overview():
+    conn = db()
+
+    try:
+        total_apps = conn.execute(
+            "SELECT COUNT(*) FROM job_applications"
+        ).fetchone()[0]
+
+        pipeline_rows = conn.execute("""
+            SELECT stage, COUNT(*) AS count
+            FROM job_applications
+            GROUP BY stage
+        """).fetchall()
+
+        pipeline = {
+            row["stage"]: row["count"]
+            for row in pipeline_rows
+        }
+
+        recent_audit = conn.execute("""
+            SELECT
+                id,
+                timestamp,
+                app,
+                action,
+                entity_type,
+                entity_id,
+                actor,
+                confidence,
+                reason
+            FROM os_audit_log
+            ORDER BY id DESC
+            LIMIT 10
+        """).fetchall()
+
+        # Primary is os_audit_log; fall back to real career_events when empty.
+        if not recent_audit:
+            recent_audit = conn.execute("""
+                SELECT
+                    id,
+                    created_at AS timestamp,
+                    'career' AS app,
+                    event_type AS action,
+                    entity_type,
+                    entity_id,
+                    source AS actor,
+                    confidence,
+                    payload_json AS reason
+                FROM career_events
+                ORDER BY id DESC
+                LIMIT 10
+            """).fetchall()
+
+    finally:
+        conn.close()
+
+    units = [
+        "hermes-gateway.service",
+        "lilith-gmail-watcher.timer",
+        "lilith-meeting-prep.timer",
+        "lilith-morning-brief.timer",
+        "lilith-career-watcher.timer",
+        "lilith-os-api.service",
+    ]
+
+    services = [
+        systemctl_state(unit)
+        for unit in units
+    ]
+
+    healthy = sum(
+        1
+        for service in services
+        if (
+            service.get("available")
+            and service.get("active") == "active"
+        )
+    )
+
+    unhealthy = len(services) - healthy
+
+    return {
+        "lilith": {
+            "status": (
+                "online"
+                if unhealthy == 0
+                else "degraded"
+            ),
+            "os_version": "0.1.0",
+            "time_utc": datetime.now(
+                timezone.utc
+            ).isoformat(),
+        },
+
+        "career": {
+            "applications": total_apps,
+            "pipeline": pipeline,
+        },
+
+        "automations": {
+            "total": len(services),
+            "healthy": healthy,
+            "unhealthy": unhealthy,
+            "services": services,
+        },
+
+        "recent_activity": [
+            dict(row)
+            for row in recent_audit
+        ],
+    }

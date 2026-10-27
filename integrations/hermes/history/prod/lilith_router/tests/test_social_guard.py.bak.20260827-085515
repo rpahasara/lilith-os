@@ -1,0 +1,85 @@
+"""Tests for the social-response guard — the 9 required failure modes + valid.
+
+Run:  python -m lilith_router.tests.test_social_guard
+Pure/offline (a fake regenerator stands in for the gpt-5.6-sol one-shot).
+Exits non-zero on any failure.
+"""
+
+from __future__ import annotations
+
+import sys
+
+from lilith_router import social_guard as sg
+
+
+def run():
+    checks = []
+
+    def check(name, cond):
+        checks.append((name, bool(cond)))
+        print(f"[{'ok ' if cond else 'FAIL'}] {name}")
+
+    FAKE = lambda user, recent: "hey you 🙂 missed you too"  # noqa: E731
+
+    # 1) empty response
+    check("1 empty content -> EMPTY", sg.classify_failure({"choices": [{"message": {"content": "   "}}]}) == sg.EMPTY)
+    check("1 empty -> regenerates clean", sg.enforce_social_reply("   ", regenerator=FAKE) == "hey you 🙂 missed you too")
+
+    # 2) null content
+    check("2 null content -> NULL", sg.classify_failure({"choices": [{"message": {"content": None}}]}) == sg.NULL)
+    check("2 null top-level -> NULL", sg.classify_failure(None) == sg.NULL)
+
+    # 3) missing choices
+    check("3 missing choices -> NO_CHOICES", sg.classify_failure({"choices": []}) == sg.NO_CHOICES)
+    check("3 no choices key -> NO_CHOICES", sg.classify_failure({"id": "x"}) == sg.NO_CHOICES)
+
+    # 4) <think> leakage (with real content after)
+    think = {"choices": [{"message": {"content": "<think>plan the reply</think> hey, i missed you too 🙂"}}]}
+    check("4 <think> leak -> THINK_LEAK", sg.classify_failure(think) == sg.THINK_LEAK)
+    check("4 clean strips <think>", sg.clean("<think>plan</think> hey there") == "hey there")
+
+    # 5) reasoning-only response (nothing left after strip)
+    ro = {"choices": [{"message": {"content": "<think>she seems sad; be gentle</think>"}}]}
+    check("5 reasoning-only -> REASONING_ONLY", sg.classify_failure(ro) == sg.REASONING_ONLY)
+    check("5 reasoning-only -> regenerates", sg.enforce_social_reply("<think>only reasoning</think>", regenerator=FAKE) == "hey you 🙂 missed you too")
+
+    # 6) timeout
+    check("6 timeout -> TIMEOUT", sg.classify_failure(error=TimeoutError("read timed out")) == sg.TIMEOUT)
+
+    # 7) HTTP 429
+    check("7 429 -> RATE_LIMIT", sg.classify_failure(status=429) == sg.RATE_LIMIT)
+
+    # 8) HTTP 5xx
+    check("8 500 -> SERVER_ERROR", sg.classify_failure(status=503) == sg.SERVER_ERROR)
+
+    # 9) normal valid social response
+    ok = {"choices": [{"message": {"content": "aw i missed you too, how was your day? 🙂"}}]}
+    check("9 valid -> None (no failure)", sg.classify_failure(ok) is None)
+    check("9 valid passes through unchanged",
+          sg.enforce_social_reply("aw i missed you too 🙂", regenerator=FAKE) == "aw i missed you too 🙂")
+
+    # Bonus: free-form internal-analysis / technical-persona leakage
+    leaky = "aw i've just been waiting in the cloud by my server rack thinking about you"
+    check("+ leakage detected", sg.is_leaky(leaky) is True)
+    check("+ leaky -> regenerates clean", sg.enforce_social_reply(leaky, regenerator=FAKE) == "hey you 🙂 missed you too")
+    check("+ 'as an AI' detected", sg.is_leaky("As an AI, i don't have feelings but...") is True)
+    check("+ provider exception -> EXCEPTION", sg.classify_failure(error=ValueError("bad json")) == sg.EXCEPTION)
+
+    def _boom(user, recent):
+        raise RuntimeError("regen down")
+    # Leaky input + failing regenerator -> fail-safe returns cleaned original
+    # (still non-empty, so the user always receives a reply).
+    check("+ regenerator failure -> cleaned original (fail-safe)",
+          sg.enforce_social_reply("just chilling in the cloud", regenerator=_boom) == "just chilling in the cloud")
+
+    failed = [n for n, ok_ in checks if not ok_]
+    print()
+    if failed:
+        print(f"{len(failed)}/{len(checks)} FAILED: {failed}")
+        return 1
+    print(f"All {len(checks)} social-guard checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run())
