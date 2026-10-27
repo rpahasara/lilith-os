@@ -1,0 +1,233 @@
+"""F8 DEV Hermes release/config gate. Read-only. Exit 0 = PASS; anything else refuses the gateway start.
+
+Runs as root from ExecStartPre (`+`, outside the sandbox) with the release venv's interpreter in -I mode, and by hand
+at the install gates. It never prints secret values.
+
+  --pre-start   integrity of the critical code set + ownership + config/env pins (fast; every start)
+  --full        additionally the complete release manifest (slow; install and health gates)
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+import yaml  # from the release venv (PyYAML, locked)
+
+BASE = Path("/opt/hermes-gateway-dev")
+HH = Path("/home/lilith/.hermes-dev")
+ETC = Path("/etc/hermes-gateway-dev")
+LANES_OFF = ("cognitive_enabled", "goals_enabled", "reasoning_enabled", "workspace_enabled", "motivation_enabled",
+             "planning_enabled", "ethics_enabled", "social_cognition_enabled", "memory_consolidation_enabled",
+             "canonical_ltm_enabled")
+REQUIRED_DENY = {"terminal", "code_execution", "file", "web", "search", "browser", "computer_use", "desktop_ui",
+                 "delegation", "cronjob", "skills", "memory", "session_search", "kanban", "project", "coding",
+                 "debugging", "homeassistant", "discord", "discord_admin", "spotify"}
+ENV_ALLOWED = {"LILITH_OS_PORT", "LILITH_OS_TOKEN"}
+# F8r3: no provider key anywhere in the gateway's reach. The Groq key exists only in the provider gate's root-only
+# credentials file (LoadCredential); provider.env must not exist at all.
+GATE_ETC = Path("/etc/hermes-provider-gate-dev")
+GATE_CONFIG = {
+    "listen_host": "127.0.0.1", "listen_port": 9911, "upstream_host": "api.groq.com", "upstream_port": 443,
+    "local_path": "/openai/v1/chat/completions", "upstream_path": "/openai/v1/chat/completions",
+    "allowed_models": ["openai/gpt-oss-120b"], "client_token": "__LILITH_GATE_CLIENT_TOKEN__",
+}
+RO_STUBS = ("skills", "optional-skills", "optional-mcps", "hooks", "scripts", "bin", "node", "node_modules")
+
+failures: list[str] = []
+
+
+def fail(msg: str) -> None:
+    failures.append(msg)
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_manifest(manifest: Path, root: Path) -> None:
+    if not manifest.is_file():
+        return fail(f"MANIFEST_MISSING {manifest}")
+    n = 0
+    for line in manifest.read_text().splitlines():
+        digest, rel = line.split("  ", 1)
+        p = root / rel
+        n += 1
+        if not p.is_file() or p.is_symlink() or sha256(p) != digest:
+            fail(f"HASH_MISMATCH {p}")
+    if n == 0:
+        fail(f"MANIFEST_EMPTY {manifest}")
+
+
+def root_owned_readonly(path: Path, *, recurse: bool) -> None:
+    paths = [path] + (list(path.rglob("*")) if recurse and path.is_dir() else [])
+    for p in paths:
+        st = p.lstat()
+        if st.st_uid != 0:
+            fail(f"NOT_ROOT_OWNED {p}")
+        if not stat.S_ISLNK(st.st_mode) and st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            fail(f"GROUP_OR_OTHER_WRITABLE {p}")
+
+
+def check_secret_file(path: Path, *, mode: int, allowed: set[str], group_ok: bool) -> dict:
+    if not path.is_file() or path.is_symlink():
+        fail(f"MISSING {path}")
+        return {}
+    st = path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != mode:
+        fail(f"BAD_OWNER_OR_MODE {path} (want root {oct(mode)})")
+    if not group_ok and st.st_gid != 0:
+        fail(f"BAD_GROUP {path}")
+    values = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        if key not in allowed:
+            fail(f"FORBIDDEN_KEY {path}:{key}")
+        values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def main(argv: list[str]) -> int:
+    full = "--full" in argv
+    current = (BASE / "current").resolve()
+    if current.parent != BASE / "releases":
+        fail(f"CURRENT_NOT_A_RELEASE {current}")
+
+    # 1. Code integrity: critical set every start; complete release manifest at the gates.
+    check_manifest(ETC / "critical.sha256", Path("/"))
+    if full:
+        check_manifest(current / "RELEASE.sha256", current)
+    root_owned_readonly(current, recurse=full)
+    for rel in ("lilith_router", "plugins", *RO_STUBS):
+        p = HH / rel
+        if not p.is_dir() or p.is_symlink():
+            fail(f"MISSING_DIR {p}")
+        else:
+            root_owned_readonly(p, recurse=True)
+
+    # 2. Hermes config pins.
+    cfg_path = HH / "config.yaml"
+    st = cfg_path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o640:
+        fail("BAD_OWNER_OR_MODE config.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    if (cfg.get("platform_toolsets") or {}).get("lilith_os") != []:
+        fail("TOOLSET_PIN platform_toolsets.lilith_os != []")
+    missing = REQUIRED_DENY - set((cfg.get("agent") or {}).get("disabled_toolsets") or [])
+    if missing:
+        fail(f"DENYLIST_MISSING {sorted(missing)}")
+    if (cfg.get("security") or {}).get("allow_lazy_installs") is not False:
+        fail("LAZY_INSTALLS_NOT_DISABLED")
+    if (cfg.get("security") or {}).get("tirith_enabled") is not False:
+        fail("TIRITH_AUTO_DOWNLOAD_NOT_DISABLED")
+    jobs = HH / "cron" / "jobs.json"
+    if not jobs.is_file() or jobs.is_symlink() or jobs.lstat().st_uid != 0 or jobs.read_text().strip() != '{"jobs": []}':
+        fail("CRON_JOBS_NOT_PINNED_EMPTY")
+    mem = cfg.get("memory") or {}
+    if mem.get("memory_enabled") is not False or mem.get("user_profile_enabled") is not False:
+        fail("HERMES_MEMORY_NOT_DISABLED")
+    if (cfg.get("plugins") or {}).get("enabled") != ["lilith_os"]:
+        fail("PLUGINS_ENABLED != [lilith_os]")
+    for key in ("mcp_servers", "hooks", "cron_jobs", "terminal", "toolsets"):
+        if cfg.get(key):
+            fail(f"FORBIDDEN_CONFIG {key}")
+    if (cfg.get("auxiliary") or {}).get("background_review", {}).get("enabled") is not False:
+        fail("BACKGROUND_REVIEW_ON")
+    if (cfg.get("curator") or {}).get("enabled") is not False or (cfg.get("cron") or {}).get("allow_agent_scheduling") is not False:
+        fail("CURATOR_OR_AGENT_CRON_ON")
+    kanban = cfg.get("kanban") or {}
+    if kanban.get("dispatch_in_gateway") is not False or kanban.get("review_dispatch") is not False:
+        fail("KANBAN_DISPATCH_ON")
+    # F8r3 provider path: Groq gpt-oss-120b through the local gate only; bounded calls; no background model calls.
+    model = cfg.get("model") or {}
+    want = {"provider": "custom", "default": "openai/gpt-oss-120b", "base_url": "http://127.0.0.1:9911/openai/v1",
+            "api_key": "__LILITH_GATE_CLIENT_TOKEN__", "api_mode": "chat_completions"}
+    for k, v in want.items():
+        if model.get(k) != v:
+            fail(f"MODEL_PIN {k}")
+    if not (0 < int(model.get("max_tokens") or 0) <= 1024) or not model.get("context_length"):
+        fail("MODEL_LIMITS")
+    agent = cfg.get("agent") or {}
+    if agent.get("api_max_retries") != 1 or (agent.get("empty_response_guard") or {}).get("enabled") is not False:
+        fail("RETRIES_NOT_BOUNDED")
+    if (cfg.get("auxiliary") or {}).get("title_generation", {}).get("enabled") is not False:
+        fail("TITLE_GENERATION_ON")
+    if (cfg.get("compression") or {}).get("enabled") is not False:
+        fail("COMPRESSION_ON")
+    if cfg.get("fallback_providers") or cfg.get("fallback_model"):
+        fail("FALLBACK_CONFIGURED")
+    if cfg.get("max_concurrent_sessions") != 1:
+        fail("CONCURRENCY_NOT_1")
+    if (cfg.get("logging") or {}).get("level") not in ("INFO", "WARNING"):
+        fail("LOGGING_LEVEL")
+    gate = cfg.get("lilith_os") or {}
+    if not gate.get("allow_admin_from") or "operator" in gate.get("allow_admin_from") or gate.get("user_allowed_commands"):
+        fail("SLASH_GATING_OFF")
+
+    # 3. Router: every cognitive lane off; Router V2 only in shadow or live for lilith_os.
+    rpath = HH / "lilith_router" / "router.yaml"
+    router = yaml.safe_load(rpath.read_text()) or {}
+    for lane in LANES_OFF:
+        if router.get(lane) is not False:
+            fail(f"LANE_NOT_OFF {lane}")
+    if router.get("cognitive_channels"):
+        fail("COGNITIVE_CHANNELS_SET")
+    if router.get("mode") not in ("shadow", "live") or router.get("live_channels") != ["lilith_os"]:
+        fail("ROUTER_SCOPE")
+    if not str(router.get("log_path", "")).startswith(str(HH / "logs") + "/"):
+        fail("DECISIONS_LOG_OUTSIDE_STATE_LOGS")
+    # The DEV world_context is an import stub; it is only acceptable while every lane above is off.
+    if "\nDEV_IMPORT_STUB = True\n" not in (HH / "lilith_router" / "world_context.py").read_text():
+        fail("WORLD_CONTEXT_NOT_THE_F7_STUB")
+
+    # 4. Secrets: the console .env holds the port + DEV token only; provider.env holds at most the D-1 key.
+    env = check_secret_file(HH / ".env", mode=0o640, allowed=ENV_ALLOWED, group_ok=True)
+    if env:
+        if env.get("LILITH_OS_PORT") != "9901":
+            fail("CONSOLE_PORT != 9901")
+        if not re.fullmatch(r"[0-9a-f]{64}", env.get("LILITH_OS_TOKEN", "")):
+            fail("CONSOLE_TOKEN_NOT_64_HEX")
+    if (ETC / "provider.env").exists():
+        fail("PROVIDER_ENV_PRESENT (F8r3 keeps no provider key in the gateway's reach)")
+    # 5. Provider gate: exact pinned policy fields, root-only credentials, key never readable by the gateway uid.
+    try:
+        gcfg = json.loads((GATE_ETC / "gate.json").read_text())
+        for k, v in GATE_CONFIG.items():
+            if gcfg.get(k) != v:
+                fail(f"GATE_PIN {k}")
+        if not (0 < int(gcfg["max_output_tokens"]) <= 1024) or int(gcfg["budget_requests"]) > 50:
+            fail("GATE_LIMITS")
+    except (OSError, ValueError, KeyError):
+        fail("GATE_CONFIG_UNREADABLE")
+    cdir = GATE_ETC / "credentials"
+    if not cdir.is_dir() or cdir.lstat().st_uid != 0 or stat.S_IMODE(cdir.lstat().st_mode) != 0o700:
+        fail("GATE_CREDENTIALS_DIR")
+    for f in cdir.glob("*") if cdir.is_dir() else []:
+        if f.name != "groq-api-key" or f.lstat().st_uid != 0 or stat.S_IMODE(f.lstat().st_mode) != 0o600:
+            fail(f"GATE_CREDENTIAL_FILE {f.name}")
+    for forbidden in ("auth.json", ".anthropic_oauth.json", "honcho.json", "slack_tokens.json", "SOUL.md.prod",
+                      "groq.env"):
+        if (HH / forbidden).exists():
+            fail(f"FORBIDDEN_FILE {forbidden}")
+
+    if failures:
+        for f in failures:
+            print("F8_VERIFY_FAIL", f)
+        return 1
+    print("F8_VERIFY_PASS", "full" if full else "pre-start", current.name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

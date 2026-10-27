@@ -1,0 +1,115 @@
+--- f9a1/src/gateway/run.py
++++ f9b1/src/gateway/run.py
+@@ -19079,13 +19079,14 @@
+         """Inner handler that runs under the _running_agents sentinel guard."""
+         _msg_start_time = time.time()
+         _platform_name = source.platform.value if hasattr(source.platform, "value") else str(source.platform)
+-        _msg_preview = (event.text or "")[:80].replace("\n", " ")
++        # F9-B (LILITH DEV): no message text in the operating logs. gateway.log is written at INFO whatever
++        # logging.level says, so the sizes replace the previews here rather than relying on the log level.
+         _reply_id = getattr(event, "reply_to_message_id", None)
+-        _reply_txt = (getattr(event, "reply_to_text", None) or "")[:80].replace("\n", " ")
+         logger.info(
+-            "inbound message: platform=%s user=%s chat=%s msg=%r reply_to_id=%s reply_to_text=%r",
++            "inbound message: platform=%s user=%s chat=%s msg_chars=%d reply_to_id=%s reply_to_chars=%d",
+             _platform_name, source.user_name or source.user_id or "unknown",
+-            source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
++            source.chat_id or "unknown", len(event.text or ""), _reply_id,
++            len(getattr(event, "reply_to_text", None) or ""),
+         )
+ 
+         # Get or create session
+--- f9a1/src/agent/turn_context.py
++++ f9b1/src/agent/turn_context.py
+@@ -614,15 +614,12 @@
+         agent._run_budget_started_at = None
+     agent._run_budget_wrapup_injected = False
+ 
+-    # Log conversation turn start for debugging/observability.
+-    _preview_text = summarize_user_message_for_log(user_message)
+-    _msg_preview = (_preview_text[:80] + "...") if len(_preview_text) > 80 else _preview_text
+-    _msg_preview = _msg_preview.replace("\n", " ")
++    # Log conversation turn start for debugging/observability. F9-B (LILITH DEV): the message size, not its text.
+     logger.info(
+-        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg=%r",
++        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg_chars=%d",
+         agent.session_id or "none", agent.model, agent.provider or "unknown",
+         agent.platform or "unknown", len(conversation_history or []),
+-        _msg_preview,
++        len(summarize_user_message_for_log(user_message)),
+     )
+ 
+     # Initialize conversation (copy to avoid mutating the caller's list).
+--- f9a1/src/agent/agent_runtime_helpers.py
++++ f9b1/src/agent/agent_runtime_helpers.py
+@@ -1864,6 +1864,48 @@
+ 
+ 
+ 
++_DUMP_SAFE_STR_KEYS = ("model", "reasoning_effort", "service_tier")
++_DUMP_SAFE_ERROR_KEYS = ("type", "status_code", "request_id", "code", "param", "response_status")
++
++
++def _content_free_request_dump(payload: Dict[str, Any]) -> Dict[str, Any]:
++    """F9-B (LILITH DEV): a request debug dump without conversation content.
++
++    Keeps what diagnoses a failed call (reason, endpoint, model and scalar
++    parameters, message roles and sizes, tool names, error type/status/code)
++    and drops message text, structured parameters and provider error bodies,
++    which can echo the request.
++    """
++    def _size(value) -> int:
++        if isinstance(value, list):
++            return sum(_size(v.get("text", "") if isinstance(v, dict) else v) for v in value)
++        return 0 if value is None else len(value if isinstance(value, str) else str(value))
++
++    out = dict(payload)
++    request = dict(out.get("request") or {})
++    safe: Dict[str, Any] = {}
++    for key, value in (request.get("body") or {}).items():
++        if key in ("messages", "input") and isinstance(value, list):
++            safe[key] = [{"role": m.get("role"), "chars": _size(m.get("content"))} if isinstance(m, dict)
++                         else {"chars": _size(m)} for m in value]
++        elif key == "tools" and isinstance(value, list):
++            safe[key] = [((t.get("function") or {}).get("name") or t.get("name")) if isinstance(t, dict) else None
++                         for t in value]
++        elif value is None or isinstance(value, (bool, int, float)):
++            safe[key] = value
++        elif key in _DUMP_SAFE_STR_KEYS and isinstance(value, str):
++            safe[key] = value
++        else:
++            safe[key] = f"<{type(value).__name__} omitted>"
++    request["body"] = safe
++    out["request"] = request
++    if isinstance(out.get("error"), dict):
++        out["error"] = {k: v for k, v in out["error"].items()
++                        if k in _DUMP_SAFE_ERROR_KEYS and (v is None or isinstance(v, (str, int, float, bool)))}
++    out["content_free"] = True
++    return out
++
++
+ def dump_api_request_debug(
+     agent,
+     api_kwargs: Dict[str, Any],
+@@ -1928,6 +1970,7 @@
+ 
+             dump_payload["error"] = error_info
+ 
++        dump_payload = _content_free_request_dump(dump_payload)   # F9-B: before anything is written or printed
+         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+         # Sanitize the session ID into a traversal-free path segment — it can
+         # originate from untrusted input (X-Hermes-Session-Id header), and an
+--- f9a1/profiles/operate/config.yaml
++++ f9b1/profiles/operate/config.yaml
+@@ -63,6 +63,11 @@
+   user_profile_enabled: false
+   nudge_interval: 0
+ 
++# F9-A D-1 (kept by F9-B: apply_profile.sh operate REPLACES config.yaml with this file). QUOTED on purpose: YAML
++# reads a bare `off` as boolean false, which Hermes treats as unknown -> "ask".
++onboarding:
++  profile_build: "off"
++
+ # No skill-creation nudges, no automatic post-turn memory/skill review, no curator, no kanban dispatch,
+ # no agent-scheduled cron jobs (upstream defaults: background_review on, curator on, kanban dispatch on).
+ skills:

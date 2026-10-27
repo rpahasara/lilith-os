@@ -1,0 +1,63 @@
+--- /c/Users/edufo/lilith-hermes-staging/quarantine-20261022-222752/extracted/plugins/lilith_os/adapter.py	2026-10-22 22:47:56.904913200 +0530
++++ /c/Users/edufo/lilith-hermes-staging/dev-candidate-20261022/plugins/lilith_os/adapter.py	2026-10-22 23:33:51.339580900 +0530
+@@ -16,6 +16,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import hmac
+ import json
+ import logging
+ import os
+@@ -41,6 +42,8 @@
+ logger = logging.getLogger(__name__)
+ 
+ _DEFAULT_PORT = 9901
++# DEV candidate: bounded request body (the Core API relay sends one short JSON object).
++_MAX_BODY_BYTES = 64 * 1024
+ _OPERATOR_ID = "operator"
+ _OPERATOR_NAME = "Operator"
+ 
+@@ -121,20 +124,26 @@
+     def do_POST(self) -> None:
+         adapter = self._adapter
+ 
+-        # Defense-in-depth: if a shared token is configured, require it. The
+-        # 127.0.0.1 bind is the primary control; this stops any other local
+-        # process from driving the operator console.
++        # DEV candidate: the shared token is MANDATORY (fail closed when it is not
++        # configured) and compared in constant time. The 127.0.0.1 bind alone is
++        # not authentication: other local processes could otherwise drive the
++        # operator console.
+         token = os.getenv("LILITH_OS_TOKEN", "").strip()
+-        if token:
+-            presented = (self.headers.get("X-LILITH-OS-Token") or "").strip()
+-            if presented != token:
+-                self._json(401, {"error": "unauthorized"})
+-                return
++        if len(token) < 32:
++            self._json(503, {"error": "console token not configured"})
++            return
++        presented = (self.headers.get("X-LILITH-OS-Token") or "").strip()
++        if not hmac.compare_digest(presented.encode("utf-8"), token.encode("utf-8")):
++            self._json(401, {"error": "unauthorized"})
++            return
+ 
+         try:
+             length = int(self.headers.get("Content-Length") or 0)
+         except (TypeError, ValueError):
+             length = 0
++        if length < 0 or length > _MAX_BODY_BYTES:
++            self._json(413, {"error": "request too large"})
++            return
+         try:
+             raw = self.rfile.read(length) if length > 0 else b""
+             data = json.loads(raw or b"{}")
+@@ -222,7 +231,7 @@
+         )
+         self._server_thread.start()
+         self._mark_connected()
+-        secured = "token+localhost" if os.getenv("LILITH_OS_TOKEN") else "localhost-only"
++        secured = "token+localhost" if len(os.getenv("LILITH_OS_TOKEN", "").strip()) >= 32 else "REFUSING POSTS: token unset"
+         logger.info(
+             "lilith_os: operator console serving on http://%s:%s (%s)",
+             self.host,

@@ -1,0 +1,58 @@
+# LILITH F9-C: non-destructive release check. Runs only while the gateway-blocking marker exists; it erases nothing
+# and processes no request. It releases the marker only when Privacy shows the authorization COMPLETED with Hermes
+# COMPLETE (read-only), then starts the gateway (the restart unit refuses while the marker still exists).
+# Also releases a pending FORGET intent once Privacy proves that FORGET completed with the Hermes owner.
+# Same sandbox as hermes-forget-executor.service; no Conflicts= (it never stops the gateway).
+[Unit]
+Description=LILITH F9-C Hermes erasure release check (DEV_SYNTHETIC)
+# Runs while an erasure is unreleased OR a FORGET intent is pending (triggering conditions; the config is required).
+ConditionPathExists=|/var/lib/hermes-forget/in-progress
+ConditionPathExistsGlob=|/var/lib/hermes-forget/intent/*.intent
+ConditionPathExists=/etc/hermes-forget/executor.json
+OnSuccess=hermes-forget-restart.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hermes-gateway-dev/current/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11 -I -B /opt/hermes-gateway-dev/current/bin/hermes_forget_executor.py --reconcile
+TimeoutStartSec=120
+UMask=0077
+ProtectSystem=strict
+ReadWritePaths=/home/lilith/.hermes-dev /var/lib/hermes-forget /run/hermes-forget
+ReadWritePaths=-/var/backups/hermes-gateway-dev -/var/log/journal/%m.hermes-gateway-dev
+TemporaryFileSystem=/home/lilith/.hermes/lilith-os-dev:ro
+BindReadOnlyPaths=/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db
+BindReadOnlyPaths=-/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db-wal
+BindPaths=-/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db-shm
+InaccessiblePaths=-/etc/hermes-gateway-dev -/etc/hermes-provider-gate-dev -/var/lib/private/hermes-provider-gate-dev -/run/credentials
+InaccessiblePaths=-/etc/credstore.encrypted -/etc/lilith-authority-custody -/var/lib/lilith-authority-custody
+InaccessiblePaths=-/etc/lilith-authority-dev -/var/lib/lilith-authority-dev -/opt/lilith-authority-dev -/etc/lilith-recovery-witness -/var/lib/lilith-recovery-witness
+InaccessiblePaths=-/etc/lilith-memory-broker -/var/lib/lilith-memory-broker -/opt/lilith-memory-broker -/opt/lilith-stage3-a2-final-v1 -/opt/lilith-trusted-controls
+InaccessiblePaths=-/run/lilith-memory -/run/lilith-authority-dev -/run/lilith-recovery-witness -/usr/local/lib/lilith-dev-deploy -/etc/sudoers.d -/etc/sudoers
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+KeyringMode=private
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_CHOWN
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @module @reboot @swap @obsolete @cpu-emulation
+SystemCallFilter=@chown
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-forget-reconcile

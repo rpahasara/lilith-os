@@ -1,0 +1,7 @@
+cd13a46e1c84f1c069c1d3f4712243fc5d739c7b5411274238581535200b8e2c *./CHANGES.md
+3592fb40f4b6097adaffce1e2af2e45b7366eac9d77a75351e94c8268321cd98 *./config-templates/config.yaml
+3ac478d47479d6863c032d1c8db515ff3df94cdc061173c1960c94a68b2b670a *./config-templates/env.template
+14696e56743e501592dc574e61fc835920880178eb3ae74672839dc415a5a7a2 *./config-templates/router.yaml
+5c1fbf98ead049013aa79fdfb4e74dd3dd210ab0c3386f257ce0b4e334e6a3d5 *./lilith_router/world_context.py
+76948218a23ed7e9b698ab07bd36a7a8a8d513abca1f02022f85669b0db24f54 *./plugins/lilith_os/adapter.py
+654db23a1fa15973a623f6ab599f730352f8dd93d6dccb1746dec70717f993a4 *./plugins/lilith_os/adapter.py.dev-candidate.diff

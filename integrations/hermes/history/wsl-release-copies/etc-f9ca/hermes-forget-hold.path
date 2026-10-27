@@ -1,0 +1,12 @@
+# LILITH F9-C hold-first: the moment the Core API records the durable FORGET intent (sticky intent directory
+# /var/lib/hermes-forget/intent, root:lilith-forget 1730, created by hermes-forget.tmpfiles.conf), take it under root
+# ownership and stop the gateway. The gateway drop-in already refuses to start while any intent exists.
+[Unit]
+Description=LILITH F9-C durable FORGET intent (DEV_SYNTHETIC)
+
+[Path]
+PathExistsGlob=/var/lib/hermes-forget/intent/*.intent
+Unit=hermes-forget-hold.service
+
+[Install]
+WantedBy=paths.target
