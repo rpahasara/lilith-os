@@ -254,11 +254,13 @@ class InProcessCase(unittest.TestCase):
         self.opener = FakeOpener()
         self._saved_opener = wc._OPENER
         wc._OPENER = self.opener
+        wc._BREAKER["open_until"] = 0.0
         self.stats_before = dict(wc._STATS)
         _SOCKET_ATTEMPTS.clear()
 
     def tearDown(self):
         self.wc._OPENER = self._saved_opener
+        self.wc._BREAKER["open_until"] = 0.0
         (CANDIDATE / "lilith_router" / "router.yaml").write_text(yaml_text(TMP / "decisions.log"), encoding="utf-8")
         self.assertEqual(_SOCKET_ATTEMPTS, [])
 
@@ -413,6 +415,8 @@ class FailureTest(InProcessCase):
         self.assertIn("WORLD MODEL: temporarily unavailable", belief["combined_ephemeral"])
         goal = self.route("goal_query")
         self.assertIn("GOAL / EXECUTIVE STATE: temporarily unavailable", goal["combined_ephemeral"])
+        self.assertEqual(len(self.opener.calls), 1)            # the breaker skipped every later read
+        self.assertTrue(self.wc.status()["breaker_open"])
 
     def test_malformed_responses_never_break_a_turn(self):
         bodies = [b"[]", b'"x"', b"null", b"{", b'{"beliefs": "nope", "goals": 7, "tasks": {"a": 1}}']
@@ -476,6 +480,132 @@ class FailureTest(InProcessCase):
                                                  do_write=True)
         self.assertEqual(len(suffix), self.wc.MAX_GROUNDING_CHARS)
         self.assertTrue(suffix.endswith(self.wc.TRUNCATION_MARK))
+
+
+IO_ENTRIES = {"build_grounding", "build_goal_grounding", "build_attention_candidates", "build_motivation_snapshot",
+              "select_reasoning_input_m", "build_planning_input", "build_ethical_input"}
+MANY_APPS = " ".join(f"application {i}" for i in range(10, 40))
+BOUND_MESSAGES = dict(MESSAGES, **{
+    "multi": f"TEST_ONLY make a plan to follow up but do not create anything; is it okay to share my salary with "
+             f"the recruiter? what are my options for {MANY_APPS}?",
+    "many_reasoning": f"TEST_ONLY what are my options for {MANY_APPS}?",
+    "many_planning": f"TEST_ONLY make a plan to follow up on {MANY_APPS} but do not create anything",
+    "many_ethics": f"TEST_ONLY is it okay to email the recruiter about {MANY_APPS}?",
+})
+DENSE = dict(FIXTURES, **{"/os/goals": {"goals": [
+    dict(GOAL, goalId=f"g.test.{i}", lifecycleState="BLOCKED", blockedBy=[f"d.test.{i}"]) for i in range(80)]}})
+
+
+class RouteBoundTest(InProcessCase):
+    """Reads per complete gateway turn, not per adapter call."""
+
+    def test_gateway_has_a_fixed_number_of_read_capable_call_sites_outside_loops(self):
+        tree = ast.parse((CANDIDATE / "lilith_router" / "gateway_integration.py").read_text(encoding="utf-8"))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        sites = []
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "_world_context"
+                    and node.func.attr in IO_ENTRIES):
+                sites.append(node.func.attr)
+                up = node
+                while up in parents:
+                    up = parents[up]
+                    self.assertNotIsInstance(up, (ast.For, ast.While, ast.AsyncFor, ast.comprehension))
+        self.assertEqual(len(sites), self.wc.MAX_IO_ENTRIES_PER_TURN)
+        self.assertEqual(self.wc.MAX_READS_PER_TURN, self.wc.MAX_IO_ENTRIES_PER_TURN * self.wc.MAX_CALLS_PER_ENTRY)
+        self.assertEqual(set(self.wc.GATEWAY_API) - IO_ENTRIES,
+                         {n for n in self.wc.GATEWAY_API if n.startswith("detect_")}
+                         | {"motivation_candidates", "motivation_trace"})
+
+    def test_aggregate_reads_per_turn_stay_within_the_bound(self):
+        from lilith_router import reasoning
+        wc = self.wc
+        originals = {n: getattr(wc, n) for n in wc.GATEWAY_API}
+        entries = []
+
+        def counted(name):
+            def call(*args, **kwargs):
+                before = len(self.opener.calls)
+                try:
+                    return originals[name](*args, **kwargs)
+                finally:
+                    entries.append((name, len(self.opener.calls) - before))
+            return call
+
+        saved_model = reasoning._default_model_call
+        reasoning._default_model_call = lambda prompt: "not json"
+        for name in wc.GATEWAY_API:
+            setattr(wc, name, counted(name))
+        worst_turn, worst_entry, turns = 0, 0, 0
+        try:
+            self.opener.fixtures = DENSE
+            for mode in ("shadow", "live"):
+                self.configure(**all_lanes(mode))
+                for key in BOUND_MESSAGES:
+                    with self.subTest(mode=mode, message=key):
+                        entries.clear()
+                        start = len(self.opener.calls)
+                        chat = f"bound-{mode}-{key}"
+                        ctx = SimpleNamespace(source=SimpleNamespace(platform=SimpleNamespace(value="lilith_os"),
+                                                                     chat_id=chat),
+                                              session_key=f"agent:lilith_os:{chat}", message=BOUND_MESSAGES[key])
+                        self.gi.route_turn(runner=SimpleNamespace(), ctx=ctx, model="dev-model", runtime_kwargs={},
+                                           turn_route={"model": "dev-model"}, combined_ephemeral="TEST_ONLY base",
+                                           cached_agent=None)
+                        reads = len(self.opener.calls) - start
+                        io = [n for n, _ in entries if n in IO_ENTRIES]
+                        self.assertLessEqual(len(io), wc.MAX_IO_ENTRIES_PER_TURN)
+                        self.assertLessEqual(reads, wc.MAX_READS_PER_TURN)
+                        for name, delta in entries:
+                            self.assertLessEqual(delta, wc.MAX_CALLS_PER_ENTRY)
+                            if name not in IO_ENTRIES:
+                                self.assertEqual(delta, 0, name)
+                        worst_turn = max(worst_turn, reads)
+                        worst_entry = max([worst_entry] + [d for _, d in entries])
+                        turns += 1
+        finally:
+            for name, fn in originals.items():
+                setattr(wc, name, fn)
+            reasoning._default_model_call = saved_model
+        self.assertEqual(turns, 2 * len(BOUND_MESSAGES))
+        self.assertEqual(self.delta("reads_refused"), 0)       # no realistic turn exhausts a per-call budget
+        # The measured envelope documented in the adapter and the README (the PROD bytes are digest-pinned).
+        self.assertEqual((worst_entry, worst_turn), (9, 19))
+        self.assert_reads_only_allowlisted()
+
+    def test_a_hung_core_api_costs_one_read_until_the_breaker_cools_down(self):
+        wc = self.wc
+        now = [1000.0]
+        saved_time = wc.time
+        wc.time = SimpleNamespace(monotonic=lambda: now[0])
+        self.opener.error = TimeoutError("TEST_ONLY hung")
+        try:
+            self.configure(**all_lanes("live"))
+            for key in ("planning", "ethics", "belief", "goal_query"):
+                self.route(key)
+            self.assertEqual(len(self.opener.calls), 1)
+            self.assertTrue(wc.status()["breaker_open"])
+            self.assertGreater(self.delta("reads_skipped_breaker"), 0)
+            now[0] += wc.BREAKER_COOLDOWN_SECONDS + 1
+            self.opener.error = None
+            res = self.route("belief", chat="breaker-recovered")
+            self.assertIn(BELIEF_CANARY, res["combined_ephemeral"])
+            self.assertFalse(wc.status()["breaker_open"])
+        finally:
+            wc.time = saved_time
+
+    def test_an_answering_core_api_never_opens_the_breaker(self):
+        wc = self.wc
+        token = wc._BUDGET.set([10])
+        try:
+            for respond in (lambda r: FakeResponse(b"{", code=200),
+                            lambda r: (_ for _ in ()).throw(urllib.error.HTTPError(r.full_url, 503, "x", {}, None))):
+                self.opener.respond = respond
+                self.assertIsNone(wc._governed_get("/os/goals/focus"))
+            self.assertFalse(wc.status()["breaker_open"])
+        finally:
+            wc._BUDGET.reset(token)
 
 
 class DisabledLegacyTest(unittest.TestCase):

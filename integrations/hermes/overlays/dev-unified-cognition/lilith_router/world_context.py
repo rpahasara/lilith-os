@@ -12,7 +12,13 @@ PROD Working Memory unchanged and replaces only that module's I/O seam:
   and ethics inputs.
 * Reads are GET only, to the loopback Core API only, and only to an exact path allowlist (World Model, tasks,
   drafts, goals, career applications; never ``/memory/*``). They use no proxy, follow no redirects, accept JSON
-  only, are size-capped, and are budgeted per gateway entry point.
+  only, and are size-capped.
+* Read bounds. Each call into this module has its own budget of ``MAX_CALLS_PER_ENTRY`` reads; there is no
+  budget for a whole turn. The bound for a whole turn is structural: the DEV gateway has ``MAX_IO_ENTRIES_PER_TURN``
+  call sites that can read, and none of them is inside a loop. That gives ``MAX_READS_PER_TURN`` at most; the
+  offline scenarios measure 9 reads per call and 19 per turn at most. A transport failure (refused, timeout) opens
+  a breaker: reads are skipped for ``BREAKER_COOLDOWN_SECONDS``, so a hung Core API costs one timeout, not one
+  per read.
 * Writes are never sent. Core API ``POST /os/drafts`` and ``POST /os/goals`` have no caller authentication or
   approval gate, so the historical PROD draft and goal writes stay off until a reviewed write-governance path
   exists. The PROD code then tells the model that nothing was saved.
@@ -32,6 +38,8 @@ import importlib.util
 import json
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -45,6 +53,9 @@ API_BASE = "http://127.0.0.1:8765"          # the PROD module's Core API origin;
 GET_TIMEOUT_MAX = 2.5
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_CALLS_PER_ENTRY = 16
+MAX_IO_ENTRIES_PER_TURN = 10                # read-capable call sites in DEV gateway_integration.py (tests check)
+MAX_READS_PER_TURN = MAX_IO_ENTRIES_PER_TURN * MAX_CALLS_PER_ENTRY
+BREAKER_COOLDOWN_SECONDS = 30.0
 MAX_GROUNDING_CHARS = 16000
 TRUNCATION_MARK = "\n[grounding truncated]"
 
@@ -73,7 +84,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 _BUDGET: contextvars.ContextVar = contextvars.ContextVar("lilith_wm_budget", default=None)
-_STATS = {"reads": 0, "reads_refused": 0, "writes_refused": 0}
+_STATS = {"reads": 0, "reads_refused": 0, "reads_skipped_breaker": 0, "writes_refused": 0}
+_BREAKER = {"open_until": 0.0}
 
 
 def _path_allowed(path) -> bool:
@@ -85,6 +97,9 @@ def _governed_get(path, timeout=GET_TIMEOUT_MAX):
     if budget is None or budget[0] <= 0 or not _path_allowed(path):
         _STATS["reads_refused"] += 1
         return None
+    if time.monotonic() < _BREAKER["open_until"]:
+        _STATS["reads_skipped_breaker"] += 1
+        return None
     budget[0] -= 1
     try:
         req = urllib.request.Request(API_BASE + path, headers={"accept": "application/json"}, method="GET")
@@ -94,6 +109,12 @@ def _governed_get(path, timeout=GET_TIMEOUT_MAX):
             if "application/json" not in (resp.headers.get("content-type") or "").lower():
                 return None
             raw = resp.read(MAX_RESPONSE_BYTES + 1)
+    except (urllib.error.HTTPError, ValueError):
+        return None                         # Core API answered: no breaker
+    except Exception:
+        _BREAKER["open_until"] = time.monotonic() + BREAKER_COOLDOWN_SECONDS
+        return None
+    try:
         if len(raw) > MAX_RESPONSE_BYTES:
             return None
         _STATS["reads"] += 1
@@ -140,7 +161,8 @@ _LEGACY, _UNAVAILABLE_REASON = _load_legacy()
 def status() -> dict:
     """Non-sensitive state for diagnostics and tests."""
     return {"legacy_loaded": _LEGACY is not None, "reason": _UNAVAILABLE_REASON,
-            "legacy_sha256": LEGACY_SHA256, "writes_enabled": False, **_STATS}
+            "legacy_sha256": LEGACY_SHA256, "writes_enabled": False,
+            "breaker_open": time.monotonic() < _BREAKER["open_until"], **_STATS}
 
 
 def _cap(suffix):

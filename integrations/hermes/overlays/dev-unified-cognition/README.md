@@ -34,9 +34,22 @@ checked. It then replaces the only three PROD functions that do I/O (the tests c
 
 | PROD helper | Under the adapter |
 |---|---|
-| `_get_json` | GET to `127.0.0.1:8765` only, on an exact path allowlist: `/os/world`, `/os/tasks`, `/os/drafts`, `/os/goals`, `/os/goals/focus`, `/career/applications`, with the PROD query shapes. Never `/memory/*` or anything else. No proxy and no redirects; JSON only; 512 KiB per response; 2.5 s timeout; at most 16 reads per gateway call |
+| `_get_json` | GET to `127.0.0.1:8765` only, on an exact path allowlist: `/os/world`, `/os/tasks`, `/os/drafts`, `/os/goals`, `/os/goals/focus`, `/career/applications`, with the PROD query shapes. Never `/memory/*` or anything else. No proxy and no redirects; JSON only; 512 KiB per response; 2.5 s timeout. Read limits are in the next section |
 | `_post_draft` (`POST /os/drafts`) | never sent; returns "not confirmed" |
 | `_post_goal_json` (`POST /os/goals`) | never sent; returns "not confirmed" |
+
+### Read limits
+
+The adapter enforces its read budget per adapter call. There is no single budget for a whole turn.
+
+| Scope | Limit | How it is held |
+|---|---|---|
+| One adapter call | 16 reads (`MAX_CALLS_PER_ENTRY`) | enforced; further reads return nothing |
+| One gateway turn | at most 160 reads (`MAX_READS_PER_TURN`) | structural: the DEV gateway has 10 read-capable call sites and none is inside a loop (the tests check the gateway source), and each gets at most 16 |
+| Measured (offline, every lane in shadow and in live, messages referencing 30 applications, 80 blocked goals) | 9 reads per call, 19 per turn | asserted exactly by the tests. The PROD bytes are digest-pinned, so a change shows up there |
+| Core API refusing or timing out | 1 read, then none for 30 s | a transport failure opens a breaker; HTTP errors and malformed JSON do not open it |
+
+A hung Core API therefore costs a turn at most one 2.5 s timeout, not one per read.
 
 A lane's grounding text is capped at 16,000 characters. If the PROD bytes differ or fail to load, every detector
 reports no intent and every builder raises inside the gateway's existing `try`. Routing then matches the stub
@@ -98,7 +111,8 @@ cover:
 - shadow side effects;
 - each live lane against the fake API;
 - no writes;
-- the transport allowlist, budget, proxy and redirect refusal, size and content-type limits;
+- the transport allowlist, per-call budget, proxy and redirect refusal, size and content-type limits;
+- reads per complete turn: the gateway call-site bound, the measured envelope, and the breaker for a hung Core API;
 - unavailable and malformed API responses;
 - tampered PROD bytes;
 - the grounding cap;

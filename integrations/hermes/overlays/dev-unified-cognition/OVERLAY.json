@@ -5,7 +5,7 @@
   "note": "Applied on top of MODULES.json[dev-f9c2]. router.yaml, gateway_integration.py and plugins/lilith_os/adapter.py are unchanged, so every cognitive lane stays off.",
   "files": {
     "lilith_router/world_context.py": {
-      "sha256": "2404d7f5465f44d856e116e884d4fe07c8c1aca447bdb34ecf81a56ca717c2ff",
+      "sha256": "07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc",
       "source": "integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py",
       "replaces": "5c1fbf98ead049013aa79fdfb4e74dd3dd210ab0c3386f257ce0b4e334e6a3d5",
       "role": "governed DEV Working Memory adapter (replaces the import stub)"
