@@ -95,8 +95,12 @@ plus patches reproduces the bytes.
 ### Operational and migration impact
 
 - No host changes. The PROD-only gaps close only through a separately approved, sanitized PROD source export.
-- Merging source under `integrations/` into `main` is classified `DEPLOY_REQUIRED` by the existing DEV gate, like
-  any non-control change; it redeploys the Core API bundle to DEV and never installs Hermes.
+- With the DEV gate classifier of #271 on `main`, merging brand-new files under `integrations/hermes/`, or this
+  consolidation record at its exact reviewed revision, is classified `CONTROL_ONLY_NO_DEPLOY`: the Core API is not
+  repackaged, redeployed or restarted, and Hermes is never installed. The workflow still contacts DEV read-only to
+  re-prove the deployer boundary. Any modification, deletion or mode change under `integrations/hermes/`, and any
+  other path, keeps the existing fail-closed classification (`DEPLOY_REQUIRED` unless otherwise exempted). Without
+  that classifier, every such merge is `DEPLOY_REQUIRED` and redeploys the unchanged Core API bundle to DEV.
 
 ## Verification
 
