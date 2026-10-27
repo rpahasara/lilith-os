@@ -1,0 +1,5 @@
+# Byte-exact historical copies (except the adaptations listed in README.md): no end-of-line conversion, and
+# whitespace in them is content.
+* -text -whitespace
+README.md text whitespace
+.gitattributes text

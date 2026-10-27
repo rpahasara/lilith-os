@@ -1,0 +1,6 @@
+ M agent/background_review.py
+ M gateway/run.py
+ M tools/memory_tool.py
+ M tools/skill_manager_tool.py
+ M tools/write_approval.py
+?? tools/legacy_canonical_containment.py

@@ -1,0 +1,109 @@
+# LILITH F8 DEV Hermes gateway (lilith-dev-01 only). lilith_os console on 127.0.0.1:9901; zero tools; every cognitive
+# lane off; no owner recording; no canonical memory admission. Code is root-owned under /opt/hermes-gateway-dev;
+# writable state is HERMES_HOME=/home/lilith/.hermes-dev. Phase A network = localhost only (no model provider).
+# Provider egress is a separate, owner-authorized drop-in (20-provider-egress.conf).
+[Unit]
+Description=LILITH Hermes gateway DEV (lilith_os console only, no tools)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/hermes-gateway-dev/current/venv/bin/python
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=lilith
+Group=lilith
+WorkingDirectory=/home/lilith/.hermes-dev
+Environment=HOME=/home/lilith
+Environment=HERMES_HOME=/home/lilith/.hermes-dev
+Environment=XDG_CACHE_HOME=/home/lilith/.hermes-dev/cache/xdg
+Environment=LILITH_ENV=dev
+Environment=HERMES_DISABLE_LAZY_INSTALLS=1
+Environment=TIRITH_ENABLED=0
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PIP_NO_INDEX=1
+Environment=PIP_CONFIG_FILE=/dev/null
+Environment=UV_OFFLINE=1
+Environment=UV_NO_CONFIG=1
+# Provider credential (owner decision D-1). Read by PID 1 before privileges drop; the file itself is hidden from the
+# service below. Absent in Phase A.
+EnvironmentFile=-/etc/hermes-gateway-dev/provider.env
+ExecStartPre=+/opt/hermes-gateway-dev/current/venv/bin/python -I -B /opt/hermes-gateway-dev/current/bin/verify_release.py --pre-start
+ExecStart=/opt/hermes-gateway-dev/current/venv/bin/python -I -B -m hermes_cli.main gateway run
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=90s
+TimeoutStopSec=30s
+KillMode=mixed
+UMask=0077
+
+# Filesystem: everything read-only except HERMES_HOME; code and config inside it are re-mounted read-only.
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/lilith/.hermes-dev
+ReadOnlyPaths=/home/lilith/.hermes-dev/lilith_router /home/lilith/.hermes-dev/plugins /home/lilith/.hermes-dev/config.yaml /home/lilith/.hermes-dev/.env
+# The in-process cron ticker cannot be switched off; it runs only the jobs in cron/jobs.json, pinned here as a
+# root-owned, read-only empty list, so no autonomous agent turn can be scheduled.
+ReadOnlyPaths=/home/lilith/.hermes-dev/cron/jobs.json
+ReadOnlyPaths=/home/lilith/.hermes-dev/skills /home/lilith/.hermes-dev/optional-skills /home/lilith/.hermes-dev/optional-mcps /home/lilith/.hermes-dev/hooks /home/lilith/.hermes-dev/scripts /home/lilith/.hermes-dev/bin /home/lilith/.hermes-dev/node /home/lilith/.hermes-dev/node_modules /home/lilith/.hermes-dev/memories
+InaccessiblePaths=-/etc/hermes-gateway-dev -/etc/lilith-os-dev -/etc/credstore.encrypted -/etc/lilith-authority-custody -/var/lib/lilith-authority-custody
+InaccessiblePaths=-/etc/lilith-authority-dev -/var/lib/lilith-authority-dev -/opt/lilith-authority-dev -/etc/lilith-recovery-witness -/var/lib/lilith-recovery-witness
+InaccessiblePaths=-/etc/lilith-memory-broker -/var/lib/lilith-memory-broker -/opt/lilith-memory-broker -/opt/lilith-stage3-a2-final-v1 -/opt/lilith-trusted-controls
+InaccessiblePaths=-/run/lilith-memory -/run/lilith-authority-dev -/run/lilith-recovery-witness -/usr/local/lib/lilith-dev-deploy -/etc/sudoers.d
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+NoNewPrivileges=yes
+RemoveIPC=yes
+KeyringMode=private
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @module @reboot @swap @obsolete @cpu-emulation
+SystemCallErrorNumber=EPERM
+
+# Network, Phase A: loopback only (console ingress from the Core API, nothing else). This also blocks the GCE metadata
+# server (the VM service account has the cloud-platform scope), the VPC (PROD lilith-01 is 10.20.0.2) and the internet.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAccounting=yes
+
+# Resources (e2-small, 1.9 GiB, no swap): yield to the broker/authority/witness/Core API under pressure.
+MemoryHigh=450M
+MemoryMax=640M
+MemorySwapMax=0
+TasksMax=128
+CPUWeight=50
+IOWeight=50
+OOMScoreAdjust=500
+LimitNOFILE=4096
+LimitCORE=0
+
+StandardOutput=journal
+StandardError=journal
+# Own journald namespace with its own 7-day / 200 MB retention (journald@hermes-gateway-dev.conf): console message
+# previews never enter the main journal, and the host journald policy that other DEV evidence relies on is untouched.
+# Read with: journalctl --namespace=hermes-gateway-dev
+LogNamespace=hermes-gateway-dev
+SyslogIdentifier=hermes-gateway-dev
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=2000
+
+# No [Install] section on first install: the unit is started by hand at gate G-6 and not enabled at boot until the
+# owner accepts it (decision D-6).

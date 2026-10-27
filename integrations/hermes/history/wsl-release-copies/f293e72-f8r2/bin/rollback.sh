@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# F8 rollback (root). Touches ONLY F8-owned paths (allowlist in RUNBOOK §4). Never touches lilith-os-api-dev, the
+# broker, authority or witness, their files, sockets, credentials, users or groups, and never deletes anything.
+#   R-1  rollback.sh stop     stop+disable the gateway and the retention timer (Core API console returns 502 as before F8)
+#   R-2  rollback.sh remove   R-1 + MOVE every F8 artefact to /var/backups/hermes-gateway-dev/rollback-<UTC>/ (root 0700)
+# Works on a partial install (every step is conditional). daemon-reload only runs when nothing else is pending (C-3)
+# and the pre-existing services are unchanged across it; otherwise it prints F8_ROLLBACK_HOLD and leaves the reload to
+# the owner (the gateway is already stopped and its files moved).
+set -Eeuo pipefail
+umask 077
+MODE=${1:?usage: rollback.sh stop|remove}
+HH=/home/lilith/.hermes-dev
+SD=/etc/systemd/system
+F8_UNITS="hermes-gateway-dev.service hermes-gateway-dev-retention.timer hermes-gateway-dev-retention.service"
+EXISTING_UNITS="lilith-os-api-dev.service lilith-memory-broker.service lilith-memory-broker.socket lilith-authority-dev.service lilith-authority-dev.socket lilith-recovery-witness.service lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket lilith-stage3-a2-final.service"
+service_state() {
+  for u in ${EXISTING_UNITS}; do
+    printf '%s ' "$u"; systemctl show "$u" -p ActiveState,SubState,MainPID,InvocationID,NRestarts,ExecMainStartTimestampMonotonic | tr '\n' ' '; echo
+  done
+}
+[[ $(id -u) -eq 0 ]] || { echo "not root" >&2; exit 1; }
+for u in ${F8_UNITS}; do
+  if [[ $(systemctl show "$u" -p LoadState --value 2>/dev/null) == loaded ]]; then
+    systemctl stop "$u" || true
+    [[ $(systemctl show "$u" -p UnitFileState --value) == enabled ]] && systemctl disable "$u"
+  fi
+done
+! ss -Hltn 'sport = :9901' | grep -q . || { echo "F8_ROLLBACK_FAIL 9901 still listening" >&2; exit 1; }
+if [[ ${MODE} == stop ]]; then echo "F8_ROLLBACK_STOPPED"; exit 0; fi
+[[ ${MODE} == remove ]] || { echo "unknown mode" >&2; exit 2; }
+
+Q=/var/backups/hermes-gateway-dev/rollback-$(date -u +%Y%m%dT%H%M%SZ)
+install -d -o root -g root -m 0700 /var/backups/hermes-gateway-dev
+install -d -o root -g root -m 0700 "${Q}" "${Q}/etc" "${Q}/hermes-dev" "${Q}/opt"
+moved=0
+for f in ${SD}/hermes-gateway-dev.service ${SD}/hermes-gateway-dev-retention.service ${SD}/hermes-gateway-dev-retention.timer \
+         ${SD}/hermes-gateway-dev.service.d /etc/systemd/journald@hermes-gateway-dev.conf /etc/hermes-gateway-dev; do
+  if [[ -e $f || -L $f ]]; then mv "$f" "${Q}/etc/"; moved=1; fi
+done
+if [[ -d /opt/hermes-gateway-dev ]]; then mv /opt/hermes-gateway-dev "${Q}/opt/"; fi
+# HERMES_HOME: everything except the pre-existing memories/ came from F8 or from the gateway at runtime.
+shopt -s dotglob nullglob
+for p in "${HH}"/*; do [[ $(basename "$p") == memories ]] || mv "$p" "${Q}/hermes-dev/"; done
+if [[ $(systemctl show systemd-journald@hermes-gateway-dev.service -p ActiveState --value 2>/dev/null) == active ]]; then
+  systemctl stop systemd-journald@hermes-gateway-dev.socket systemd-journald@hermes-gateway-dev.service || true
+fi
+J="/var/log/journal/$(cat /etc/machine-id).hermes-gateway-dev"
+if [[ -d ${J} ]]; then mv "${J}" "${Q}/"; fi
+chmod -R go-rwx "${Q}"
+
+if [[ ${moved} -eq 1 ]]; then
+  pending=$(systemctl list-units --all --no-legend --plain | awk '{print $1}' | grep -v '^hermes-gateway-dev' \
+    | while read -r u; do [[ $(systemctl show "$u" -p NeedDaemonReload --value 2>/dev/null) == yes ]] && echo "$u"; done || true)
+  if [[ -n ${pending} || $(systemctl list-jobs --no-legend | wc -l) -ne 0 ]]; then
+    echo "F8_ROLLBACK_HOLD daemon-reload withheld: other units pending/jobs queued (${pending//$'\n'/ }); owner decides"
+  else
+    before=$(service_state); systemctl daemon-reload; after=$(service_state)
+    [[ "${before}" == "${after}" ]] || { echo "F8_ROLLBACK_FAIL EXISTING_SERVICE_STATE_CHANGED_ACROSS_RELOAD" >&2; exit 1; }
+  fi
+fi
+latest=$(ls -d /var/backups/hermes-gateway-dev/pre-* 2>/dev/null | tail -1 || true)
+if [[ -n ${latest} ]]; then
+  if find "${HH}" -printf '%M %u:%g %s %P\n' | LC_ALL=C sort -k4 | diff -u "${latest}/hermes-dev-home.listing" -; then
+    echo "HERMES_HOME listing == G-1 backup ${latest##*/}"
+  else
+    echo "F8_ROLLBACK_WARN HERMES_HOME differs from G-1 listing"; exit 1
+  fi
+fi
+echo "F8_ROLLBACK_REMOVED quarantine=${Q}"

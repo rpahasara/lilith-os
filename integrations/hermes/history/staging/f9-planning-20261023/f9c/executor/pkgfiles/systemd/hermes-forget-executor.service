@@ -1,0 +1,67 @@
+# LILITH F9-C DEV Hermes conversation erasure executor (lilith-dev-01, DEV_SYNTHETIC only). Root oneshot, activated
+# only by hermes-forget.path when the Core API's spool client queues a request. A request is never authorization:
+# the executor re-validates the Privacy authorization itself (read-only, hash-pinned Core API modules) before any
+# change. Starting this unit STOPS the gateway (Conflicts=); success starts it again (OnSuccess=); failure leaves it
+# stopped, and the gateway's drop-in refuses to start while /var/lib/hermes-forget/in-progress exists.
+# No sudo, no polkit, no deployer change: activation is a root path unit on a group-writable spool.
+[Unit]
+Description=LILITH F9-C Hermes DEV conversation erasure executor (DEV_SYNTHETIC)
+Conflicts=hermes-gateway-dev.service
+After=hermes-gateway-dev.service
+OnSuccess=hermes-forget-restart.service
+ConditionPathExists=/etc/hermes-forget/executor.json
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hermes-gateway-dev/current/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11 -I -B /opt/hermes-gateway-dev/current/bin/hermes_forget_executor.py
+TimeoutStartSec=900
+UMask=0077
+
+# Filesystem: read-only everywhere except the Hermes conversation store, the executor's own state and spool, the
+# Hermes backups and the Hermes journal namespace. The Core API data directory is replaced by an empty read-only
+# tmpfs; only the Privacy DB (and its WAL/SHM, if present) is bound in, read-only except the WAL index.
+ProtectSystem=strict
+ReadWritePaths=/home/lilith/.hermes-dev /var/lib/hermes-forget /run/hermes-forget
+ReadWritePaths=-/var/backups/hermes-gateway-dev -/var/log/journal/%m.hermes-gateway-dev
+TemporaryFileSystem=/home/lilith/.hermes/lilith-os-dev:ro
+BindReadOnlyPaths=/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db
+BindReadOnlyPaths=-/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db-wal
+BindPaths=-/home/lilith/.hermes/lilith-os-dev/data/privacy_governance.dev.db-shm
+InaccessiblePaths=-/etc/hermes-gateway-dev -/etc/hermes-provider-gate-dev -/var/lib/private/hermes-provider-gate-dev -/run/credentials
+InaccessiblePaths=-/etc/credstore.encrypted -/etc/lilith-authority-custody -/var/lib/lilith-authority-custody
+InaccessiblePaths=-/etc/lilith-authority-dev -/var/lib/lilith-authority-dev -/opt/lilith-authority-dev -/etc/lilith-recovery-witness -/var/lib/lilith-recovery-witness
+InaccessiblePaths=-/etc/lilith-memory-broker -/var/lib/lilith-memory-broker -/opt/lilith-memory-broker -/opt/lilith-stage3-a2-final-v1 -/opt/lilith-trusted-controls
+InaccessiblePaths=-/run/lilith-memory -/run/lilith-authority-dev -/run/lilith-recovery-witness -/usr/local/lib/lilith-dev-deploy -/etc/sudoers.d -/etc/sudoers
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+KeyringMode=private
+# Root, but only file-ownership capabilities (HERMES_HOME is lilith-owned; receipts are chowned to the reader group).
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_CHOWN
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @module @reboot @swap @obsolete @cpu-emulation
+# @privileged includes @chown; the executor needs exactly chown/fchown (receipt group, archive owner preserved).
+# Found by the mirror run: without this line every chown fails with EPERM inside the sandbox.
+SystemCallFilter=@chown
+SystemCallErrorNumber=EPERM
+# Network: only the loopback probe of the gateway port; D-Bus/varlink (AF_UNIX) for systemctl and journalctl.
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-forget-executor

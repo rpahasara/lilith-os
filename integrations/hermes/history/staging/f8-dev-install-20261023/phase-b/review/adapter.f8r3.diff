@@ -1,0 +1,74 @@
+--- C:/Users/edufo/AppData/Local/Temp/claude/C--Users-edufo-Documents-Projects-lilith-os/598c2ced-0f00-4494-801f-dc70f5561102/scratchpad/f8r3/adapter.F7.py	2026-10-23 14:32:16.986772300 +0530
++++ C:/Users/edufo/AppData/Local/Temp/claude/C--Users-edufo-Documents-Projects-lilith-os/598c2ced-0f00-4494-801f-dc70f5561102/scratchpad/f8r3/pkgfiles/home-overrides/plugins/lilith_os/adapter.py	2026-10-23 14:58:35.655117900 +0530
+@@ -175,6 +175,10 @@
+             self._json(500, {"error": "internal error", "session": session})
+             return
+ 
++        if state == "starting":
++            # F8r3 B-4: the gateway is still in its startup restore; nothing was dispatched.
++            self._json(503, {"error": "starting", "detail": reply, "session": session})
++            return
+         self._json(200, {"reply": reply, "state": state, "session": session})
+ 
+ 
+@@ -193,6 +197,7 @@
+         # context_id (session) -> FIFO of waiting reply futures.
+         self._pending: Dict[str, Deque[Future]] = {}
+         self._pending_lock = threading.Lock()
++        self._idle: Dict[str, threading.Event] = {}  # F8r3 B-4: per-session serialization
+ 
+     # ── Identity ───────────────────────────────────────────────────────────
+     @property
+@@ -263,7 +268,13 @@
+         (on an HTTP worker thread) until LILITH's final reply resolves."""
+         if self._loop is None or self._message_handler is None:
+             return ("failed", "LILITH gateway is not ready yet — try again in a moment.")
++        if self._startup_restore_in_progress():
++            return ("starting", "LILITH is starting — try again in a moment.")
+ 
++        idle = self._session_idle(session)
++        if not idle.wait(timeout=_reply_timeout()):
++            logger.warning("lilith_os: session %s still busy after %ss; dispatching anyway", session, _reply_timeout())
++        idle.clear()
+         fut: Future = Future()
+         with self._pending_lock:
+             self._pending.setdefault(session, deque()).append(fut)
+@@ -288,6 +299,7 @@
+             asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)
+         except Exception as exc:
+             self._discard(session, fut)
++            idle.set()
+             logger.debug("lilith_os: dispatch failed: %s", exc, exc_info=True)
+             return ("failed", "Could not reach LILITH's conversation engine.")
+ 
+@@ -351,6 +363,8 @@
+         session = getattr(getattr(event, "source", None), "chat_id", None) or ""
+         if not session:
+             return
++        if outcome == ProcessingOutcome.SUCCESS and self._startup_restore_in_progress():
++            return
+         if outcome == ProcessingOutcome.SUCCESS:
+             state = "completed"
+         elif outcome == ProcessingOutcome.CANCELLED:
+@@ -358,6 +372,21 @@
+         else:
+             state = "failed"
+         self._resolve_oldest(session, state, "")
++        self._session_idle(session).set()
++
++    def _session_idle(self, session: str) -> threading.Event:
++        """F8r3 B-4: per-session 'previous turn fully processed' flag (set = idle)."""
++        with self._pending_lock:
++            ev = self._idle.get(session)
++            if ev is None:
++                ev = self._idle[session] = threading.Event()
++                ev.set()
++            return ev
++
++    def _startup_restore_in_progress(self) -> bool:
++        """F8r3 B-4: True while the gateway runner is replaying its startup restore queue."""
++        runner = getattr(self._message_handler, "__self__", None)
++        return bool(getattr(runner, "_startup_restore_in_progress", False))
+ 
+     # ── Required by BasePlatformAdapter ───────────────────────────────────────
+     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:

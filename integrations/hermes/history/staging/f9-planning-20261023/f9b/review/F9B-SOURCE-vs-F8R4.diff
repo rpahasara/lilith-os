@@ -1,0 +1,275 @@
+--- f8r4/src/gateway/run.py
++++ f9b1/src/gateway/run.py
+@@ -19079,13 +19079,14 @@
+         """Inner handler that runs under the _running_agents sentinel guard."""
+         _msg_start_time = time.time()
+         _platform_name = source.platform.value if hasattr(source.platform, "value") else str(source.platform)
+-        _msg_preview = (event.text or "")[:80].replace("\n", " ")
++        # F9-B (LILITH DEV): no message text in the operating logs. gateway.log is written at INFO whatever
++        # logging.level says, so the sizes replace the previews here rather than relying on the log level.
+         _reply_id = getattr(event, "reply_to_message_id", None)
+-        _reply_txt = (getattr(event, "reply_to_text", None) or "")[:80].replace("\n", " ")
+         logger.info(
+-            "inbound message: platform=%s user=%s chat=%s msg=%r reply_to_id=%s reply_to_text=%r",
++            "inbound message: platform=%s user=%s chat=%s msg_chars=%d reply_to_id=%s reply_to_chars=%d",
+             _platform_name, source.user_name or source.user_id or "unknown",
+-            source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
++            source.chat_id or "unknown", len(event.text or ""), _reply_id,
++            len(getattr(event, "reply_to_text", None) or ""),
+         )
+ 
+         # Get or create session
+@@ -20240,7 +20241,14 @@
+         # Delivered on the current user message (sidecar), NOT the ephemeral
+         # system prompt: present-on-turn-1/absent-on-turn-2 was a guaranteed
+         # system-prompt diff and agent rebuild.
+-        if not history and not await self.async_session_store.has_any_sessions():
++        # F9-A (LILITH DEV): no first-contact sidecar note on the lilith_os console. LILITH's persona (SOUL.md) owns
++        # how she introduces herself, and anything learned about the owner belongs to LILITH's governed First Memory,
++        # never to a Hermes profile flow. Checked before has_any_sessions() so an emptied store cannot re-arm it.
++        if (
++            not history
++            and getattr(source.platform, "value", source.platform) != "lilith_os"
++            and not await self.async_session_store.has_any_sessions()
++        ):
+             # Default first-contact note: a brief self-introduction.
+             _intro_note = (
+                 "[System note: This is the user's very first message ever. "
+--- f8r4/src/agent/turn_context.py
++++ f9b1/src/agent/turn_context.py
+@@ -614,15 +614,12 @@
+         agent._run_budget_started_at = None
+     agent._run_budget_wrapup_injected = False
+ 
+-    # Log conversation turn start for debugging/observability.
+-    _preview_text = summarize_user_message_for_log(user_message)
+-    _msg_preview = (_preview_text[:80] + "...") if len(_preview_text) > 80 else _preview_text
+-    _msg_preview = _msg_preview.replace("\n", " ")
++    # Log conversation turn start for debugging/observability. F9-B (LILITH DEV): the message size, not its text.
+     logger.info(
+-        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg=%r",
++        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg_chars=%d",
+         agent.session_id or "none", agent.model, agent.provider or "unknown",
+         agent.platform or "unknown", len(conversation_history or []),
+-        _msg_preview,
++        len(summarize_user_message_for_log(user_message)),
+     )
+ 
+     # Initialize conversation (copy to avoid mutating the caller's list).
+--- f8r4/src/agent/agent_runtime_helpers.py
++++ f9b1/src/agent/agent_runtime_helpers.py
+@@ -1864,6 +1864,48 @@
+ 
+ 
+ 
++_DUMP_SAFE_STR_KEYS = ("model", "reasoning_effort", "service_tier")
++_DUMP_SAFE_ERROR_KEYS = ("type", "status_code", "request_id", "code", "param", "response_status")
++
++
++def _content_free_request_dump(payload: Dict[str, Any]) -> Dict[str, Any]:
++    """F9-B (LILITH DEV): a request debug dump without conversation content.
++
++    Keeps what diagnoses a failed call (reason, endpoint, model and scalar
++    parameters, message roles and sizes, tool names, error type/status/code)
++    and drops message text, structured parameters and provider error bodies,
++    which can echo the request.
++    """
++    def _size(value) -> int:
++        if isinstance(value, list):
++            return sum(_size(v.get("text", "") if isinstance(v, dict) else v) for v in value)
++        return 0 if value is None else len(value if isinstance(value, str) else str(value))
++
++    out = dict(payload)
++    request = dict(out.get("request") or {})
++    safe: Dict[str, Any] = {}
++    for key, value in (request.get("body") or {}).items():
++        if key in ("messages", "input") and isinstance(value, list):
++            safe[key] = [{"role": m.get("role"), "chars": _size(m.get("content"))} if isinstance(m, dict)
++                         else {"chars": _size(m)} for m in value]
++        elif key == "tools" and isinstance(value, list):
++            safe[key] = [((t.get("function") or {}).get("name") or t.get("name")) if isinstance(t, dict) else None
++                         for t in value]
++        elif value is None or isinstance(value, (bool, int, float)):
++            safe[key] = value
++        elif key in _DUMP_SAFE_STR_KEYS and isinstance(value, str):
++            safe[key] = value
++        else:
++            safe[key] = f"<{type(value).__name__} omitted>"
++    request["body"] = safe
++    out["request"] = request
++    if isinstance(out.get("error"), dict):
++        out["error"] = {k: v for k, v in out["error"].items()
++                        if k in _DUMP_SAFE_ERROR_KEYS and (v is None or isinstance(v, (str, int, float, bool)))}
++    out["content_free"] = True
++    return out
++
++
+ def dump_api_request_debug(
+     agent,
+     api_kwargs: Dict[str, Any],
+@@ -1928,6 +1970,7 @@
+ 
+             dump_payload["error"] = error_info
+ 
++        dump_payload = _content_free_request_dump(dump_payload)   # F9-B: before anything is written or printed
+         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+         # Sanitize the session ID into a traversal-free path segment — it can
+         # originate from untrusted input (X-Hermes-Session-Id header), and an
+--- f8r4/home/lilith_router/gateway_integration.py
++++ f9b1/home/lilith_router/gateway_integration.py
+@@ -37,6 +37,7 @@
+ import json
+ import logging
+ import time
++import uuid
+ 
+ from . import config as _config
+ from . import policy as _policy
+@@ -53,11 +54,21 @@
+     return getattr(plat, "value", None) or str(plat)
+ 
+ 
++def _message_meta(message) -> dict:
++    """Non-content audit metadata for a decision record (F9-A D-2).
++
++    No message text and no hash of it: a random per-record event id plus the
++    message length in characters and lines.
++    """
++    text = message or ""
++    return {"event_id": uuid.uuid4().hex, "msg_chars": len(text), "msg_lines": len(text.splitlines())}
++
++
+ def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
+     """Append one JSON line describing the routing decision. Never raises.
+ 
+-    No secrets are logged. A short message preview (≤60 chars) is included for
+-    auditing — consistent with the gateway's own inbound-message logging.
++    No secrets and no message text are logged (F9-A D-2): only the decision
++    and non-content metadata from :func:`_message_meta`.
+     """
+     try:
+         path = cfg.resolved_log_path()
+@@ -71,7 +82,7 @@
+             "reason": decision.reason,
+             "signals": decision.signals,
+             "live": bool(live),
+-            "preview": (message or "")[:60].replace("\n", " "),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -94,7 +105,7 @@
+                 k: intent.get(k)
+                 for k in ("belief", "pending", "draft", "example_only", "app_id")
+             },
+-            "preview": (message or "")[:60].replace("\n", " "),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -114,7 +125,7 @@
+             "lane": "goal",
+             "goal_mode": goal_mode,
+             "intent": {k: gintent.get(k) for k in ("goal_query", "goal_create", "app_id", "subtype")},
+-            "preview": (message or "")[:60].replace("\n", " "),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -136,7 +147,7 @@
+             "intent": {"mode": rintent.get("mode"), "subtype": rintent.get("subtype"),
+                        "app_id": rintent.get("app_id")},
+             "trace": trace,
+-            "preview": (message or "")[:60].replace("\n", " "),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -156,7 +167,7 @@
+             "lane": "workspace",
+             "workspace_mode": mode,
+             "trace": trace,
+-            "preview": (message or "")[:60].replace("\n", " "),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -176,7 +187,7 @@
+             "lane": "motivation",
+             "motivation_mode": mode,
+             "trace": trace,
+-            "preview": " ".join(((message or "")[:60]).splitlines()),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -198,7 +209,7 @@
+             "intent": {"subtype": (pintent or {}).get("subtype"),
+                        "app_id": (pintent or {}).get("app_id")},
+             "trace": trace,
+-            "preview": " ".join(((message or "")[:60]).splitlines()),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+@@ -220,7 +231,7 @@
+             "intent": {"trigger": (eintent or {}).get("trigger"),
+                        "app_id": (eintent or {}).get("app_id")},
+             "trace": trace,
+-            "preview": " ".join(((message or "")[:60]).splitlines()),
++            **_message_meta(message),
+         }
+         with path.open("a", encoding="utf-8") as fh:
+             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+--- f8r4/home/config.yaml
++++ f9b1/home/config.yaml
+@@ -63,6 +63,13 @@
+   user_profile_enabled: false
+   nudge_interval: 0
+ 
++# F9-A D-1: no Hermes profile-build onboarding (upstream default "ask" injects a hidden first-message directive to
++# collect the user's name/work/preferences and save them with the memory tool). It is NOT gated by the memory
++# switches above. LILITH's governed First Memory is the only route to anything durable about the owner.
++# QUOTED on purpose: YAML reads a bare `off` as boolean false, which Hermes treats as unknown -> "ask".
++onboarding:
++  profile_build: "off"
++
+ # No skill-creation nudges, no automatic post-turn memory/skill review, no curator, no kanban dispatch,
+ # no agent-scheduled cron jobs (upstream defaults: background_review on, curator on, kanban dispatch on).
+ skills:
+--- f8r4/profiles/operate/config.yaml
++++ f9b1/profiles/operate/config.yaml
+@@ -63,6 +63,11 @@
+   user_profile_enabled: false
+   nudge_interval: 0
+ 
++# F9-A D-1 (kept by F9-B: apply_profile.sh operate REPLACES config.yaml with this file). QUOTED on purpose: YAML
++# reads a bare `off` as boolean false, which Hermes treats as unknown -> "ask".
++onboarding:
++  profile_build: "off"
++
+ # No skill-creation nudges, no automatic post-turn memory/skill review, no curator, no kanban dispatch,
+ # no agent-scheduled cron jobs (upstream defaults: background_review on, curator on, kanban dispatch on).
+ skills:
+--- f8r4/tests/test_f7_offline.py
++++ f9b1/tests/test_f7_offline.py
+@@ -278,13 +278,15 @@
+         self.assertFalse(cfg.canonical_ltm_is_enabled())
+         self.assertEqual(cfg.resolved_log_path(), HERMES_HOME / "lilith_router" / "decisions.log")
+ 
+-    def test_shadow_mode_never_overrides_and_logs_a_preview(self):
++    def test_shadow_mode_never_overrides_and_logs_no_message_text(self):
+         for message in ("TEST_ONLY hey how are you 😊", "TEST_ONLY why is my kubernetes pod pending?"):
+             self.assertIsNone(self.route(message))
+-        log = (HERMES_HOME / "lilith_router" / "decisions.log").read_text(encoding="utf-8").splitlines()
+-        last = json.loads(log[-1])
++        raw = (HERMES_HOME / "lilith_router" / "decisions.log").read_text(encoding="utf-8")
++        last = json.loads(raw.splitlines()[-1])
+         self.assertEqual((last["platform"], last["mode"], last["live"]), ("lilith_os", "technical", False))
+-        self.assertTrue(last["preview"].startswith("TEST_ONLY why is my"))            # persistence finding
++        self.assertNotIn("preview", last)                                              # F9-A D-2
++        self.assertEqual(last["msg_chars"], len("TEST_ONLY why is my kubernetes pod pending?"))
++        self.assertNotIn("kubernetes", raw)
+ 
+     def test_live_social_without_groq_credentials_fails_open(self):
+         self.set_yaml(mode="live")
