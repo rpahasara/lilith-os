@@ -1,0 +1,102 @@
+--- base/hermes_forget_executor.py	2026-10-26 20:42:06.778163100 +0530
++++ patched/hermes_forget_executor.py	2026-10-26 20:42:28.408065800 +0530
+@@ -37,6 +37,11 @@
+ exists. The reconcile pass removes the intent only when Privacy proves the First Interaction FORGET COMPLETED with the
+ Hermes owner (``identity_forget_completed``: HMAC-verified receipt, no ACTIVE hold) and no journal is unreleased.
+ ``--cancel-intent --confirm-owner-approved`` (operator, root) removes it only while no authorization is in flight.
++
++Relationship origin (owner-provided canonical memory): a second closed intent, ``relationship-origin.intent`` with the
++label RELATIONSHIP_ORIGIN, is held the same way. Its release needs Privacy's proof that the origin FORGET COMPLETED with
++L18_V2 (Hermes is an owner of it only where the Privacy floor provisions that). Each intent name admits exactly its own
++label; any other name stays in place, unheld and blocking. The executor's erasure scope is unchanged.
+ """
+ 
+ from __future__ import annotations
+@@ -100,6 +105,11 @@
+ JOURNAL_DIR_SUFFIX = ".hermes-gateway-dev"
+ INTENT_DIR = Path("/var/lib/hermes-forget/intent")
+ INTENT_NAME = "first-interaction.intent"
++# Closed: intent file name -> (label, memory_action_v2 identity attribute, the owner whose COMPLETE releases it).
++INTENT_IDENTITIES = {
++    INTENT_NAME: ("FIRST_INTERACTION", "FIRST_INTERACTION_IDENTITY", "HERMES_DEV_CONVERSATION"),
++    "relationship-origin.intent": ("RELATIONSHIP_ORIGIN", "RELATIONSHIP_ORIGIN_IDENTITY", "L18_V2"),
++}
+ INTENT_FIELDS = frozenset({"v", "identity", "intentRefId", "actorRefId", "recordedAt"})
+ INTENT_REF_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+ MAX_INTENT_BYTES = 1024
+@@ -719,18 +729,20 @@
+         if self.cfg.marker.exists() and not _journals_in_progress(self.cfg.state_dir):
+             self.cfg.marker.unlink()
+             _fsync_dir(self.cfg.marker.parent)
+-        intent = self.cfg.intent_dir / INTENT_NAME
+-        if intent.exists() and not _journals_in_progress(self.cfg.state_dir) and _held(intent) \
+-                and self._identity_completed():
+-            self.fault("reconcile:before-intent-release")
+-            intent.unlink()
+-            _fsync_dir(intent.parent)
+-            log("INTENT_RELEASED")
++        for name in INTENT_IDENTITIES:
++            intent = self.cfg.intent_dir / name
++            if intent.exists() and not _journals_in_progress(self.cfg.state_dir) and _held(intent) \
++                    and self._identity_completed(name):
++                self.fault("reconcile:before-intent-release")
++                intent.unlink()
++                _fsync_dir(intent.parent)
++                log("INTENT_RELEASED")
+ 
+-    def _identity_completed(self) -> bool:
++    def _identity_completed(self, name: str = INTENT_NAME) -> bool:
+         try:
++            _label, attribute, owner = INTENT_IDENTITIES[name]
+             store, _P, MA = load_privacy(self.cfg)
+-            return bool(store.identity_forget_completed(MA.FIRST_INTERACTION_IDENTITY, OWNER))
++            return bool(store.identity_forget_completed(getattr(MA, attribute), owner))
+         except Exception:
+             return False                                                         # unknown = not completed
+ 
+@@ -745,7 +757,7 @@
+             for name in sorted(os.listdir(self.cfg.intent_dir)):
+                 if name.startswith("."):
+                     continue                                                     # the Core API's own temp files
+-                if name != INTENT_NAME:
++                if name not in INTENT_IDENTITIES:
+                     log("INTENT_INVALID", code="INTENT_NAME_UNEXPECTED")
+                     continue
+                 try:
+@@ -773,18 +785,20 @@
+             fcntl.flock(lock, fcntl.LOCK_EX)
+             try:
+                 store, _P, MA = load_privacy(self.cfg)
+-                in_flight = store.in_flight_authorization(MA.FIRST_INTERACTION_IDENTITY)
++                in_flight = [store.in_flight_authorization(getattr(MA, attribute))
++                             for _label, attribute, _owner in INTENT_IDENTITIES.values()]
+             except Exception:
+                 log("FAILED", code="CANCEL_REFUSED_PRIVACY_UNAVAILABLE")
+                 return 2
+-            if in_flight is not None or _journals_in_progress(self.cfg.state_dir):
++            if any(ref is not None for ref in in_flight) or _journals_in_progress(self.cfg.state_dir):
+                 log("FAILED", code="CANCEL_REFUSED_FORGET_IN_FLIGHT")
+                 return 2
+-            intent = self.cfg.intent_dir / INTENT_NAME
+-            if intent.exists() or intent.is_symlink():
+-                intent.unlink()
+-                _fsync_dir(intent.parent)
+-                log("INTENT_CANCELLED")
++            for name in INTENT_IDENTITIES:
++                intent = self.cfg.intent_dir / name
++                if intent.exists() or intent.is_symlink():
++                    intent.unlink()
++                    _fsync_dir(intent.parent)
++                    log("INTENT_CANCELLED")
+             return 0
+         finally:
+             os.close(lock)
+@@ -891,7 +905,7 @@
+         except (UnicodeDecodeError, ValueError) as exc:
+             raise ExecutorError("INTENT_REJECTED") from exc
+         _require(isinstance(intent, dict) and set(intent) == INTENT_FIELDS and intent.get("v") == 1
+-                 and intent.get("identity") == "FIRST_INTERACTION"
++                 and path.name in INTENT_IDENTITIES and intent.get("identity") == INTENT_IDENTITIES[path.name][0]
+                  and all(isinstance(intent.get(k), str) and bool(INTENT_REF_RE.fullmatch(intent[k]))
+                          for k in ("intentRefId", "actorRefId")) and isinstance(intent.get("recordedAt"), str),
+                  "INTENT_REJECTED")

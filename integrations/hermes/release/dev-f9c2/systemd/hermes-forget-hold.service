@@ -1,0 +1,53 @@
+# LILITH F9-C hold-first. Starting this unit STOPS the gateway (Conflicts=); it then makes the intent root-owned (the
+# Core API can no longer remove it) and verifies the gateway is down. RemainAfterExit= keeps it active so the path
+# unit does not re-trigger while the intent exists; starting the gateway again (only possible once root has removed
+# the intent) stops it through the same Conflicts=. It never removes an intent and never touches Privacy.
+[Unit]
+Description=LILITH F9-C hold the gateway for a recorded FORGET intent (DEV_SYNTHETIC)
+Conflicts=hermes-gateway-dev.service
+After=hermes-gateway-dev.service
+ConditionPathExists=/etc/hermes-forget/executor.json
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/hermes-gateway-dev/current/python/cpython-3.11.16-linux-x86_64-gnu/bin/python3.11 -I -B /opt/hermes-gateway-dev/current/bin/hermes_forget_executor.py --hold
+TimeoutStartSec=120
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/hermes-forget/intent
+TemporaryFileSystem=/home/lilith/.hermes/lilith-os-dev:ro
+InaccessiblePaths=-/etc/hermes-gateway-dev -/etc/hermes-provider-gate-dev -/var/lib/private/hermes-provider-gate-dev -/run/credentials
+InaccessiblePaths=-/etc/credstore.encrypted -/etc/lilith-authority-custody -/var/lib/lilith-authority-custody
+InaccessiblePaths=-/etc/lilith-authority-dev -/var/lib/lilith-authority-dev -/opt/lilith-authority-dev -/etc/lilith-recovery-witness -/var/lib/lilith-recovery-witness
+InaccessiblePaths=-/etc/lilith-memory-broker -/var/lib/lilith-memory-broker -/opt/lilith-memory-broker -/opt/lilith-stage3-a2-final-v1 -/opt/lilith-trusted-controls
+InaccessiblePaths=-/run/lilith-memory -/run/lilith-authority-dev -/run/lilith-recovery-witness -/usr/local/lib/lilith-dev-deploy -/etc/sudoers.d -/etc/sudoers
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+KeyringMode=private
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_CHOWN
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @module @reboot @swap @obsolete @cpu-emulation
+SystemCallFilter=@chown
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-forget-hold

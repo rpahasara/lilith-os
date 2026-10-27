@@ -1,0 +1,129 @@
+# DEV-ONLY Hermes config for lilith-dev-01 (HERMES_HOME=/home/lilith/.hermes-dev). F8r3 Phase B, VALIDATE profile.
+# Fresh configuration; nothing here is copied from PROD. Key names follow upstream
+# NousResearch/hermes-agent f293e72 cli-config.yaml.example.
+
+# F8r3 B-1/B-2: Groq openai/gpt-oss-120b THROUGH the local provider gate. The gateway never holds the Groq key:
+# base_url is the gate on 127.0.0.1 (the gateway sandbox allows only 127.0.0.1), api_key is the gate's non-secret
+# client token. `custom` = OpenAI-compatible chat completions (no built-in groq provider in f293e72; the user groq
+# plugin would load $HERMES_HOME/groq.env, which must never exist). context_length set => no metadata probes.
+model:
+  provider: custom
+  default: openai/gpt-oss-120b
+  base_url: http://127.0.0.1:9911/openai/v1
+  api_key: __LILITH_GATE_CLIENT_TOKEN__
+  api_mode: chat_completions
+  max_tokens: 1024
+  context_length: 131072
+
+# Only the LILITH OS console platform. No Discord/Telegram/WhatsApp/Slack/etc. variables exist in the DEV .env.
+plugins:
+  enabled:
+    - lilith_os
+
+# No tools for the console: a plugin platform otherwise defaults to hermes-lilith_os = the full core tool list
+# (terminal, process, file write, browser, web, skills, ...). BUILD CHECK: the resolved tool list for lilith_os
+# must be empty before the gateway is started.
+platform_toolsets:
+  lilith_os: []
+
+# Defence in depth: the gateway subtracts this deny-list when it builds the tool definitions for every turn
+# (model_tools._compute_tool_definitions always applies it). Verified offline: with EVERY toolset enabled, this list
+# leaves zero tools.
+# `kanban` is force-recovered for every platform even with the empty pin above (it is only usable when the kanban
+# dispatcher sets HERMES_KANBAN_TASK, which is disabled below), so it is denied here explicitly.
+agent:
+  disabled_toolsets: [kanban, terminal, code_execution, file, web, search, browser, computer_use, desktop_ui,
+                      delegation, cronjob, skills, memory, session_search, project, coding, debugging, image_gen,
+                      video_gen, video, bfl, tts, vision, homeassistant, spotify, x_search, discord, discord_admin,
+                      feishu_doc, feishu_drive, yuanbao, context_engine, clarify, todo]
+  # F8r3 B-3: one provider attempt per turn (Hermes default 3), no empty-response re-asks, short reasoning,
+  # at most 4 loop iterations (zero tools => 1 model call per turn in practice).
+  api_max_retries: 1
+  empty_response_guard:
+    enabled: false
+  reasoning_effort: low
+  max_turns: 4
+
+# F8r3 B-3: no fallback provider or model.
+fallback_providers: []
+
+# No runtime package installs (upstream default true: a tool availability check lazily pip-installed edge-tts and
+# aiohttp from PyPI during offline testing). Upstream fails OPEN if config is unreadable, so the DEV unit also sets
+# HERMES_DISABLE_LAZY_INSTALLS=1 and the venv is root-owned and read-only to lilith.
+security:
+  allow_lazy_installs: false
+  # F8 (Linux-only finding): at gateway start Hermes downloads the tirith command scanner from GitHub in a background
+  # thread into HERMES_HOME/bin. It only scans terminal commands, and there is no terminal tool. The unit also sets
+  # TIRITH_ENABLED=0, and bin/ is a root-owned read-only stub.
+  tirith_enabled: false
+
+# No Hermes personal memory, user profile or memory nudges on DEV.
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  nudge_interval: 0
+
+# F9-A D-1: no Hermes profile-build onboarding (upstream default "ask" injects a hidden first-message directive to
+# collect the user's name/work/preferences and save them with the memory tool). It is NOT gated by the memory
+# switches above. LILITH's governed First Memory is the only route to anything durable about the owner.
+# QUOTED on purpose: YAML reads a bare `off` as boolean false, which Hermes treats as unknown -> "ask".
+onboarding:
+  profile_build: "off"
+
+# No skill-creation nudges, no automatic post-turn memory/skill review, no curator, no kanban dispatch,
+# no agent-scheduled cron jobs (upstream defaults: background_review on, curator on, kanban dispatch on).
+skills:
+  creation_nudge_interval: 0
+auxiliary:
+  background_review:
+    enabled: false
+  # F8r3 B-3: session-title generation would make an extra provider call on the first message.
+  title_generation:
+    enabled: false
+# F8r3 B-3: no context-compression (summarisation) calls.
+compression:
+  enabled: false
+curator:
+  enabled: false
+kanban:
+  review_dispatch: false
+  dispatch_in_gateway: false
+cron:
+  allow_agent_scheduling: false
+
+# DEV retention: prune ended sessions from state.db after 7 days and VACUUM (upstream default: no pruning).
+sessions:
+  auto_prune: true
+  retention_days: 7
+  vacuum_after_prune: true
+
+# A console session otherwise never ends (upstream default session_reset.mode: none), so auto_prune would never
+# remove it. End idle sessions after 24h so they become prunable, and cap concurrent sessions.
+# F8r3: this caps OPEN chat sessions (a lease per session for its lifetime), not simultaneous requests; spend is
+# bounded by the provider gate budget. 1 would refuse every second console session (mirror finding).
+session_reset:
+  mode: idle
+  idle_minutes: 1440
+max_concurrent_sessions: 8
+
+group_sessions_per_user: true
+
+# F8: bound Hermes' own rotating file logs (logs/agent.log, gateway.log, errors.log). Age-based deletion is done by
+# hermes-gateway-dev-retention.service (daily).
+logging:
+  # F8r3 B-5: INFO during synthetic-only validation; the OPERATE profile switches to WARNING.
+  level: INFO
+  max_size_mb: 5
+  backup_count: 3
+
+# F8: slash-command gating for the console. The adapter marks every console turn role_authorized, so without this
+# block the operator text "/update", "/skills install", "/tools enable", "/model --global", "/cron", "/restart" or
+# "/reload" would be dispatched as gateway commands. Naming an admin id that the adapter never uses (it always sends
+# user_id "operator") turns gating on and leaves only the read-only floor (/help, /whoami). Plain chat is unaffected.
+lilith_os:
+  allow_admin_from: ["f8-no-console-admin"]
+  user_allowed_commands: []
+  group_allow_admin_from: ["f8-no-console-admin"]
+  group_user_allowed_commands: []
+
+# Not set on DEV: mcp_servers, cron jobs, hooks, skills directories, channel overrides.

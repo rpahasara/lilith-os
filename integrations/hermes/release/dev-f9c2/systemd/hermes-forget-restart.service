@@ -1,0 +1,13 @@
+# LILITH F9-C: after a verified erasure (executor exited 0), clear the gateway's start limit and start it again. Never
+# runs while an erasure is in progress. A start failure does not undo the erasure (the receipt is already COMPLETE);
+# it is an availability alert only.
+[Unit]
+Description=LILITH F9-C restart the Hermes DEV gateway after a verified erasure
+ConditionPathExists=!/var/lib/hermes-forget/in-progress
+ConditionPathExistsGlob=!/var/lib/hermes-forget/intent/*.intent
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/bin/systemctl stop hermes-forget-hold.service
+ExecStart=/usr/bin/systemctl reset-failed hermes-gateway-dev.service
+ExecStart=/usr/bin/systemctl start --no-block hermes-gateway-dev.service
