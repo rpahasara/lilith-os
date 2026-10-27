@@ -1,0 +1,72 @@
+# F8r3 DEV provider gate (lilith-dev-01). The only holder of the Groq key and the only F8 process with egress.
+# Key: LoadCredential from a root-only file -> /run/credentials/<unit>/ readable only by this unit's dynamic user
+# (not by uid lilith, i.e. neither the Hermes gateway nor the Core API). Static: pulled in by hermes-gateway-dev.
+[Unit]
+Description=LILITH Hermes DEV provider gate (Groq, credential-injecting, budgeted)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/hermes-provider-gate-dev/gate.json
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=hermes-provider-gate-dev
+StateDirectoryMode=0700
+LoadCredential=groq-api-key:/etc/hermes-provider-gate-dev/credentials/groq-api-key
+# Fallback when the owner has not provisioned the key yet (systemd: SetCredential= is the default for a LoadCredential=
+# id; an EMPTY value is rejected as invalid syntax, so a deliberately invalid placeholder is used): the gate starts and
+# answers 503 KEY_NOT_PROVISIONED instead of failing with 243/CREDENTIALS and restart-looping (F8r3 mirror finding).
+SetCredential=groq-api-key:NOT-PROVISIONED
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/hermes-gateway-dev/current/venv/bin/python -I -B /opt/hermes-gateway-dev/current/bin/provider_gate.py /etc/hermes-provider-gate-dev/gate.json
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @module @reboot @swap @obsolete @cpu-emulation
+InaccessiblePaths=-/etc/hermes-provider-gate-dev/credentials -/etc/hermes-gateway-dev -/etc/lilith-os-dev -/etc/credstore.encrypted
+InaccessiblePaths=-/etc/lilith-authority-custody -/var/lib/lilith-authority-custody -/etc/lilith-authority-dev -/var/lib/lilith-authority-dev
+InaccessiblePaths=-/opt/lilith-authority-dev -/etc/lilith-recovery-witness -/var/lib/lilith-recovery-witness -/etc/lilith-memory-broker
+InaccessiblePaths=-/var/lib/lilith-memory-broker -/opt/lilith-memory-broker -/run/lilith-memory -/run/lilith-authority-dev -/run/lilith-recovery-witness
+InaccessiblePaths=-/run/dbus -/usr/local/lib/lilith-dev-deploy -/etc/sudoers.d
+
+# Network: listen on 127.0.0.1, DNS via the local stub only, upstream = public internet. Denied: every other loopback
+# address (incl. the Core API is NOT reachable except 127.0.0.1 itself), RFC1918 (VPC, PROD 10.20.0.2), CGNAT,
+# link-local (GCE metadata 169.254.169.254), multicast/reserved, and all IPv6. The code additionally resolves the
+# single upstream host itself and refuses any non-global address.
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressAllow=127.0.0.1/32 127.0.0.53/32
+IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 224.0.0.0/3 ::/0
+IPAccounting=yes
+MemoryMax=96M
+TasksMax=32
+CPUWeight=50
+OOMScoreAdjust=500
+LimitCORE=0
+LogNamespace=hermes-gateway-dev
+SyslogIdentifier=hermes-provider-gate-dev

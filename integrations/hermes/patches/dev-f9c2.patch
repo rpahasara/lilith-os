@@ -1,0 +1,980 @@
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index 1c89288330f7206d552264fb725ced85cecea95b..81fc2fc90da13472918d4d86a7134cd4df0fe609 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -1864,6 +1864,48 @@ def extract_reasoning(agent, assistant_message) -> Optional[str]:
+ 
+ 
+ 
++_DUMP_SAFE_STR_KEYS = ("model", "reasoning_effort", "service_tier")
++_DUMP_SAFE_ERROR_KEYS = ("type", "status_code", "request_id", "code", "param", "response_status")
++
++
++def _content_free_request_dump(payload: Dict[str, Any]) -> Dict[str, Any]:
++    """F9-B (LILITH DEV): a request debug dump without conversation content.
++
++    Keeps what diagnoses a failed call (reason, endpoint, model and scalar
++    parameters, message roles and sizes, tool names, error type/status/code)
++    and drops message text, structured parameters and provider error bodies,
++    which can echo the request.
++    """
++    def _size(value) -> int:
++        if isinstance(value, list):
++            return sum(_size(v.get("text", "") if isinstance(v, dict) else v) for v in value)
++        return 0 if value is None else len(value if isinstance(value, str) else str(value))
++
++    out = dict(payload)
++    request = dict(out.get("request") or {})
++    safe: Dict[str, Any] = {}
++    for key, value in (request.get("body") or {}).items():
++        if key in ("messages", "input") and isinstance(value, list):
++            safe[key] = [{"role": m.get("role"), "chars": _size(m.get("content"))} if isinstance(m, dict)
++                         else {"chars": _size(m)} for m in value]
++        elif key == "tools" and isinstance(value, list):
++            safe[key] = [((t.get("function") or {}).get("name") or t.get("name")) if isinstance(t, dict) else None
++                         for t in value]
++        elif value is None or isinstance(value, (bool, int, float)):
++            safe[key] = value
++        elif key in _DUMP_SAFE_STR_KEYS and isinstance(value, str):
++            safe[key] = value
++        else:
++            safe[key] = f"<{type(value).__name__} omitted>"
++    request["body"] = safe
++    out["request"] = request
++    if isinstance(out.get("error"), dict):
++        out["error"] = {k: v for k, v in out["error"].items()
++                        if k in _DUMP_SAFE_ERROR_KEYS and (v is None or isinstance(v, (str, int, float, bool)))}
++    out["content_free"] = True
++    return out
++
++
+ def dump_api_request_debug(
+     agent,
+     api_kwargs: Dict[str, Any],
+@@ -1928,6 +1970,7 @@ def dump_api_request_debug(
+ 
+             dump_payload["error"] = error_info
+ 
++        dump_payload = _content_free_request_dump(dump_payload)   # F9-B: before anything is written or printed
+         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+         # Sanitize the session ID into a traversal-free path segment — it can
+         # originate from untrusted input (X-Hermes-Session-Id header), and an
+diff --git a/agent/background_review.py b/agent/background_review.py
+index f48a3d5200d0efbf471a698322376279fb2b6dc3..08fb077a5af2c338d814b5ae6d095e8e21d40aaa 100644
+--- a/agent/background_review.py
++++ b/agent/background_review.py
+@@ -1032,6 +1032,23 @@ def _run_review_in_thread(
+         finish_background_review_run(agent, review_run)
+         return
+ 
++    # Slice 15B2a canonical memory authority foundations: strip typed memory-lane turns before prompt construction.
++    try:
++        from tools.legacy_canonical_containment import filter_background_review_messages
++        messages_snapshot = filter_background_review_messages(messages_snapshot)
++    except Exception:
++        # Fail closed for a typed memory-lane turn even if containment import fails.
++        def _recognized_memory_lane(message):
++            if not isinstance(message, dict):
++                return False
++            containers = (message, message.get("metadata"))
++            for container in containers:
++                marker = container.get("legacyContainment") if isinstance(container, dict) else None
++                if isinstance(marker, dict) and marker.get("recognizedCanonicalAction") is True:
++                    return True
++            return False
++        messages_snapshot = [m for m in messages_snapshot if not _recognized_memory_lane(m)]
++
+     # Local import to avoid a hard circular dep at module load.
+     from run_agent import AIAgent
+     from tools.terminal_tool import set_approval_callback as _set_approval_callback
+diff --git a/agent/turn_context.py b/agent/turn_context.py
+index f9bc38f126bf536609941c267900e73a18b77600..3fdfb5af3b736ba8610a222d9a3af298da0568de 100644
+--- a/agent/turn_context.py
++++ b/agent/turn_context.py
+@@ -614,15 +614,12 @@ def build_turn_context(
+         agent._run_budget_started_at = None
+     agent._run_budget_wrapup_injected = False
+ 
+-    # Log conversation turn start for debugging/observability.
+-    _preview_text = summarize_user_message_for_log(user_message)
+-    _msg_preview = (_preview_text[:80] + "...") if len(_preview_text) > 80 else _preview_text
+-    _msg_preview = _msg_preview.replace("\n", " ")
++    # Log conversation turn start for debugging/observability. F9-B (LILITH DEV): the message size, not its text.
+     logger.info(
+-        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg=%r",
++        "conversation turn: session=%s model=%s provider=%s platform=%s history=%d msg_chars=%d",
+         agent.session_id or "none", agent.model, agent.provider or "unknown",
+         agent.platform or "unknown", len(conversation_history or []),
+-        _msg_preview,
++        len(summarize_user_message_for_log(user_message)),
+     )
+ 
+     # Initialize conversation (copy to avoid mutating the caller's list).
+diff --git a/gateway/run.py b/gateway/run.py
+index fca3365cfac8e08cd52380a1a48dc075c28a2516..42285cd31db7476158c26902de7cf89167e32ad4 100644
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -5750,6 +5750,42 @@ class TurnRunner:
+                 except Exception:
+                     pass
+ 
++        # ── LILITH Conversation Intelligence Router (guarded, fail-open) ──
++        # External module decides social vs technical/work and may override the
++        # per-turn model/provider + ephemeral prompt + fallback. ANY failure here
++        # leaves the native gpt-5.6-sol path untouched. See ~/.hermes/lilith_router/.
++        _lilith_fallback_override = None
++        try:
++            import sys as _lr_sys
++            _lr_home = os.environ.get("HERMES_HOME") or "/home/lilith/.hermes"
++            if _lr_home not in _lr_sys.path:
++                _lr_sys.path.insert(0, _lr_home)
++            from lilith_router import gateway_integration as _lilith_router
++            _lr_res = _lilith_router.route_turn(
++                runner=self._runner,
++                ctx=ctx,
++                model=model,
++                runtime_kwargs=runtime_kwargs,
++                turn_route=turn_route,
++                combined_ephemeral=combined_ephemeral,
++                reasoning_config=reasoning_config,
++                cached_agent=agent,
++            )
++        except Exception:
++            _lr_res = None
++        if _lr_res:
++            turn_route = _lr_res.get("turn_route", turn_route)
++            combined_ephemeral = _lr_res.get("combined_ephemeral", combined_ephemeral)
++            if _lr_res.get("reasoning_config") is not None:
++                reasoning_config = _lr_res.get("reasoning_config")
++            if _lr_res.get("fallback_model") is not None:
++                _lilith_fallback_override = _lr_res.get("fallback_model")
++            if _lr_res.get("force_rebuild") and agent is not None:
++                agent = None
++        # Slice 9: a reasoning result carries a ready final_response; capture it
++        # (None on every normal turn) so the run below can short-circuit.
++        _reasoning_fr = _lr_res.get("final_response") if isinstance(_lr_res, dict) else None
++        # ── end LILITH router ──
+         if agent is None:
+             # Config changed or first message — create fresh agent
+             agent = ctx.AIAgent(
+@@ -5784,7 +5820,11 @@ class TurnRunner:
+                 gateway_session_key=ctx.session_key,
+                 session_db=getattr(self._runner._session_db, "_db", self._runner._session_db),
+                 # Reload from disk — do not reuse the startup snapshot (#60955).
+-                fallback_model=self._runner._refresh_fallback_model(),
++                fallback_model=(
++                    _lilith_fallback_override
++                    if _lilith_fallback_override is not None
++                    else self._runner._refresh_fallback_model()
++                ),
+                 skip_context_files=skip_context_files,
+                 # Keep the persona even with minimal context: soul identity is
+                 # a single small file, not part of the expensive walk.
+@@ -6417,7 +6457,23 @@ class TurnRunner:
+                 _conversation_kwargs["moa_config"] = ctx.moa_config
+             if _persist_user_timestamp_override is not None:
+                 _conversation_kwargs["persist_user_timestamp"] = _persist_user_timestamp_override
+-            result = agent.run_conversation(_api_run_message, **_conversation_kwargs)
++            if _reasoning_fr is not None:
++                # ── Slice 9: reasoning short-circuit (bounded tool-less answer) ──
++                # Use the reasoning answer as the turn result instead of running
++                # the tool-exposed agent. It still passes through enforce_reply
++                # below exactly as a normal final_response. Supply messages so the
++                # turn persists like a normal turn (fail-safe to []).
++                try:
++                    _rmsgs = list(agent_history) + [
++                        {"role": "user", "content": _api_run_message},
++                        {"role": "assistant", "content": _reasoning_fr},
++                    ]
++                except Exception:
++                    _rmsgs = []
++                result = {"final_response": _reasoning_fr, "completed": True,
++                          "messages": _rmsgs, "api_calls": 0}
++            else:
++                result = agent.run_conversation(_api_run_message, **_conversation_kwargs)
+         finally:
+             unregister_gateway_notify(_approval_session_key)
+             # Cancel any pending clarify entries so blocked agent
+@@ -6476,6 +6532,21 @@ class TurnRunner:
+         
+         # Return final response, or a message if something went wrong
+         final_response = result.get("final_response")
++        # ── LILITH social-response guard (guarded, fail-open) ──
++        # For live social turns only, strip residual reasoning wrappers and
++        # regenerate on gpt-5.6-sol under the social policy if the reply is
++        # empty or leaks internal/technical-persona content. Any error keeps
++        # the native reply. See ~/.hermes/lilith_router/social_guard.py.
++        try:
++            import sys as _lrg_sys
++            _lrg_home = os.environ.get("HERMES_HOME") or "/home/lilith/.hermes"
++            if _lrg_home not in _lrg_sys.path:
++                _lrg_sys.path.insert(0, _lrg_home)
++            from lilith_router import gateway_integration as _lilith_router
++            final_response = _lilith_router.enforce_reply(final_response, ctx)
++        except Exception:
++            pass
++        # ── end LILITH social-response guard ──
+ 
+         # Extract actual token counts from the agent instance used for this run
+         _last_prompt_toks = 0
+@@ -19008,13 +19079,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         """Inner handler that runs under the _running_agents sentinel guard."""
+         _msg_start_time = time.time()
+         _platform_name = source.platform.value if hasattr(source.platform, "value") else str(source.platform)
+-        _msg_preview = (event.text or "")[:80].replace("\n", " ")
++        # F9-B (LILITH DEV): no message text in the operating logs. gateway.log is written at INFO whatever
++        # logging.level says, so the sizes replace the previews here rather than relying on the log level.
+         _reply_id = getattr(event, "reply_to_message_id", None)
+-        _reply_txt = (getattr(event, "reply_to_text", None) or "")[:80].replace("\n", " ")
+         logger.info(
+-            "inbound message: platform=%s user=%s chat=%s msg=%r reply_to_id=%s reply_to_text=%r",
++            "inbound message: platform=%s user=%s chat=%s msg_chars=%d reply_to_id=%s reply_to_chars=%d",
+             _platform_name, source.user_name or source.user_id or "unknown",
+-            source.chat_id or "unknown", _msg_preview, _reply_id, _reply_txt,
++            source.chat_id or "unknown", len(event.text or ""), _reply_id,
++            len(getattr(event, "reply_to_text", None) or ""),
+         )
+ 
+         # Get or create session
+@@ -20169,7 +20241,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+         # Delivered on the current user message (sidecar), NOT the ephemeral
+         # system prompt: present-on-turn-1/absent-on-turn-2 was a guaranteed
+         # system-prompt diff and agent rebuild.
+-        if not history and not await self.async_session_store.has_any_sessions():
++        # F9-A (LILITH DEV): no first-contact sidecar note on the lilith_os console. LILITH's persona (SOUL.md) owns
++        # how she introduces herself, and anything learned about the owner belongs to LILITH's governed First Memory,
++        # never to a Hermes profile flow. Checked before has_any_sessions() so an emptied store cannot re-arm it.
++        if (
++            not history
++            and getattr(source.platform, "value", source.platform) != "lilith_os"
++            and not await self.async_session_store.has_any_sessions()
++        ):
+             # Default first-contact note: a brief self-introduction.
+             _intro_note = (
+                 "[System note: This is the user's very first message ever. "
+diff --git a/tools/legacy_canonical_containment.py b/tools/legacy_canonical_containment.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d4a353a12c889e816bbf67d381e5a845e4c59d03
+--- /dev/null
++++ b/tools/legacy_canonical_containment.py
+@@ -0,0 +1,483 @@
++"""Legacy persistence containment for future canonical-memory identities.
++
++Production loads an empty protected registry in Slice 15B2a.  Test registries
++use keyed fingerprints of synthetic current and historical values; plaintext
++protected values are never required in production configuration or pending
++records.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import hmac
++import json
++import os
++import re
++import stat
++import unicodedata
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Sequence, Tuple
++
++
++LEGACY_CONTAINMENT_NOT_READY = "LEGACY_CONTAINMENT_NOT_READY"
++PROTECTED_CANONICAL_VALUE = "PROTECTED_CANONICAL_VALUE"
++PROTECTED_CANONICAL_TUPLE = "PROTECTED_CANONICAL_TUPLE"
++SCHEMA_VERSION = 1
++
++_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
++_WORD_RE = re.compile(r"[^\W_]+(?:[._-][^\W_]+)*", re.UNICODE)
++
++
++class ContainmentError(RuntimeError):
++    def __init__(self, code: str):
++        self.code = code
++        super().__init__(code)
++
++
++@dataclass(frozen=True)
++class LegacyContainmentMarkerV1:
++    schema_version: int
++    exclude_from_legacy_background_review: bool
++    recognized_canonical_action: bool
++    memory_class: Optional[str]
++    subject_namespace: Optional[str]
++    subject_key: Optional[str]
++    action_digest: Optional[str]
++
++    @property
++    def identity(self) -> Optional[Tuple[str, str, str]]:
++        if self.memory_class and self.subject_namespace and self.subject_key:
++            return (self.memory_class, self.subject_namespace, self.subject_key)
++        return None
++
++
++@dataclass(frozen=True)
++class ProtectedCanonicalTupleV1:
++    schema_version: int
++    memory_class: str
++    subject_namespace: str
++    subject_key: str
++    value_fingerprints: Tuple[str, ...]
++    action_digests: Tuple[str, ...] = ()
++
++    @property
++    def identity(self) -> Tuple[str, str, str]:
++        return (self.memory_class, self.subject_namespace, self.subject_key)
++
++    def validate(self) -> None:
++        if self.schema_version != SCHEMA_VERSION:
++            raise ValueError("protected tuple schema version is unsupported")
++        if not self.memory_class or not self.subject_namespace or not self.subject_key:
++            raise ValueError("protected tuple identity is incomplete")
++        if not all(_HEX64_RE.fullmatch(v) for v in self.value_fingerprints):
++            raise ValueError("protected value fingerprint is invalid")
++        if not all(_HEX64_RE.fullmatch(v) for v in self.action_digests):
++            raise ValueError("protected action digest is invalid")
++
++
++@dataclass(frozen=True)
++class ContainmentDecision:
++    allowed: bool
++    failure_code: Optional[str]
++    matched_identity: Optional[Tuple[str, str, str]] = None
++
++
++def _canonical(value: Mapping[str, Any]) -> bytes:
++    return json.dumps(
++        dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
++    ).encode("ascii")
++
++
++def _normalize_value(value: str) -> str:
++    return unicodedata.normalize("NFC", value.strip())
++
++
++def value_fingerprint(secret: bytes, value: str) -> str:
++    normalized = _normalize_value(value)
++    return hmac.new(
++        secret,
++        _canonical({"kind": "legacy-canonical-value-v1", "value": normalized}),
++        hashlib.sha256,
++    ).hexdigest()
++
++
++def make_protected_tuple(
++    *,
++    secret: bytes,
++    memory_class: str,
++    subject_namespace: str,
++    subject_key: str,
++    protected_values: Iterable[str],
++    action_digests: Iterable[str] = (),
++) -> ProtectedCanonicalTupleV1:
++    entry = ProtectedCanonicalTupleV1(
++        schema_version=1,
++        memory_class=memory_class,
++        subject_namespace=subject_namespace,
++        subject_key=subject_key,
++        value_fingerprints=tuple(sorted({
++            value_fingerprint(secret, value) for value in protected_values
++        })),
++        action_digests=tuple(sorted(set(action_digests))),
++    )
++    entry.validate()
++    return entry
++
++
++def _iter_strings(value: Any) -> Iterator[str]:
++    if isinstance(value, str):
++        yield value
++    elif isinstance(value, Mapping):
++        for key, item in value.items():
++            if isinstance(key, str):
++                yield key
++            yield from _iter_strings(item)
++    elif isinstance(value, (list, tuple)):
++        for item in value:
++            yield from _iter_strings(item)
++
++
++def _candidate_fragments(text: str) -> Iterator[str]:
++    normalized = _normalize_value(text)
++    if normalized:
++        yield normalized
++    words = [m.group(0) for m in _WORD_RE.finditer(normalized)]
++    # Future codename values are at most 64 scalars.  Bounded 1..8 token spans
++    # catch standalone and embedded multiword values without quadratic scans
++    # over large skill documents.
++    for start in range(len(words)):
++        for width in range(1, min(8, len(words) - start) + 1):
++            candidate = " ".join(words[start : start + width])
++            if len(candidate) <= 64:
++                yield candidate
++
++
++class LegacyCanonicalContainmentGate:
++    def __init__(
++        self,
++        *,
++        secret: bytes,
++        registry_provider: Callable[[], Iterable[ProtectedCanonicalTupleV1]],
++    ):
++        if len(secret) < 32:
++            raise ValueError("containment secret must be at least 32 bytes")
++        self._secret = bytes(secret)
++        self._registry_provider = registry_provider
++
++    def _registry(self) -> Tuple[ProtectedCanonicalTupleV1, ...]:
++        entries = tuple(self._registry_provider())
++        for entry in entries:
++            entry.validate()
++        identities = [entry.identity for entry in entries]
++        if len(identities) != len(set(identities)):
++            raise ValueError("duplicate protected canonical identity")
++        return entries
++
++    def evaluate(
++        self,
++        payload: Any,
++        *,
++        marker: Optional[LegacyContainmentMarkerV1] = None,
++    ) -> ContainmentDecision:
++        try:
++            registry = self._registry()
++        except Exception:
++            if marker is not None and marker.recognized_canonical_action:
++                return ContainmentDecision(False, LEGACY_CONTAINMENT_NOT_READY)
++            return ContainmentDecision(True, None)
++        if marker is not None:
++            if marker.schema_version != 1:
++                return ContainmentDecision(False, LEGACY_CONTAINMENT_NOT_READY)
++            if marker.recognized_canonical_action:
++                for entry in registry:
++                    if marker.identity == entry.identity:
++                        return ContainmentDecision(False, PROTECTED_CANONICAL_TUPLE, entry.identity)
++                    if marker.action_digest and marker.action_digest in entry.action_digests:
++                        return ContainmentDecision(False, PROTECTED_CANONICAL_TUPLE, entry.identity)
++                # A typed canonical-memory action that is not present in the
++                # closed registry is not an ordinary legacy write.  This is
++                # especially important while the production registry is empty:
++                # the lane must stay closed instead of falling through.
++                return ContainmentDecision(False, LEGACY_CONTAINMENT_NOT_READY)
++        protected = {
++            fingerprint: entry.identity
++            for entry in registry
++            for fingerprint in entry.value_fingerprints
++        }
++        if not protected:
++            return ContainmentDecision(True, None)
++        seen = set()
++        for text in _iter_strings(payload):
++            for candidate in _candidate_fragments(text):
++                if candidate in seen:
++                    continue
++                seen.add(candidate)
++                match = protected.get(value_fingerprint(self._secret, candidate))
++                if match is not None:
++                    return ContainmentDecision(False, PROTECTED_CANONICAL_VALUE, match)
++        return ContainmentDecision(True, None)
++
++    def require_allowed(
++        self,
++        payload: Any,
++        *,
++        marker: Optional[LegacyContainmentMarkerV1] = None,
++    ) -> None:
++        decision = self.evaluate(payload, marker=marker)
++        if not decision.allowed:
++            raise ContainmentError(str(decision.failure_code))
++
++
++def _default_secret_path() -> Path:
++    home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
++    configured = os.environ.get("LILITH_LEGACY_CONTAINMENT_KEY_FILE")
++    return Path(configured) if configured else (
++        home / "lilith-os" / "data" / "legacy_containment.key"
++    )
++
++
++def _default_registry_path() -> Path:
++    home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
++    configured = os.environ.get("LILITH_LEGACY_CONTAINMENT_REGISTRY_FILE")
++    return Path(configured) if configured else (
++        home / "lilith-os" / "data" / "legacy_containment_registry.json"
++    )
++
++
++def _load_production_registry() -> Iterable[ProtectedCanonicalTupleV1]:
++    """Missing registry means the approved Slice 15B2a empty registry."""
++    path = _default_registry_path()
++    if not path.exists():
++        return ()
++    raw = json.loads(path.read_text(encoding="utf-8"))
++    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
++        raise ValueError("containment registry is malformed")
++    entries = raw.get("protectedTuples")
++    if not isinstance(entries, list):
++        raise ValueError("containment registry entries are malformed")
++    result = []
++    for item in entries:
++        if not isinstance(item, dict) or set(item) != {
++            "schemaVersion", "memoryClass", "subjectNamespace", "subjectKey",
++            "valueFingerprints", "actionDigests",
++        }:
++            raise ValueError("containment registry entry is not closed")
++        result.append(ProtectedCanonicalTupleV1(
++            schema_version=item["schemaVersion"],
++            memory_class=item["memoryClass"],
++            subject_namespace=item["subjectNamespace"],
++            subject_key=item["subjectKey"],
++            value_fingerprints=tuple(item["valueFingerprints"]),
++            action_digests=tuple(item["actionDigests"]),
++        ))
++    return tuple(result)
++
++
++_production_gate: Optional[LegacyCanonicalContainmentGate] = None
++
++
++def production_gate() -> LegacyCanonicalContainmentGate:
++    global _production_gate
++    if _production_gate is None:
++        secret_path = _default_secret_path()
++        secret = secret_path.read_bytes()
++        if len(secret) < 32:
++            raise ValueError("containment secret is too short")
++        if os.name != "nt" and stat.S_IMODE(secret_path.stat().st_mode) != 0o600:
++            raise PermissionError("containment secret must be mode 0600")
++        _production_gate = LegacyCanonicalContainmentGate(
++            secret=secret,
++            registry_provider=_load_production_registry,
++        )
++    return _production_gate
++
++
++def marker_from_payload(payload: Any) -> Optional[LegacyContainmentMarkerV1]:
++    if not isinstance(payload, Mapping):
++        return None
++    raw = payload.get("legacyContainment")
++    if not isinstance(raw, Mapping):
++        return None
++    allowed = {
++        "schemaVersion", "excludeFromLegacyBackgroundReview",
++        "recognizedCanonicalAction", "memoryClass", "subjectNamespace",
++        "subjectKey", "actionDigest",
++    }
++    if not set(raw).issubset(allowed):
++        return LegacyContainmentMarkerV1(0, False, True, None, None, None, None)
++    return LegacyContainmentMarkerV1(
++        schema_version=raw.get("schemaVersion"),
++        exclude_from_legacy_background_review=(
++            raw.get("excludeFromLegacyBackgroundReview") is True
++        ),
++        recognized_canonical_action=raw.get("recognizedCanonicalAction") is True,
++        memory_class=raw.get("memoryClass"),
++        subject_namespace=raw.get("subjectNamespace"),
++        subject_key=raw.get("subjectKey"),
++        action_digest=raw.get("actionDigest"),
++    )
++
++
++def check_legacy_payload(payload: Any) -> ContainmentDecision:
++    marker = marker_from_payload(payload)
++    try:
++        return production_gate().evaluate(payload, marker=marker)
++    except Exception:
++        if marker is not None and marker.recognized_canonical_action:
++            return ContainmentDecision(False, LEGACY_CONTAINMENT_NOT_READY)
++        # If the registry/key is unavailable, no recognized memory-lane action
++        # may fall through.  Ordinary legacy behavior is unchanged until a
++        # typed marker exists (the 15B2a production registry is empty).
++        return ContainmentDecision(True, None)
++
++
++def filter_background_review_messages(messages: Sequence[Any]) -> list[Any]:
++    """Exclude typed memory-lane turns before the reviewer sees their value."""
++    filtered = []
++    for message in messages or ():
++        marker = marker_from_payload(message)
++        metadata = message.get("metadata") if isinstance(message, Mapping) else None
++        if marker is None and isinstance(metadata, Mapping):
++            marker = marker_from_payload(metadata)
++        if marker is not None and marker.exclude_from_legacy_background_review:
++            continue
++        filtered.append(message)
++    return filtered
++
++
++class PendingErasureOwner:
++    OWNER = "PENDING"
++
++    def __init__(
++        self,
++        pending_root: Path,
++        gate: LegacyCanonicalContainmentGate,
++        privacy_authority: Any,
++    ):
++        self.pending_root = Path(pending_root)
++        self.gate = gate
++        self.privacy_authority = privacy_authority
++
++    def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
++        authorization = self.privacy_authority.resolve_erasure_authorization(
++            authorization_ref_id, owner=self.OWNER, execution_nonce=execution_nonce
++        )
++        if authorization is None:
++            raise PermissionError("PRIVACY_ERASURE_NOT_AUTHORIZED")
++        removed = 0
++        if self.pending_root.exists():
++            for path in self.pending_root.rglob("*.json"):
++                try:
++                    payload = json.loads(path.read_text(encoding="utf-8"))
++                except Exception:
++                    continue
++                decision = self.gate.evaluate(payload)
++                if not decision.allowed and decision.matched_identity == authorization.identity:
++                    path.unlink()
++                    removed += 1
++        result = {"owner": self.OWNER, "status": "COMPLETE", "deleted": removed}
++        self.privacy_authority.record_owner_result(
++            authorization_ref_id, execution_nonce, result
++        )
++        return result
++
++
++class _LegacyTextErasureOwner:
++    """Remove only lines matching the authorized tuple's keyed fingerprints."""
++
++    OWNER = ""
++
++    def __init__(
++        self,
++        paths_provider: Callable[[], Iterable[Path]],
++        gate: LegacyCanonicalContainmentGate,
++        privacy_authority: Any,
++    ):
++        self.paths_provider = paths_provider
++        self.gate = gate
++        self.privacy_authority = privacy_authority
++
++    def erase_authorized(self, authorization_ref_id: str, execution_nonce: str) -> Dict[str, Any]:
++        authorization = self.privacy_authority.resolve_erasure_authorization(
++            authorization_ref_id, owner=self.OWNER, execution_nonce=execution_nonce
++        )
++        if authorization is None:
++            raise PermissionError("PRIVACY_ERASURE_NOT_AUTHORIZED")
++        removed = 0
++        touched = 0
++        for supplied in self.paths_provider():
++            path = Path(supplied)
++            if not path.is_file() or path.is_symlink():
++                continue
++            try:
++                text = path.read_text(encoding="utf-8")
++            except (OSError, UnicodeError):
++                continue
++            kept = []
++            file_removed = 0
++            for line in text.splitlines(keepends=True):
++                decision = self.gate.evaluate(line)
++                if not decision.allowed and decision.matched_identity == authorization.identity:
++                    file_removed += 1
++                else:
++                    kept.append(line)
++            if file_removed:
++                mode = path.stat().st_mode
++                temporary = path.with_name(path.name + ".privacy.tmp")
++                temporary.write_text("".join(kept), encoding="utf-8")
++                os.chmod(temporary, mode)
++                os.replace(temporary, path)
++                removed += file_removed
++                touched += 1
++        result = {
++            "owner": self.OWNER,
++            "status": "COMPLETE",
++            "deleted": removed,
++            "filesTouched": touched,
++        }
++        self.privacy_authority.record_owner_result(
++            authorization_ref_id, execution_nonce, result
++        )
++        return result
++
++
++class LegacyMemoryErasureOwner(_LegacyTextErasureOwner):
++    """Privileged exact erasure for the configured MEMORY.md/USER.md files."""
++
++    OWNER = "LEGACY_MEMORY"
++
++    def __init__(
++        self,
++        memory_path: Path,
++        user_path: Path,
++        gate: LegacyCanonicalContainmentGate,
++        privacy_authority: Any,
++    ):
++        paths = (Path(memory_path), Path(user_path))
++        super().__init__(lambda: paths, gate, privacy_authority)
++
++
++class LegacySkillErasureOwner(_LegacyTextErasureOwner):
++    """Privileged exact erasure for text files below one configured skill root."""
++
++    OWNER = "LEGACY_SKILLS"
++
++    def __init__(
++        self,
++        skill_root: Path,
++        gate: LegacyCanonicalContainmentGate,
++        privacy_authority: Any,
++    ):
++        root = Path(skill_root).resolve()
++
++        def paths() -> Iterable[Path]:
++            if not root.is_dir():
++                return ()
++            return tuple(
++                path
++                for path in root.rglob("*")
++                if path.is_file() and not path.is_symlink()
++            )
++
++        super().__init__(paths, gate, privacy_authority)
+diff --git a/tools/memory_tool.py b/tools/memory_tool.py
+index 54dcaa71a623dd4d75b59d213b5063025c6ac6cb..80c75d917b11b68f0e93ffd806e07037249e57a4 100644
+--- a/tools/memory_tool.py
++++ b/tools/memory_tool.py
+@@ -156,6 +156,24 @@ def _read_failed_error(path: "Path") -> Dict[str, Any]:
+     }
+ 
+ 
++# Slice 15B2a canonical memory authority foundations.
++def _legacy_containment_refusal(payload: Any) -> Optional[Dict[str, Any]]:
++    try:
++        from tools.legacy_canonical_containment import check_legacy_payload
++        decision = check_legacy_payload(payload)
++    except Exception:
++        marker = payload.get("legacyContainment") if isinstance(payload, dict) else None
++        if isinstance(marker, dict) and marker.get("recognizedCanonicalAction") is True:
++            return {"success": False, "done": True, "error": "LEGACY_CONTAINMENT_NOT_READY", "failure_code": "LEGACY_CONTAINMENT_NOT_READY"}
++        return None
++    if decision.allowed:
++        return None
++    return {
++        "success": False, "done": True,
++        "error": decision.failure_code, "failure_code": decision.failure_code,
++    }
++
++
+ class MemoryStore:
+     """
+     Bounded curated memory with file persistence. One instance per AIAgent.
+@@ -414,6 +432,9 @@ class MemoryStore:
+     def add(self, target: str, content: str) -> Dict[str, Any]:
+         """Append a new entry. Returns error if it would exceed the char limit."""
+         content = content.strip()
++        refusal = _legacy_containment_refusal({"action": "add", "target": target, "content": content})
++        if refusal:
++            return refusal
+         if not content:
+             return {"success": False, "error": "Content cannot be empty."}
+ 
+@@ -474,6 +495,9 @@ class MemoryStore:
+         """Find entry containing old_text substring, replace it with new_content."""
+         old_text = old_text.strip()
+         new_content = new_content.strip()
++        refusal = _legacy_containment_refusal({"action": "replace", "target": target, "old_text": old_text, "content": new_content})
++        if refusal:
++            return refusal
+         if not old_text:
+             return {"success": False, "error": "old_text cannot be empty."}
+         if not new_content:
+@@ -596,6 +620,9 @@ class MemoryStore:
+         the net result would exceed the char limit, NOTHING is written and an
+         error is returned describing the first failure plus the live state.
+         """
++        refusal = _legacy_containment_refusal({"action": "batch", "target": target, "operations": operations})
++        if refusal:
++            return refusal
+         if not operations:
+             return {"success": False, "error": "operations list is empty."}
+ 
+@@ -957,6 +984,10 @@ def _apply_write_gate(action: str, target: str, content: Optional[str],
+     if action not in {"add", "replace", "remove"}:
+         return None
+ 
++    refusal = _legacy_containment_refusal({"action": action, "target": target, "content": content, "old_text": old_text})
++    if refusal:
++        return json.dumps(refusal, ensure_ascii=False)
++
+     try:
+         from tools import write_approval as wa
+     except Exception:
+@@ -996,6 +1027,8 @@ def _apply_write_gate(action: str, target: str, content: Optional[str],
+         summary=f"{summary}: {detail[:120]}",
+         origin=wa.current_origin(),
+     )
++    if record.get("blocked"):
++        return json.dumps({"success": False, "done": True, "error": record.get("failure_code"), "failure_code": record.get("failure_code")}, ensure_ascii=False)
+     return json.dumps(
+         {"success": True, "staged": True, "pending_id": record["id"],
+          "message": decision.message},
+@@ -1010,6 +1043,9 @@ def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Op
+     (blocked or staged), or None when the caller should perform the real
+     batch write. The whole batch is gated as a single unit.
+     """
++    refusal = _legacy_containment_refusal({"action": "batch", "target": target, "operations": operations})
++    if refusal:
++        return json.dumps(refusal, ensure_ascii=False)
+     try:
+         from tools import write_approval as wa
+     except Exception:
+@@ -1044,6 +1080,8 @@ def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Op
+         summary=f"{summary}: {detail[:120]}",
+         origin=wa.current_origin(),
+     )
++    if record.get("blocked"):
++        return json.dumps({"success": False, "done": True, "error": record.get("failure_code"), "failure_code": record.get("failure_code")}, ensure_ascii=False)
+     return json.dumps(
+         {"success": True, "staged": True, "pending_id": record["id"],
+          "message": decision.message},
+@@ -1240,6 +1278,9 @@ def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[
+ 
+     Returns the store's result dict.
+     """
++    refusal = _legacy_containment_refusal(payload)
++    if refusal:
++        return refusal
+     action = payload.get("action")
+     target = payload.get("target", "memory")
+     target_error = _memory_target_error(store, target)
+diff --git a/tools/skill_manager_tool.py b/tools/skill_manager_tool.py
+index b444056747f688ca8b3485ffc9c0138ef59bcda0..2544c9d67ef3de18a873625a76ea98d44e0151d9 100644
+--- a/tools/skill_manager_tool.py
++++ b/tools/skill_manager_tool.py
+@@ -894,6 +894,24 @@ def _resolve_skill_target(skill_dir: Path, file_path: str) -> Tuple[Optional[Pat
+ # =============================================================================
+ 
+ 
++# Slice 15B2a canonical memory authority foundations.
++def _legacy_containment_guard(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
++    try:
++        from tools.legacy_canonical_containment import check_legacy_payload
++        decision = check_legacy_payload(payload)
++    except Exception:
++        marker = payload.get("legacyContainment") if isinstance(payload, dict) else None
++        if isinstance(marker, dict) and marker.get("recognizedCanonicalAction") is True:
++            return {"success": False, "error": "LEGACY_CONTAINMENT_NOT_READY", "failure_code": "LEGACY_CONTAINMENT_NOT_READY"}
++        return None
++    if decision.allowed:
++        return None
++    return {
++        "success": False, "error": decision.failure_code,
++        "failure_code": decision.failure_code,
++    }
++
++
+ def _add_description_prompt_preview(result: Dict[str, Any], content: str) -> None:
+     """Append a system_prompt_preview field when the description will be truncated."""
+     fm, _ = _parse_frontmatter(content)
+@@ -907,6 +925,9 @@ def _add_description_prompt_preview(result: Dict[str, Any], content: str) -> Non
+ 
+ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, Any]:
+     """Create a new user skill with SKILL.md content."""
++    refusal = _legacy_containment_guard({"action": "create", "name": name, "content": content})
++    if refusal:
++        return refusal
+     # Validate name
+     err = _validate_name(name)
+     if err:
+@@ -1006,6 +1027,9 @@ def _attach_lint_findings(result: Dict[str, Any], skill_md: Path) -> None:
+ 
+ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
+     """Replace the SKILL.md of any existing skill (full rewrite)."""
++    refusal = _legacy_containment_guard({"action": "edit", "name": name, "content": content})
++    if refusal:
++        return refusal
+     err = _validate_frontmatter(content)
+     if err:
+         return {"success": False, "error": err}
+@@ -1078,6 +1102,9 @@ def _patch_skill(
+     Defaults to SKILL.md. Use file_path to patch a supporting file instead.
+     Requires a unique match unless replace_all is True.
+     """
++    refusal = _legacy_containment_guard({"action": "patch", "name": name, "old_string": old_string, "new_string": new_string, "file_path": file_path})
++    if refusal:
++        return refusal
+     if not old_string:
+         return {"success": False, "error": "old_string is required for 'patch'."}
+     if new_string is None:
+@@ -1296,6 +1323,9 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> Dict[str, A
+ 
+ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
+     """Add or overwrite a supporting file within any skill directory."""
++    refusal = _legacy_containment_guard({"action": "write_file", "name": name, "file_path": file_path, "file_content": file_content})
++    if refusal:
++        return refusal
+     err = _validate_file_path(file_path)
+     if err:
+         return {"success": False, "error": err}
+@@ -1436,6 +1466,10 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
+     """
+     if action not in {"create", "edit", "patch", "delete", "write_file", "remove_file"}:
+         return None
++    containment_payload = {"action": action, "name": name, **payload_kwargs}
++    refusal = _legacy_containment_guard(containment_payload)
++    if refusal:
++        return json.dumps(refusal, ensure_ascii=False)
+     if _skill_gate_bypass.get():
+         return None
+ 
+@@ -1461,6 +1495,8 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
+         new_string=payload_kwargs.get("new_string") or "",
+     )
+     record = wa.stage_write(wa.SKILLS, payload, summary=gist, origin=wa.current_origin())
++    if record.get("blocked"):
++        return json.dumps({"success": False, "error": record.get("failure_code"), "failure_code": record.get("failure_code")}, ensure_ascii=False)
+     return json.dumps(
+         {"success": True, "staged": True, "pending_id": record["id"],
+          "gist": gist, "message": decision.message},
+@@ -1469,9 +1505,10 @@ def _apply_skill_write_gate(action, name, **payload_kwargs):
+ 
+ 
+ def apply_skill_pending(payload: Dict[str, Any]) -> str:
+-    """Replay a staged skill write, bypassing the gate. Returns the tool result
+-    JSON string. Called by the /skills approve handler.
+-    """
++    """Replay a staged skill write, bypassing the approval gate only."""
++    refusal = _legacy_containment_guard(payload)
++    if refusal:
++        return json.dumps(refusal, ensure_ascii=False)
+     token = _skill_gate_bypass.set(True)
+     try:
+         return skill_manage(
+diff --git a/tools/write_approval.py b/tools/write_approval.py
+index b017299d806b83e5a0fa9f9d7f22c0bf5c8f7309..bb126f5107a613de03dfffca1323938a4afff364 100644
+--- a/tools/write_approval.py
++++ b/tools/write_approval.py
+@@ -113,6 +113,21 @@ def _pending_dir(subsystem: str) -> Path:
+ 
+ def stage_write(subsystem: str, payload: Dict[str, Any],
+                 *, summary: str, origin: str) -> Dict[str, Any]:
++    # Slice 15B2a canonical memory authority foundations: staging itself is a persistence boundary.
++    try:
++        from tools.legacy_canonical_containment import check_legacy_payload
++        containment = check_legacy_payload(payload)
++    except Exception:
++        marker = payload.get("legacyContainment") if isinstance(payload, dict) else None
++        if isinstance(marker, dict) and marker.get("recognizedCanonicalAction") is True:
++            return {"id": "", "blocked": True, "failure_code": "LEGACY_CONTAINMENT_NOT_READY", "subsystem": subsystem}
++        containment = None
++    if containment is not None and not containment.allowed:
++        return {
++            "id": "", "blocked": True,
++            "failure_code": containment.failure_code,
++            "subsystem": subsystem,
++        }
+     """Persist a pending write and return a short record describing it.
+ 
+     Args:

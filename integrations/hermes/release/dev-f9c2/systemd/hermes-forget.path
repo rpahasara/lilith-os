@@ -1,0 +1,11 @@
+# LILITH F9-C: activates the erasure executor when the Core API's spool client queues a request. The spool
+# (/run/hermes-forget/spool, root:lilith-forget 0730) is created by hermes-forget.tmpfiles.conf; the gateway cannot see it.
+[Unit]
+Description=LILITH F9-C Hermes erasure request spool (DEV_SYNTHETIC)
+
+[Path]
+PathExistsGlob=/run/hermes-forget/spool/*.req
+Unit=hermes-forget-executor.service
+
+[Install]
+WantedBy=paths.target

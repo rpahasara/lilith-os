@@ -1,0 +1,11 @@
+# LILITH F9-C: re-check, while an erasure is unreleased, whether Privacy has completed it (also after a reboot).
+[Unit]
+Description=LILITH F9-C Hermes erasure release check timer (DEV_SYNTHETIC)
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=30s
+Unit=hermes-forget-reconcile.service
+
+[Install]
+WantedBy=timers.target

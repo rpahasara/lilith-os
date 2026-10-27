@@ -1,0 +1,36 @@
+# Daily DEV retention for Hermes conversation state. Hermes only auto-prunes state.db when the gateway starts, so a
+# long-running gateway would never prune; this runs the same prune from the CLI (SQLite WAL, safe beside the gateway).
+# Ended sessions older than 7 days (idle sessions end after 24 h) + their sessions/ transcripts; log files older
+# than 7 days, including the Router V2 decisions log.
+[Unit]
+Description=LILITH Hermes gateway DEV retention (state.db prune + log age-out)
+ConditionPathExists=/home/lilith/.hermes-dev/state.db
+
+[Service]
+Type=oneshot
+User=lilith
+Group=lilith
+WorkingDirectory=/home/lilith/.hermes-dev
+Environment=HOME=/home/lilith
+Environment=HERMES_HOME=/home/lilith/.hermes-dev
+Environment=XDG_CACHE_HOME=/home/lilith/.hermes-dev/cache/xdg
+Environment=HERMES_DISABLE_LAZY_INSTALLS=1
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/hermes-gateway-dev/current/venv/bin/python -I -B -m hermes_cli.main sessions prune --older-than 7 --include-archived --include-pinned --yes
+# Live log files are appended continuously (their mtime never ages), so rotate daily first, then age out.
+ExecStart=/usr/sbin/logrotate --state /home/lilith/.hermes-dev/logs/.logrotate.state /opt/hermes-gateway-dev/current/bin/hermes-logrotate.conf
+ExecStart=/usr/bin/find /home/lilith/.hermes-dev/logs -xdev -type f -mtime +7 ! -name .logrotate.state -delete
+UMask=0077
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/lilith/.hermes-dev
+ReadOnlyPaths=/home/lilith/.hermes-dev/lilith_router /home/lilith/.hermes-dev/plugins /home/lilith/.hermes-dev/config.yaml /home/lilith/.hermes-dev/.env /home/lilith/.hermes-dev/memories
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictNamespaces=yes
+SystemCallFilter=@system-service
+LogNamespace=hermes-gateway-dev

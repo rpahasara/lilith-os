@@ -1,0 +1,2 @@
+# Patch files and their exact upstream context must stay byte-exact; whitespace in them is content.
+*.patch -whitespace
