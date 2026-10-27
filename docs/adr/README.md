@@ -21,6 +21,7 @@ ADRs preserve consequential decisions, their alternatives, evidence, and tradeof
 | [0013](0013-world-model-preserves-claims-separates-epistemic-projection.md) | World Model preserves claims and separates epistemic projection | Accepted | 2026-10-05 |
 | [0014](0014-proposed-cognitive-sources-enter-architecture-through-native-acceptance.md) | Proposed cognitive sources are non-controlling and enter architecture through native acceptance | Accepted | 2026-10-05 |
 | [0015](0015-operational-evidence-invalidated-by-material-substrate-drift.md) | Operational evidence is invalidated by material substrate drift, not unrelated change | Accepted | 2026-10-05 |
+| [0016](0016-private-repository-holds-reviewed-runtime-source.md) | The private repository holds reviewed runtime source; secrets, private state and upstream code stay out | Accepted | 2026-10-27 |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 
