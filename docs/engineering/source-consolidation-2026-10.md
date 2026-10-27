@@ -26,12 +26,12 @@ NousResearch/hermes-agent `f293e7206b4ddd66042329442c6afebc19a8808d` (0.20.5, MI
 
 Review and merge in this order. Each is independent of the others in content; the order is for reading.
 
-| # | Branch | Adds | Files |
-|---|---|---|---|
-| 1 | `source/consolidation-policy-v0.1` | ADR-0016, this record, the VM-only gap list | 4 |
-| 2 | `source/hermes-runtime-source-v0.1` | `integrations/hermes/`: upstream pin and licence, PROD and DEV patch sets with digests, DEV release `f293e72-f9c2` non-upstream members (four token-bearing files as templates), DEV FORGET executor overlay, planned memory-context overlay, reconstruction and verification tools and tests | 74 |
-| 3 | `source/router-v2-cognition-source-v0.1` | `integrations/hermes/home/`: Router V2 modules not tracked elsewhere, PROD/DEV variants, plugins, `MODULES.json` source map, assembly tool and tests | 26 |
-| 4 | `source/hermes-build-lineage-v0.1` | `integrations/hermes/history/`: F7–F9 designs, results, build and simulation tooling, superseded release scripts, PROD export procedure | 309 |
+| # | Pull request | Branch | Adds | Files |
+|---|---|---|---|---|
+| 1 | [#267](https://github.com/rpahasara/lilith-os/pull/267) | `source/consolidation-policy-v0.1` | ADR-0016, this record, the VM-only gap list | 4 |
+| 2 | [#268](https://github.com/rpahasara/lilith-os/pull/268) | `source/hermes-runtime-source-v0.1` | `integrations/hermes/`: upstream pin and licence, PROD and DEV patch sets with digests, DEV release `f293e72-f9c2` non-upstream members (four token-bearing files as templates), DEV FORGET executor overlay, planned memory-context overlay, reconstruction and verification tools and tests | 74 |
+| 3 | [#269](https://github.com/rpahasara/lilith-os/pull/269) | `source/router-v2-cognition-source-v0.1` | `integrations/hermes/home/`: Router V2 modules not tracked elsewhere, PROD/DEV variants, plugins, `MODULES.json` source map, assembly tool and tests | 26 |
+| 4 | [#270](https://github.com/rpahasara/lilith-os/pull/270) | `source/hermes-build-lineage-v0.1` | `integrations/hermes/history/`: F7–F9 designs, results, build and simulation tooling, superseded release scripts, PROD export procedure | 309 |
 
 ## Environment variants
 
