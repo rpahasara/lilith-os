@@ -120,10 +120,36 @@ added. It stays in the archive and in the working copy.
 
 ## Remaining gaps
 
-- PROD-only source and configuration: [vm-only-source-gaps.md](vm-only-source-gaps.md). `PROD_ONLY_SOURCE_GAPS=OPEN`.
+- PROD-only source and configuration: [vm-only-source-gaps.md](vm-only-source-gaps.md). `PROD_ONLY_SOURCE_GAPS=OPEN`
+  until the PROD recovery change sets below merge. After that, two items remain: the withheld 08-26 `run.py`
+  checkpoint and the private runtime configuration and persona files.
 - The off-PC copy of the encrypted archive has not been made.
 - DEV credentials (gate token, Groq key, console token) are host-only by design; rebuilding the DEV release needs the
   gate token from custody.
 - The PROD virtualenv is not reproducible; the DEV wheel set is hash-locked but was not re-downloaded here.
 - The release offline tests (`integrations/hermes/release/dev-f9c2/tests/`) need a Hermes runtime and were not re-run
   in this consolidation.
+
+## PROD source recovery (2026-10-27)
+
+The owner approved a bounded, read-only export from `lilith-01` (instance `1332996232081478576`). It ran three SSH
+sessions that wrote nothing on PROD; the boot id was unchanged throughout. It read 176 paths from the audit inventory:
+175 were hash-verified, and all 37 that the audit had hashed matched. One file was withheld by the credential
+pre-scan. Persona, profile, credential, database, log and conversation files were never read.
+
+| PR | Branch | Adds (all new files under `integrations/hermes/`) | Merge-time DEV mode |
+|---|---|---|---|
+| [#272](https://github.com/rpahasara/lilith-os/pull/272) | `source/prod-working-memory-router-v0.1` | PROD `world_context.py` (byte-exact), `router.yaml` template, 7 Router V2 tests, 8 Working Memory stages, `PROD-RECOVERY.json`, the assembly tool and tests | `CONTROL_ONLY_NO_DEPLOY` |
+| [#273](https://github.com/rpahasara/lilith-os/pull/273) | `source/prod-career-ingestion-v0.1` | 10 career scripts and the reconstructed ingestion contract | `CONTROL_ONLY_NO_DEPLOY` |
+| [#274](https://github.com/rpahasara/lilith-os/pull/274) | `source/prod-automation-v0.1` | productivity automations, prompt, `config.json`, 12 systemd units | `CONTROL_ONLY_NO_DEPLOY` |
+| [#275](https://github.com/rpahasara/lilith-os/pull/275) | `source/prod-history-v0.1` | router, API and prototype history | `CONTROL_ONLY_NO_DEPLOY` |
+
+Status after these merge:
+- **Router V2:** with these merged, the full PROD `lilith_router` tree rebuilds byte-exact from Git. `router.yaml`
+  needs its private channel id from custody.
+- **Tests:** the recovered PROD tests pass offline, with network blocked, except two checks that need host-only
+  files.
+- **Working Memory:** the PROD file contains all six per-slice blocks under `docs/architecture/slice-8..13/` verbatim.
+  Its Slice 7.2 base is the first recovered stage.
+- **`app.py`:** the hand-patched `743a804a…` differs from the 2026-09-13 git import only in path configuration.
+- **Still unverified:** runtime reconstruction on DEV and any live deployment.
