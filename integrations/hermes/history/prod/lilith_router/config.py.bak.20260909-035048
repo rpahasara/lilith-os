@@ -1,0 +1,195 @@
+"""Router configuration loader.
+
+Config lives OUTSIDE Hermes' config.yaml so the core config surface is never
+touched: ``~/.hermes/lilith_router/router.yaml``. All values have safe
+defaults; a missing or malformed file yields a disabled router (fail-safe).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List
+
+logger = logging.getLogger(__name__)
+
+
+def _hermes_home() -> Path:
+    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes"))
+
+
+CONFIG_PATH = _hermes_home() / "lilith_router" / "router.yaml"
+
+
+@dataclass
+class RouterConfig:
+    enabled: bool = False           # master switch; False => router is a no-op
+    mode: str = "shadow"            # "shadow" (log only) | "live" (may switch)
+    live_channels: List[str] = field(default_factory=list)  # "platform:chat_id"; ["*"] = all
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_provider: str = "groq"
+    # Fallback (Hermes "GPT-5.6 Sol") for when the Groq social turn fails,
+    # rate-limits, or times out. Applied per-social-turn only, so technical/work
+    # turns keep their native (unchanged) fallback behavior.
+    hermes_model: str = "gpt-5.6-sol"
+    hermes_provider: str = "openai-codex"
+    recent_turns: int = 6
+    log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
+
+    # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ────
+    # Additive and OFF by default so deploying the code changes NO behavior.
+    # Stage: cognitive_enabled:true + cognitive_mode:shadow (log only) ->
+    # cognitive_mode:live + cognitive_channels:["lilith_os"] (Home) ->
+    # add "telegram" -> ["*"]. Read per-turn (router.yaml edits are live, no
+    # gateway restart). This lane governs belief/pending/draft turns ONLY and
+    # never alters social/technical/work routing.
+    cognitive_enabled: bool = False
+    cognitive_mode: str = "shadow"  # "shadow" (detect+log only) | "live" (inject)
+    cognitive_channels: List[str] = field(default_factory=list)
+    # Slice 7.3: deterministic semantic de-dup of career follow-up drafts. When
+    # true (default), a create request reuses an existing UNSENT follow-up draft
+    # for the same application instead of creating a duplicate; multiple existing
+    # unresolved drafts surface a reconciliation notice. Set false to restore the
+    # pre-7.3 always-create behaviour without reverting code.
+    cognitive_draft_dedup: bool = True
+
+    # -- Slice 8: Goal / Executive lane (additive; reuses cognitive_channels).
+    # Independent rollout: goals_enabled + goals_mode:shadow (detect+log) ->
+    # goals_mode:live (inject durable Goal/Executive grounding; create only on
+    # an explicit 'track as a goal'). Channel scope reuses cognitive_channels.
+    goals_enabled: bool = False
+    goals_mode: str = "shadow"
+
+    # -- Slice 9: Reasoning lane (additive; reuses cognitive_channels). --
+    # reasoning_enabled + reasoning_mode:shadow (detect+log) -> live (bounded
+    # tool-less reasoning answer). Analytic framings only; yields to 7.2/8.
+    reasoning_enabled: bool = False
+    reasoning_mode: str = "shadow"
+
+    # -- Slice 10: Global Workspace / Attention lane (additive; reuses
+    # cognitive_channels). workspace_enabled + workspace_mode:shadow (build+log
+    # snapshot only) -> live (snapshot bounds the Slice 9 ReasoningInput).
+    # workspace_capacity = secondary capacity, hard-bounded [0,8] downstream.
+    workspace_enabled: bool = False
+    workspace_mode: str = "shadow"
+    workspace_capacity: int = 4
+
+    # -- Slice 11: Motivation / Homeostasis lane (additive; reuses
+    # cognitive_channels). motivation_enabled + motivation_mode:shadow
+    # (build+log snapshot only) -> live (eligible MOTIVATION_DRIVE candidates
+    # merge into the Workspace pool + bounded motivationSummary on the
+    # ReasoningInput). Ordinal only; no numeric tuning. Read per-turn.
+    motivation_enabled: bool = False
+    motivation_mode: str = "shadow"
+
+    def channel_is_live(self, platform: str, chat_id: str) -> bool:
+        """True when live switching is allowed for this channel."""
+        if self.mode != "live":
+            return False
+        if not self.live_channels:
+            return False
+        if "*" in self.live_channels:
+            return True
+        key = f"{platform}:{chat_id}"
+        return key in self.live_channels or platform in self.live_channels
+
+    def _cognitive_channel_match(self, platform: str, chat_id: str) -> bool:
+        if not self.cognitive_channels:
+            return False
+        if "*" in self.cognitive_channels:
+            return True
+        key = f"{platform}:{chat_id}"
+        return key in self.cognitive_channels or platform in self.cognitive_channels
+
+    def cognitive_is_active(self, platform: str, chat_id: str) -> bool:
+        """The cognitive lane is engaged for this channel (shadow or live)."""
+        return bool(self.cognitive_enabled) and self._cognitive_channel_match(platform, str(chat_id))
+
+    def cognitive_is_live(self, platform: str, chat_id: str) -> bool:
+        """The cognitive lane may actually inject context / create drafts."""
+        return self.cognitive_is_active(platform, chat_id) and self.cognitive_mode == "live"
+
+    def goals_is_active(self, platform: str, chat_id: str) -> bool:
+        """The goal/executive lane is engaged for this channel (shadow or live)."""
+        return bool(self.goals_enabled) and self._cognitive_channel_match(platform, str(chat_id))
+
+    def goals_is_live(self, platform: str, chat_id: str) -> bool:
+        """The goal lane may inject Goal/Executive grounding / create goals."""
+        return self.goals_is_active(platform, chat_id) and self.goals_mode == "live"
+
+    def reasoning_is_active(self, platform: str, chat_id: str) -> bool:
+        """The reasoning lane is engaged for this channel (shadow or live)."""
+        return bool(self.reasoning_enabled) and self._cognitive_channel_match(platform, str(chat_id))
+
+    def reasoning_is_live(self, platform: str, chat_id: str) -> bool:
+        """The reasoning lane may run the bounded tool-less reasoning call."""
+        return self.reasoning_is_active(platform, chat_id) and self.reasoning_mode == "live"
+
+    def workspace_is_active(self, platform: str, chat_id: str) -> bool:
+        """The workspace/attention lane is engaged for this channel (shadow or live)."""
+        return bool(self.workspace_enabled) and self._cognitive_channel_match(platform, str(chat_id))
+
+    def workspace_is_live(self, platform: str, chat_id: str) -> bool:
+        """The workspace snapshot may bound the ReasoningInput (else shadow: log only)."""
+        return self.workspace_is_active(platform, chat_id) and self.workspace_mode == "live"
+
+    def motivation_is_active(self, platform: str, chat_id: str) -> bool:
+        """The motivation/homeostasis lane is engaged for this channel (shadow or live)."""
+        return bool(self.motivation_enabled) and self._cognitive_channel_match(platform, str(chat_id))
+
+    def motivation_is_live(self, platform: str, chat_id: str) -> bool:
+        """Eligible drive candidates may merge into the Workspace pool (else shadow: log only)."""
+        return self.motivation_is_active(platform, chat_id) and self.motivation_mode == "live"
+
+    def resolved_log_path(self) -> Path:
+        if self.log_path:
+            return Path(os.path.expanduser(self.log_path))
+        return _hermes_home() / "lilith_router" / "decisions.log"
+
+
+def load() -> RouterConfig:
+    """Load config from disk. Never raises — returns defaults on any error."""
+    try:
+        import yaml  # Hermes ships pyyaml
+        raw = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw, dict):
+            return RouterConfig()
+        cfg = RouterConfig()
+        cfg.enabled = bool(raw.get("enabled", cfg.enabled))
+        cfg.mode = str(raw.get("mode", cfg.mode)).strip().lower() or "shadow"
+        lc = raw.get("live_channels", [])
+        cfg.live_channels = [str(x) for x in lc] if isinstance(lc, (list, tuple)) else []
+        cfg.groq_model = str(raw.get("groq_model", cfg.groq_model))
+        cfg.groq_provider = str(raw.get("groq_provider", cfg.groq_provider))
+        cfg.hermes_model = str(raw.get("hermes_model", cfg.hermes_model))
+        cfg.hermes_provider = str(raw.get("hermes_provider", cfg.hermes_provider))
+        cfg.recent_turns = int(raw.get("recent_turns", cfg.recent_turns))
+        cfg.log_path = str(raw.get("log_path", cfg.log_path) or "")
+        # Slice 7.2 cognitive lane (additive; safe defaults keep it OFF).
+        cfg.cognitive_enabled = bool(raw.get("cognitive_enabled", cfg.cognitive_enabled))
+        cfg.cognitive_mode = str(
+            raw.get("cognitive_mode", cfg.cognitive_mode)
+        ).strip().lower() or "shadow"
+        cc = raw.get("cognitive_channels", [])
+        cfg.cognitive_channels = [str(x) for x in cc] if isinstance(cc, (list, tuple)) else []
+        cfg.cognitive_draft_dedup = bool(raw.get("cognitive_draft_dedup", cfg.cognitive_draft_dedup))
+        cfg.goals_enabled = bool(raw.get("goals_enabled", cfg.goals_enabled))
+        cfg.goals_mode = str(raw.get("goals_mode", cfg.goals_mode)).strip().lower() or "shadow"
+        cfg.reasoning_enabled = bool(raw.get("reasoning_enabled", cfg.reasoning_enabled))
+        cfg.reasoning_mode = str(raw.get("reasoning_mode", cfg.reasoning_mode)).strip().lower() or "shadow"
+        cfg.workspace_enabled = bool(raw.get("workspace_enabled", cfg.workspace_enabled))
+        cfg.workspace_mode = str(raw.get("workspace_mode", cfg.workspace_mode)).strip().lower() or "shadow"
+        try:
+            cfg.workspace_capacity = int(raw.get("workspace_capacity", cfg.workspace_capacity))
+        except (TypeError, ValueError):
+            pass
+        cfg.motivation_enabled = bool(raw.get("motivation_enabled", cfg.motivation_enabled))
+        cfg.motivation_mode = str(raw.get("motivation_mode", cfg.motivation_mode)).strip().lower() or "shadow"
+        return cfg
+    except FileNotFoundError:
+        return RouterConfig()
+    except Exception:
+        logger.debug("lilith_router: config load failed; using safe defaults", exc_info=True)
+        return RouterConfig()

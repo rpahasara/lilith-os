@@ -1,0 +1,39 @@
+# LILITH Conversation Intelligence Router V2 — runtime config
+#
+# Rollout ladder (change one step at a time, watch decisions.log):
+#   1. enabled: false                      -> router is a complete no-op (DEFAULT)
+#   2. enabled: true,  mode: shadow        -> logs decisions on all traffic, never switches
+#   3. enabled: true,  mode: live,
+#      live_channels: ["discord:<chat_id>"] -> live switching on ONE channel only
+#   4. live_channels: ["*"]                -> global live switching
+#
+# Mode/provider decisions are invisible to the user. Never expose provider or
+# model names in responses.
+
+enabled: true          # master switch — keep OFF until validated
+mode: live            # "shadow" (observe only) | "live" (may switch to Groq)
+live_channels: ["discord:__LILITH_DISCORD_CHANNEL_ID__", "telegram", "lilith_os"]       # allow-list of "platform:chat_id" (or "*"); empty = none live
+
+groq_model: "qwen/qwen3.8-27b"
+groq_provider: "groq"
+
+# Social-turn fallback: if the Groq call fails / rate-limits / times out, the
+# turn retries on this Hermes model carrying the same social behavior policy.
+hermes_model: "gpt-5.6-sol"
+hermes_provider: "openai-codex"
+
+recent_turns: 6         # bounded recent context considered by the classifier
+# log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
+
+# ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────
+# Additive. Governs ONLY belief / pending / durable-draft turns; never alters the
+# social/technical/work routing above. Default OFF so deploying the code changes
+# NO behavior. Read per-turn (edits are live — NO gateway restart needed).
+# Ladder:
+#   cognitive_enabled: true, cognitive_mode: shadow        -> detect + log only
+#   cognitive_mode: live, cognitive_channels: ["lilith_os"] -> Home free-chat live
+#   cognitive_channels: ["lilith_os","telegram"]            -> add Telegram
+#   cognitive_channels: ["*"]                               -> all channels
+cognitive_enabled: true
+cognitive_mode: live
+cognitive_channels: ["lilith_os", "telegram"]

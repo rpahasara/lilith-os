@@ -1,0 +1,306 @@
+"""Bridge between the Hermes gateway turn-builder and the LILITH router.
+
+The gateway core calls exactly one function — :func:`route_turn` — from a small
+guarded block in ``gateway/run.py``. This function decides whether the current
+turn should be served by the Groq social brain and, if so, returns the
+overrides the core applies for that single turn. It NEVER raises into the core
+(all paths are wrapped) and returns ``None`` to mean "do nothing, use the native
+gpt-5.6-sol path".
+
+Contract with the core patch
+----------------------------
+``route_turn(...) -> Optional[dict]`` where the dict may contain:
+    turn_route          -- replacement for the local ``turn_route``
+    combined_ephemeral  -- replacement ephemeral system prompt (SOUL still loads)
+    force_rebuild       -- when True the core sets ``agent = None`` to rebuild
+    mode                -- decided mode (for logging only)
+
+Safety model
+------------
+* Master flag OFF (default) or shadow mode  -> always returns None.
+* Only ``social`` turns on an allow-listed live channel produce an override.
+* Groq creds missing / any exception         -> returns None (fail open).
+* Fallback to gpt-5.6-sol on a Groq runtime failure is handled natively by the
+  agent's ``fallback_model`` chain, carrying this turn's social ephemeral prompt.
+
+Slice 7.2 — cognitive lane
+--------------------------
+An additive, independently-flagged lane (``cognitive_*`` in router.yaml) gives
+belief / pending / durable-draft turns a World-Model-first grounding on the
+WORK brain (native gpt-5.6-sol), shared identically by Home (``lilith_os``) and
+Telegram. It runs BEFORE the social/technical/work decision, governs ONLY those
+turns, and — like everything here — is fully fail-open. See ``world_context``.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+
+from . import config as _config
+from . import policy as _policy
+from . import social_guard as _social_guard
+from . import world_context as _world_context
+from .classifier import SOCIAL, WORK, classify
+from .state import STATE
+
+logger = logging.getLogger(__name__)
+
+
+def _platform_name(source) -> str:
+    plat = getattr(source, "platform", None)
+    return getattr(plat, "value", None) or str(plat)
+
+
+def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
+    """Append one JSON line describing the routing decision. Never raises.
+
+    No secrets are logged. A short message preview (≤60 chars) is included for
+    auditing — consistent with the gateway's own inbound-message logging.
+    """
+    try:
+        path = cfg.resolved_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": round(time.time(), 3),
+            "platform": platform,
+            "chat_id": str(chat_id or ""),
+            "mode": decision.mode,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "signals": decision.signals,
+            "live": bool(live),
+            "preview": (message or "")[:60].replace("\n", " "),
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.debug("lilith_router: decision log write failed", exc_info=True)
+
+
+def _log_cognitive(cfg, platform, chat_id, intent, cog_mode, message) -> None:
+    """Append one JSON line describing a cognitive-lane decision. Never raises."""
+    try:
+        path = cfg.resolved_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": round(time.time(), 3),
+            "platform": platform,
+            "chat_id": str(chat_id or ""),
+            "lane": "cognitive",
+            "cognitive_mode": cog_mode,
+            "intent": {
+                k: intent.get(k)
+                for k in ("belief", "pending", "draft", "example_only", "app_id")
+            },
+            "preview": (message or "")[:60].replace("\n", " "),
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.debug("lilith_router: cognitive log write failed", exc_info=True)
+
+
+def _evict(runner, session_key) -> None:
+    fn = getattr(runner, "_evict_cached_agent", None)
+    if callable(fn) and session_key:
+        try:
+            fn(session_key)
+        except Exception:
+            logger.debug("lilith_router: cached-agent eviction failed", exc_info=True)
+
+
+def route_turn(
+    *,
+    runner,
+    ctx,
+    model,
+    runtime_kwargs,
+    turn_route,
+    combined_ephemeral,
+    reasoning_config=None,
+    cached_agent=None,
+):
+    try:
+        return _route_turn_impl(
+            runner=runner,
+            ctx=ctx,
+            model=model,
+            runtime_kwargs=runtime_kwargs,
+            turn_route=turn_route,
+            combined_ephemeral=combined_ephemeral,
+            reasoning_config=reasoning_config,
+            cached_agent=cached_agent,
+        )
+    except Exception:
+        # Absolute guarantee: the router can never break a turn.
+        logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
+        return None
+
+
+def _route_turn_impl(
+    *, runner, ctx, model, runtime_kwargs, turn_route, combined_ephemeral,
+    reasoning_config, cached_agent,
+):
+    cfg = _config.load()
+    if not cfg.enabled:
+        return None
+
+    source = getattr(ctx, "source", None)
+    if source is None:
+        return None
+    platform = _platform_name(source)
+    chat_id = getattr(source, "chat_id", "") or ""
+    session_key = getattr(ctx, "session_key", None) or f"{platform}:{chat_id}"
+    message = getattr(ctx, "message", "") or ""
+
+    # Decide the mode from message + bounded recent turns + previous mode.
+    recent = STATE.recent(session_key, cfg.recent_turns)
+    previous_mode = STATE.previous_mode(session_key)
+    decision = classify(message, recent, previous_mode)
+
+    # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
+    # Runs BEFORE the social/technical/work model decision so a belief or pending
+    # question that would otherwise be misrouted (e.g. "what's pending" reads as
+    # social) is grounded on the WORK brain with World-Model context. Governs
+    # ONLY these turns; every other turn falls through to the unchanged routing.
+    if cfg.cognitive_is_active(platform, str(chat_id)):
+        try:
+            intent = _world_context.detect_intent(message)
+        except Exception:
+            intent = None
+        if intent and intent.get("any"):
+            cog_live = cfg.cognitive_is_live(platform, str(chat_id))
+            _log_cognitive(
+                cfg, platform, chat_id, intent, "live" if cog_live else "shadow", message
+            )
+            if cog_live:
+                # Record a non-social mode so the social-reply guard leaves this
+                # grounded WORK turn untouched, and continuity stays sane.
+                STATE.record(session_key, message, WORK)
+                try:
+                    suffix, _action = _world_context.build_grounding(
+                        message=message,
+                        session_key=session_key,
+                        intent=intent,
+                        do_write=True,
+                    )
+                except Exception:
+                    suffix = None
+                    logger.debug("lilith_router: build_grounding failed", exc_info=True)
+                if suffix:
+                    base = (combined_ephemeral or "").strip()
+                    grounded = (base + "\n\n" + suffix) if base else suffix
+                    # Ensure the WORK brain (native gpt-5.6-sol) runs, not a
+                    # lingering Groq social agent.
+                    if getattr(cached_agent, "model", None) == cfg.groq_model:
+                        _evict(runner, session_key)
+                    return {
+                        "turn_route": turn_route,          # native model unchanged
+                        "combined_ephemeral": grounded,
+                        "force_rebuild": True,             # guarantee grounding applies
+                        "mode": "cognitive",
+                    }
+                # Grounding unavailable -> fall through to normal routing below.
+            # Shadow mode -> observed + logged only; fall through unchanged.
+    # ── end cognitive lane ──
+
+    STATE.record(session_key, message, decision.mode)
+
+    live = cfg.channel_is_live(platform, str(chat_id))
+    _log_decision(cfg, platform, chat_id, decision, live, message)
+
+    # Shadow (or channel not live-enabled): observe only, never switch.
+    if not live:
+        return None
+
+    cached_model = getattr(cached_agent, "model", None)
+    groq_model = cfg.groq_model
+
+    if decision.mode == SOCIAL:
+        # Already running on the Groq social agent — reuse it.
+        if cached_agent is not None and cached_model == groq_model:
+            return None
+        # Resolve Groq credentials natively; bail (fail open) if unauthenticated.
+        try:
+            groq_runtime = runner._resolve_runtime_agent_kwargs_for_provider(
+                cfg.groq_provider
+            )
+        except Exception:
+            logger.debug("lilith_router: groq creds unresolved; fail open", exc_info=True)
+            return None
+        if not (groq_runtime.get("api_key") or groq_runtime.get("credential_pool")):
+            return None
+        groq_route = runner._resolve_turn_agent_config(
+            message, groq_model, dict(groq_runtime)
+        )
+        ephemeral = _policy.social_ephemeral(combined_ephemeral)
+        force = cached_agent is not None  # exists but non-groq -> rebuild
+        if force:
+            _evict(runner, session_key)
+        # Per-turn fallback: if the Groq turn fails / rate-limits / times out,
+        # Hermes' native fallback chain retries on gpt-5.6-sol carrying THIS
+        # turn's social ephemeral prompt (= "GPT-5.6 Sol with social policy").
+        fallback = [{"provider": cfg.hermes_provider, "model": cfg.hermes_model}]
+        return {
+            "turn_route": groq_route,
+            "combined_ephemeral": ephemeral,
+            "fallback_model": fallback,
+            "force_rebuild": force,
+            "mode": SOCIAL,
+        }
+
+    # technical / work -> native gpt-5.6-sol. Only intervene to switch BACK
+    # from a lingering Groq social agent.
+    if cached_agent is not None and cached_model == groq_model:
+        _evict(runner, session_key)
+        return {"force_rebuild": True, "mode": decision.mode}
+    return None
+
+
+def enforce_reply(final_response, ctx):
+    """Post-generation social-response guard. Returns the reply to deliver.
+
+    Runs ONLY for a live social turn (this session's last routed mode is social
+    on a live channel). Strips residual reasoning wrappers and, on empty/leaky
+    output, regenerates a clean reply on gpt-5.6-sol under the social policy so
+    the user always receives a normal LILITH message. NEVER raises into the
+    core: on any error it returns the original reply unchanged (fail open).
+
+    Cognitive-lane turns record mode WORK, so the ``previous_mode == SOCIAL``
+    guard below leaves their grounded replies untouched.
+    """
+    try:
+        cfg = _config.load()
+        if not cfg.enabled:
+            return final_response
+        source = getattr(ctx, "source", None)
+        if source is None:
+            return final_response
+        platform = _platform_name(source)
+        chat_id = getattr(source, "chat_id", "") or ""
+        session_key = getattr(ctx, "session_key", None) or f"{platform}:{chat_id}"
+        # Only guard turns we actually route live to the social brain.
+        if not cfg.channel_is_live(platform, str(chat_id)):
+            return final_response
+        if STATE.previous_mode(session_key) != SOCIAL:
+            return final_response
+        last_reply = STATE.last_social_reply(session_key)
+        delivered = _social_guard.enforce_social_reply(
+            final_response,
+            user_message=getattr(ctx, "message", "") or "",
+            recent=STATE.recent(session_key, cfg.recent_turns),
+            last_reply=last_reply,
+        )
+        # Remember the delivered reply so the next social turn can enforce the
+        # adjacent pet-name rule against what the user actually saw.
+        try:
+            if isinstance(delivered, str) and delivered.strip():
+                STATE.record_social_reply(session_key, delivered)
+        except Exception:
+            logger.debug("lilith_router: record_social_reply failed", exc_info=True)
+        return delivered
+    except Exception:
+        logger.debug("lilith_router: enforce_reply failed (fail-open)", exc_info=True)
+        return final_response

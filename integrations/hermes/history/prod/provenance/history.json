@@ -1,0 +1,874 @@
+{
+ "export": "bounded read-only PROD source export, lilith-01 (id 1332996232081478576), 2026-10-27",
+ "status_vocabulary": {
+  "BYTE_EXACT": "Git bytes equal the deployed PROD bytes",
+  "SANITIZED_FOR_GIT": "named private values replaced by placeholders; Git bytes differ from PROD; original kept in owner custody"
+ },
+ "files": [
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260825-144348",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260825-144348",
+   "size": 6772,
+   "prod_sha256": "7a2c10c88193b08ede6a53238806040d418580ed81769a075750e82340a7ecc4",
+   "git_sha256": "7a2c10c88193b08ede6a53238806040d418580ed81769a075750e82340a7ecc4",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787638514,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260825-161036",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260825-161036",
+   "size": 12205,
+   "prod_sha256": "4b48164d0581d3952a0d149d1cd37c37f92f742791f2c8ca4b814af2c271bceb",
+   "git_sha256": "4b48164d0581d3952a0d149d1cd37c37f92f742791f2c8ca4b814af2c271bceb",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787669371,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260825-164203",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260825-164203",
+   "size": 25333,
+   "prod_sha256": "6245f4e56b37479d0ec63a423da56eb361a9c0ba35d52fc048c94bd45905e3b0",
+   "git_sha256": "6245f4e56b37479d0ec63a423da56eb361a9c0ba35d52fc048c94bd45905e3b0",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787674267,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260827-140121",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260827-140121",
+   "size": 36161,
+   "prod_sha256": "4d7914636c6022f734282f1b01d9810e969b99803d5d38d949f2f6cf39d15b05",
+   "git_sha256": "4d7914636c6022f734282f1b01d9810e969b99803d5d38d949f2f6cf39d15b05",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787676511,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260907-055335",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260907-055335",
+   "size": 39514,
+   "prod_sha256": "7961dd144bc4b99505cf507297bb900d3087c361cae65c838c71091aca115f1a",
+   "git_sha256": "7961dd144bc4b99505cf507297bb900d3087c361cae65c838c71091aca115f1a",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788760415,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260907-071635",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260907-071635",
+   "size": 51290,
+   "prod_sha256": "5b8f58122f142589d20e65fc178dec28ff81376902316264a249c837905abd2c",
+   "git_sha256": "5b8f58122f142589d20e65fc178dec28ff81376902316264a249c837905abd2c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788760415,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260907-111159",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260907-111159",
+   "size": 60312,
+   "prod_sha256": "f99985217b5796d3dd601d9c1ea9e25e0a966175c85418d170fe54b8bad99ffe",
+   "git_sha256": "f99985217b5796d3dd601d9c1ea9e25e0a966175c85418d170fe54b8bad99ffe",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788765449,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260907-170850",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260907-170850",
+   "size": 60327,
+   "prod_sha256": "340358764024a83b4425484423b45417d70b4cf75d4e204c4576a89c26ff6c9e",
+   "git_sha256": "340358764024a83b4425484423b45417d70b4cf75d4e204c4576a89c26ff6c9e",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788779519,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260907-173941",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260907-173941",
+   "size": 84241,
+   "prod_sha256": "90083ddb4a64ae350850d3a1b53d56bf9d86f48dc7ef963eb990fc75293e8cde",
+   "git_sha256": "90083ddb4a64ae350850d3a1b53d56bf9d86f48dc7ef963eb990fc75293e8cde",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788801082,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.20260908-100133",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.20260908-100133",
+   "size": 91262,
+   "prod_sha256": "f44396c58e2f34dc9e1820ce69bebf217eb088ecf9ea3b5853c878843dd48d45",
+   "git_sha256": "f44396c58e2f34dc9e1820ce69bebf217eb088ecf9ea3b5853c878843dd48d45",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788802978,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/api/app.py.bak.gitdeploy.20260913T153019Z",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/api/app.py.bak.gitdeploy.20260913T153019Z",
+   "size": 122756,
+   "prod_sha256": "743a804aa7e3cbb8edf7ff8e3a698a74d4bc17cce2cfefe24c353b52c214d6e2",
+   "git_sha256": "743a804aa7e3cbb8edf7ff8e3a698a74d4bc17cce2cfefe24c353b52c214d6e2",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1789313419,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/groq_smoke_test.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/groq_smoke_test.py",
+   "size": 2206,
+   "prod_sha256": "5d840fce8948acda24496cf1e4fa54823dccec7a59cbac0eeca365e7356a45d4",
+   "git_sha256": "5d840fce8948acda24496cf1e4fa54823dccec7a59cbac0eeca365e7356a45d4",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787733979,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_conversation_router.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_conversation_router.py",
+   "size": 10218,
+   "prod_sha256": "ddf0c6e1a5aa4d26d1bed59304423914db5d26b9fe6aab20a6ea90580ed83e38",
+   "git_sha256": "ddf0c6e1a5aa4d26d1bed59304423914db5d26b9fe6aab20a6ea90580ed83e38",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787737676,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_groq_bakeoff.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_groq_bakeoff.py",
+   "size": 3722,
+   "prod_sha256": "bf4686ba476eff1ab28bcc56a4788692dfe18c7ecc058bbb6f6f79e2fae122f0",
+   "git_sha256": "bf4686ba476eff1ab28bcc56a4788692dfe18c7ecc058bbb6f6f79e2fae122f0",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787733821,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_groq_final_test.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_groq_final_test.py",
+   "size": 3839,
+   "prod_sha256": "eb513bd310ac7de06d8d8c0e93e799101c821c011b04903d9dafff745b67325b",
+   "git_sha256": "eb513bd310ac7de06d8d8c0e93e799101c821c011b04903d9dafff745b67325b",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787736791,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_social_bakeoff.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_social_bakeoff.py",
+   "size": 2788,
+   "prod_sha256": "844f87328c513e4a1f36f0ada8e298857732439056ccd30f5191b616e95fc46d",
+   "git_sha256": "844f87328c513e4a1f36f0ada8e298857732439056ccd30f5191b616e95fc46d",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787730784,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_social_multiturn.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_social_multiturn.py",
+   "size": 3833,
+   "prod_sha256": "2a21ba26def093fd299b472372c3d5cf747a1209f8cef56b0c1883f4ef30ccb1",
+   "git_sha256": "2a21ba26def093fd299b472372c3d5cf747a1209f8cef56b0c1883f4ef30ccb1",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787731221,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/lilith_social_round3.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/lilith_social_round3.py",
+   "size": 3222,
+   "prod_sha256": "d8afbaa08f66d94c5b0e8eca8ba7ab4ff61113f84d290ee8daa0de20de2bc5a5",
+   "git_sha256": "d8afbaa08f66d94c5b0e8eca8ba7ab4ff61113f84d290ee8daa0de20de2bc5a5",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787731553,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/puter_grok_test.py",
+   "repo_path": "integrations/hermes/history/prod/home-lilith/puter_grok_test.py",
+   "size": 2194,
+   "prod_sha256": "f34e0212447683d376003819e383169ff2c5f2e69ce5861603fc0a996ef05f81",
+   "git_sha256": "f34e0212447683d376003819e383169ff2c5f2e69ce5861603fc0a996ef05f81",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787733574,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-051429",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-051429",
+   "size": 3303,
+   "prod_sha256": "de970bc41ba67a3fa507493c3703191aaffbd2bda4714470682f2c2794fd30d4",
+   "git_sha256": "de970bc41ba67a3fa507493c3703191aaffbd2bda4714470682f2c2794fd30d4",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787745855,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-091656",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-091656",
+   "size": 5271,
+   "prod_sha256": "eb7244be03f71b82b6784856bc0d65961774b1f3cbd9903e838e8c385aff63fe",
+   "git_sha256": "eb7244be03f71b82b6784856bc0d65961774b1f3cbd9903e838e8c385aff63fe",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788844469,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-100618",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-100618",
+   "size": 5799,
+   "prod_sha256": "2788e8658bd9ac740b2d74db5fde3851700be265857f92180d630f79cf895483",
+   "git_sha256": "2788e8658bd9ac740b2d74db5fde3851700be265857f92180d630f79cf895483",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788859016,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-141508",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-141508",
+   "size": 6834,
+   "prod_sha256": "09906dac04ee459edbd25fc4390f8e5bf99641b0dcc48affeeb9326f3bafae0f",
+   "git_sha256": "09906dac04ee459edbd25fc4390f8e5bf99641b0dcc48affeeb9326f3bafae0f",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788861978,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-155803",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-155803",
+   "size": 7830,
+   "prod_sha256": "0572d9add5b3489ccf6c19015ba6c7f899538b40c62e834f578576a88fc1f3d4",
+   "git_sha256": "0572d9add5b3489ccf6c19015ba6c7f899538b40c62e834f578576a88fc1f3d4",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788876908,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260908-204811",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260908-204811",
+   "size": 9121,
+   "prod_sha256": "ce2098b3c2428789ffe9482c1a4f9dd6ba41615bde5af6b066e42c9c7b45d04b",
+   "git_sha256": "ce2098b3c2428789ffe9482c1a4f9dd6ba41615bde5af6b066e42c9c7b45d04b",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788883083,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.20260909-035048",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.20260909-035048",
+   "size": 10292,
+   "prod_sha256": "76c4604d06ee049908038f956b1561e35478a86d44f9d1e42e77e1ac2597ef47",
+   "git_sha256": "76c4604d06ee049908038f956b1561e35478a86d44f9d1e42e77e1ac2597ef47",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788900491,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.slice14.20260909T112534Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.slice14.20260909T112534Z",
+   "size": 13524,
+   "prod_sha256": "df944b19a01705ce92a47ff82c08ab7f494f707889e1827c92de9b38750c0eb3",
+   "git_sha256": "df944b19a01705ce92a47ff82c08ab7f494f707889e1827c92de9b38750c0eb3",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788933239,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.slice15a.20260909T135027Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.slice15a.20260909T135027Z",
+   "size": 14644,
+   "prod_sha256": "49599036f8a966e9977586fa2b58d1cf033a14af3593e3805ede55493cea5be9",
+   "git_sha256": "49599036f8a966e9977586fa2b58d1cf033a14af3593e3805ede55493cea5be9",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788953189,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/config.py.bak.slice15b1.20260909T164925Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/config.py.bak.slice15b1.20260909T164925Z",
+   "size": 15536,
+   "prod_sha256": "bb04943f4b51b7b4a7f1ecad531d7cf9f3305a8ed90a1a8fe96f0bbcfefdffb5",
+   "git_sha256": "bb04943f4b51b7b4a7f1ecad531d7cf9f3305a8ed90a1a8fe96f0bbcfefdffb5",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788961827,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/ethics.py.bak.snapfix.20260909-060316",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/ethics.py.bak.snapfix.20260909-060316",
+   "size": 35205,
+   "prod_sha256": "7fa69d32dca6e04161c884657addde74f6628a188edf535b2d1a85d6abf91a64",
+   "git_sha256": "7fa69d32dca6e04161c884657addde74f6628a188edf535b2d1a85d6abf91a64",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788933796,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260827-085515",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260827-085515",
+   "size": 8217,
+   "prod_sha256": "600224478761b7343f186a505adcadabdf485f103a5b258416c8dfb9825fc09e",
+   "git_sha256": "600224478761b7343f186a505adcadabdf485f103a5b258416c8dfb9825fc09e",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787745855,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-051429",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-051429",
+   "size": 8743,
+   "prod_sha256": "0593ed814e7732b9858e8395e872d804c8753dd51f89bbc1737c756181aa6f5b",
+   "git_sha256": "0593ed814e7732b9858e8395e872d804c8753dd51f89bbc1737c756181aa6f5b",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787820915,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-091656",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-091656",
+   "size": 12771,
+   "prod_sha256": "5355103aa40bb9dbc8b4909e5b49fe3765a548ea473b6409103db781c5753666",
+   "git_sha256": "5355103aa40bb9dbc8b4909e5b49fe3765a548ea473b6409103db781c5753666",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788844469,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-100618",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-100618",
+   "size": 12828,
+   "prod_sha256": "2e6ac7b9c4b5666141717ab4e652b6c6070df243a2ab9e2dc7993e12c46cfd97",
+   "git_sha256": "2e6ac7b9c4b5666141717ab4e652b6c6070df243a2ab9e2dc7993e12c46cfd97",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788859016,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-141508",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-141508",
+   "size": 15750,
+   "prod_sha256": "3d1e7a1b7ee8e4890ec2b0b0aa47954e03eb59d23852f7fd579d268f3289b063",
+   "git_sha256": "3d1e7a1b7ee8e4890ec2b0b0aa47954e03eb59d23852f7fd579d268f3289b063",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788861978,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-155803",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-155803",
+   "size": 18680,
+   "prod_sha256": "92c01c49252ef2bea2c7492ea1a135ad99ad6ae16011aa3b523f4f3b58c51587",
+   "git_sha256": "92c01c49252ef2bea2c7492ea1a135ad99ad6ae16011aa3b523f4f3b58c51587",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788876908,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260908-204811",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260908-204811",
+   "size": 21089,
+   "prod_sha256": "c9c028f8b17e90d2c9bea45dc1b585f8ef45af1ea81c7a6aa05ebfff38913629",
+   "git_sha256": "c9c028f8b17e90d2c9bea45dc1b585f8ef45af1ea81c7a6aa05ebfff38913629",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788883083,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.20260909-035048",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.20260909-035048",
+   "size": 23407,
+   "prod_sha256": "9c667eef0699c1fba232c3d1e43f48bb4dc332a172dd38893771f8ef3075cfef",
+   "git_sha256": "9c667eef0699c1fba232c3d1e43f48bb4dc332a172dd38893771f8ef3075cfef",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788900491,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/gateway_integration.py.bak.slice14.20260909T112534Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/gateway_integration.py.bak.slice14.20260909T112534Z",
+   "size": 32094,
+   "prod_sha256": "7d98f1581e164a9334a793d44887f2da152585d345fa07e3af0c4ba4e37f3556",
+   "git_sha256": "7d98f1581e164a9334a793d44887f2da152585d345fa07e3af0c4ba4e37f3556",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788933239,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/learning_store.py.bak.slice15b2a.20260910T024935Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/learning_store.py.bak.slice15b2a.20260910T024935Z",
+   "size": 30096,
+   "prod_sha256": "b8ad2baa35af505593c0043c89979e9b5be617cd82f883464f5a9d7501f9a306",
+   "git_sha256": "b8ad2baa35af505593c0043c89979e9b5be617cd82f883464f5a9d7501f9a306",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788972596,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/policy.py.bak.20260826-120415",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/policy.py.bak.20260826-120415",
+   "size": 1815,
+   "prod_sha256": "0b92ba2cfc134232ff94fec7a4eff96b95759cad96f281a388a6d33a5a3da315",
+   "git_sha256": "0b92ba2cfc134232ff94fec7a4eff96b95759cad96f281a388a6d33a5a3da315",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787743923,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/policy.py.bak.slice15b2a.20260910T024935Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/policy.py.bak.slice15b2a.20260910T024935Z",
+   "size": 3744,
+   "prod_sha256": "3eca1aec75716b8a862330f225f29a4c616f807251a88a02ee41417ed2592e1f",
+   "git_sha256": "3eca1aec75716b8a862330f225f29a4c616f807251a88a02ee41417ed2592e1f",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787818997,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/social_guard.py.bak.20260826-120415",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/social_guard.py.bak.20260826-120415",
+   "size": 10088,
+   "prod_sha256": "2f4e017623529207dbee07263e0ef29b0af6a96e74e594ee58679c3ad01fd612",
+   "git_sha256": "2f4e017623529207dbee07263e0ef29b0af6a96e74e594ee58679c3ad01fd612",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787743923,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/social_guard.py.bak.20260827-085515",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/social_guard.py.bak.20260827-085515",
+   "size": 11188,
+   "prod_sha256": "acd3e44ae5a2055dcc1af8d8e7f79b8749b1fd3ebb5f90b83170d604bd5ecbac",
+   "git_sha256": "acd3e44ae5a2055dcc1af8d8e7f79b8749b1fd3ebb5f90b83170d604bd5ecbac",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787818997,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/state.py.bak.20260827-085515",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/state.py.bak.20260827-085515",
+   "size": 1993,
+   "prod_sha256": "fe4a989e092dfefffa3f8fcd7c41f66d6b022bf1a4a57107f0e0c8cdad06e2d9",
+   "git_sha256": "fe4a989e092dfefffa3f8fcd7c41f66d6b022bf1a4a57107f0e0c8cdad06e2d9",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787745855,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260826-105327",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260826-105327",
+   "size": 1261,
+   "prod_sha256": "5771ee3a09b67ab0ca2933334f6e4e89d1fea174d7ad903b72c70236bb499471",
+   "git_sha256": "5771ee3a09b67ab0ca2933334f6e4e89d1fea174d7ad903b72c70236bb499471",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787740755,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260826-114448",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260826-114448",
+   "size": 1260,
+   "prod_sha256": "27133ca46e518742c05951379045114c589698ff9e3d151e205ca377f8363c5d",
+   "git_sha256": "27133ca46e518742c05951379045114c589698ff9e3d151e205ca377f8363c5d",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787741607,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260827-140121",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260827-140121",
+   "size": 1299,
+   "prod_sha256": "614c7ff080b800f2821a1992d37ce1d31a29cb55f8242e1ae6e02e1e19368101",
+   "git_sha256": "82e7519a3ed302b5954d74c9288d99ae16e342ce730008984e1ae68e17033ef9",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1787825818,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-051429",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-051429",
+   "size": 1312,
+   "prod_sha256": "72b105edc95ff4c179fd5123fb3946071faa55638b98ea984df57c1105869c7b",
+   "git_sha256": "eb0fe06eb4cf8f63216645321bc23edef66d5d2002b416c1700c945dfe2193cc",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1787839281,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-052432",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-052432",
+   "size": 2055,
+   "prod_sha256": "5fc8c433447002ba86547bbf39b807b176b6c6cf7ccf29de74233a90d2199f62",
+   "git_sha256": "737b695316f168192d75672a8366524287c393afb171c234f5a65b27d86000cd",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788844469,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-052734",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-052734",
+   "size": 2065,
+   "prod_sha256": "046d7ba1f986b6eb68145ccd16fee6525b35dd07a0f5f8869f7a87a0d15e5f69",
+   "git_sha256": "96c57668b4cbb06fb51a4442c8a6abb5c25eebfd036caa40f9651ab905936afa",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788845072,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-053143",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-053143",
+   "size": 2063,
+   "prod_sha256": "13ee823e6e8398afbc6225106e66cd5768971055acff7f7383ba9c2e5bb668fd",
+   "git_sha256": "09cce7222640a60b7568583648040725f492a79e2c30134dad19688776b5755f",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788845254,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-091656",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-091656",
+   "size": 2075,
+   "prod_sha256": "7821c3caf5abba9a6447602ca50a9525fd1e78d4d2076bf1dd5133e9577aa94a",
+   "git_sha256": "ec1d5389cdd561ba0714a40751fbdc7f231381eaab05d6ebb4535878880479eb",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788845503,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-100618",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-100618",
+   "size": 2103,
+   "prod_sha256": "d47a1e8c167aca33656e26cb34cb0271f6d45ed50699804280bff13fd1e0ba0b",
+   "git_sha256": "0e9a5d1397dd781cbe01b33a570c70b1588a49a8ca779c241b393e58fc6dd85e",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788859016,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-141508",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-141508",
+   "size": 2392,
+   "prod_sha256": "4c9865aa91f3e9fb8cb4a727801e85bd3503a7e65b10d98b277eef4837ecd926",
+   "git_sha256": "bf0bb44bf22d8a727f8605fb5391efc660b253f901e921176aba6782f24e388c",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788862591,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-155803",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-155803",
+   "size": 2664,
+   "prod_sha256": "55a6b39e9d5451b7d4c3bb8d3c89792ab589eec72977ebd8f509bb7cc8902eb7",
+   "git_sha256": "fb4af4078a736af154fed4e5576102c0694dd678ae435e5e0a9ad98a3285c84a",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788877107,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260908-204811",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260908-204811",
+   "size": 3047,
+   "prod_sha256": "95a54d1bd851c88bf5ea5a8151329f949a871ad5b3eb7c550b5c1bc7db38f3c4",
+   "git_sha256": "2d02c10d22e31464d9ce93436dfa510406fe7461f03331dc4709b00ccbc749f5",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788883824,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260909-035048",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260909-035048",
+   "size": 3404,
+   "prod_sha256": "0978502d9e8b7e69ed5d662beb0c570064bbc2664d48997b10e43feab52b6ef4",
+   "git_sha256": "00c831c70019965792a4d20bf62924f6e34d433265a45ea0ffd209695452a312",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788901067,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.20260909-055359",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.20260909-055359",
+   "size": 3778,
+   "prod_sha256": "50d5f65145a3ebb3617c719e26f8baa36a7234eaa075f1b0107e13056d99b523",
+   "git_sha256": "e1a23f0a005dd73c47ccc4c0ca6f713d6e3f45462cf0ecf829cd40f1cc0b3526",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788927240,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.golive.20260908-101631",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.golive.20260908-101631",
+   "size": 2394,
+   "prod_sha256": "98a827b7dd3a6b360f0e04dad4aedc2e372c9ddafaa845163e4b24249b2954a3",
+   "git_sha256": "602f94e212a08c1cbcc4aeabc48d5c504ac7226944f77541c934f85daa8d28b7",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788861978,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.r9live.20260908-141827",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.r9live.20260908-141827",
+   "size": 2666,
+   "prod_sha256": "73e80fbc0b226e5a93ba7f38546f2892f8867c7e32539a9daea04f97970ddfe3",
+   "git_sha256": "bd0e0f404147496f783d9059427d8cd44b5da5efa87c5b0999f4e35bfc3ded64",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788876908,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.slice14.20260909T112534Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.slice14.20260909T112534Z",
+   "size": 4176,
+   "prod_sha256": "a7e2f25f2921b4863e8223a73769a9dfb3ab2ee4e95c6e55094c718f83b7114d",
+   "git_sha256": "506b358a4d4d9b8c9686c0cec975d1f3a65559b591c911ce39188027d0b6aba6",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788933646,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.slice15a.20260909T135027Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.slice15a.20260909T135027Z",
+   "size": 4474,
+   "prod_sha256": "5e205a6ad31c18d9f47b2d50d42a5e58b2c52d1ae224e7821cba802f81a1c69e",
+   "git_sha256": "4f769e9a0460dc1b6449c5a85a3ae4ff8191dace0514a425586b72eabf10bdf4",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788953189,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/router.yaml.bak.slice15b1.20260909T164925Z",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/router.yaml.bak.slice15b1.20260909T164925Z",
+   "size": 4755,
+   "prod_sha256": "df37c6c3c5403835872e457c539a049c2c7e592507e56d6749647adee54a7201",
+   "git_sha256": "97341849f0f2b23614c84dd22408b8b916e82e10ac896d412692cabb22308292",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788961970,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/_patched/config.py",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/_patched/config.py",
+   "size": 11807,
+   "prod_sha256": "0a9949ba312c30d6f04cd70c5bfa802a473588dfd6a9c95f5c2220e545182f0a",
+   "git_sha256": "0a9949ba312c30d6f04cd70c5bfa802a473588dfd6a9c95f5c2220e545182f0a",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788925706,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/_patched/gateway_integration.py",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/_patched/gateway_integration.py",
+   "size": 28108,
+   "prod_sha256": "9feac66ce1cc7b7f96ddddf3649f0ba02c4477ea772cae11992edc0d331e2f51",
+   "git_sha256": "9feac66ce1cc7b7f96ddddf3649f0ba02c4477ea772cae11992edc0d331e2f51",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788925706,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/_patched/router.yaml",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/_patched/router.yaml",
+   "size": 3780,
+   "prod_sha256": "ca451e5faa601a61be8c32b347f623b396ac111f0c305dfcbe1e48f1622bdc2d",
+   "git_sha256": "24426ff822350889641e3fae71ecd8274239d79af84b6972c28d664702b62faa",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788925706,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/_patched/test_planning.py",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/_patched/test_planning.py",
+   "size": 20994,
+   "prod_sha256": "db84d6f9a338d0f4b249e727b8942c4b6497582452109fc060082aa2cac8ff7d",
+   "git_sha256": "db84d6f9a338d0f4b249e727b8942c4b6497582452109fc060082aa2cac8ff7d",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788925706,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/checkpoints/policy.py.20260826-122342",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/checkpoints/policy.py.20260826-122342",
+   "size": 2388,
+   "prod_sha256": "93e8c0c0e3923cbccf81559330b4c8b3cd8710a09701d73c7d0235c22aebbaee",
+   "git_sha256": "93e8c0c0e3923cbccf81559330b4c8b3cd8710a09701d73c7d0235c22aebbaee",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787747022,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/checkpoints/router.yaml.20260826-122342",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/checkpoints/router.yaml.20260826-122342",
+   "size": 1287,
+   "prod_sha256": "1bd1a7d5628b5400fbe12e370c8e4f6c8b48c0a8e1b1aa88a080822ba5988a3c",
+   "git_sha256": "3020985cecb82d4ace1272e64d6750d6f94680439dfcdc07d18dcc8c2d3fd0ca",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1787747022,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/checkpoints/social_guard.py.20260826-122342",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/checkpoints/social_guard.py.20260826-122342",
+   "size": 10472,
+   "prod_sha256": "382292567b3a40b01408d9bb63b12c82087af22a6875212298a1e7be3fedad79",
+   "git_sha256": "382292567b3a40b01408d9bb63b12c82087af22a6875212298a1e7be3fedad79",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787747022,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/tests/test_social_guard.py.bak.20260827-085515",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/tests/test_social_guard.py.bak.20260827-085515",
+   "size": 3950,
+   "prod_sha256": "b91cf235e4369d7c49942a57bcb452be1f5b5432a1679cec0a8079f9c07d2f32",
+   "git_sha256": "b91cf235e4369d7c49942a57bcb452be1f5b5432a1679cec0a8079f9c07d2f32",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787745855,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/tests/test_world_context.py.bak.20260908-091656",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/tests/test_world_context.py.bak.20260908-091656",
+   "size": 10700,
+   "prod_sha256": "35da40f17f98eef3c899a6a6986b1eeaec2f6997283d77fcd83313529ea1b800",
+   "git_sha256": "35da40f17f98eef3c899a6a6986b1eeaec2f6997283d77fcd83313529ea1b800",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1788844469,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/tools/probe_groq.py",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/tools/probe_groq.py",
+   "size": 2736,
+   "prod_sha256": "0b0a184d108c936d52a7a32ac790d484792e54b372d58ca51b04fb8f55d58d31",
+   "git_sha256": "0b0a184d108c936d52a7a32ac790d484792e54b372d58ca51b04fb8f55d58d31",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787745855,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith_router/CURRENT_STATE.md",
+   "repo_path": "integrations/hermes/history/prod/lilith_router/CURRENT_STATE.md",
+   "size": 30922,
+   "prod_sha256": "1a4bfbbf0212fffa8c892a2790b521760ae0725ba63113cb7cadf6f486612de2",
+   "git_sha256": "17c60ea862251e28c8219cbdc189974268b9215266932914d779861fa8c92e3d",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__LILITH_DISCORD_CHANNEL_ID__"
+   ],
+   "prod_mtime_epoch": 1788942478,
+   "audit_sha256_matched": true
+  }
+ ]
+}
