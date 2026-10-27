@@ -1,0 +1,20 @@
+{
+  "overlay": "dev-unified-cognition",
+  "status": "PLANNED_NOT_DEPLOYED",
+  "base_variant": "dev-f9c2",
+  "note": "Applied on top of MODULES.json[dev-f9c2]. router.yaml, gateway_integration.py and plugins/lilith_os/adapter.py are unchanged, so every cognitive lane stays off.",
+  "files": {
+    "lilith_router/world_context.py": {
+      "sha256": "2404d7f5465f44d856e116e884d4fe07c8c1aca447bdb34ecf81a56ca717c2ff",
+      "source": "integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py",
+      "replaces": "5c1fbf98ead049013aa79fdfb4e74dd3dd210ab0c3386f257ce0b4e334e6a3d5",
+      "role": "governed DEV Working Memory adapter (replaces the import stub)"
+    },
+    "lilith_router/_prod_world_context.py": {
+      "sha256": "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/world_context.py",
+      "replaces": null,
+      "role": "recovered PROD Working Memory, byte-exact"
+    }
+  }
+}
