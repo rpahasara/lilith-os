@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LILITH Gmail watcher every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=lilith-gmail-watcher.service
+
+[Install]
+WantedBy=timers.target

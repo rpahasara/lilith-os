@@ -1,0 +1,17 @@
+[Unit]
+Description=LILITH OS Backend API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lilith
+Group=lilith
+Environment="HOME=/home/lilith"
+WorkingDirectory=/home/lilith/.hermes/lilith-os/api
+ExecStart=/home/lilith/.hermes/lilith-os/api-venv/bin/uvicorn app:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

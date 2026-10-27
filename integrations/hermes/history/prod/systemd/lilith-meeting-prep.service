@@ -1,0 +1,12 @@
+[Unit]
+Description=LILITH Meeting Prep watcher and runner
+After=network-online.target hermes-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lilith
+Group=lilith
+WorkingDirectory=/home/lilith
+ExecStart=/bin/bash -lc '/home/lilith/.hermes/automation/productivity/meeting_prep_watcher.py && /home/lilith/.hermes/automation/productivity/meeting_context_collector.py && /home/lilith/.hermes/automation/productivity/meeting_prep_runner.py'
+TimeoutStartSec=10min

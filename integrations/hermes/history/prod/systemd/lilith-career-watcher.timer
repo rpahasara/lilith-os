@@ -1,0 +1,11 @@
+[Unit]
+Description=Run LILITH Career CRM Watcher every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=lilith-career-watcher.service
+
+[Install]
+WantedBy=timers.target
