@@ -1,0 +1,26 @@
+name: lilith_os
+label: LILITH OS
+kind: platform
+version: 1.0.0
+description: >
+  Trusted local operator console for LILITH OS. Exposes a localhost-only,
+  synchronous HTTP endpoint so the LILITH OS web app can converse with LILITH
+  through the normal gateway MessageEvent path (Conversation Router V2, full
+  memory + persona). This is NOT an agent-to-agent surface: the bind is
+  127.0.0.1 only and the single caller is treated as the authenticated local
+  operator, so there is no a2a-style untrusted framing and no email/token
+  redaction of normal operator-facing replies. Pure Python stdlib — no extra
+  packages required. Activated by setting LILITH_OS_PORT.
+author: LILITH
+requires_env: []
+optional_env:
+  - name: LILITH_OS_PORT
+    description: "Localhost port for the OS operator console. Setting it enables the platform (default 9901)."
+    prompt: "LILITH OS console port (default 9901)"
+  - name: LILITH_OS_TOKEN
+    description: "Shared secret required in the X-LILITH-OS-Token header — defense-in-depth on top of the 127.0.0.1-only bind."
+    prompt: "LILITH OS console shared token (blank = localhost-only)"
+    password: true
+  - name: LILITH_OS_REPLY_TIMEOUT
+    description: "Seconds to wait for LILITH's reply before returning a timeout (default 180)."
+    prompt: "Reply timeout seconds (default 180)"

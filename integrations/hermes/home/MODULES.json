@@ -1,0 +1,280 @@
+{
+  "dev-f9c2": {
+    "lilith_router/__init__.py": {
+      "sha256": "de39ddefb212155a6f375a39d679e37ba6bb118985232d5c2ebb04a4a6a80402",
+      "source": "integrations/hermes/home/lilith_router/__init__.py"
+    },
+    "lilith_router/canonical_authority.py": {
+      "sha256": "bd2cfcc1b6852b9a13a3f95a95e1ebc4097124565418ee57fd4719efd44c0540",
+      "source": "docs/architecture/slice-15b2a/canonical_authority.py"
+    },
+    "lilith_router/canonical_contracts.py": {
+      "sha256": "f93d26d8a7e01d78d25f1f1d9540577cf2a55dfd4d52c4b64c87bef93ad887e0",
+      "source": "services/core-api/lilith_memory/canonical_contracts.py"
+    },
+    "lilith_router/classifier.py": {
+      "sha256": "4c92fee95f31f77570a1aa83b1059caf15e12877c2480665022c291d871b6fff",
+      "source": "integrations/hermes/home/lilith_router/classifier.py"
+    },
+    "lilith_router/config.py": {
+      "sha256": "14b0a6e870eb18a7494574fc403c7002ea18bd8761a3f897368572d4f4b60b2d",
+      "source": "integrations/hermes/home/lilith_router/config.py"
+    },
+    "lilith_router/ethics.py": {
+      "sha256": "b6e3ce49afad658bd314dc9c28c524f324a3123e52fbd49a55ab5e1137e50a66",
+      "source": "docs/architecture/slice-13/ethics.py"
+    },
+    "lilith_router/ethics_principles.py": {
+      "sha256": "178990e53404518b937627fccc0d8dd590a49f061116681a11eadc338b713b63",
+      "source": "docs/architecture/slice-13/ethics_principles.py"
+    },
+    "lilith_router/gateway_integration.py": {
+      "sha256": "5ce4bbd4b53755c4f6f97b433f65fd4428965659936615f894283c3e266037e0",
+      "source": "integrations/hermes/home/variants/dev-f9c2/lilith_router/gateway_integration.py"
+    },
+    "lilith_router/learning.py": {
+      "sha256": "7a74ebbcbfb77c7a68399581b1dd6c4ea74fd432c95a1a0c235bdcf9fcfd87f0",
+      "source": "integrations/hermes/home/lilith_router/learning.py"
+    },
+    "lilith_router/learning_store.py": {
+      "sha256": "b093089f155a0670612e026618fc901df78ebb722f0247fb6cec31f0d417acb8",
+      "source": "integrations/hermes/home/lilith_router/learning_store.py"
+    },
+    "lilith_router/learning_v2.py": {
+      "sha256": "e3fe629dc9109e37728793e21801950b3b43d9fe09e5ca2409303dbbfe96ed31",
+      "source": "docs/architecture/slice-15b2a/learning_v2.py"
+    },
+    "lilith_router/learning_worker.py": {
+      "sha256": "9b52d1fd4fa658cd1685c298acfcfd74ace97493ad4fa43217d38fb98be03b5c",
+      "source": "services/core-api/lilith_memory/learning_worker.py"
+    },
+    "lilith_router/memory_contracts.py": {
+      "sha256": "40fe5cfe303668e745e9114cfe5bdc0388c806a5bbcf7314969ef5152481cac6",
+      "source": "services/core-api/lilith_memory/memory_contracts.py"
+    },
+    "lilith_router/memory_store.py": {
+      "sha256": "84e51fd9995b18fdbc06ae8c6d3f95a70b121fe2f9113b80a62a732cab47e403",
+      "source": "integrations/hermes/home/lilith_router/memory_store.py"
+    },
+    "lilith_router/memory_v2.py": {
+      "sha256": "14a98a799084262da0a58112046f09fe25450bce426db3f24c1ebf675a247190",
+      "source": "docs/architecture/slice-15b2a/memory_v2.py"
+    },
+    "lilith_router/motivation.py": {
+      "sha256": "f95d4f56cc67d7866f9fec41be97bb96fdeb0531516ec7cc1447ae981bb90eaa",
+      "source": "docs/architecture/slice-11/motivation.py"
+    },
+    "lilith_router/planning.py": {
+      "sha256": "e74f7f7e9c59b7b19bb17eaa4868cf4365a2d3c4edacf7818e887a242703b852",
+      "source": "docs/architecture/slice-12/planning.py"
+    },
+    "lilith_router/planning_capabilities.py": {
+      "sha256": "742b01c938f56a4ce2642c1f441875a9fe3c6e91468cca6fa3492016276c1f73",
+      "source": "docs/architecture/slice-12/planning_capabilities.py"
+    },
+    "lilith_router/policy.py": {
+      "sha256": "54db43909d8b066fe96e50be1897167c76f568a071522433f630f7f4345a74db",
+      "source": "integrations/hermes/home/lilith_router/policy.py"
+    },
+    "lilith_router/presence_contract.py": {
+      "sha256": "4458bdd76c6ab98d14617a6c7dea9c637a6b5e3d1d8afa79c560fb57042d0823",
+      "source": "docs/architecture/slice-14/presence_contract.py"
+    },
+    "lilith_router/privacy_governance.py": {
+      "sha256": "3c57b9c10d19dd7ef127eeaf4a4c124bd9c31b517a68f94f75e6d68a0b166d15",
+      "source": "docs/architecture/slice-15b2a/privacy_governance.py"
+    },
+    "lilith_router/reasoning.py": {
+      "sha256": "57284ff2425d3fb8be2097b48f426911d77ea12e0caf438977e48523ff3b9114",
+      "source": "docs/architecture/slice-9/reasoning.py"
+    },
+    "lilith_router/slice15b2a_migration.py": {
+      "sha256": "b038e89587e012e2a2b7cc8afae2b3b0a1b461109e0ad90e124e559fc8be9ef5",
+      "source": "services/core-api/lilith_memory/slice15b2a_migration.py"
+    },
+    "lilith_router/social_cognition.py": {
+      "sha256": "f14023dd3853d31c08288576b7ee4302c9f16afdc093eac36d5ff76d0bcc3c6a",
+      "source": "integrations/hermes/home/lilith_router/social_cognition.py"
+    },
+    "lilith_router/social_guard.py": {
+      "sha256": "edbc7eec6dc9e2b73463e3a65d563486f31eb2e2f894d75cdc7b370dcf55033e",
+      "source": "integrations/hermes/home/lilith_router/social_guard.py"
+    },
+    "lilith_router/state.py": {
+      "sha256": "a0bf4865fe42c37a2c5dfbdcb6fc0feeb10a531900c3a84d68d50f9c25c21093",
+      "source": "integrations/hermes/home/lilith_router/state.py"
+    },
+    "lilith_router/workspace.py": {
+      "sha256": "e209440f55c40f3d95c6cd286907831027a8501415fa0c6901c4666fe3640a64",
+      "source": "integrations/hermes/home/lilith_router/workspace.py"
+    },
+    "lilith_router/world_context.py": {
+      "sha256": "5c1fbf98ead049013aa79fdfb4e74dd3dd210ab0c3386f257ce0b4e334e6a3d5",
+      "source": "integrations/hermes/home/variants/dev-f9c2/lilith_router/world_context.py"
+    },
+    "plugins/lilith_os/__init__.py": {
+      "sha256": "8adb7d5085a96d5edbc72f43e8dfd089ed5c8434f3cedd76b418f930746df37c",
+      "source": "integrations/hermes/home/plugins/lilith_os/__init__.py"
+    },
+    "plugins/lilith_os/adapter.py": {
+      "sha256": "8c3b00552d83adb4e7d6c0af5a9aa081cb60d92879dc14db3baf71537ca32a4a",
+      "source": "integrations/hermes/home/variants/dev-f9c2/plugins/lilith_os/adapter.py"
+    },
+    "plugins/lilith_os/plugin.yaml": {
+      "sha256": "7c88925a7456c24c169b1ecc2cbe403a7a1e56175b83b62b85258fbbbd73cefd",
+      "source": "integrations/hermes/home/plugins/lilith_os/plugin.yaml"
+    },
+    "plugins/model-providers/groq/__init__.py": {
+      "sha256": "ba137ecbbd8a6559146aef024c4652d574ccc39a13cafbba110c1b57da030cf5",
+      "source": "integrations/hermes/home/plugins/model-providers/groq/__init__.py"
+    },
+    "plugins/model-providers/groq/plugin.yaml": {
+      "sha256": "4323378c787ec26224e2fd5a81dc15b6e30729517660f0772f88624fd2a5bcf8",
+      "source": "integrations/hermes/home/plugins/model-providers/groq/plugin.yaml"
+    },
+    "router.yaml": {
+      "sha256": "7bb4fbb5cb0db6c711a8094d1678ebba8ae93c5a561b2fa5794a85686ec82b15",
+      "source": "integrations/hermes/home/variants/dev-f9c2/router.yaml"
+    }
+  },
+  "prod-lilith-01": {
+    "lilith_router/__init__.py": {
+      "sha256": "de39ddefb212155a6f375a39d679e37ba6bb118985232d5c2ebb04a4a6a80402",
+      "source": "integrations/hermes/home/lilith_router/__init__.py"
+    },
+    "lilith_router/canonical_authority.py": {
+      "sha256": "bd2cfcc1b6852b9a13a3f95a95e1ebc4097124565418ee57fd4719efd44c0540",
+      "source": "docs/architecture/slice-15b2a/canonical_authority.py"
+    },
+    "lilith_router/canonical_contracts.py": {
+      "sha256": "f93d26d8a7e01d78d25f1f1d9540577cf2a55dfd4d52c4b64c87bef93ad887e0",
+      "source": "services/core-api/lilith_memory/canonical_contracts.py"
+    },
+    "lilith_router/classifier.py": {
+      "sha256": "4c92fee95f31f77570a1aa83b1059caf15e12877c2480665022c291d871b6fff",
+      "source": "integrations/hermes/home/lilith_router/classifier.py"
+    },
+    "lilith_router/config.py": {
+      "sha256": "14b0a6e870eb18a7494574fc403c7002ea18bd8761a3f897368572d4f4b60b2d",
+      "source": "integrations/hermes/home/lilith_router/config.py"
+    },
+    "lilith_router/ethics.py": {
+      "sha256": "b6e3ce49afad658bd314dc9c28c524f324a3123e52fbd49a55ab5e1137e50a66",
+      "source": "docs/architecture/slice-13/ethics.py"
+    },
+    "lilith_router/ethics_principles.py": {
+      "sha256": "178990e53404518b937627fccc0d8dd590a49f061116681a11eadc338b713b63",
+      "source": "docs/architecture/slice-13/ethics_principles.py"
+    },
+    "lilith_router/gateway_integration.py": {
+      "sha256": "aef313140372497775b23b482a40c4f72a32de4a00506ad307ba1c541b6b9641",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/gateway_integration.py"
+    },
+    "lilith_router/learning.py": {
+      "sha256": "7a74ebbcbfb77c7a68399581b1dd6c4ea74fd432c95a1a0c235bdcf9fcfd87f0",
+      "source": "integrations/hermes/home/lilith_router/learning.py"
+    },
+    "lilith_router/learning_store.py": {
+      "sha256": "b093089f155a0670612e026618fc901df78ebb722f0247fb6cec31f0d417acb8",
+      "source": "integrations/hermes/home/lilith_router/learning_store.py"
+    },
+    "lilith_router/learning_v2.py": {
+      "sha256": "e3fe629dc9109e37728793e21801950b3b43d9fe09e5ca2409303dbbfe96ed31",
+      "source": "docs/architecture/slice-15b2a/learning_v2.py"
+    },
+    "lilith_router/learning_worker.py": {
+      "sha256": "9b52d1fd4fa658cd1685c298acfcfd74ace97493ad4fa43217d38fb98be03b5c",
+      "source": "services/core-api/lilith_memory/learning_worker.py"
+    },
+    "lilith_router/memory_contracts.py": {
+      "sha256": "40fe5cfe303668e745e9114cfe5bdc0388c806a5bbcf7314969ef5152481cac6",
+      "source": "services/core-api/lilith_memory/memory_contracts.py"
+    },
+    "lilith_router/memory_store.py": {
+      "sha256": "84e51fd9995b18fdbc06ae8c6d3f95a70b121fe2f9113b80a62a732cab47e403",
+      "source": "integrations/hermes/home/lilith_router/memory_store.py"
+    },
+    "lilith_router/memory_v2.py": {
+      "sha256": "14a98a799084262da0a58112046f09fe25450bce426db3f24c1ebf675a247190",
+      "source": "docs/architecture/slice-15b2a/memory_v2.py"
+    },
+    "lilith_router/motivation.py": {
+      "sha256": "f95d4f56cc67d7866f9fec41be97bb96fdeb0531516ec7cc1447ae981bb90eaa",
+      "source": "docs/architecture/slice-11/motivation.py"
+    },
+    "lilith_router/planning.py": {
+      "sha256": "e74f7f7e9c59b7b19bb17eaa4868cf4365a2d3c4edacf7818e887a242703b852",
+      "source": "docs/architecture/slice-12/planning.py"
+    },
+    "lilith_router/planning_capabilities.py": {
+      "sha256": "742b01c938f56a4ce2642c1f441875a9fe3c6e91468cca6fa3492016276c1f73",
+      "source": "docs/architecture/slice-12/planning_capabilities.py"
+    },
+    "lilith_router/policy.py": {
+      "sha256": "54db43909d8b066fe96e50be1897167c76f568a071522433f630f7f4345a74db",
+      "source": "integrations/hermes/home/lilith_router/policy.py"
+    },
+    "lilith_router/presence_contract.py": {
+      "sha256": "4458bdd76c6ab98d14617a6c7dea9c637a6b5e3d1d8afa79c560fb57042d0823",
+      "source": "docs/architecture/slice-14/presence_contract.py"
+    },
+    "lilith_router/privacy_governance.py": {
+      "sha256": "3c57b9c10d19dd7ef127eeaf4a4c124bd9c31b517a68f94f75e6d68a0b166d15",
+      "source": "docs/architecture/slice-15b2a/privacy_governance.py"
+    },
+    "lilith_router/reasoning.py": {
+      "sha256": "57284ff2425d3fb8be2097b48f426911d77ea12e0caf438977e48523ff3b9114",
+      "source": "docs/architecture/slice-9/reasoning.py"
+    },
+    "lilith_router/slice15b2a_migration.py": {
+      "sha256": "b038e89587e012e2a2b7cc8afae2b3b0a1b461109e0ad90e124e559fc8be9ef5",
+      "source": "services/core-api/lilith_memory/slice15b2a_migration.py"
+    },
+    "lilith_router/social_cognition.py": {
+      "sha256": "f14023dd3853d31c08288576b7ee4302c9f16afdc093eac36d5ff76d0bcc3c6a",
+      "source": "integrations/hermes/home/lilith_router/social_cognition.py"
+    },
+    "lilith_router/social_guard.py": {
+      "sha256": "edbc7eec6dc9e2b73463e3a65d563486f31eb2e2f894d75cdc7b370dcf55033e",
+      "source": "integrations/hermes/home/lilith_router/social_guard.py"
+    },
+    "lilith_router/state.py": {
+      "sha256": "a0bf4865fe42c37a2c5dfbdcb6fc0feeb10a531900c3a84d68d50f9c25c21093",
+      "source": "integrations/hermes/home/lilith_router/state.py"
+    },
+    "lilith_router/workspace.py": {
+      "sha256": "e209440f55c40f3d95c6cd286907831027a8501415fa0c6901c4666fe3640a64",
+      "source": "integrations/hermes/home/lilith_router/workspace.py"
+    },
+    "lilith_router/world_context.py": {
+      "sha256": "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104",
+      "source": null,
+      "status": "VM_ONLY_SOURCE_PENDING_SEPARATE_EXPORT"
+    },
+    "plugins/lilith_os/__init__.py": {
+      "sha256": "8adb7d5085a96d5edbc72f43e8dfd089ed5c8434f3cedd76b418f930746df37c",
+      "source": "integrations/hermes/home/plugins/lilith_os/__init__.py"
+    },
+    "plugins/lilith_os/adapter.py": {
+      "sha256": "39fa27b90cd676c27e42e1741aced744dadbdde66f8a9c5cf296840067d4b709",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/plugins/lilith_os/adapter.py"
+    },
+    "plugins/lilith_os/plugin.yaml": {
+      "sha256": "7c88925a7456c24c169b1ecc2cbe403a7a1e56175b83b62b85258fbbbd73cefd",
+      "source": "integrations/hermes/home/plugins/lilith_os/plugin.yaml"
+    },
+    "plugins/model-providers/groq/__init__.py": {
+      "sha256": "ba137ecbbd8a6559146aef024c4652d574ccc39a13cafbba110c1b57da030cf5",
+      "source": "integrations/hermes/home/plugins/model-providers/groq/__init__.py"
+    },
+    "plugins/model-providers/groq/plugin.yaml": {
+      "sha256": "4323378c787ec26224e2fd5a81dc15b6e30729517660f0772f88624fd2a5bcf8",
+      "source": "integrations/hermes/home/plugins/model-providers/groq/plugin.yaml"
+    },
+    "router.yaml": {
+      "sha256": "7d14b571abc73766782fbe2d534e85a4fb1fef628592b478b9747f7c76639586",
+      "source": null,
+      "status": "VM_ONLY_SOURCE_PENDING_SEPARATE_EXPORT"
+    }
+  }
+}
