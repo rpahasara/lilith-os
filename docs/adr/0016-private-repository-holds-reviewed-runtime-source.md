@@ -32,8 +32,9 @@
 1. **Reviewed LILITH-authored runtime source belongs in this repository.** That includes Hermes integration patches,
    Router V2 and its cognitive lanes, plugins, the provider gate, Privacy executors, installers, systemd units,
    non-secret configuration and templates, tests, build tooling, and the historical lineage needed to reconstruct
-   deployed releases. Hermes-specific code lives under `integrations/hermes/`, which keeps Hermes replaceable
-   (ADR-0001): nothing outside that directory may depend on it.
+   deployed releases. Hermes-specific implementation normally lives under `integrations/hermes/`; legitimate
+   boundary adapters and interfaces may live elsewhere. The invariant is ADR-0001's: LILITH's canonical identity,
+   memory, cognition and governance must not require Hermes to function, so Hermes stays replaceable.
 2. **Upstream third-party code is pinned, not vendored.** Hermes is recorded as an exact upstream commit plus
    LILITH's patch set and the SHA-256 of every patched file, with the upstream licence notice. Vendoring a
    third-party tree needs its own justification and licence review.
@@ -44,9 +45,11 @@
 5. **Never in Git, private repository or not:** credentials and tokens of any kind (including package-embedded
    localhost tokens), private keys and custody material (owner, K-PCK, K-ACT, K-WIT, signer and witness), `.env`
    files with values, live databases and conversation state, canonical or personal memory content, Privacy records,
-   persona and profile runtime files (`SOUL.md`, `USER.md`), owner-origin and First Interaction content, private
-   research history, and recovery passphrases. Files that mix source with a secret are committed as templates with
-   a placeholder and an injection tool that reads the value from custody.
+   actual persona and profile files (a real `SOUL.md` or `USER.md`, owner profiles), owner-origin and First
+   Interaction content, private research history, and recovery passphrases. Files that mix source with a secret are
+   committed as templates with a placeholder and an injection tool that reads the value from custody. Sanitized,
+   non-personal persona or profile templates and schemas are allowed; they must be marked as templates and never
+   stand in for canonical identity (ADR-0008).
 6. **Byte-exact by default.** Preserved deployed and historical files keep their bytes. Every adaptation (secret
    redaction, a Markdown newline) is listed with the original digest; the original bytes stay in owner-controlled
    encrypted backup.
@@ -76,8 +79,9 @@ plus patches reproduces the bytes.
 
 ### Positive
 
-- Every locally available source of the running DEV runtime, and every PROD Hermes and Router file except two, can
-  be rebuilt from Git and verified by digest.
+- Once the consolidation pull requests merge, every locally available source of the running DEV runtime, and every
+  PROD Hermes and Router file except two, can be rebuilt from Git and verified by digest (verified on the PR
+  branches on 2026-10-27; full runtime reconstruction and live deployment are not verified).
 - PROD/DEV differences become reviewable diffs instead of host archaeology.
 
 ### Negative and tradeoffs

@@ -49,7 +49,11 @@ Every other Router V2 and plugin file is byte-identical in both environments. Fu
 
 ## Rebuilding from Git
 
-| Target | How | Status on 2026-10-27 |
+The statuses below were established on 2026-10-27 against the PR branches listed above and the preserved
+workstation source. The tools and files they cover are not on `main` until the relevant pull requests merge. Full
+runtime reconstruction and live deployment remain unverified.
+
+| Target | How | Status on 2026-10-27 (PR branches) |
 |---|---|---|
 | Patched Hermes source, PROD and DEV | `integrations/hermes/tools/reconstruct_hermes_src.py` over a clone at the pin | SOURCE_BUILD_VERIFIED: all 6 PROD and 8 DEV files byte-exact |
 | DEV release files held in Git | `integrations/hermes/tools/verify_dev_f9c2_source.py` | SOURCE_BUILD_VERIFIED against the deployed manifest |
