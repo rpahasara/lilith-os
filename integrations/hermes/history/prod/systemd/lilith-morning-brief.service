@@ -1,0 +1,13 @@
+[Unit]
+Description=LILITH Daily Gmail and Calendar Morning Brief
+After=network-online.target hermes-gateway.service
+Wants=network-online.target
+
+[Service]
+Environment="PATH=/home/lilith/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Type=oneshot
+User=lilith
+Group=lilith
+WorkingDirectory=/home/lilith
+ExecStart=/home/lilith/.hermes/automation/productivity/morning_brief.py
+TimeoutStartSec=20min

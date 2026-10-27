@@ -1,0 +1,10 @@
+[Unit]
+Description=LILITH Meetings agenda snapshot (read-only Google Calendar -> agenda.json)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lilith
+WorkingDirectory=/home/lilith
+ExecStart=/home/lilith/.hermes/google-venv/bin/python /home/lilith/.hermes/automation/productivity/meeting_agenda_snapshot.py

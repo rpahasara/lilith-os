@@ -1,0 +1,135 @@
+#!/home/lilith/.hermes/google-venv/bin/python
+
+import json
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+BASE = Path.home() / ".hermes" / "automation" / "productivity"
+FOLLOWUP_DIR = BASE / "followups"
+STATE_PATH = FOLLOWUP_DIR / "followups.json"
+LOG_PATH = BASE / "logs" / "followup_tracker.log"
+
+
+def log(message: str):
+    stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    line = f"{stamp} {message}"
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+    print(line)
+
+
+def load_state():
+    if not STATE_PATH.exists():
+        return {"items": []}
+
+    try:
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"items": []}
+
+
+def save_state(state):
+    tmp = STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(STATE_PATH)
+    STATE_PATH.chmod(0o600)
+
+
+def normalize(text):
+    return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def add_followup(
+    title,
+    source,
+    reason,
+    due_date=None,
+    related_message_id=None,
+    status="waiting"
+):
+    state = load_state()
+
+    # Deduplicate by Gmail message ID when available.
+    if related_message_id:
+        for item in state["items"]:
+            if item.get("related_message_id") == related_message_id:
+                return False
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    item = {
+        "id": f"fu-{int(datetime.now(timezone.utc).timestamp())}",
+        "title": normalize(title),
+        "source": source,
+        "reason": normalize(reason),
+        "status": status,
+        "created_at": now,
+        "updated_at": now,
+        "due_date": due_date,
+        "related_message_id": related_message_id
+    }
+
+    state["items"].append(item)
+    save_state(state)
+    return True
+
+
+def list_followups():
+    state = load_state()
+
+    if not state["items"]:
+        print("No follow-ups.")
+        return
+
+    for item in state["items"]:
+        print(
+            f"{item['id']} | "
+            f"{item['status']} | "
+            f"{item.get('due_date') or 'no due date'} | "
+            f"{item['title']}"
+        )
+
+
+def main():
+    FOLLOWUP_DIR.mkdir(parents=True, exist_ok=True)
+
+    if len(sys.argv) == 1 or sys.argv[1] == "--list":
+        list_followups()
+        return 0
+
+    if sys.argv[1] == "--init":
+        state = load_state()
+        save_state(state)
+        print("FOLLOWUP TRACKER INITIALIZED")
+        return 0
+
+    if sys.argv[1] == "--add-json":
+        payload = json.load(sys.stdin)
+
+        created = add_followup(
+            title=payload.get("title", "Untitled follow-up"),
+            source=payload.get("source", "gmail"),
+            reason=payload.get("reason", ""),
+            due_date=payload.get("due_date"),
+            related_message_id=payload.get("related_message_id"),
+            status=payload.get("status", "waiting")
+        )
+
+        print("FOLLOWUP_ADDED" if created else "FOLLOWUP_EXISTS")
+        return 0
+
+    print("Usage:")
+    print("  followup_tracker.py --init")
+    print("  followup_tracker.py --list")
+    print("  followup_tracker.py --add-json")
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        log(f"ERROR {type(exc).__name__}: {exc}")
+        raise SystemExit(1)

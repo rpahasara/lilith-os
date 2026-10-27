@@ -1,0 +1,13 @@
+[Unit]
+Description=LILITH Career CRM Watcher
+After=network-online.target hermes-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lilith
+Group=lilith
+Environment="HOME=/home/lilith"
+Environment="PATH=/home/lilith/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/lilith/.hermes/lilith-os/apps/career/career_watcher.py
+TimeoutStartSec=20min

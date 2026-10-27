@@ -1,0 +1,56 @@
+{
+  "timezone": "Asia/Colombo",
+  "poll_minutes": 10,
+  "morning_brief_hour": 8,
+  "morning_brief_minute": 0,
+
+  "gmail": {
+    "lookback_minutes": 30,
+    "max_messages_per_poll": 30
+  },
+
+  "urgent": {
+    "min_score": 5,
+    "linkedin_direct_message_score": 6,
+    "recruiter_score": 5,
+    "interview_score": 7,
+    "security_score": 8
+  },
+
+  "noise_subject_keywords": [
+    "jobs you may be interested in",
+    "job alert",
+    "recommended jobs",
+    "top job picks",
+    "newsletter",
+    "weekly digest",
+    "daily digest",
+    "promotion",
+    "offers for you"
+  ],
+
+  "important_keywords": [
+    "recruiter",
+    "recruitment",
+    "talent acquisition",
+    "human resources",
+    "hr team",
+    "interview",
+    "technical interview",
+    "screening call",
+    "assessment",
+    "application update",
+    "application status",
+    "shortlisted",
+    "selected",
+    "offer",
+    "next round",
+    "next step",
+    "availability",
+    "schedule a call",
+    "security alert",
+    "suspicious login",
+    "password reset",
+    "account access"
+  ]
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run LILITH Morning Brief daily at 08:00 Asia/Colombo
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 Asia/Colombo
+Persistent=true
+Unit=lilith-morning-brief.service
+
+[Install]
+WantedBy=timers.target

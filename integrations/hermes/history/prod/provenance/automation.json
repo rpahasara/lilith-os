@@ -1,0 +1,306 @@
+{
+ "export": "bounded read-only PROD source export, lilith-01 (id 1332996232081478576), 2026-10-27",
+ "status_vocabulary": {
+  "BYTE_EXACT": "Git bytes equal the deployed PROD bytes",
+  "SANITIZED_FOR_GIT": "named private values replaced by placeholders; Git bytes differ from PROD; original kept in owner custody"
+ },
+ "files": [
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/config.json",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/config.json",
+   "size": 1061,
+   "prod_sha256": "e56afa027911e68913e103c8a4b3d1a7f32539c8b328deb15c7d1243a37fa851",
+   "git_sha256": "e56afa027911e68913e103c8a4b3d1a7f32539c8b328deb15c7d1243a37fa851",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787580926,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/discord_notifier.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/discord_notifier.py",
+   "size": 2969,
+   "prod_sha256": "6ddf96bdabcda488ea03707fd0decdf9acfc2d1c53e683171f4a9c0743d80175",
+   "git_sha256": "6ddf96bdabcda488ea03707fd0decdf9acfc2d1c53e683171f4a9c0743d80175",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787581111,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/followup_tracker.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/followup_tracker.py",
+   "size": 8855,
+   "prod_sha256": "00822a6dfacf2e1925047288b89f63912f566eec373a781ec9acc55ee582ed2e",
+   "git_sha256": "00822a6dfacf2e1925047288b89f63912f566eec373a781ec9acc55ee582ed2e",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787585142,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/followup_tracker.py.before-due-v2",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/followup_tracker.py.before-due-v2",
+   "size": 3386,
+   "prod_sha256": "82449bd9268c5b3cea5f1fd5b4cc896a1f566a36b647e5f4ae2ea4fd917a8c0c",
+   "git_sha256": "82449bd9268c5b3cea5f1fd5b4cc896a1f566a36b647e5f4ae2ea4fd917a8c0c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787584817,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/gmail_watcher.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/gmail_watcher.py",
+   "size": 26712,
+   "prod_sha256": "e80a80d6e6ac23100365ed2fc7f8c89bd126f1cc1aebd5af5d0181c9a9460073",
+   "git_sha256": "e80a80d6e6ac23100365ed2fc7f8c89bd126f1cc1aebd5af5d0181c9a9460073",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787594428,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/gmail_watcher.py.before-multi-account",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/gmail_watcher.py.before-multi-account",
+   "size": 22416,
+   "prod_sha256": "6d3b581010d309875160de1f27fef3dfcf33f9338119675bf1adf347ab475267",
+   "git_sha256": "6d3b581010d309875160de1f27fef3dfcf33f9338119675bf1adf347ab475267",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787590830,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/meeting_agenda_snapshot.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/meeting_agenda_snapshot.py",
+   "size": 7320,
+   "prod_sha256": "3d54e74a179c5fd5488a53492ec03589cfef4a1e990237afdd4c823c3ce61c2d",
+   "git_sha256": "3d54e74a179c5fd5488a53492ec03589cfef4a1e990237afdd4c823c3ce61c2d",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787676124,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/meeting_context_collector.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/meeting_context_collector.py",
+   "size": 6721,
+   "prod_sha256": "9be3cda810522e49058d21f48c82cffc7d28e839e42fb7abc0acdf3bdb686c3c",
+   "git_sha256": "9be3cda810522e49058d21f48c82cffc7d28e839e42fb7abc0acdf3bdb686c3c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787594337,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/meeting_prep_runner.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/meeting_prep_runner.py",
+   "size": 6640,
+   "prod_sha256": "d0cd4174f72951a143427f806f4ad745d8d8a3cdf35fad691d03e5dcd59b2aa0",
+   "git_sha256": "d0cd4174f72951a143427f806f4ad745d8d8a3cdf35fad691d03e5dcd59b2aa0",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787676124,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/meeting_prep_runner.py.bak.20260825-164203",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/meeting_prep_runner.py.bak.20260825-164203",
+   "size": 4979,
+   "prod_sha256": "49e977c974ba14afc84b5b4acad804b86c3365f4c574065cd5032d9631a0a43b",
+   "git_sha256": "49e977c974ba14afc84b5b4acad804b86c3365f4c574065cd5032d9631a0a43b",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787593505,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/meeting_prep_watcher.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/meeting_prep_watcher.py",
+   "size": 5441,
+   "prod_sha256": "5a94e00cf3a25c70cac6727be0ecef30b081880adeb292feba0aec16fe4b834f",
+   "git_sha256": "5a94e00cf3a25c70cac6727be0ecef30b081880adeb292feba0aec16fe4b834f",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787591822,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/morning_brief.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/morning_brief.py",
+   "size": 2880,
+   "prod_sha256": "7520039fccbf61a0590cc6a44788d5e42f5c2fda68d4fea956280890d260e14c",
+   "git_sha256": "7520039fccbf61a0590cc6a44788d5e42f5c2fda68d4fea956280890d260e14c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787591163,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/redact_sensitive.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/redact_sensitive.py",
+   "size": 2189,
+   "prod_sha256": "913bf225350691fbc6a05feefe87ef7600f66a385de517c0cb2cd60a1bbb248e",
+   "git_sha256": "913bf225350691fbc6a05feefe87ef7600f66a385de517c0cb2cd60a1bbb248e",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787594243,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/secondary_career_summary.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/secondary_career_summary.py",
+   "size": 3568,
+   "prod_sha256": "d703d8ddaa7816fa7341bcef52a3be5e5d01bbb5e8a08e0e7c50f5b4b6017c64",
+   "git_sha256": "d703d8ddaa7816fa7341bcef52a3be5e5d01bbb5e8a08e0e7c50f5b4b6017c64",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787594447,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/automation/productivity/prompts/morning_brief.txt",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/automation/productivity/prompts/morning_brief.txt",
+   "size": 3434,
+   "prod_sha256": "51a75a7647537f795c139a487aa4f0afec08d3119ff7b255af90911f22a97d0a",
+   "git_sha256": "51a75a7647537f795c139a487aa4f0afec08d3119ff7b255af90911f22a97d0a",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787591208,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/hermes-gateway.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/hermes-gateway.service",
+   "size": 1127,
+   "prod_sha256": "29047f4e944a28b459930875cefe1b0dcfcf9294a03804202feebd56496b0c38",
+   "git_sha256": "29047f4e944a28b459930875cefe1b0dcfcf9294a03804202feebd56496b0c38",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787511053,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-agenda-snapshot.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-agenda-snapshot.service",
+   "size": 342,
+   "prod_sha256": "5a1229f06b3c2aae26fb60a0228b7cb7e36964f25c7c07b18443c736a6986c79",
+   "git_sha256": "5a1229f06b3c2aae26fb60a0228b7cb7e36964f25c7c07b18443c736a6986c79",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787676124,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-agenda-snapshot.timer",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-agenda-snapshot.timer",
+   "size": 159,
+   "prod_sha256": "76f27ef69fffe2d1c5db4311399a2689d3e93e7959a970047f29e223db5b4d98",
+   "git_sha256": "76f27ef69fffe2d1c5db4311399a2689d3e93e7959a970047f29e223db5b4d98",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787676124,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-career-watcher.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-career-watcher.service",
+   "size": 402,
+   "prod_sha256": "a84d952c1fa93725c0c2d679a2eb369fe3b91efdbad769661d24366950f9a463",
+   "git_sha256": "a84d952c1fa93725c0c2d679a2eb369fe3b91efdbad769661d24366950f9a463",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787637158,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-career-watcher.timer",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-career-watcher.timer",
+   "size": 197,
+   "prod_sha256": "485260eb04e799c0a1eed7e7ae4cc3afacc9c8d83aa3d73fb496e2f78906a2a0",
+   "git_sha256": "485260eb04e799c0a1eed7e7ae4cc3afacc9c8d83aa3d73fb496e2f78906a2a0",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787637167,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-gmail-watcher.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-gmail-watcher.service",
+   "size": 259,
+   "prod_sha256": "c7cd02266fb34538c7ed8f561f2b1a16c669c701947bdc5e006863acb21f78aa",
+   "git_sha256": "c7cd02266fb34538c7ed8f561f2b1a16c669c701947bdc5e006863acb21f78aa",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787581391,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-gmail-watcher.timer",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-gmail-watcher.timer",
+   "size": 191,
+   "prod_sha256": "fe684c0b59df0a85d249a7b9f96fbc8584591c830362ec8b9068360574984101",
+   "git_sha256": "fe684c0b59df0a85d249a7b9f96fbc8584591c830362ec8b9068360574984101",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787581409,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-meeting-prep.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-meeting-prep.service",
+   "size": 481,
+   "prod_sha256": "4b714697794b446e43bed07f71beedb42e493f241c81f20bef23f3bf6b1d093c",
+   "git_sha256": "4b714697794b446e43bed07f71beedb42e493f241c81f20bef23f3bf6b1d093c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787593527,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-meeting-prep.timer",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-meeting-prep.timer",
+   "size": 189,
+   "prod_sha256": "3c1a9d5c636e65ad50e21fc9679aab647051049a1b5ea37ad65aa7d712517ef1",
+   "git_sha256": "3c1a9d5c636e65ad50e21fc9679aab647051049a1b5ea37ad65aa7d712517ef1",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787592048,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-morning-brief.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-morning-brief.service",
+   "size": 421,
+   "prod_sha256": "ded5d1635389fc1a00b7f888ce63bda1ce611bd6344767773ab001f62f877695",
+   "git_sha256": "ded5d1635389fc1a00b7f888ce63bda1ce611bd6344767773ab001f62f877695",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787627011,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-morning-brief.timer",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-morning-brief.timer",
+   "size": 204,
+   "prod_sha256": "446a54f32cbde6fe91089677b0788fa487f152d8aaa79a9bbd12fa4fd9777e32",
+   "git_sha256": "446a54f32cbde6fe91089677b0788fa487f152d8aaa79a9bbd12fa4fd9777e32",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787582138,
+   "audit_sha256_matched": null
+  },
+  {
+   "prod_path": "/etc/systemd/system/lilith-os-api.service",
+   "repo_path": "integrations/hermes/history/prod/systemd/lilith-os-api.service",
+   "size": 396,
+   "prod_sha256": "ed030ad9668905ba659769796b42c23367f49279143f215b6601bb166635dd80",
+   "git_sha256": "ed030ad9668905ba659769796b42c23367f49279143f215b6601bb166635dd80",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787659809,
+   "audit_sha256_matched": null
+  }
+ ]
+}
