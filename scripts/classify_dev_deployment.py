@@ -108,7 +108,7 @@ PRESERVED_SOURCE_ADDITION_PREFIX = "integrations/hermes/"
 # only at its exact reviewed revision. Any other revision of these paths takes full deployment.
 PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
-    "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "e63f413421d08950b00c8353c48fa34544c0fd62",
+    "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "74d279bf81fd0988d735600f582c998b27e06377",
     "docs/adr/README.md": "68adc83f384492e3010d2859068a8802f4a224d4",
     "docs/engineering/source-consolidation-2026-10.md": "184cf8299b7aff60a939b5493db55b8b5fde9fc0",
     "docs/engineering/vm-only-source-gaps.md": "5431e8e431cac727a843f0b055e0e0287a827a06",
