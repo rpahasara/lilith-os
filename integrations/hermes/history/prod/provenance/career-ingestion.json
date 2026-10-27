@@ -1,0 +1,131 @@
+{
+ "export": "bounded read-only PROD source export, lilith-01 (id 1332996232081478576), 2026-10-27",
+ "status_vocabulary": {
+  "BYTE_EXACT": "Git bytes equal the deployed PROD bytes",
+  "SANITIZED_FOR_GIT": "named private values replaced by placeholders; Git bytes differ from PROD; original kept in owner custody"
+ },
+ "files": [
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/career_extractor.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/career_extractor.py",
+   "size": 13779,
+   "prod_sha256": "2225636d3fe6ee59d49f1af0825ddbeb95145cda3abd83827885bfb8f81e2eaf",
+   "git_sha256": "2225636d3fe6ee59d49f1af0825ddbeb95145cda3abd83827885bfb8f81e2eaf",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787597725,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/career_extractor_v2.before-incremental.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/career_extractor_v2.before-incremental.py",
+   "size": 27219,
+   "prod_sha256": "3060a2a4e65953471c832127d79d28e1c6da5c9f004eefae7cd8a1f1acddeaa2",
+   "git_sha256": "9af5935f2ed0d3042acc53cc80dcea883f0fbc3d03bacb5dee0da169063e7a97",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__OWNER_PRIMARY_EMAIL__",
+    "__OWNER_SECONDARY_EMAIL__"
+   ],
+   "prod_mtime_epoch": 1787636976,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/career_extractor_v2.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/career_extractor_v2.py",
+   "size": 30336,
+   "prod_sha256": "8ec99391d78b2354bf47dc13332b10c092ac689a999da859c48643b5e4a90c21",
+   "git_sha256": "756eb24faa157810c5d283e84a4cd9c183a55def9dc0019015d7d4894a1e72d2",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__OWNER_PRIMARY_EMAIL__",
+    "__OWNER_SECONDARY_EMAIL__"
+   ],
+   "prod_mtime_epoch": 1787637567,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/career_watcher.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/career_watcher.py",
+   "size": 8138,
+   "prod_sha256": "5aa0193fbdb891f7dd7c33f56dba3f5fa9da4d390b3d4c03f1206b86c77265a1",
+   "git_sha256": "5aa0193fbdb891f7dd7c33f56dba3f5fa9da4d390b3d4c03f1206b86c77265a1",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787637714,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/entity_resolver.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/entity_resolver.py",
+   "size": 16722,
+   "prod_sha256": "94ee25dfe564833725ad9118710f0b7051478ab855871ef5caf595efcefe63b4",
+   "git_sha256": "94ee25dfe564833725ad9118710f0b7051478ab855871ef5caf595efcefe63b4",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787600830,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/init_db.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/init_db.py",
+   "size": 2739,
+   "prod_sha256": "2fa9bb5bdc6e5b0d4a4c8aff9501de247c87b5e60a01b02c02883181674c28db",
+   "git_sha256": "2fa9bb5bdc6e5b0d4a4c8aff9501de247c87b5e60a01b02c02883181674c28db",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787597566,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/reconcile_crm.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/reconcile_crm.py",
+   "size": 4218,
+   "prod_sha256": "41aeeff456df4e5b92dc78c43e7d417b6264a08c0a2c2286ac7dc9db5c9b516c",
+   "git_sha256": "41aeeff456df4e5b92dc78c43e7d417b6264a08c0a2c2286ac7dc9db5c9b516c",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787599087,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/remove_owner_test_mail.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/remove_owner_test_mail.py",
+   "size": 4671,
+   "prod_sha256": "6ac073ab7c6117d1915fc2cd79e6eabb9f5b785c7bb5f0974b7b799b073be19e",
+   "git_sha256": "ce0483f2e6109f6e733b534fe0f9f596945f524d53ab26b190423e86db13b5fe",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__OWNER_PRIMARY_EMAIL__",
+    "__OWNER_SECONDARY_EMAIL__"
+   ],
+   "prod_mtime_epoch": 1787633390,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/repair_counterparties.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/repair_counterparties.py",
+   "size": 5807,
+   "prod_sha256": "3dc8d415937dcaf102716c7c9a86820a75163662ceb1d307d1f5ac1488d3037a",
+   "git_sha256": "111a891659dc3304aeee8804e4de793bb98513dd9ad33117dffa9e51035c04fe",
+   "transform": "SANITIZED_FOR_GIT",
+   "placeholders": [
+    "__OWNER_PRIMARY_EMAIL__",
+    "__OWNER_SECONDARY_EMAIL__"
+   ],
+   "prod_mtime_epoch": 1787600780,
+   "audit_sha256_matched": true
+  },
+  {
+   "prod_path": "/home/lilith/.hermes/lilith-os/apps/career/view_crm.py",
+   "repo_path": "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/view_crm.py",
+   "size": 1894,
+   "prod_sha256": "82aaa3f8780d7bddf26a70724fde7ab79c758f50380f28dac910a074d395b920",
+   "git_sha256": "82aaa3f8780d7bddf26a70724fde7ab79c758f50380f28dac910a074d395b920",
+   "transform": "BYTE_EXACT",
+   "placeholders": [],
+   "prod_mtime_epoch": 1787597921,
+   "audit_sha256_matched": true
+  }
+ ]
+}
