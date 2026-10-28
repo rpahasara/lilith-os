@@ -1,0 +1,32 @@
+{
+  "release": "f293e72-f9c2-cog1-wm2",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2-cog1-wm1",
+  "base_definition": "integrations/hermes/release/dev-f9c2-cog1-wm1/RELEASE-DELTA.json",
+  "note": "The wm1 release with the Slice 7.2 World Model lane authorized LIVE on lilith_os only; the router mode stays shadow. Every other member of the wm1 release is unchanged, including the governed adapter (draft and goal writes refused), the PROD Working Memory, gateway_integration.py and the lilith_os adapter.",
+  "members": {
+    "RELEASE_ID": {
+      "change": "replace",
+      "from": "0fb160017eb70a0a979ae8650cf34b5153052b8f0a076233f7ce38ac62b0102b",
+      "sha256": "10ccde6c36a0d247d6c1424a36a96d209f3b6648b79082300446e2957eea7552",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm2/RELEASE_ID"
+    },
+    "bin/verify_release.py": {
+      "change": "replace",
+      "sha256": null,
+      "template": "integrations/hermes/release/dev-f9c2-cog1-wm2/templates/bin/verify_release.py.tmpl",
+      "template_sha256": "60c91ad128891903918b8303de7e3a44350b65e08885d5fad4235907727ea16f",
+      "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1/templates/bin/verify_release.py.tmpl",
+      "base_template_sha256": "b69b2344f8637be0fc7488e231c2a91e79fb145a875638f23d16c8257443fbaa",
+      "placeholder": "__LILITH_GATE_CLIENT_TOKEN__",
+      "rendered": "on the host from the installed wm1 verifier (install_wm2.sh)"
+    },
+    "home/router.yaml": {
+      "change": "replace",
+      "from": "4035f0a175ea6bf130287a49e7428b8ef588bf0b0b4bdb021b6ad27bf84ee57a",
+      "sha256": "47c487d66376f06a2be1458e727fbef435bd430e71b9164335aeffd2960cb726",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm2/home/router.yaml",
+      "installed_as": "/home/lilith/.hermes-dev/lilith_router/router.yaml (root:lilith 0640)"
+    }
+  }
+}
