@@ -67,9 +67,43 @@ class InstallerContractTest(unittest.TestCase):
                 self.assertIsNone(re.search(forbidden, code))
         self.assertEqual(re.findall(r"systemctl\s+\w+", code), ["systemctl show"])
 
-    def test_simulation_hooks_are_refused_on_the_dev_host(self):
-        self.assertIn('[[ $(hostname) != lilith-dev-01 ]] || die "F8_SIM refused on lilith-dev-01"', TEXT)
-        self.assertIn('inject() { if [[ ${F8_SIM:-} == 1 && ${F8_FAIL_AT:-} == "$1" ]]', TEXT)
+    def test_simulation_mode_is_refused_on_any_real_host(self):
+        guard = TEXT.split("SIM=0\n", 1)[1].split("\nfi\n", 1)[0]
+        for condition in ('[[ ${F8_SIM} == 1 ]] || die',
+                          '[[ $(hostname) != lilith-* ]] || die',
+                          '[[ $(cat /etc/machine-id 2>/dev/null) != "${DEV_MACHINE_ID}" ]] || die',
+                          '[[ $(readlink /proc/1/ns/mnt) != "$(readlink /proc/self/ns/mnt)" ]] || die',
+                          '[[ $(stat -f -c %T /opt) == overlayfs ]] || die'):
+            self.assertIn(condition, guard)
+        self.assertIn("DEV_MACHINE_ID=ae929170e6fa4c8ab9cc7b9547238d9d\n", TEXT)
+        self.assertIn('[[ ${SIM} == 1 ]] || return 0', TEXT)                     # hooks are inert outside the sim
+        self.assertIn('if [[ ${SIM} != 1 ]]; then [[ $(hostname) == lilith-dev-01 ]] || die', TEXT)
+
+    def test_holds_the_forget_executors_own_lock(self):
+        self.assertIn("FORGET_LOCK=${FORGET}/state/.lock\n", TEXT)
+        self.assertIn("FORGET=/var/lib/hermes-forget\n", TEXT)
+        self.assertIn('"stateDir": "/var/lib/hermes-forget/state"',
+                      (REPO / "integrations/hermes/release/dev-f9c2/bin/install_f9c.sh").read_text(encoding="utf-8"))
+        for executor in ("integrations/hermes/release/dev-f9c2/bin/hermes_forget_executor.py",
+                         "integrations/hermes/overlays/dev-origin-forget-executor/hermes_forget_executor.py"):
+            self.assertIn('self.cfg.state_dir / ".lock"', (REPO / executor).read_text(encoding="utf-8"))
+        self.assertIn('flock -w 30 9 || die', TEXT)
+        pre = TEXT.split("preconditions() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(pre.index("take_forget_lock"), pre.index("no_forget_pending"))   # checked under the lock
+        install = TEXT.split("  install)", 1)[1]
+        self.assertLess(install.index("no_forget_pending"), install.index('PHASE=home'))  # re-checked before changes
+
+    def test_only_a_fully_stopped_gateway_is_accepted(self):
+        body = TEXT.split("gateway_stopped() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertEqual(re.findall(r'"(ActiveState=[^"]+)"', body),
+                         ["ActiveState=inactive LoadState=loaded MainPID=0 SubState=dead",
+                          "ActiveState=failed LoadState=loaded MainPID=0 SubState=failed"])
+
+    def test_new_directories_never_reuse_an_existing_path(self):
+        self.assertNotIn("mktemp -u", TEXT)
+        self.assertIn('q=$(mktemp -d "${BACKUP}/cog1-revert-', TEXT)
+        self.assertIn('kept=$(mktemp -d "${BASE}/releases/.cog1-failed-staging-', TEXT)
+        self.assertIn('mv -n "${LR}/_prod_world_context.py" "${q}/"', TEXT)
 
     @unittest.skipUnless(shutil.which("bash") and sys.platform != "win32", "bash syntax check needs Linux bash")
     def test_shell_syntax(self):
