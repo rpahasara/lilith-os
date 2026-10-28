@@ -1,0 +1,39 @@
+{
+  "release": "f293e72-f9c2-cog1",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2",
+  "base_package_sha256": "4b0b0110dde1cccd585203ea9a92cfe8b8cbe31d8e1a6e4edb461ba2c09c3ba5",
+  "base_manifest": "integrations/hermes/release/dev-f9c2/MANIFEST.sha256",
+  "base_manifest_sha256": "c78a8bd2d00c80dc3c3cca5f2dac3cd55a748405412730e48f68e0b3e9ff46dd",
+  "note": "Every member of the base package not listed here is unchanged, including home/router.yaml (every lane off), home/lilith_router/gateway_integration.py, home/plugins/lilith_os/adapter.py, src/, the provider gate and the FORGET executor.",
+  "members": {
+    "RELEASE_ID": {
+      "change": "replace",
+      "from": "2cc6efe3bc217b2adcd754d1a8d1c5e983d08b93a16bed929ae3bf72e032385f",
+      "sha256": "7c5467d4ff179e142a1353492ebbc370f8529de2e0247bcba13459e491cabb09",
+      "source": "integrations/hermes/release/dev-f9c2-cog1/RELEASE_ID"
+    },
+    "bin/verify_release.py": {
+      "change": "replace",
+      "from": "b33c8971f335bd16e60b869d3b1e30b1828a616fec023db7b3bb607b878ca23e",
+      "sha256": null,
+      "template": "integrations/hermes/release/dev-f9c2-cog1/templates/bin/verify_release.py.tmpl",
+      "template_sha256": "817f7cae2c4f78c5bdfb707893ef52802f621b6b2e62409f5969f4552b746840",
+      "base_template": "integrations/hermes/release/dev-f9c2/templates/bin/verify_release.py.tmpl",
+      "placeholder": "__LILITH_GATE_CLIENT_TOKEN__",
+      "rendered": "at the authorized installation stage, with the custody token the base template is proven against",
+      "base_template_sha256": "865be1237ffe108322babdcca589c4bee426ef59813344e2706c34fe89ea649e"
+    },
+    "home/lilith_router/world_context.py": {
+      "change": "replace",
+      "from": "5c1fbf98ead049013aa79fdfb4e74dd3dd210ab0c3386f257ce0b4e334e6a3d5",
+      "sha256": "07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc",
+      "source": "integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py"
+    },
+    "home/lilith_router/_prod_world_context.py": {
+      "change": "add",
+      "sha256": "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104",
+      "source": "integrations/hermes/home/variants/prod-lilith-01/lilith_router/world_context.py"
+    }
+  }
+}
