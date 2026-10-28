@@ -39,42 +39,72 @@ of any goal (the goal lane stays off). As with every turn, the user's own messag
 - **Read bounds:** at most 16 reads per adapter call; a worst-case World Model turn makes about 3 reads. A transport
   failure opens a 30 s breaker.
 
-## Where the grounding text could persist (must be measured, not assumed)
+## Where the grounding text could persist (F1b, 2026-10-28: offline source review)
 
-- **Hermes `state.db` `system_prompts` table.** FORGET purges it (`hermes_forget_executor.py` `PURGE_ORDER`). It is
-  unverified whether ephemeral grounding is stored there, and whether `hermes sessions prune --older-than 7` removes
-  it.
-- **`sessions/request_dump_*.json`.** Observed on 2026-10-28 when the gate refused a request: 2 files of about 750
-  bytes, contents not read. A dump is expected whenever a provider request fails (refusal, rate limit, timeout).
-  FORGET purges `sessions/`; the 7-day retention probably does not. The DEV config has no setting for dumps.
+Sources: pinned upstream Hermes `f293e72`, the DEV patch `integrations/hermes/patches/dev-f9c2.patch`, and the f9c2
+release manifest.
+
+- **Hermes `state.db` `system_prompts`: grounding is not persisted.**
+  - Hermes stores only `agent._cached_system_prompt` (`agent/conversation_loop.py` 926 and 1021, `run_agent.py:678`).
+    That is built by `_build_system_prompt`, which excludes the ephemeral prompt (`agent/system_prompt.py:779`).
+  - The gateway passes grounding as `ephemeral_system_prompt` (`gateway/run.py:5764`). Hermes appends it only when
+    each API call is built (`conversation_loop.py` 1510 and 2316; `chat_completion_helpers.py` 2931).
+  - The DEV patch does not change this.
+  - What `system_prompts` holds is the base persona/context prompt Hermes already stores for every session.
+- **`sessions/request_dump_*.json`: content-free on DEV.**
+  - When written: only when a provider call fails (`non_retryable_client_error` or `max_retries_exhausted`). That is
+    at most one per failed turn. The optional preflight dump needs `HERMES_DUMP_REQUESTS`, which is not set.
+  - Contents: DEV's patched `agent/agent_runtime_helpers.py` (`bdeecae2…`, F9-B `_content_free_request_dump`) keeps
+    only message roles and character counts, tool names, the model and the error type, status and code. It writes no
+    user message, system prompt, persona or grounding text. `release/dev-f9c2/tests/test_f9b_offline.py` tests this.
+  - There is no setting to turn error dumps off, and none is needed.
+- **Retention covers both.** `hermes sessions prune --older-than 7` (the daily DEV retention timer) uses
+  `prune_sessions` → `_remove_session_files`. That deletes each pruned session's rows, transcripts and
+  `request_dump_{session_id}_*.json`, and then any `system_prompts` row no session still references
+  (`hermes_state.py`). FORGET purges all of it.
+- **Exceptions:**
+  - A dump whose session ID never reached `state.db` (an orphan) is not matched by the prune. It is still purged by
+    FORGET.
+  - Model replies are stored like any reply (7-day prune and FORGET). A reply that repeats grounding facts keeps them
+    for that long.
 - **Decision log:** unchanged. The World Model record holds flags only, never grounding text.
+
+**Correction:** an earlier version of this plan said dumps "may contain prompt material" and that the 7-day
+retention "probably does not" cover them. The F1b review shows both are wrong for DEV.
 
 ## Proposed sequence (each step needs its own approval)
 
 | # | Gate | Step | Notes |
 |---|---|---|---|
-| F1 | A (read-only) | **Data-exposure inventory on DEV.** Counts and field presence only: beliefs (total and per entity type), tasks, unsent drafts, whether drafts have bodies, whether career tables exist. Uses Core API's own read-only SQLite access, as earlier audits did. No values shown | The 2026-10-27 audit saw 0 beliefs and no career tables. If DEV holds only synthetic or no World Model data, live grounding sends no new personal data |
-| F1b | none (offline) | **Request-dump and `system_prompts` behaviour.** Read the pinned upstream Hermes `f293e72` source offline: what triggers `request_dump_*`, what it contains, any switch to turn it off, and whether ephemeral prompts reach `system_prompts` and get pruned | Decides whether F4's cleanup is needed and how much |
-| F2 | **F** | **Owner provider-data decision**, choosing one of: **(a)** synthetic or empty DEV data only, all fields above; **(b)** real DEV data, all fields above; **(c)** as (a) or (b) but **excluding draft bodies**. Option (c) needs a small adapter or verifier change (reviewed PR) to drop the reuse-path body | Recommendation: **(a)**, verified by F1. Add (c) before any real data |
+| F1 | A (read-only) | **DONE 2026-10-28 10:08Z.** DEV `lilith-dev.db` read with `mode=ro&immutable=1` and `query_only`; the file was unchanged. Results: **0** beliefs and **0** tasks; `drafts`, `goal` and every career table **absent** | A pending or draft turn would create an empty `drafts` table (`_drafts_db` DDL). Belief-only turns do not |
+| F1b | none (offline) | **DONE 2026-10-28.** See the persistence section above | No extra cleanup engineering is needed |
+| F2 | **F** | **DECIDED 2026-10-28: option (a).** Empty DEV World Model data, explicitly authorized synthetic data only, and the static honesty-policy text. The owner acknowledges that a live turn also sends Hermes' existing base system/persona prompt and the synthetic user message to the configured provider through the gate. Not to be sent under this approval: real beliefs, career records, task titles, draft subjects or bodies | Not an authorization to send. The full F2 constraints are listed below |
 | B | B | **Release PR** `f293e72-f9c2-cog1-wm2`: router with `cognitive_mode: live`; verifier lane policy World Model **live** on `lilith_os` only, everything else off; installer adapted from `install_wm1.sh` (same guards); offline tests | The tests show: grounding fields and limits; no writes; reads per turn; Core API compatibility with the real `app.py`; draft body excluded if F2 is (c); rollback to wm1 and cog1 |
 | G1 | A, D, E, D | Preflight, stop, install, start | As for wm1 |
 | G2 | **F** | **Budget reset:** `gate_budget.sh reset --owner-approved "wm2-live-test"` | Gives 5 requests. Daily caps 10 requests / 10,000 tokens; ≤1,024 output tokens per reply |
-| G3 | **G** | **Live test:** 3 `TEST_ONLY` console turns in one dedicated session: (1) belief question about synthetic application `999`; (2) pending question; (3) a non-matching control | Expected cost: **3 gate requests** (≤4 with one retry); each reply ≤1,024 tokens |
-| G4 | A | **Evidence (aggregates only)** | Per-turn records `cognitive_mode=live` with the expected flags. Core API journal: exactly the expected GETs, **0** POSTs, **0** `/os/goals/focus`. Gate `budget_used` equals the turns sent and every request was forwarded with status 200. Replies are not error notices. **Request dumps created: 0.** `system_prompts` row-count change reported (count only). Gateway stable; protected services unchanged |
-| G5 | conditional | **Cleanup** of any request dump created by the test: pre-approved as part of G3. Same pinned, targeted deletion as 2026-10-28; never a general FORGET | Any `system_prompts` row from the test is handled per F1b (retention, or an owner-approved targeted removal) |
+| G3 | **G** | **Live test**, preceded by an immediate F1 recheck. If real personal data appears, stop and ask for a new F2 decision. Then 2 `TEST_ONLY` console turns in one fresh session: (1) a belief question about synthetic application `999`; (2) a non-matching control. **No pending or draft-request turns**, so the `drafts` table is not created | Expected cost: **2 gate requests** (≤3 with one retry); each reply ≤1,024 tokens |
+| G4 | A | **Evidence (aggregates only)** | The belief turn has one `cognitive_mode=live` record with `belief=True`; the control has none. Core API journal: exactly 1 `GET /os/world…`, **0** POSTs, **0** `/os/drafts`, `/os/tasks`, `/os/goals*` or `/career/*`. Gate `budget_used` rises by the number of turns sent, all forwarded with status 200. Replies are not error notices. **Request dumps created: 0.** Gateway stable; protected services unchanged |
+| G5 | none | Request dumps or test-session rows need no extra cleanup: they are content-free or session-linked, so the 7-day prune and FORGET cover them | A dump still counts as a stop condition (a failed request) |
+
+**F2 constraints (owner, 2026-10-28):**
+- Recheck the DEV grounding tables right before any provider test. Stop on real data.
+- No pending or draft turns.
+- No `drafts` table creation, database seeding, memory creation or persistent Core API change.
+- Every other lane off; draft and goal writes refused.
+- `lilith_os` only.
 
 ## Stop conditions
 
 Stop before the first turn if any of these hold:
-- F1 shows real personal data while F2 chose (a);
+- the immediate F1 recheck finds any belief, task, draft or career row that is not explicitly approved synthetic data;
 - the budget reset does not show `available: true`;
 - the runtime differs from G1's evidence.
 
 Stop after any turn on any of these:
-- a Core API write, or a `/os/goals/focus` call;
+- a Core API write, or a `/os/goals/focus`, `/os/drafts`, `/os/tasks` or `/career/*` call;
 - an unexpected read count;
 - a provider error or refusal;
-- a request dump created (clean up under G5, then stop);
+- a request dump created (content-free and pruned, but it signals a failed request);
 - a gateway restart, or any lane other than World Model;
 - prompt material appearing in decision logs.
 
