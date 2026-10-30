@@ -1,0 +1,23 @@
+diff --git a/integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py b/integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py
+index be8e441..3eaaea3 100644
+--- a/integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py
++++ b/integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py
+@@ -133,6 +133,10 @@ def _refused_post_goal_json(path, payload):
+     return 0, None
+ 
+ 
++def _title_without_career_read(app_id):
++    return "Follow up on application {aid}".format(aid=app_id)
++
++
+ def _load_legacy():
+     """Compile the PROD module from the exact bytes whose digest matched, then replace its I/O seam."""
+     try:
+@@ -149,6 +153,7 @@ def _load_legacy():
+         module._get_json = _governed_get
+         module._post_draft = _refused_post_draft
+         module._post_goal_json = _refused_post_goal_json
++        module._goal_title_for = _title_without_career_read
+         sys.modules[name] = module
+         return module, None
+     except Exception:
