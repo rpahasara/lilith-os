@@ -7,11 +7,15 @@ assembles, installs or references this directory. r1 on DEV keeps the deployed d
 
 | Rule | Deployed | Candidate |
 |---|---|---|
-| Evidence needed | a common word anywhere in the message | an explicit analytic request about work, in one clause |
-| Trigger followed by a topic | matches | the topic must name work, or end on `this`, `that` or `it` |
-| Bare `not sure`, `unknown`, `uncertain`, `assess`, `what next` | match | do not match |
-| Negation before a trigger | ignored | that clause does not count; other clauses still do |
+| Main test | a common word anywhere in the message | a question or request, in one clause, aimed at a named piece of work; or an explicit analytic cue about work |
+| Paraphrases | missed | matched by the shape of the clause and its topic, not by a phrase list |
+| Bare `not sure`, `unknown`, `assess`, `what next` | match | do not match |
+| Other senses of work words | match | removed by an off-topic list (`film`, `shop`, `role of`, `application form`…) |
+| Negation before the trigger or topic | ignored | that clause does not count; other clauses still do |
 | Quoted text, and reported or transformed speech | matches | removed or refused |
+| Plain look-ups (`what time`, `how many`, `show me`) | varies | refused, for the forms listed |
+| Explicit knowledge questions | not considered | World Model keeps them |
+| Common typos | missed | normalised for the detector only |
 | Input scanned | the whole message | the first 2,000 characters |
 | Lane priority | draft, goal, pending first | the same checks, unchanged |
 
@@ -20,43 +24,37 @@ it. All four accepted r1 test turns keep their result.
 
 ## Measurements
 
-**The first two corpora were written by the same author as the detector, so they flatter it.** The candidate was built after the
-held-out corpus was committed (`4ece7cb`), but knowing what was in it. The red-team corpus was then written to break it.
+| Corpus | Deployed | Previous candidate | This candidate | Independence |
+|---|---|---|---|---|
+| Original analytic, matched of 25 | 20 | 21 | **21** | used for tuning |
+| Original casual, false of 25 | 18 | 0 | **0** | used for tuning |
+| Held-out analytic, matched of 40 | 29 | 39 | **39** | seen before this candidate |
+| Held-out false matches, of 75 | 47 | 0 | **0** | seen |
+| Red-team analytic, matched of 20 | 1 | 1 | **19** | seen, used for tuning |
+| Red-team false, of 25 | 16 | 6 | **0** | seen, used for tuning |
+| **Validation analytic, matched of 39** | 2 | not run | **37** | **unseen; scored once** |
+| **Validation false, of 26** | 1 | not run | **0** | **unseen; scored once** |
+| Plain look-ups about work matched, of 10 | not run | not run | **10** | written after, to attack it |
 
-| Corpus | Deployed | Candidate v1 | Candidate (final) |
-|---|---|---|---|
-| Original analytic, matched of 25 | 20 | 23 | **21** |
-| Original casual, false of 25 | 18 | 0 | **0** |
-| Held-out analytic, matched of 40 | 29 | 39 | **39** |
-| Held-out casual, false of 45 | 27 | 0 | **0** |
-| Held-out negated, false of 15 | 8 | 0 | **0** |
-| Held-out multi-intent, matched of 8 | 8 | 8 | **8** |
-| Held-out lane yields, wrong of 10 | 0 | 0 | **0** |
-| Held-out adversarial, false of 15 | 12 | 0 | **0** |
-| **Red-team must-match, matched of 20** | 1 | **1** | **1** |
-| **Red-team must-not-match, false of 25** | 16 | **20** | **6** |
-
-Candidate v1 was **worse than deployed** on red-team false matches. It failed because triggers such as `pros and cons` needed no work
-context. The final candidate fixed that rule, using what the red-team corpus showed, so **its 6 of 25 is no longer a held-out
-number.** v1's 20 of 25 is the honest held-out result for that class of attack.
+**Only the validation row is independent of tuning,** and only partly. The pool (`bedfec8`) was committed first, then split by hash, and that half was
+never read until its one run. The same author wrote it, and its negatives use everyday topics also covered by the off-topic list, so
+treat 0 of 26 as optimistic. It is small: the 95% range on 37 of 39 is roughly 83% to 99%.
 
 ## Known failures, not hidden
 
-- **Paraphrases are missed.** 19 of 20 red-team requests fail, including `thoughts on the offer?`, `why did they reject me?`, `what went
-  wrong on application 3?`, typos and shorthand. The deployed detector misses the same set. A rule list can't reach these.
-- **Work words in other senses still match:** `the role of bees`, `application form at the DMV`, `offer in the shop`.
-- **Four original analytic requests are missed** by the tightening: `which option looks strongest to you?`, `what are the risks of
-  declining?`, `what would settle this question?`, and the `reply` case, which the draft path takes first.
-- **Lane priority causes one held-out miss:** `why is the draft for job 9 on hold?` goes to the draft path, as designed.
-- The full lists are pinned in [`tests/holdout_results.json`](tests/holdout_results.json) and [`tests/redteam_results.json`](tests/redteam_results.json).
+- **Plain look-ups about work match.** `who is the recruiter?` wants a fact, and the rule can't tell. This is the main cost of the broad rule, and
+  it will also inflate Workspace reads. Real records will show how common it is.
+- **The off-topic list is a list.** It removes the senses it names and no others.
+- **Validation misses:** `can you make sense of this feedback?` and `what's the downside of accepting?`.
+- **No work word means no match:** `what are the risks of declining?`, `which option looks strongest to you?`, `what are my choices here?`.
+- **Lane priority:** `reply` and `follow up on…` can read as draft requests, so those messages go to the draft path, as designed.
+- **Other languages:** not handled.
+- The full lists are pinned in the `tests/*_results.json` files.
 
 ## What this supports
 
-**The candidate trades recall for precision, which is the right way round for shadow.** A miss costs nothing there. A false match costs
-a record, and up to 5 Core API reads under Workspace.
-
-**It does not support Reasoning Live.** Missing most paraphrases means a live lane would rarely fire on natural wording. Live needs
-measurement on real shadow records, and probably a classifier that isn't a rule list.
+Good enough to **replace the deployed detector in shadow**, where a false match costs a record and, under Workspace, up to 5 reads. **It does
+not support Reasoning Live:** real wording is unmeasured, and a live false match would replace a normal reply.
 
 ## To adopt it
 

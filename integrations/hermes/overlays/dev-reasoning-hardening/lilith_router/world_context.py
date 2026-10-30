@@ -167,10 +167,10 @@ _R_DEICTIC_RE = re.compile(r"\b(this|that|these|those|it)\s*$|\bthe (situation|e
 _R_TAIL_OK_RE = re.compile(r"\s*(here|now|then|next time|for me)?\s*$", re.IGNORECASE)
 _R_QUOTED_RE = re.compile(r'"[^"]*"|(?<!\w)\'[^\']+\'(?!\w)')
 _R_REPORTED_RE = re.compile(
-    r"\b(repeat after me|translate|how do you spell|plural of|define|write (a|me a) (poem|story|song)|"
-    r"in the (movie|film|book|song|show)|(title|name) is|is called|ignore (your|all|previous)|system:)", re.IGNORECASE)
+    r"\b(repeat after me|translate|how do you spell|plural of|define|write (a|me a) (poem|story|song)|summari[sz]e the plot|"
+    r"in the (movie|film|book|song|show)|(title|name) is|is called|headline|quote:|ignore (your|all|previous)|system:)", re.IGNORECASE)
 _R_NEGATED_RE = re.compile(
-    r"\b(don'?t|do not|no need|never mind|skip|stop|forget|hold off|leave|wouldn'?t|not (asking|looking)|no analysis|without)\b", re.IGNORECASE)
+    r"\b(don'?t|do not|no need|never mind|skip|stop|forget|hold off|leave|wouldn'?t|not (asking|looking|interested)|no (analysis|thoughts)|without)\b", re.IGNORECASE)
 _R_CLAUSE_RE = re.compile(r"[.!?;\n,]+|\bbut\b", re.IGNORECASE)
 _R_POLITE = r"^\s*(?:(?:please|can you|could you|would you|will you|help me|now|ok|okay|then|and|also|hey|hi)\s+)*"
 _R_H_BLOCKER = re.compile(
@@ -194,8 +194,33 @@ _R_H_ANALYZE_WORK = re.compile(r"\bwhat does\b[^.?!]*\b(mean|imply|suggest|tell 
 _R_H_ANALYZE_VERB = re.compile(_R_POLITE + r"(analy[sz]e|assess|evaluate|interpret|compare|weigh)\b", re.IGNORECASE)
 
 
+# Broad rule: someone directing a question or request at a named piece of their own work, in any wording. Rule lists cannot enumerate
+# paraphrases, so this keys on the shape of the clause and on its topic, then removes plain look-ups and other senses of the words.
+_R_ASK_RE = re.compile(_R_POLITE + r"(what|what'?s|whats|why|how|who|where|which|should|shall|is|are|am|does|do|did|was|were|can|could|would|will|"
+                       r"any|tell me|help me|explain|walk me|talk me|summari[sz]e|advise|break down|thoughts|make sense)\b", re.IGNORECASE)
+_R_TOPIC_RE = re.compile(
+    r"\b(applications?(?! (of|form)\b)|jobs?|(?<!\ba )(?<!\bthe )role\s+\d+|(this|that|my|[A-Z]\w+) role\b|the role\b(?! of\b)|offers?|recruiters?|"
+    r"interview(er|ers)?|hiring manager|salary|reject(ed|ion|ions)?|follow[- ]?ups?|cover letter|negotiation|deadlines?|job search)\b", re.IGNORECASE)
+_R_OFFTOPIC_RE = re.compile(
+    r"\b(game|film|movie|play|show|episode|shop|store|mail|video|bike|cat|pizza|coupon|recipe|dmv|tutorial|netflix|sale|plot|role of|role-play|application form)\b", re.IGNORECASE)
+_R_LOOKUP_RE = re.compile(
+    r"\b(what time|what day|what date|when (is|does|did|was)|how many|how much|what('?s| is) the (name|address|email|phone|link|url)|"
+    r"show me|list|remind me)\b", re.IGNORECASE)
+_R_BELIEF_ONLY_RE = re.compile(r"\b(do you believe|what do you (currently )?know|know about|provenance|source of)\b", re.IGNORECASE)
+_R_TYPOS = ((r"\bpls\b", "please"), (r"\bcn\b", "can"), (r"\br\b", "are"), (r"\bwat\b", "what"), (r"\banali[sz]e\b", "analyze"), (r"\bevalute\b", "evaluate"))
+
+
+def _reasoning_broad(clause):
+    m = _R_TOPIC_RE.search(clause)
+    if not m or not _R_ASK_RE.match(clause) or _R_OFFTOPIC_RE.search(clause) or _R_LOOKUP_RE.search(clause):
+        return False
+    return not _R_NEGATED_RE.search(clause[:m.start()])
+
+
 def _reasoning_clause(clause):
     """(mode, subtype) for one clause, or None. A trigger only counts when no negation comes before it."""
+    if _R_OFFTOPIC_RE.search(clause):
+        return None
     def fires(rx):
         m = rx.search(clause)
         return bool(m) and not _R_NEGATED_RE.search(clause[:m.start()])
@@ -215,6 +240,8 @@ def _reasoning_clause(clause):
         return "UNCERTAINTY_ANALYSIS", "uncertainty"
     if free(_R_H_ANALYZE_FREE) or (fires(_R_H_ANALYZE_WORK) and (work or deictic)) or (fires(_R_H_ANALYZE_VERB) and (work or deictic)):
         return "FACTUAL_INTERPRETATION", "analyze"
+    if _reasoning_broad(clause):
+        return "FACTUAL_INTERPRETATION", "analyze"
     return None
 
 
@@ -228,6 +255,10 @@ def hardened_reasoning_intent(message):
         if ci.get("draft") or gi.get("goal_create") or gi.get("goal_query") or ci.get("pending"):
             return none
         text = m.translate({0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'})
+        for wrong, right in _R_TYPOS:
+            text = re.sub(wrong, right, text, flags=re.IGNORECASE)
+        if _R_BELIEF_ONLY_RE.search(text):
+            return none                    # World Model owns explicit knowledge questions
         if _R_REPORTED_RE.search(text):
             return none
         text = _R_QUOTED_RE.sub(" ", text)
