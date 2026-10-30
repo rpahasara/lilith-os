@@ -130,6 +130,23 @@ class WorkspaceShadow(Base):
         self.assertIsNone(ws["trace"]["fallback_reason"])
         print("\nW1_TRACE_KEYS", sorted(ws["trace"]), "PRIMARY", ws["trace"]["selected_primary_id"], ws["trace"]["selected_primary_class"])
 
+    def test_candidate_ids_are_unsalted_hashes_stable_across_turns_so_they_stay_sensitive(self):
+        # An id hides the goal id, but it is a stable, unsalted hash: it links turns, and it is not anonymous.
+        core = C.STATE["core"]
+        bootstrap_drafts("id-text")
+        conn = core._goals_db()
+        core._create_goal_impl(conn, {"type": "test_only.synthetic", "title": "TEST_ONLY", "source": "SYSTEM_MAINTENANCE", "owner": "user",
+                                      "priority": "HIGH", "goalId": f"g.{CANARY.lower()}"})
+        conn.close()
+        ids, raw = [], ""
+        for session in ("ws-id-1", "ws-id-2"):
+            self.route(ANALYTIC, session)
+            ws = [r for r in self.new_log() if r.get("lane") == "workspace"][0]
+            ids.append(ws["trace"]["selected_primary_id"]); raw += json.dumps(ws)
+        self.assertNotIn(CANARY.lower(), raw)
+        self.assertRegex(ids[0], r"^wc\.[0-9a-f]{16}$")
+        self.assertEqual(ids[0], ids[1])
+
     def test_a_focus_read_with_a_goal_would_write_a_trace_which_is_why_the_verifier_needs_an_empty_store(self):
         core = C.STATE["core"]
         db = bootstrap_drafts("trace")

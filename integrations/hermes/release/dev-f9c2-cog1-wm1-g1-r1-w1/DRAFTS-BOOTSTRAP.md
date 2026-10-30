@@ -1,29 +1,43 @@
-# `drafts` schema bootstrap: design for a future gate (NOT RUN)
+# `drafts` schema bootstrap gate (PREPARED, NOT RUN)
 
 Workspace shadow calls `GET /os/drafts`, and `_drafts_db()` runs `CREATE TABLE IF NOT EXISTS`. Without this gate, the first
 analytic turn would change the DEV schema from inside a GET. The gate makes that change deliberate, reversible and pinned, as
 the G-S goal-schema gate did.
 
+**Host scripts:** generated from the executed G-S scripts by asserted replacements, and kept outside the repository like every
+gate package, because they pin live PIDs: `C:\Users\edufo\lilith-dev-drafts-schema-20261030`.
+
 ## Steps
 
-Modelled on the accepted G-S gate. One script, run once, with the gateway running on r1, which makes no Core API reads.
+One script, `ds_bootstrap.sh`, run once with the gateway up on r1, which makes no Core API reads. It stops before the schema write
+on any failed check.
 
-1. **Preflight, read-only:** r1 current; DB digest exactly `b291372517…`; no `-journal`; FORGET idle; `app.py` is `a9fc562f…`.
-2. **Backup:** sqlite online backup to `/var/backups/lilith-drafts-schema-<date>/` (root 0700, file 0600), with its digest
-   recorded and its logical digest proven equal to the reference.
-3. **Create:** run the Core API's own `_drafts_db()` once, in a separate process, as `lilith`, with an empty `HERMES_HOME`.
-4. **Verify:** the digest equals the new pinned reference. It adds exactly `drafts` and its 3 named and 2 automatic indexes. Every
-   table has 0 rows.
+| Phase | Action |
+|---|---|
+| A, read-only | r1 current and its router; gateway 369445; gate 370064; budget 2/5; ledger 27 lines; FORGET idle; protected services; no `-journal`, `-wal` or `-shm`; DB digest `b291372517…` and file stat unchanged |
+| B, rehearsal | Core API interpreter matches the running process; `app.py` is `a9fc562f…`; the same code runs on a throwaway DB, including exact rollback and three refusals |
+| C, backup | sqlite online backup to `/var/backups/lilith-drafts-schema-20261030/` (root 0700, file 0600); logical digest equal to the reference |
+| D, write | the Core API's own `_drafts_db()` once, as `lilith`, with an empty `HERMES_HOME`. Any post-condition failure drops the table in one transaction, back to the exact reference |
+| E, verify | independent read-only check, as root |
 
-**New reference:** computed offline from the post-bootstrap DB when the gate is packaged, then pinned in the scripts. The test
-`DraftsBootstrap` proves the change is additive and idempotent on the real Core API.
+**New reference:** `88b76a7910fdcb27dc3b7c02e9f18c2c92b8154d10afc9f15f4bc9da90a84e79`, computed from the real Core API. It adds exactly
+`drafts`, 3 named indexes and 2 automatic ones. Every table has 0 rows.
 
 ## Rollback
 
-`DROP TABLE drafts` in one transaction, which also drops its indexes, committing only if the digest then equals
-`b291372517…`. The test proves this returns to the exact prior logical state, on an empty table.
+`ds_rollback.sh`: `DROP TABLE drafts` in one transaction, committing only if the digest then equals `b291372517…`.
 
-**Refuse rollback if `drafts` has any row.** Nothing on DEV writes drafts: the adapter refuses them.
+**It refuses** if `drafts` has any row, if anything else differs, or if r1 is not current. Nothing on DEV writes drafts: the
+adapter refuses them.
+
+## Offline evidence
+
+`tests/dspy_check.py`, on the pinned `app.py`, passes 21 checks and 24 rehearsal checks: refusal on a wrong digest or a foreign table,
+an injected post-condition failure rolled back exactly, a second bootstrap and rollback refused, rollback refused with a draft
+row, and the three scripts identical except their `MODE` line. `ds_status_ro.sh` classified the live DB as the prior reference.
+
+**Not proven:** the write has not run on DEV. The check ran with Python on Windows, not the Core API interpreter; phase B is what
+covers that on the host.
 
 ## Effect on other packages
 

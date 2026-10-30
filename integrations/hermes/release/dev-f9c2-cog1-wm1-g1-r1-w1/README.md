@@ -48,9 +48,19 @@ suppressed ids, deciding rule, capacity, duration, fallback reason.
 
 **Tested with canary text in a goal title, a goal description, a draft subject and a draft body: none reaches the record.**
 
-**What ids can reveal:** candidate ids are derived from durable refs, so they can expose that a goal, draft or application
-exists, and its number. That is the same class as `app_id` in other records. Treat them as sensitive metadata: 7-day retention,
-FORGET, counts-only observation. Owner acceptance is needed before this runs.
+**What ids can reveal:** a candidate id is `wc.` plus 16 hex characters of an unsalted SHA-256 over source type, source ref and
+correlation id. A test shows it hides the goal id, and that the same goal has the same id across turns. So the record can link
+turns about one item, and an id could be confirmed by anyone who can guess the inputs. It is a pseudonym, not anonymous, and it is
+treated as sensitive metadata, the same class as `app_id`:
+
+| Control | State |
+|---|---|
+| Retention | the decision log is in `logs/`, rotated daily and removed after 7 days by `hermes-gateway-dev-retention` |
+| FORGET | `logs` is in the executor's `PURGE_DIRS`, so a principal FORGET removes it. There is no per-item erasure |
+| Deleting one goal | does not remove its id from existing log records, which stay until retention |
+| Observation | gates print counts and classes, never the ids |
+
+Owner acceptance of this is needed before this runs.
 
 ## Install and rollback
 
