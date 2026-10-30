@@ -2,10 +2,12 @@
 
 Replaces section 1 of [`../goals-privacy-v0.2/PLAN.md`](../goals-privacy-v0.2/PLAN.md) where they differ.
 
-## The defect in today's design
+## Status
 
-PR #289 treats an unset token as "open". That is the failure the owner asked to avoid: a lost or forgotten setting silently removes
-protection, and the service looks healthy. **#289 should not be merged in this form.**
+PR #289 is reworked to this design (`LILITH_OS_WRITE_AUTH`, `LILITH_OS_WRITE_TOKEN`, header `X-LILITH-OS-Write`), with tests. Not merged or deployed.
+
+**Merging it without stage 1 would stop every Core API write on DEV and PROD,** because unset now refuses. That is deliberate, and it is why the
+setting has to be in place first. It also deploys: `DEPLOY_REQUIRED`.
 
 ## Target rule
 
@@ -30,8 +32,8 @@ packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open, afte
 
 | Stage | Change | State after | Proof |
 |---|---|---|---|
-| 1 | Credential file outside the unit (a drop-in the bootstrap does not rewrite), root-owned, and a preflight for it | No code change | Bootstrap re-run keeps it |
-| 2 | Rework #289 to the rule above, shipped with `open-acknowledged` set on DEV and PROD first | Same behaviour, now explicit | Unset refuses, in tests |
+| 1 | Drop-in outside the unit, which the bootstrap does not rewrite, holding `LILITH_OS_WRITE_AUTH=open-acknowledged`, on DEV and PROD, and a preflight for it | No code change | Bootstrap re-run keeps it |
+| 2 | Merge #289 after stage 1 is verified on both hosts | Same behaviour, now explicit; `/health` shows `writeAuth` | `/health` reads `open-acknowledged`; unset refuses, in tests |
 | 3 | Callers send the header: PROD `_post_goal_json`, task and draft writers, and the Command Center path | Harmless while open | Caller tests |
 | 4 | DEV to `enforced` | **Protected on DEV** | No header 401, wrong 401, right 200, on every route |
 | 5 | PROD to `enforced` in its own approved window | **Protected on PROD** | Same probe |

@@ -2,34 +2,33 @@
 
 Based on the recovered PROD code in Git. Line references are to `home/variants/dev-f9c2/lilith_router/gateway_integration.py`.
 
-## Finding that shapes everything
+## Correction
 
-**`reasoning.py`, `motivation.py` and `planning.py` are not installed on DEV.** They exist in Git only under
-`docs/architecture/slice-9`, `-11` and `-12`. The gateway imports them lazily (`from . import reasoning`), so turning a lane on without
-shipping the file fails open silently: a lane can look enabled and do nothing. Each needs to be a release member with a digest and a
-verifier check.
+An earlier version of this file said `reasoning.py`, `motivation.py` and `planning.py` were not installed on DEV. **That was wrong.** All three are in
+the DEV release manifest (`release/dev-f9c2/MANIFEST.sha256`, `home/lilith_router/`) and in the assembled home, and the lanes import them from
+there. They do not need adding as release members. Their digests must still be reviewed before a lane uses them.
 
 ## Reasoning Live
 
 | Dependency | State |
 |---|---|
-| Module shipped | no |
+| Module shipped | yes, digest `ff3b9114…`; unused while the lane is in shadow |
 | Model path | `run_reasoning` resolves the gateway model and builds an agent. Must be proven to go through the gate, count against budget, and have no tools |
 | **Extra provider call** | a live match makes its own call and, if valid, returns as the turn's answer, skipping the main agent (line 549). If invalid it falls through, so **one turn can cost 2 requests** |
-| Detector | recall is poor: 1 of 20 red-team paraphrases. Measure on real shadow records first; a rule list may not be enough |
+| Detector | the #295 candidate is much better offline, but plain look-ups match, and a live false match would replace a normal reply. Measure on real shadow records first |
 | Input data | `select_reasoning_input_m` reads goals, world, tasks and drafts, so **provider exposure is wider than Goals**: a new owner decision |
 | Governed reads | the adapter allow-list and budget must fit the read set |
 | Drafts schema | required |
 | Retention and FORGET | goal rows must be covered first if any real goal is present |
 | Answer safety | `final_response` still passes `enforce_reply`. Needs a test that the reply claims no action |
 
-**Order:** detector on real records, ship module, synthetic-only live window, then provider decision for real data.
+**Order:** detector on real records, synthetic-only live window, then provider decision for real data.
 
 ## Workspace Live
 
 | Dependency | State |
 |---|---|
-| Workspace shadow accepted | not yet: needs #295 and the counts-only trace in the release |
+| Workspace shadow accepted | not yet: #293 now carries #295 and the counts-only trace, not installed |
 | Runs only inside Reasoning | Workspace live only changes `select_reasoning_input_m`'s input, so **it has no effect without Reasoning Live** |
 | Goal store | the w1 verifier refuses goals, because a focus read writes a trace. Must be redesigned before Workspace runs with any goal |
 | Empty-store limit | shadow on empty stores shows plumbing, not salience quality. Needs synthetic populated data |
@@ -48,7 +47,7 @@ Planning branches (lines 408 to 411), so it inherits their detector.
 | Reads | the snapshot reuses goal and task reads. Measure the count offline before release |
 | Record | must be counts and classes only, as with the trace candidate. Check for ids |
 | Live | adds candidates to Workspace, so it depends on Workspace Live |
-| Module | `motivation.py` must be a release member |
+| Module | present, digest `1bb90eaa…` |
 
 ## Planning
 
@@ -63,7 +62,7 @@ code shows no model call in shadow. A release test must pin that, because `plann
 | Priority | it runs before Reasoning, so its detector needs the same hardening review |
 | Reads | `build_planning_input` reads durable state on every match |
 | Live | a successful result becomes the turn's answer. Proposal-only must be tested: no task, draft or goal writes |
-| Module | `planning.py` must be a release member |
+| Module | present, digest `2703b852…` |
 
 ## Recommended sequence
 
