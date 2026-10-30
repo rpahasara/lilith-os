@@ -1,0 +1,35 @@
+# DEV-ONLY LILITH Router V2 config (HERMES_HOME/lilith_router/router.yaml). F8r3: SHADOW only (B-7 evidence).
+# Generated from lilith_router/config.py defaults; nothing copied from PROD.
+# Start in shadow (classify + log only). Switch to live for lilith_os only after the smoke tests pass.
+enabled: true
+mode: shadow
+live_channels:
+  - lilith_os
+groq_model: qwen/qwen3.8-27b
+groq_provider: groq
+hermes_model: openai/gpt-oss-120b
+hermes_provider: custom
+recent_turns: 6
+# F8: decisions.log out of the root-owned code directory into the writable DEV state (logs/). One JSON line per turn
+# including a <=60-char message preview, so it is conversation data: covered by the DEV retention rules.
+log_path: /home/lilith/.hermes-dev/logs/lilith-router-decisions.log
+
+# f9c2-cog1-wm1: Slice 7.2 World Model lane in SHADOW on lilith_os only (detect + one content-free decision record per
+# matching turn; no Core API read, no write, no model call). Every other lane OFF. Enforced by bin/verify_release.py.
+cognitive_enabled: true
+cognitive_mode: shadow
+cognitive_channels:
+  - lilith_os
+# f9c2-cog1-wm1-g1: Slice 8 Goals/Executive lane also in SHADOW, on the same cognitive_channels (lilith_os only): detect
+# + one content-free goal decision record per matching turn; no Core API read (so no goal schema or goal_trace write),
+# no write, no model call. Every other lane OFF. Enforced by bin/verify_release.py.
+goals_enabled: true
+goals_mode: shadow
+reasoning_enabled: false
+workspace_enabled: false
+motivation_enabled: false
+planning_enabled: false
+ethics_enabled: false
+social_cognition_enabled: false
+memory_consolidation_enabled: false
+canonical_ltm_enabled: false
