@@ -66,7 +66,7 @@ code shows no model call in shadow. A release test must pin that, because `plann
 
 ## Recommended sequence
 
-1. G3, or skip it.
+1. G3: **closed 2026-10-30.** Owner accepted it as partial evidence, no re-run. Its title criterion failed and its negative control did not run.
 2. `drafts` gate.
 3. Combined release: detector candidate plus Workspace shadow with counts-only trace.
 4. Collect real shadow records; decide on the detector.

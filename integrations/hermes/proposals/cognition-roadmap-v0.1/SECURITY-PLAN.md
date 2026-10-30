@@ -28,7 +28,7 @@ lacks it. `/os/conversation` keeps its existing fail-closed owner check.
 ## Stages
 
 Each is a separate approval. Every stage that changes `app.py` is `DEPLOY_REQUIRED`: merging it restarts Core API and invalidates
-packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open, after G3 and the `drafts` gate.**
+packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open, after the `drafts` gate.** G3 is closed. Merging stage 2 changes `app.py`, so regenerate the `drafts` gate if it has not run, and the w1 package.
 
 | Stage | Change | State after | Proof |
 |---|---|---|---|
@@ -46,6 +46,8 @@ packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open, afte
 Refusal happens before any DB access. So a preflight POST with no header is a safe probe on a protected service: 401 or 503 means
 protected. **A 200 would mean it wrote,** so the probe sends a body that fails validation, where an unprotected route returns 400.
 
+Proven on the real app over HTTP in #289: `test_the_preflight_probe_is_refused_before_body_handling`. Unset returns 503, enforced returns 401, and only a correct header or open mode reaches validation.
+
 ## Other open items
 
 | Item | State |
@@ -61,5 +63,7 @@ protected. **A 200 would mean it wrote,** so the probe sends a body that fails v
 gone from the file bytes after erasure, no activity counter remains, a re-run is harmless, an unknown table or held lock refuses
 with nothing changed, and retention removes only old terminal goals.
 
+**Also candidate, tested, not wired:** a hold check, an independent zero-rows check, a restore gate and a channel-name sanitiser.
+
 **Still needed:** owner decisions 1 to 8 in `goals-privacy-v0.2/PLAN.md`; wiring into the FORGET executor, which is a Privacy change needing
-its own approval; hold handling; backup rules; and a DEV drill.
+its own approval; backup rules; the goal-detector fix and title rule reaching a release; and a DEV drill.

@@ -96,6 +96,30 @@ class Erasure(unittest.TestCase):
         c.close()
         self.assertNotIn(b"old done", db.read_bytes())
 
+    def test_a_hold_blocks_erasure_and_changes_nothing(self):
+        db = fresh("hold", [CANARY])
+        before = db.read_bytes()
+        self.assertEqual(E.forget_goals_unless_held(db, True), "held")
+        self.assertEqual(db.read_bytes(), before)
+        self.assertEqual(E.forget_goals_unless_held(db, False), "erased")
+        self.assertTrue(E.goal_rows_zero(db))
+
+    def test_goal_rows_zero_sees_a_remaining_row_and_writes_nothing(self):
+        db = fresh("zero", [CANARY])
+        before = db.read_bytes()
+        self.assertFalse(E.goal_rows_zero(db))
+        self.assertEqual(db.read_bytes(), before)
+
+    def test_a_backup_with_goal_rows_cannot_be_restored(self):
+        self.assertFalse(E.backup_restore_allowed(fresh("bk1", [CANARY])))
+        self.assertTrue(E.backup_restore_allowed(fresh("bk2")))
+
+    def test_channel_label_drops_the_session_key(self):
+        self.assertEqual(E.channel_label("lilith_os:TEST_ONLY-session-7"), "lilith_os")
+        self.assertEqual(E.channel_label("discord:12345"), "discord")
+        for bad in (None, "", "a b:c", "x/y"):
+            self.assertEqual(E.channel_label(bad), "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

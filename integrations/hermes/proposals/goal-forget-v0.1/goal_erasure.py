@@ -68,3 +68,34 @@ def prune_terminal_goals(db, days=30, now=None):
         return len(ids)
     finally:
         conn.close()
+
+
+def goal_rows_zero(db):
+    """The check the FORGET executor would add: read-only, and an absent goal table counts as zero only if the table was never made."""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return all(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] == 0 for t in tables & {"goal", "goal_trace"})
+    finally:
+        conn.close()
+
+
+def forget_goals_unless_held(db, hold_active):
+    """A FORGET hold blocks both erasure and retention. Returns 'held', with nothing changed, or 'erased' after an independent check."""
+    if hold_active:
+        return "held"
+    erase_all_goals(db)
+    if not goal_rows_zero(db):
+        raise Refused("rows_remain")
+    return "erased"
+
+
+def backup_restore_allowed(backup_db):
+    """Restore gate: a backup holding goal rows could resurrect erased data, so it is refused until listed in an erasure ledger."""
+    return goal_rows_zero(backup_db)
+
+
+def channel_label(source_channel):
+    """Provenance: keep the channel name, drop the session key after it. `lilith_os:chat-123` becomes `lilith_os`."""
+    name = str(source_channel or "").split(":", 1)[0].strip().lower()
+    return name if name.replace("_", "").isalnum() else "unknown"
