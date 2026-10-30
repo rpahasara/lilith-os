@@ -32,9 +32,11 @@ RESULTS = Path(__file__).with_name("planning_results.json")
 
 def setUpModule():
     W.setUpModule()
-    router = (REPO / "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/home/router.yaml").read_text(encoding="utf-8").replace(
+    router = (REPO / "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1/home/router.yaml").read_text(encoding="utf-8").replace(
         "/home/lilith/.hermes-dev/logs/lilith-router-decisions.log", C.LOG.as_posix())
-    router = router.replace("motivation_enabled: false\n", "motivation_enabled: true\nmotivation_mode: shadow\n").replace("planning_enabled: false\n", "planning_enabled: true\nplanning_mode: shadow\n")
+    assert "planning_enabled: false\n" in router
+    router = router.replace("planning_enabled: false\n", "planning_enabled: true\nplanning_mode: shadow\n")
+    shutil.copy2(REPO / "integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py", C.HOME / "lilith_router" / "motivation.py")
     (C.HOME / "lilith_router" / "router.yaml").write_text(router, encoding="utf-8")
     shutil.copy2(HERE / "lilith_router" / "world_context.py", C.HOME / "lilith_router" / "world_context.py")
     shutil.copy2(HERE / "lilith_router" / "planning.py", C.HOME / "lilith_router" / "planning.py")
@@ -132,6 +134,27 @@ class Candidate(W.Base):
         self.wc._OPENER = Down()
         self.assertIsNone(self.route(FOLLOWUP, "c-out"))
         self.assertEqual(self.wc._READ_MEMO, {})
+
+    def test_the_m1_turns_keep_their_records_with_fewer_reads(self):
+        # Compatibility with the installed lanes: same records as m1, each route once. A p1 window must pin these totals, not m1's.
+        db = W.bootstrap_drafts("c-m1")
+        before = C.rows(db), C.schema(db)
+        expected = {"TEST_ONLY what are my options for application 14?": (["motivation", "workspace", "reasoning", "cognitive", "routing"], 5),
+                    "TEST_ONLY what information is missing to resolve this?": (["motivation", "workspace", "reasoning", "routing"], 5),
+                    "TEST_ONLY which goal has priority?": (["goal", "routing"], 0), "TEST_ONLY hey how are you": (["routing"], 0)}
+        for i, (message, (lanes, reads)) in enumerate(expected.items()):
+            self.wc._READ_MEMO.clear()
+            self.bridge.calls.clear()
+            self.assertIsNone(self.route(message, f"c-m1-{i}"))
+            records = self.new_log()
+            self.log0 += len(records)
+            self.assertEqual([r.get("lane", "routing") for r in records], lanes, message)
+            self.assertEqual(len(self.bridge.calls), reads, message)
+        self.assertEqual((C.rows(db), C.schema(db)), before)
+
+    def test_ethics_still_yields_to_a_work_plan_and_takes_a_casual_one_only_on_its_own_terms(self):
+        self.assertFalse(self.wc.detect_ethics_intent("plan how to follow up on application 14")["any"])
+        self.assertFalse(self.wc.detect_planning_intent("TEST_ONLY is it ethical to contact the recruiter's manager?")["any"])
 
     def test_the_corpus_result_is_pinned(self):
         detect = self.wc.detect_planning_intent

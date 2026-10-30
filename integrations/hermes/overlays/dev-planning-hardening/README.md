@@ -40,9 +40,9 @@ Records follow the decision log: 7-day retention and the FORGET purge of `logs/`
 | Item | State |
 |---|---|
 | m1 accepted on DEV | not yet |
-| Memo effect on Workspace and Motivation read counts | changes them: a p1 window must pin new totals |
+| Memo effect on Workspace and Motivation read counts | measured on m1: same records, 8 reads become 5 on a matching turn. A p1 window must pin those totals |
 | Installer, verifier pins and simulation | not built |
 | The `intent.app_id` choice for the Reasoning and Goal records | owner decision; unchanged here |
 | Live mode, and the model candidate path | out of scope |
 
-**Evidence:** `tests/test_planning_hardening.py`, 9/9, on the real gateway, adapter and Core API.
+**Evidence:** `tests/test_planning_hardening.py`, 11/11, on the real gateway, adapter and Core API with the m1 router and counts-only `motivation.py`. It includes compatibility with the four m1 turns.
