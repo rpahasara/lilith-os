@@ -15,7 +15,7 @@
       "change": "replace",
       "sha256": null,
       "template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/templates/bin/verify_release.py.tmpl",
-      "template_sha256": "cd6a8056117ec1d4152586b65e1cbed4144bd4151b0aef236423cf851849a9ea",
+      "template_sha256": "9e2aec1176a6e4bc06bcb3dd1add86e5ad7bc27f53f088433da4259d07e6ef47",
       "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1/templates/bin/verify_release.py.tmpl",
       "base_template_sha256": "12fa37c226dff639199fe9482679ddb73fed149e619496009706d15ba6940c2b",
       "placeholder": "__LILITH_GATE_CLIENT_TOKEN__",
@@ -31,7 +31,7 @@
     "home/lilith_router/world_context.py": {
       "change": "replace",
       "from": "07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc",
-      "sha256": "c2a1ab0002227ae03ebb31fd948eafd18f6c6548991bfcb12e264f1e9e91dca2",
+      "sha256": "8bafd94137e1beef4c46de644728dff386403e665af000f57edf07934e01210a",
       "source": "integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py",
       "installed_as": "/home/lilith/.hermes-dev/lilith_router/world_context.py (root:root 0644)"
     },

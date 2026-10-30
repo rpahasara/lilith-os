@@ -7,8 +7,8 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 | # | Blocker | Owner of it |
 |---|---|---|
 | 1 | r1 shadow acceptance | **done**, owner-accepted 2026-10-30 (#294) |
-| 2 | Detector candidate accepted: PR #295, merged into this branch. Plain look-ups about work still match | owner decision |
-| 3 | G3 | ran once: FAIL by criteria, recovery PASS. Any re-run must be regenerated |
+| 2 | Detector candidate accepted: PR #295, merged into this branch | owner decision |
+| 3 | G3 | **closed**: owner accepted it as partial evidence, no re-run (#297) |
 | 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md): DB write, needs its own approval | owner |
 | 5 | Stable candidate ids removed from the log | **done in source** |
 | 6 | #293 merged and classified. It is `CONTROL_ONLY_NO_DEPLOY` as long as it adds only new files | owner |
@@ -17,13 +17,12 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 
 Workspace runs only inside a Reasoning match, so the detector sets its read load.
 
-| Held-out casual messages, of 45 | False matches | Core API reads, at up to 5 each |
-|---|---|---|
-| Deployed detector | 27 | up to 135 |
-| Candidate in #295 | 0 | 0 |
+| Message set | Deployed false matches | Candidate false matches | Core API reads, at up to 5 each |
+|---|---|---|---|
+| Held-out casual, of 45 | 27 | 0 | up to 135 against 0 |
+| Validation 2 work look-ups, unseen, of 17 | 0 | 1 | 0 against up to 5 |
 
-The red-team corpus still gets 6 false matches of 25 from the candidate, so it reduces the load and does not remove it. The reads stay
-bounded and write nothing on an empty store.
+Reads stay bounded and write nothing on an empty store. A focus read with a goal present does write a trace, which is why the verifier needs an empty goal store.
 
 **This release now carries both changes** as members, with digests pinned in the verifier, installer and delta. If #295 changes, these pins move.
 
@@ -63,7 +62,7 @@ Same gate-stopped method as r1, so no request can be forwarded. Unlike r1, this 
 | Turn | Message | Records, in order | Core API |
 |---|---|---|---|
 | T1 | `TEST_ONLY what are my options for application 14?` | workspace, reasoning, cognitive, routing | exactly the 5 reads |
-| T2 | `TEST_ONLY what information is missing to resolve this?` | workspace, reasoning, routing | at most 5 reads, measured offline before sealing |
+| T2 | `TEST_ONLY what information is missing to resolve this?` | workspace, reasoning, routing | exactly 5 reads, ending in `GET /os/world`, measured offline |
 | T3 | `TEST_ONLY which goal has priority?` | goal, routing | 0 |
 | T4 | `TEST_ONLY hey how are you` | routing | 0 |
 

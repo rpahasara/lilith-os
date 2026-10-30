@@ -153,6 +153,35 @@ class WorkspaceShadow(Base):
         self.assertEqual({k: v for k, v in records[0]["trace"].items() if k.endswith("_count")},
                          {k: v for k, v in records[1]["trace"].items() if k.endswith("_count")})
 
+    def test_identical_turns_share_no_stable_identifier_in_any_record(self):
+        # Same chat, same message, populated store: the only shared values may be the routing metadata every record already has.
+        core = C.STATE["core"]
+        db = bootstrap_drafts("identical")
+        conn = core._goals_db()
+        core._create_goal_impl(conn, {"type": "test_only.synthetic", "title": f"{CANARY} title", "source": "SYSTEM_MAINTENANCE", "owner": "user",
+                                      "priority": "HIGH", "goalId": "g.test-only-identical"})
+        conn.close()
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO drafts (draft_id, schema_version, kind, status, target_type, target_id, subject, body, content_hash, idempotency_key, created_at, updated_at) "
+                     "VALUES ('d.test-only-identical', 1, 'followup', 'created', 'career.application', '14', ?, ?, 'h', 'k', 1, 1)", (f"{CANARY} subject", f"{CANARY} body"))
+        conn.commit(); conn.close()
+        turns = []
+        for _ in range(2):
+            self.route(ANALYTIC, "ws-identical")
+            turns.append(self.new_log())
+            self.log0 += len(turns[-1])
+        raw = json.dumps(turns)
+        for secret in (CANARY, "g.test-only-identical", "d.test-only-identical", "TEST_ONLY"):
+            self.assertNotIn(secret, raw)
+        self.assertNotRegex(raw, r"wc\.[0-9a-f]{16}")
+        self.assertNotRegex(raw, r"sc\.[0-9a-f]{16}")
+        first, second = (next(r for r in t if r.get("lane") == "workspace")["trace"] for t in turns)
+        self.assertNotEqual(first["correlation_id"], second["correlation_id"])    # per-turn: channel and clock, never session or message
+        self.assertRegex(first["correlation_id"], r"^w\.[0-9a-f]{16}$")
+        self.assertEqual(set(first) & {"selected_primary_id", "selected_secondary_ids", "suppressed_ids"}, set())
+        for turn in turns:
+            self.assertEqual([r.get("lane", "routing") for r in turn], ["workspace", "reasoning", "cognitive", "routing"])
+
     def test_a_casual_turn_now_makes_no_read(self):
         bootstrap_drafts("casual")
         for i, message in enumerate((OVER_MATCH, "TEST_ONLY not sure what to eat", "TEST_ONLY what can you do?")):
