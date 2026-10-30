@@ -1,0 +1,101 @@
+"""Candidate goal erasure on the real Core API schema. TEST_ONLY; throwaway DBs. Needs fastapi.
+
+    python -B -m unittest discover -s integrations/hermes/proposals/goal-forget-v0.1 -p "test_*.py"
+"""
+
+import importlib.util
+import os
+import sqlite3
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[3]
+sys.path.insert(0, str(HERE))
+import goal_erasure as E  # noqa: E402
+
+CANARY = "TEST_ONLY_FORGET_CANARY_5F"
+tmp = tempfile.mkdtemp(prefix="gforget.")
+os.environ.update(LILITH_DB_PATH=str(Path(tmp) / "boot.db"), HERMES_HOME=tmp, LILITH_HOME=tmp)
+sys.path.insert(0, str(REPO / "services/core-api"))
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("app", REPO / "services/core-api/app.py")
+app = importlib.util.module_from_spec(spec)
+sys.modules["app"] = app
+spec.loader.exec_module(app)
+
+
+def fresh(name, goals=()):
+    db = Path(tmp) / f"{name}.db"
+    app.DB = db
+    app._goal_schema_ready = False
+    conn = app._goals_db()
+    for i, title in enumerate(goals):
+        app._create_goal_impl(conn, {"type": "test_only.synthetic", "title": title, "source": "SYSTEM_MAINTENANCE", "owner": "user",
+                                     "priority": "NORMAL", "goalId": f"g.test-only-{i}", "description": f"{title} description"})
+    conn.close()
+    return db
+
+
+def rows(db):
+    c = sqlite3.connect(db)
+    out = tuple(c.execute(q).fetchone()[0] for q in ("SELECT COUNT(*) FROM goal", "SELECT COUNT(*) FROM goal_trace"))
+    c.close()
+    return out
+
+
+class Erasure(unittest.TestCase):
+    def test_a_canary_is_gone_from_the_file_bytes(self):
+        db = fresh("canary", [CANARY])
+        self.assertIn(CANARY.encode(), db.read_bytes())
+        E.erase_all_goals(db)
+        self.assertEqual(rows(db), (0, 0))
+        self.assertNotIn(CANARY.encode(), db.read_bytes())
+
+    def test_no_activity_counter_remains_and_a_rerun_is_harmless(self):
+        db = fresh("seq", ["TEST_ONLY a"])
+        E.erase_all_goals(db)
+        E.erase_all_goals(db)
+        c = sqlite3.connect(db)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM sqlite_sequence WHERE name LIKE 'goal%'").fetchone()[0], 0)
+        c.close()
+
+    def test_an_unknown_table_refuses_and_changes_nothing(self):
+        db = fresh("foreign", ["TEST_ONLY a"])
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE test_only_foreign (x)")
+        c.commit(); c.close()
+        with self.assertRaises(E.Refused):
+            E.erase_all_goals(db)
+        self.assertEqual(rows(db)[0], 1)
+
+    def test_a_held_write_lock_refuses(self):
+        db = fresh("lock", ["TEST_ONLY a"])
+        c = sqlite3.connect(db, isolation_level=None)
+        c.execute("BEGIN IMMEDIATE")
+        with self.assertRaises(E.Refused):
+            E.erase_all_goals(db)
+        c.execute("ROLLBACK"); c.close()
+        self.assertEqual(rows(db)[0], 1)
+
+    def test_retention_removes_only_old_terminal_goals(self):
+        db = fresh("retain", ["TEST_ONLY old done", "TEST_ONLY new done", "TEST_ONLY old active"])
+        old = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        c = sqlite3.connect(db)
+        c.execute("UPDATE goal SET lifecycle_state='COMPLETED', updated_at=? WHERE goal_id='g.test-only-0'", (old,))
+        c.execute("UPDATE goal SET lifecycle_state='COMPLETED' WHERE goal_id='g.test-only-1'")
+        c.execute("UPDATE goal SET updated_at=? WHERE goal_id='g.test-only-2'", (old,))
+        c.commit(); c.close()
+        self.assertEqual(E.prune_terminal_goals(db), 1)
+        c = sqlite3.connect(db)
+        self.assertEqual({r[0] for r in c.execute("SELECT goal_id FROM goal")}, {"g.test-only-1", "g.test-only-2"})
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM goal_trace WHERE goal_id='g.test-only-0'").fetchone()[0], 0)
+        c.close()
+        self.assertNotIn(b"old done", db.read_bytes())
+
+
+if __name__ == "__main__":
+    unittest.main()
