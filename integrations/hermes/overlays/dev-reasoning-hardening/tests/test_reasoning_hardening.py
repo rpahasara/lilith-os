@@ -25,6 +25,7 @@ import holdout_corpus as H  # noqa: E402
 import redteam_corpus as RT  # noqa: E402
 import validation_pool as VP  # noqa: E402
 import validation_pool_v2 as VP2  # noqa: E402
+import validation_pool_v3 as VP3  # noqa: E402
 import test_r1_detector_corpus as R1  # noqa: E402
 
 BASE = REPO / "integrations/hermes/overlays/dev-goals-hardening/lilith_router/world_context.py"
@@ -112,6 +113,23 @@ class Detector(unittest.TestCase):
                "LOOKUP_MATCHED": sorted(m for m in holdout(VP2.LOOKUP) if detect(m)["any"]),
                "CASUAL_MATCHED": sorted(m for m in holdout(VP2.CASUAL) if detect(m)["any"])}
         self.assertEqual(got, json.loads(Path(__file__).with_name("validation_v2_results.json").read_text(encoding="utf-8")))
+
+    def test_third_validation_half_measured(self):
+        detect = self.cand.detect_reasoning_intent
+        holdout = lambda items: [m for m in items if not VP3.in_tune(m)]
+        got = {"PARAPHRASE_MISSED": sorted(m for m in holdout(VP3.PARAPHRASE) if not detect(m)["any"]),
+               "FALSE_MATCHED": sorted(m for m in holdout(VP3.FALSE_MATCH) if detect(m)["any"]),
+               "NEGATED_MATCHED": sorted(m for m in holdout(VP3.NEGATED) if detect(m)["any"]),
+               "PRECEDENCE_MATCHED": sorted(m for m in holdout(VP3.PRECEDENCE) if detect(m)["any"])}
+        self.assertEqual(got, json.loads(Path(__file__).with_name("validation_v3_results.json").read_text(encoding="utf-8")))
+
+    def test_every_lane_precedence_and_negation_message_yields(self):
+        detect = self.cand.detect_reasoning_intent
+        self.assertEqual([m for m in VP3.PRECEDENCE + VP3.NEGATED if detect(m)["any"]], [])
+
+    def test_the_goal_policy_names_goals_by_title(self):
+        self.assertEqual(self.cand._LEGACY.GOAL_POLICY.count(self.cand._GOAL_TITLE_RULE), 1)
+        self.assertNotIn(self.cand._GOAL_TITLE_RULE, self.dep._LEGACY.GOAL_POLICY)
 
     def test_plain_lookups_about_work_no_longer_match(self):
         # These want a fact, not analysis. A fact-style opening now needs a sign of judgement.
