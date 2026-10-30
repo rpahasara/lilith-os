@@ -21,6 +21,18 @@ expressions were run against it:
 | Deployed | 15/15 | 8/8 | 6 | not the target of this comparison |
 | Candidate | 15/15 | 8/8 | 0 | 0 |
 
+[`tests/test_goals_hardening_regressions.py`](tests/test_goals_hardening_regressions.py) adds cases outside that corpus:
+
+| Case | Candidate | Deployed |
+|---|---|---|
+| Negated or question wordings read as creates, of 5 | **2** (`don't track…`, `never add…`) | 5 |
+| Upper case, no punctuation, curly apostrophe, line break | all reach the goal lane | not measured |
+| Held-out casual messages moved into Reasoning | 0 | n/a |
+| `/career` reads on either create wording, or a goal query naming an application | 0 | not measured |
+
+The two negated creates are an open finding. They are harmless on DEV because the adapter refuses creates, but they must be
+fixed before any lane can create a goal from conversation.
+
 **Limit:** the same author wrote the corpus and the expressions, and it holds 37 messages. Real shadow records are the
 better measure. Do not tune the expressions against the held-out corpus.
 

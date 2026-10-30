@@ -21,6 +21,17 @@ header. DEV's adapter never posts.
 
 **Rollback:** unset the variable and restart Core API.
 
+**Review findings, 2026-10-30 (PR #289 at `ce692bc`, not merged):**
+
+| Finding | Effect | Needed before step 4 |
+|---|---|---|
+| Merging #289 is itself a DEV deployment | `DEPLOY_REQUIRED`: the workflow restarts Core API through the DEV helper. The PID and `app.py` digest change, and every gate package pinning `a9fc562f…` or 304463 must be regenerated (G3, the `drafts` gate, r1 rollback checks) | Merge only in an approved window, with no gate open |
+| `GET /os/goals/focus` writes a trace | A GET can write `goal_trace` when the winner changes. #289 covers POST routes only | Accept, or move the trace write out of the GET |
+| `POST /os/tasks`, `PATCH /os/tasks/{id}`, `POST /os/drafts`, `DELETE /os/drafts/{id}` stay open | Goal evidence and drafts remain writable on the same port | Step 5 |
+| The unit is written by `scripts/bootstrap_core_api_dev.sh`, which sets no token | A token added to the unit file can be lost when the unit is rewritten, and #289 then **silently** behaves as open | A drop-in or credential file outside that rewrite, plus a preflight check that an unauthenticated POST returns 401 |
+| An unset token and a working token look the same to callers until they are tested | A health check cannot tell them apart | The step 4 probe in every preflight. Use a read-only probe design, since a POST on a protected route must be refused before it writes |
+| The check itself is sound | Constant-time compare; under 32 characters returns 503; refusal happens before any DB access; the autoblock write is inside `POST /os/goals`, so it is covered | none |
+
 **Better long-term:** step 4's token is one shared secret. Binding Core API to `127.0.0.1` (it listens on `0.0.0.0:8765`,
 reachable through IAP) removes the route for anything off-host, but changes how the IAP path reaches it, so it needs its
 own review.
@@ -56,6 +67,21 @@ goals and their traces after 30 days, as the same daily job.
 
 **Tests to write when approved:** canary title gone from the file bytes after FORGET; unknown table refuses; hold blocks;
 lock held refuses; idempotent re-run. The G3 cleanup is a working model for the delete, sequence reset and refusal rules.
+
+**Decisions needed from the owner for real goal data (P-2):**
+
+| # | Decision | Recommendation |
+|---|---|---|
+| 1 | Does a principal FORGET delete all `goal` and `goal_trace` rows? | Yes, all of them, on one principal's DEV |
+| 2 | Is per-goal deletion needed, or only all-or-nothing? | All-or-nothing first, matching the executor |
+| 3 | Which component owns the Core API DB step? | An explicit allowlisted step in the FORGET executor, as designed above |
+| 4 | Retention for terminal goals | 30 days after `COMPLETED`, `CANCELLED` or `FAILED` |
+| 5 | Do active goals ever age out? | No. Review them instead |
+| 6 | May goal titles go to the provider? | Only after 1 to 4 are implemented and tested. Synthetic data only until then |
+| 7 | Backups holding goal rows | Forbid unencrypted retained backups, or include them in FORGET |
+| 8 | Decision-log ids after one goal is deleted | Accept up to 7 days until retention removes them |
+
+**The G3 window does not need these,** because its rows are synthetic and its cleanup is mandatory. Any real goal does.
 
 ## 3. Database mode 0644
 
