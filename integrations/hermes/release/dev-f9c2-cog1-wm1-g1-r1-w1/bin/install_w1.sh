@@ -37,8 +37,12 @@ DEV_MACHINE_ID=ae929170e6fa4c8ab9cc7b9547238d9d
 declare -A PAYLOAD=(
   [router.w1.yaml]=0e5d43fa0fce0863d32a7afd4715f6b27b736954cbaef21fae73f80dbcd3ee11       # World Model, Goals and Reasoning shadow
   [router.r1.yaml]=47579562bbaa2c217657efa478d960b3fb7f0949ba534012823f9f293ebea0d7       # installed r1: World Model, Goals and Reasoning shadow
-  [verify_release.w1.py.tmpl]=752cac72e1a4f309dfb418f3baf050edd5edecff029a53858f84be640e7215d1
+  [verify_release.w1.py.tmpl]=cd6a8056117ec1d4152586b65e1cbed4144bd4151b0aef236423cf851849a9ea
   [verify_release.r1.py.tmpl]=12fa37c226dff639199fe9482679ddb73fed149e619496009706d15ba6940c2b
+  [world_context.w1.py]=c2a1ab0002227ae03ebb31fd948eafd18f6c6548991bfcb12e264f1e9e91dca2   # w1-member detector candidate
+  [world_context.r1.py]=07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc   # w1-member installed r1 adapter
+  [workspace.w1.py]=d79f67e1c761d6d98e689074d7e101e97fcc3b23cecfeba551cf2aaefd5ec597   # w1-member counts-only trace
+  [workspace.r1.py]=e209440f55c40f3d95c6cd286907831027a8501415fa0c6901c4666fe3640a64   # w1-member installed r1 module
   [RELEASE_ID]=77539682dc5c22f2ad9b09e3b392b0396851213fd9a713a4ad4f8fa2e236fdf6
 )
 ADAPTER_SHA=07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc        # unchanged by w1
@@ -102,7 +106,8 @@ preconditions() {
   if [[ ${SIM} != 1 ]]; then [[ $(hostname) == lilith-dev-01 ]] || die "wrong host $(hostname)"; fi
   payload_ok
   [[ -d ${OLD} && ! -L ${OLD} ]] || die "${OLD_ID} release missing"
-  [[ $(sha "${LR}/world_context.py") == "${ADAPTER_SHA}" ]] || die "installed world_context is not the cog1 adapter"
+  a=$(sha "${LR}/world_context.py")
+  [[ ${a} == "${ADAPTER_SHA}" || ${a} == "${PAYLOAD[world_context.w1.py]}" ]] || die "installed world_context is not the cog1 adapter"
   [[ $(sha "${LR}/_prod_world_context.py") == "${PROD_WORKING_MEMORY_SHA}" ]] || die "installed PROD module differs"
   gateway_stopped
   take_forget_lock
@@ -119,6 +124,11 @@ put_router() {   # atomic root:lilith 0640 install of $1 as router.yaml (as inst
   mv -f "${LR}/router.yaml.w1-new" "${LR}/router.yaml"
 }
 
+put_code() {   # w1-member atomic root 0644 install of $1 as lilith_router/$2, as install_cog1.sh installs code
+  install -o root -g root -m 0644 "$1" "${LR}/$2.w1-new"   # w1-member
+  mv -f "${LR}/$2.w1-new" "${LR}/$2"   # w1-member
+}   # w1-member
+
 switch_current() {
   ln -sfn "releases/$1" "${BASE}/current.new" && mv -Tf "${BASE}/current.new" "${BASE}/current"
 }
@@ -127,6 +137,8 @@ revert() {   # idempotent; safe to re-run after a partial revert
   PHASE=reverting
   step "revert to ${OLD_ID}"
   put_router "${PAY}/router.r1.yaml"
+  put_code "${PAY}/world_context.r1.py" world_context.py   # w1-member
+  put_code "${PAY}/workspace.r1.py" workspace.py   # w1-member
   inject revert_after_router
   switch_current "${OLD_ID}"
   inject revert_after_switch
@@ -169,6 +181,8 @@ case ${MODE} in
     [[ $(readlink -f "${BASE}/current") == "${OLD}" ]] || die "current is not ${OLD_ID}"
     [[ ! -e ${NEW} && ! -e ${NEW}.new ]] || die "${NEW_ID} already staged"
     [[ $(sha "${LR}/router.yaml") == "${PAYLOAD[router.r1.yaml]}" ]] || die "installed router.yaml is not the r1 one"
+    [[ $(sha "${LR}/world_context.py") == "${ADAPTER_SHA}" ]] || die "installed world_context is not the r1 adapter"   # w1-member
+    [[ $(sha "${LR}/workspace.py") == "${PAYLOAD[workspace.r1.py]}" ]] || die "installed workspace is not the r1 one"   # w1-member
     verify_full "${OLD_ID}" || die "r1 verify --full before install"
     avail_mb=$(df -Pm "${BASE}" | awk 'NR==2{print $4}'); used_mb=$(du -sm "${OLD}" | cut -f1)
     (( avail_mb > used_mb + 512 )) || die "not enough space to stage ${NEW_ID}"
@@ -214,6 +228,8 @@ PY
     step "install the w1 router.yaml (World Model, Goals, Reasoning and Workspace shadow on lilith_os); switch current"
     PHASE=home
     put_router "${PAY}/router.w1.yaml"
+    put_code "${PAY}/world_context.w1.py" world_context.py   # w1-member
+    put_code "${PAY}/workspace.w1.py" workspace.py   # w1-member
     inject after_home
     switch_current "${NEW_ID}"
     inject after_switch

@@ -7,10 +7,10 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 | # | Blocker | Owner of it |
 |---|---|---|
 | 1 | r1 shadow acceptance | **done**, owner-accepted 2026-10-30 (#294) |
-| 2 | **Workspace must not ship with the deployed detector.** See below. The candidate in PR #295 must be accepted and added to this release | owner decision |
-| 3 | G3, if wanted, runs first. Its package pins the current DB reference | owner decision |
+| 2 | Detector candidate accepted: PR #295, merged into this branch. Plain look-ups about work still match | owner decision |
+| 3 | G3 | ran once: FAIL by criteria, recovery PASS. Any re-run must be regenerated |
 | 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md): DB write, needs its own approval | owner |
-| 5 | Stable candidate ids must leave the shadow log: add `overlays/dev-workspace-private-trace/lilith_router/workspace.py` as a release member | engineering, then owner review |
+| 5 | Stable candidate ids removed from the log | **done in source** |
 | 6 | #293 merged and classified. It is `CONTROL_ONLY_NO_DEPLOY` as long as it adds only new files | owner |
 
 ## Why Workspace depends on the detector
@@ -25,10 +25,7 @@ Workspace runs only inside a Reasoning match, so the detector sets its read load
 The red-team corpus still gets 6 false matches of 25 from the candidate, so it reduces the load and does not remove it. The reads stay
 bounded and write nothing on an empty store.
 
-**This release is therefore not final.** It still pins the deployed adapter `07a763e1…` and an unchanged `workspace.py`. Before any host
-package is sealed, it must gain two release members with new digests: the adapter from #295 and the counts-only `workspace.py`. The
-verifier pin, `RELEASE-DELTA.json`, the installer and the simulation then move with them. A w1 host package is deliberately not
-built yet, because it would pin bytes that are going to change.
+**This release now carries both changes** as members, with digests pinned in the verifier, installer and delta. If #295 changes, these pins move.
 
 ## Preflight, read-only
 
@@ -43,7 +40,7 @@ Same scope as the r1 `p0_r1.sh`, changed for this baseline:
 | Services | gateway and gate on their current PIDs; Core API, broker, authority, witness unchanged; FORGET idle |
 | Budget | current value, unchanged; no reset |
 | Rollback | r1 release intact, g1 intact, `/root/r1-install-20261030/payload` present |
-| Installer precondition | the r1 template renders to the installed r1 verifier. `install_w1.sh` proves this itself before any change |
+| Installer precondition | the r1 adapter and `workspace.py` are the expected bytes, and the r1 template renders to the installed verifier. `install_w1.sh` proves these before any change |
 
 ## Sequence
 
@@ -52,7 +49,7 @@ Same scope as the r1 `p0_r1.sh`, changed for this baseline:
 | P0 | preflight | none |
 | S1 | stop r1 gateway | one stop |
 | S2 | transfer pinned bundle | root-only staging |
-| S3 | `install_w1.sh install` | release, router, verifier |
+| S3 | `install_w1.sh install` | release, router, verifier, adapter, `workspace.py` |
 | S4 | start on w1 | one start |
 | S5 | post-verify | none |
 | S6 | gate-stopped test, as in r1 | gate stop and start, 4 turns |

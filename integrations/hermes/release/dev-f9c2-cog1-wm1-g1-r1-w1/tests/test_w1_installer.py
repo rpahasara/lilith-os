@@ -33,6 +33,10 @@ SOURCES = {
     "verify_release.w1.py.tmpl": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/templates/bin/verify_release.py.tmpl",
     "verify_release.r1.py.tmpl": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1/templates/bin/verify_release.py.tmpl",
     "RELEASE_ID": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/RELEASE_ID",
+    "world_context.w1.py": "integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py",
+    "world_context.r1.py": "integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py",
+    "workspace.w1.py": "integrations/hermes/overlays/dev-workspace-private-trace/lilith_router/workspace.py",
+    "workspace.r1.py": "integrations/hermes/home/lilith_router/workspace.py",
 }
 
 
@@ -63,8 +67,12 @@ class InstallerContractTest(unittest.TestCase):
 
     def test_the_text_is_install_r1_with_only_the_release_moved_one_step(self):
         pin = re.compile(r"^(  \[[^\]]+\]=)[0-9a-f]{64}")
-        strip = lambda text: [pin.sub(r"\1@", l) for l in text.splitlines()]
-        self.assertEqual(strip(TEXT), strip(r1_to_w1(R1_TEXT)))
+        strip = lambda text: [pin.sub(r"\1@", l) for l in text.splitlines() if "# w1-member" not in l]
+        # The only other change: a partial revert may find the w1 adapter, so the precondition accepts both.
+        ours = TEXT.replace('  a=$(sha "${LR}/world_context.py")\n  [[ ${a} == "${ADAPTER_SHA}" || ${a} == "${PAYLOAD[world_context.w1.py]}" ]] ||',
+                            '  [[ $(sha "${LR}/world_context.py") == "${ADAPTER_SHA}" ]] ||')
+        self.assertEqual(strip(ours).count(""), strip(r1_to_w1(R1_TEXT)).count("") + 1)
+        self.assertEqual([l for l in strip(ours) if l], [l for l in strip(r1_to_w1(R1_TEXT)) if l])
 
     def test_release_ids_and_the_only_home_change(self):
         self.assertIn(f"OLD_ID={RID_R1}\n", TEXT)
@@ -72,7 +80,9 @@ class InstallerContractTest(unittest.TestCase):
         install = TEXT.split("  install)", 1)[1].split("  revert)", 1)[0]
         home_part = install.split("PHASE=home", 1)[1]
         self.assertEqual(re.findall(r"put_router \S+", home_part), ['put_router "${PAY}/router.w1.yaml"'])
-        self.assertNotIn('world_context.py"', home_part)
+        self.assertEqual(re.findall(r'put_code "\$\{PAY\}/(\S+)" (\S+)', home_part), [("world_context.w1.py", "world_context.py"), ("workspace.w1.py", "workspace.py")])
+        reverting = TEXT.split("revert() {", 1)[1].split("PHASE=done", 1)[0]
+        self.assertEqual(re.findall(r'put_code "\$\{PAY\}/(\S+)" (\S+)', reverting), [("world_context.r1.py", "world_context.py"), ("workspace.r1.py", "workspace.py")])
         self.assertIn('sys.exit("R1_RENDER_MISMATCH")', TEXT)
         self.assertIn('"${PAY}/verify_release.w1.py.tmpl" "${STAGE}/bin/verify_release.py"', TEXT)
 

@@ -149,6 +149,10 @@ payload() {
   cp "${WM}/templates/bin/verify_release.py.tmpl" "$1/verify_release.w1.py.tmpl"
   cp "${R1R}/templates/bin/verify_release.py.tmpl" "$1/verify_release.r1.py.tmpl"
   cp "${WM}/RELEASE_ID" "$1/RELEASE_ID"
+  cp "${REPO}/integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py" "$1/world_context.w1.py"
+  cp "${REPO}/integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py" "$1/world_context.r1.py"
+  cp "${REPO}/integrations/hermes/overlays/dev-workspace-private-trace/lilith_router/workspace.py" "$1/workspace.w1.py"
+  cp "${REPO}/integrations/hermes/home/lilith_router/workspace.py" "$1/workspace.r1.py"
 }
 run() { set +e; OUT=$("$@" 2>&1); RC=$?; set -e; }
 discard_new() { [[ -e ${NEW} ]] && { chmod -R u+w "${NEW}"; rm -rf "${NEW}"; } || true; }   # simulation only
@@ -244,7 +248,7 @@ run bash "${INSTALL}" install "$P"
 check "install succeeds" '[[ $RC -eq 0 && $OUT == *"W1_INSTALLED current=f293e72-f9c2-cog1-wm1-g1-r1-w1"* ]]'
 check "  current is w1 and verify --full passes" '[[ $(readlink "${BASE}/current") == releases/f293e72-f9c2-cog1-wm1-g1-r1-w1 && $(verify) == "F8_VERIFY_PASS full f293e72-f9c2-cog1-wm1-g1-r1-w1" ]]'
 check "  router.yaml is the w1 one, root:lilith 0640, World Model, Goals, Reasoning and Workspace shadow on lilith_os, router mode shadow" '[[ $(sha256sum < "${LR}/router.yaml" | cut -c1-64) == $(sha256sum < "${WM}/home/router.yaml" | cut -c1-64) && $(stat -c %a:%U:%G "${LR}/router.yaml") == 640:root:lilith && $(lane) == "True shadow lilith_os" && $(goals) == "True shadow" && $(reasoning) == "True shadow" && $(wspace) == "True shadow" && $(rmode) == shadow ]]'
-check "  adapter and PROD module unchanged" '[[ $(sha256sum < "${LR}/world_context.py" | cut -c1-16) == 07a763e1dd3d81e8 && $(sha256sum < "${LR}/_prod_world_context.py" | cut -c1-16) == 46b8187e3f6f2ac7 ]]'
+check "  w1 adapter and counts-only workspace installed; PROD module unchanged" '[[ $(sha256sum < "${LR}/world_context.py" | cut -c1-16) == c2a1ab0002227ae0 && $(sha256sum < "${LR}/workspace.py" | cut -c1-16) == d79f67e1c761d6d9 && $(sha256sum < "${LR}/_prod_world_context.py" | cut -c1-16) == 46b8187e3f6f2ac7 ]]'
 check "  w1 verifier is the w1 template with the host token" '[[ $(sha256sum < "${NEW}/bin/verify_release.py") == $(render "${WM}/templates/bin/verify_release.py.tmpl" | sha256sum) ]]'
 check "  r1, wm1, cog1 and f9c2 releases untouched; the DB file unchanged" '[[ $(tree_of "${OLD}") == "$G1_TREE" && $(tree_of "${WM1REL}") == "$WM1_TREE" && $(tree_of "${COG1}") == "$COG1_TREE" && $(tree_of "${F9}") == "$F9_TREE" && $(sha256sum < "${GDB}") == "$DB0" ]]'
 check "  the installed r1 verifier refuses the w1 router (Workspace on)" '[[ $("${OLD}/venv/bin/python" -I -B "${OLD}/bin/verify_release.py" --full 2>&1) == *"LANE_NOT_OFF workspace_enabled"* ]]'

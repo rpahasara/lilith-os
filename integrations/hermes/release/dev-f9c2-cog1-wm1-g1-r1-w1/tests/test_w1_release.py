@@ -62,7 +62,7 @@ class ReleaseDefinitionTest(unittest.TestCase):
         self.assertEqual((W1 / "RELEASE_ID").read_bytes(), b"f293e72-f9c2-cog1-wm1-g1-r1-w1\n")
         self.assertEqual(DELTA["release"], "f293e72-f9c2-cog1-wm1-g1-r1-w1")
         self.assertEqual(DELTA["base_release"], (R1 / "RELEASE_ID").read_text().strip())
-        self.assertEqual(set(DELTA["members"]), {"RELEASE_ID", "bin/verify_release.py", "home/router.yaml"})
+        self.assertEqual(set(DELTA["members"]), {"RELEASE_ID", "bin/verify_release.py", "home/router.yaml", "home/lilith_router/world_context.py", "home/lilith_router/workspace.py"})
         for member, change in DELTA["members"].items():
             with self.subTest(member=member):
                 if change.get("source"):
@@ -89,8 +89,11 @@ class ReleaseDefinitionTest(unittest.TestCase):
 
     def test_verifier_changes_only_the_lane_policy_and_the_schema_rule(self):
         removed, added = changed_lines(R1_TEMPLATE, W1_TEMPLATE)
-        self.assertEqual([l for l in removed if not l.startswith("#")],
-                         ['SHADOW_LANES = {"cognitive_enabled": "cognitive_mode", "goals_enabled": "goals_mode", "reasoning_enabled": "reasoning_mode"}'])
+        removed = [l for l in removed if not l.startswith("#")]
+        self.assertEqual(len(removed), 3, removed)
+        self.assertTrue(removed[0].startswith("WORLD_CONTEXT_ADAPTER_SHA256 = "))
+        self.assertTrue(removed[1].startswith("SHADOW_LANES = "))
+        self.assertIn("PROD_WORKING_MEMORY_NOT_PINNED", removed[2])
         cand = W1_TEMPLATE.read_text(encoding="utf-8")
         self.assertIn("check_cognition_schema()", cand)
         self.assertIn('"drafts": ("draft_id"', cand)
@@ -155,8 +158,12 @@ class VerifierBehaviourTest(unittest.TestCase):
         return yaml.safe_load(W1_ROUTER.read_text(encoding="utf-8"))
 
     def test_w1_accepts_exactly_its_router_and_otherwise_matches_r1(self):
-        root = self.host("w1", self.w1_router)
-        w1, r1 = self.codes(self.w1, root), self.codes(self.r1, root)
+        root, base = self.host("w1", self.w1_router), self.host("w1-r1-code", self.w1_router)
+        for source, name in ((REPO / "integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py", "world_context.py"),
+                             (REPO / "integrations/hermes/overlays/dev-workspace-private-trace/lilith_router/workspace.py", "workspace.py")):
+            (root / "home" / "lilith_router" / name).write_bytes(source.read_bytes())
+        w1 = {c.replace(str(root), "ROOT") for c in self.codes(self.w1, root)}
+        r1 = {c.replace(str(base), "ROOT") for c in self.codes(self.r1, base)}
         self.assertFalse(kinds(w1) & (LANE_CODES | C.WORLD_CONTEXT_CODES))
         self.assertIn("LANE_NOT_OFF workspace_enabled", r1)
         schema = {"GOAL_DB_MISSING", "GOAL_STORE_NOT_EMPTY", "COGNITION_SCHEMA_NOT_BOOTSTRAPPED", "COGNITION_SCHEMA_MISMATCH", "GOAL_DB_UNREADABLE"}

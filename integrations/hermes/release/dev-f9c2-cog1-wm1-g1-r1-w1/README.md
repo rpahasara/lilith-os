@@ -1,15 +1,16 @@
 # DEV release candidate `f293e72-f9c2-cog1-wm1-g1-r1-w1`: Workspace in shadow (CANDIDATE, not installed)
 
 This release is `f293e72-f9c2-cog1-wm1-g1-r1` with Slice 10 Global Workspace also in **shadow**, for `lilith_os` only. World
-Model, Goals and Reasoning stay in shadow, and every other lane stays off. Nothing here has been installed. **This candidate is not final:** see [INSTALL-PLAN.md](INSTALL-PLAN.md).
+Model, Goals and Reasoning stay in shadow, and every other lane stays off. Nothing here has been installed. **It depends on PR #295,** merged into this branch. See [INSTALL-PLAN.md](INSTALL-PLAN.md).
 
 **Order:** r1 must run on DEV and pass its shadow test first. Then the [`drafts` bootstrap gate](DRAFTS-BOOTSTRAP.md). Only then
 this release. Unlike r1, this lane reads the Core API, so it is a separate step.
 
 ## What changes against r1
 
-[`RELEASE-DELTA.json`](RELEASE-DELTA.json) lists three members: `RELEASE_ID`, `router.yaml` (`workspace_enabled: true`,
-`workspace_mode: shadow`) and the verifier template. The verifier adds Workspace to `SHADOW_LANES` and one new check.
+[`RELEASE-DELTA.json`](RELEASE-DELTA.json) lists five members: `RELEASE_ID`, `router.yaml` (`workspace_enabled: true`, `workspace_mode: shadow`), the
+verifier template, the adapter with the detector candidate from #295, and `workspace.py` with the counts-only trace. The verifier adds
+Workspace to `SHADOW_LANES`, pins both new files, and has one new check.
 
 **`check_cognition_schema` refuses to start unless all of these hold, reading only (`mode=ro`):**
 - `goal`, `goal_trace` and `drafts` exist with exactly their Core API columns;
@@ -48,10 +49,8 @@ suppressed ids, deciding rule, capacity, duration, fallback reason.
 
 **Tested with canary text in a goal title, a goal description, a draft subject and a draft body: none reaches the record.**
 
-**What ids can reveal:** a candidate id is `wc.` plus 16 hex characters of an unsalted SHA-256 over source type, source ref and
-correlation id. A test shows it hides the goal id, and that the same goal has the same id across turns. So the record can link
-turns about one item, and an id could be confirmed by anyone who can guess the inputs. It is a pseudonym, not anonymous, and it is
-treated as sensitive metadata, the same class as `app_id`:
+**Why ids were removed:** a candidate id was an unsalted hash, stable across turns, so it linked turns about one item. Nothing read it.
+The record now holds counts and classes only:
 
 | Control | State |
 |---|---|
@@ -62,7 +61,7 @@ treated as sensitive metadata, the same class as `app_id`:
 
 **Decision: stable ids should not be in shadow logs.** Nothing reads them. The candidate in
 [`overlays/dev-workspace-private-trace`](../../overlays/dev-workspace-private-trace/README.md) records counts instead, and this release
-must adopt it before it runs.
+adopts it: no candidate id reaches a record, and tests pin that on the real gateway.
 
 ## Install and rollback
 
