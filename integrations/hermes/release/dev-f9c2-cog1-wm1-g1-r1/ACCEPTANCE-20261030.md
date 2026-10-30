@@ -1,8 +1,8 @@
 # Acceptance record: Reasoning shadow on DEV (`f293e72-f9c2-cog1-wm1-g1-r1`), 2026-10-30
 
-**Status:** all acceptance criteria met; **owner acceptance pending**. This validates shadow **detection** only. It does not show
-that Reasoning Live works: no reasoning input was built, no reasoning model call was made, and no model replied to any turn. DEV
-stays on r1.
+**Decision:** owner-accepted as **PASS** on 2026-10-30, for the verified shadow-only scope: detection, routing, metadata-only
+logging, zero Core API reads and writes, and provider-gate isolation. This does not establish Reasoning Live or model-based
+reasoning: no reasoning input was built, no reasoning model call was made, and no model replied to any turn. DEV stays on r1.
 
 ## Runtime tested
 
