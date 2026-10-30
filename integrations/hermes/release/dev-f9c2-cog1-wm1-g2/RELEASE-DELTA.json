@@ -1,0 +1,32 @@
+{
+  "release": "f293e72-f9c2-cog1-wm1-g2",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2-cog1-wm1-g1",
+  "base_definition": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1/RELEASE-DELTA.json",
+  "note": "The g1 release (World Model and Goals lanes in SHADOW on lilith_os) with the Slice 8 Goals/Executive lane switched to LIVE on lilith_os only. World Model stays SHADOW; every other lane stays off. The g2 verifier additionally refuses to start until the goal schema exists (separately approved bootstrap gate), so no live goal read can create it. Every other member of the g1 release is unchanged, including the governed adapter (POST /os/goals is never sent), the PROD Working Memory, gateway_integration.py and the lilith_os adapter.",
+  "members": {
+    "RELEASE_ID": {
+      "change": "replace",
+      "from": "b8c96ca209134b4abeb1434d07fa56e166f91263aec1690007c87664bd3af3db",
+      "sha256": "2730f4946c267cb9f8a20e9282897b57315bd3b75bfd4f84439df95eaf15b16d",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm1-g2/RELEASE_ID"
+    },
+    "bin/verify_release.py": {
+      "change": "replace",
+      "sha256": null,
+      "template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g2/templates/bin/verify_release.py.tmpl",
+      "template_sha256": "c2d59acaf86ab8a3b6c32a1c49f51366d7c9bdb720857250c5bf811deabce397",
+      "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1/templates/bin/verify_release.py.tmpl",
+      "base_template_sha256": "839a52b8643c9a0e5b2b25642330b2f321dc203fecb130791aeab5ef9bbec2b5",
+      "placeholder": "__LILITH_GATE_CLIENT_TOKEN__",
+      "rendered": "on the host from the installed g1 verifier (install_g2.sh)"
+    },
+    "home/router.yaml": {
+      "change": "replace",
+      "from": "d931f1b6d6e8099f63e894dffee3b8ff76ce35f35fdf87b748373256ac30e418",
+      "sha256": "9c0ce4e2686b41df7ba4e59830c54727f67414c46ac7fbf955106ecdd1876b5b",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm1-g2/home/router.yaml",
+      "installed_as": "/home/lilith/.hermes-dev/lilith_router/router.yaml (root:lilith 0640)"
+    }
+  }
+}

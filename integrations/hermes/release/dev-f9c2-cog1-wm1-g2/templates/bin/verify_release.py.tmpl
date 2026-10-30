@@ -1,0 +1,304 @@
+"""F8 DEV Hermes release/config gate. Read-only. Exit 0 = PASS; anything else refuses the gateway start.
+
+Runs as root from ExecStartPre (`+`, outside the sandbox) with the release venv's interpreter in -I mode, and by hand
+at the install gates. It never prints secret values.
+
+  --pre-start   integrity of the critical code set + ownership + config/env pins (fast; every start)
+  --full        additionally the complete release manifest (slow; install and health gates)
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import stat
+import sys
+from pathlib import Path
+
+import yaml  # from the release venv (PyYAML, locked)
+
+BASE = Path("/opt/hermes-gateway-dev")
+HH = Path("/home/lilith/.hermes-dev")
+ETC = Path("/etc/hermes-gateway-dev")
+LANES_OFF = ("cognitive_enabled", "goals_enabled", "reasoning_enabled", "workspace_enabled", "motivation_enabled",
+             "planning_enabled", "ethics_enabled", "social_cognition_enabled", "memory_consolidation_enabled",
+             "canonical_ltm_enabled")
+REQUIRED_DENY = {"terminal", "code_execution", "file", "web", "search", "browser", "computer_use", "desktop_ui",
+                 "delegation", "cronjob", "skills", "memory", "session_search", "kanban", "project", "coding",
+                 "debugging", "homeassistant", "discord", "discord_admin", "spotify"}
+ENV_ALLOWED = {"LILITH_OS_PORT", "LILITH_OS_TOKEN"}
+# F8r3: no provider key anywhere in the gateway's reach. The Groq key exists only in the provider gate's root-only
+# credentials file (LoadCredential); provider.env must not exist at all.
+GATE_ETC = Path("/etc/hermes-provider-gate-dev")
+GATE_CONFIG = {
+    "listen_host": "127.0.0.1", "listen_port": 9911, "upstream_host": "api.groq.com", "upstream_port": 443,
+    "local_path": "/openai/v1/chat/completions", "upstream_path": "/openai/v1/chat/completions",
+    "allowed_models": ["openai/gpt-oss-120b"], "client_token": "__LILITH_GATE_CLIENT_TOKEN__",
+}
+RO_STUBS = ("skills", "optional-skills", "optional-mcps", "hooks", "scripts", "bin", "node", "node_modules")
+# f9c2-cog1: the governed unified-cognition adapter (integrations/hermes/overlays/dev-unified-cognition) and the
+# recovered PROD Working Memory it runs, at their reviewed digests.
+WORLD_CONTEXT_ADAPTER_SHA256 = "07a763e1dd3d81e883c415c9b051332785b52313a00048f0cb1da57effe4a8fc"
+PROD_WORKING_MEMORY_SHA256 = "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104"
+# f9c2-cog1-wm1-g2: exactly two lanes are on, for lilith_os only (both match on cognitive_channels): Slice 7.2 World
+# Model, explicitly in SHADOW, and Slice 8 Goals/Executive, explicitly LIVE. Every other lane off; the router itself in
+# shadow. Any router.yaml key the router does not read is refused, so a misspelt lane or mode cannot slip through.
+LANE_MODES = {"cognitive_enabled": ("cognitive_mode", "shadow"), "goals_enabled": ("goals_mode", "live")}
+# Goals live reads GET /os/goals and /os/goals/focus; on a DB without the goal tables the Core API's first such read
+# would run the goal DDL. g2 therefore refuses to start until the separately approved goal-schema bootstrap gate has
+# created exactly these tables (read-only check, mode=ro; no row is read). Columns as in services/core-api/app.py
+# _goals_db() (Slice 8, GOAL_SCHEMA_VERSION 1).
+GOAL_DB = Path("/home/lilith/.hermes/lilith-os-dev/data/lilith-dev.db")
+GOAL_SCHEMA = {
+    "goal": ("goal_id", "schema_version", "type", "title", "description", "source", "owner", "lifecycle_state",
+             "priority", "parent_goal_id", "linked_task_ids", "target_json", "target_key", "deadline", "blocked_reason",
+             "blocked_by_json", "resume_conditions", "created_at", "updated_at", "started_at", "blocked_at",
+             "suspended_at", "completed_at", "cancelled_at", "failed_at", "provenance_json", "revision",
+             "last_operation_id"),
+    "goal_trace": ("id", "correlation_id", "goal_id", "at", "kind", "prior_state", "new_state", "action", "reason",
+                   "source", "arbitration_winner", "arbitration_alternatives_json", "priority_inputs_json"),
+}
+ROUTER_KEYS = frozenset({
+    "enabled", "mode", "live_channels", "groq_model", "groq_provider", "hermes_model", "hermes_provider",
+    "recent_turns", "log_path", "cognitive_enabled", "cognitive_mode", "cognitive_channels", "cognitive_draft_dedup",
+    "goals_enabled", "goals_mode", "reasoning_enabled", "reasoning_mode", "workspace_enabled", "workspace_mode",
+    "workspace_capacity", "motivation_enabled", "motivation_mode", "planning_enabled", "planning_mode",
+    "planning_max_steps", "ethics_enabled", "ethics_mode", "ethics_max_concerns", "ethics_max_tensions",
+    "social_cognition_enabled", "social_cognition_mode", "memory_consolidation_enabled", "memory_consolidation_mode",
+    "canonical_ltm_enabled",
+})
+
+failures: list[str] = []
+
+
+def fail(msg: str) -> None:
+    failures.append(msg)
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_manifest(manifest: Path, root: Path) -> None:
+    if not manifest.is_file():
+        return fail(f"MANIFEST_MISSING {manifest}")
+    n = 0
+    for line in manifest.read_text().splitlines():
+        digest, rel = line.split("  ", 1)
+        p = root / rel
+        n += 1
+        if not p.is_file() or p.is_symlink() or sha256(p) != digest:
+            fail(f"HASH_MISMATCH {p}")
+    if n == 0:
+        fail(f"MANIFEST_EMPTY {manifest}")
+
+
+def root_owned_readonly(path: Path, *, recurse: bool) -> None:
+    paths = [path] + (list(path.rglob("*")) if recurse and path.is_dir() else [])
+    for p in paths:
+        st = p.lstat()
+        if st.st_uid != 0:
+            fail(f"NOT_ROOT_OWNED {p}")
+        if not stat.S_ISLNK(st.st_mode) and st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            fail(f"GROUP_OR_OTHER_WRITABLE {p}")
+
+
+def check_secret_file(path: Path, *, mode: int, allowed: set[str], group_ok: bool) -> dict:
+    if not path.is_file() or path.is_symlink():
+        fail(f"MISSING {path}")
+        return {}
+    st = path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != mode:
+        fail(f"BAD_OWNER_OR_MODE {path} (want root {oct(mode)})")
+    if not group_ok and st.st_gid != 0:
+        fail(f"BAD_GROUP {path}")
+    values = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        if key not in allowed:
+            fail(f"FORBIDDEN_KEY {path}:{key}")
+        values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def check_goal_schema() -> None:
+    """The goal tables exist with exactly the Slice 8 columns. Read-only (mode=ro, schema only); never creates."""
+    if not GOAL_DB.is_file() or GOAL_DB.is_symlink():
+        return fail("GOAL_DB_MISSING")
+    try:
+        conn = sqlite3.connect(f"file:{GOAL_DB}?mode=ro", uri=True, timeout=5.0)
+        try:
+            for table, columns in GOAL_SCHEMA.items():
+                got = tuple(r[1] for r in conn.execute(f'PRAGMA table_info("{table}")'))
+                if not got:
+                    fail(f"GOAL_SCHEMA_NOT_BOOTSTRAPPED {table}")
+                elif got != columns:
+                    fail(f"GOAL_SCHEMA_MISMATCH {table}")
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        fail("GOAL_DB_UNREADABLE")
+
+
+def main(argv: list[str]) -> int:
+    full = "--full" in argv
+    current = (BASE / "current").resolve()
+    if current.parent != BASE / "releases":
+        fail(f"CURRENT_NOT_A_RELEASE {current}")
+
+    # 1. Code integrity: critical set every start; complete release manifest at the gates.
+    check_manifest(ETC / "critical.sha256", Path("/"))
+    if full:
+        check_manifest(current / "RELEASE.sha256", current)
+    root_owned_readonly(current, recurse=full)
+    for rel in ("lilith_router", "plugins", *RO_STUBS):
+        p = HH / rel
+        if not p.is_dir() or p.is_symlink():
+            fail(f"MISSING_DIR {p}")
+        else:
+            root_owned_readonly(p, recurse=True)
+
+    # 2. Hermes config pins.
+    cfg_path = HH / "config.yaml"
+    st = cfg_path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o640:
+        fail("BAD_OWNER_OR_MODE config.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    if (cfg.get("platform_toolsets") or {}).get("lilith_os") != []:
+        fail("TOOLSET_PIN platform_toolsets.lilith_os != []")
+    missing = REQUIRED_DENY - set((cfg.get("agent") or {}).get("disabled_toolsets") or [])
+    if missing:
+        fail(f"DENYLIST_MISSING {sorted(missing)}")
+    if (cfg.get("security") or {}).get("allow_lazy_installs") is not False:
+        fail("LAZY_INSTALLS_NOT_DISABLED")
+    if (cfg.get("security") or {}).get("tirith_enabled") is not False:
+        fail("TIRITH_AUTO_DOWNLOAD_NOT_DISABLED")
+    jobs = HH / "cron" / "jobs.json"
+    if not jobs.is_file() or jobs.is_symlink() or jobs.lstat().st_uid != 0 or jobs.read_text().strip() != '{"jobs": []}':
+        fail("CRON_JOBS_NOT_PINNED_EMPTY")
+    mem = cfg.get("memory") or {}
+    if mem.get("memory_enabled") is not False or mem.get("user_profile_enabled") is not False:
+        fail("HERMES_MEMORY_NOT_DISABLED")
+    if (cfg.get("plugins") or {}).get("enabled") != ["lilith_os"]:
+        fail("PLUGINS_ENABLED != [lilith_os]")
+    for key in ("mcp_servers", "hooks", "cron_jobs", "terminal", "toolsets"):
+        if cfg.get(key):
+            fail(f"FORBIDDEN_CONFIG {key}")
+    if (cfg.get("auxiliary") or {}).get("background_review", {}).get("enabled") is not False:
+        fail("BACKGROUND_REVIEW_ON")
+    if (cfg.get("curator") or {}).get("enabled") is not False or (cfg.get("cron") or {}).get("allow_agent_scheduling") is not False:
+        fail("CURATOR_OR_AGENT_CRON_ON")
+    kanban = cfg.get("kanban") or {}
+    if kanban.get("dispatch_in_gateway") is not False or kanban.get("review_dispatch") is not False:
+        fail("KANBAN_DISPATCH_ON")
+    # F8r3 provider path: Groq gpt-oss-120b through the local gate only; bounded calls; no background model calls.
+    model = cfg.get("model") or {}
+    want = {"provider": "custom", "default": "openai/gpt-oss-120b", "base_url": "http://127.0.0.1:9911/openai/v1",
+            "api_key": "__LILITH_GATE_CLIENT_TOKEN__", "api_mode": "chat_completions"}
+    for k, v in want.items():
+        if model.get(k) != v:
+            fail(f"MODEL_PIN {k}")
+    if not (0 < int(model.get("max_tokens") or 0) <= 1024) or not model.get("context_length"):
+        fail("MODEL_LIMITS")
+    agent = cfg.get("agent") or {}
+    if agent.get("api_max_retries") != 1 or (agent.get("empty_response_guard") or {}).get("enabled") is not False:
+        fail("RETRIES_NOT_BOUNDED")
+    if (cfg.get("auxiliary") or {}).get("title_generation", {}).get("enabled") is not False:
+        fail("TITLE_GENERATION_ON")
+    if (cfg.get("compression") or {}).get("enabled") is not False:
+        fail("COMPRESSION_ON")
+    if cfg.get("fallback_providers") or cfg.get("fallback_model"):
+        fail("FALLBACK_CONFIGURED")
+    if not (1 <= int(cfg.get("max_concurrent_sessions") or 0) <= 8):
+        fail("SESSION_CAP")
+    if (cfg.get("logging") or {}).get("level") not in ("INFO", "WARNING"):
+        fail("LOGGING_LEVEL")
+    gate = cfg.get("lilith_os") or {}
+    if not gate.get("allow_admin_from") or "operator" in gate.get("allow_admin_from") or gate.get("user_allowed_commands"):
+        fail("SLASH_GATING_OFF")
+
+    # 3. Router: every cognitive lane off; Router V2 only in shadow or live for lilith_os.
+    rpath = HH / "lilith_router" / "router.yaml"
+    router = yaml.safe_load(rpath.read_text()) or {}
+    for key in sorted(set(router) - ROUTER_KEYS):
+        fail(f"ROUTER_KEY_UNKNOWN {key}")
+    for lane in LANES_OFF:
+        if lane in LANE_MODES:
+            mode_key, want = LANE_MODES[lane]
+            if router.get(lane) is not True:
+                fail(f"LANE_NOT_ON {lane}")
+            if router.get(mode_key) != want:
+                fail(f"LANE_MODE_NOT_{want.upper()} {mode_key}")
+        elif router.get(lane) is not False:
+            fail(f"LANE_NOT_OFF {lane}")
+    if router.get("cognitive_channels") != ["lilith_os"]:
+        fail("LANE_CHANNELS cognitive_channels")
+    live_modes = {m for m, w in LANE_MODES.values() if w == "live"}
+    for key, value in router.items():
+        if key.endswith("_mode") and key not in live_modes and value != "shadow":
+            fail(f"LANE_MODE_NOT_SHADOW {key}")
+    if router.get("mode") != "shadow":
+        fail("ROUTER_MODE_NOT_SHADOW")
+    if router.get("mode") not in ("shadow", "live") or router.get("live_channels") != ["lilith_os"]:
+        fail("ROUTER_SCOPE")
+    if not str(router.get("log_path", "")).startswith(str(HH / "logs") + "/"):
+        fail("DECISIONS_LOG_OUTSIDE_STATE_LOGS")
+    # f9c2-cog1: world_context is the governed adapter beside the recovered PROD module, both pinned; still only
+    # acceptable while every lane above is off.
+    for name, digest, code in (("world_context.py", WORLD_CONTEXT_ADAPTER_SHA256, "WORLD_CONTEXT_NOT_THE_COG1_ADAPTER"),
+                               ("_prod_world_context.py", PROD_WORKING_MEMORY_SHA256, "PROD_WORKING_MEMORY_NOT_PINNED")):
+        p = HH / "lilith_router" / name
+        if not p.is_file() or p.is_symlink() or sha256(p) != digest:
+            fail(code)
+    # f9c2-cog1-wm1-g2: the goal schema must already exist (bootstrap gate), so no live read can create it.
+    check_goal_schema()
+
+    # 4. Secrets: the console .env holds the port + DEV token only; provider.env holds at most the D-1 key.
+    env = check_secret_file(HH / ".env", mode=0o640, allowed=ENV_ALLOWED, group_ok=True)
+    if env:
+        if env.get("LILITH_OS_PORT") != "9901":
+            fail("CONSOLE_PORT != 9901")
+        if not re.fullmatch(r"[0-9a-f]{64}", env.get("LILITH_OS_TOKEN", "")):
+            fail("CONSOLE_TOKEN_NOT_64_HEX")
+    if (ETC / "provider.env").exists():
+        fail("PROVIDER_ENV_PRESENT (F8r3 keeps no provider key in the gateway's reach)")
+    # 5. Provider gate: exact pinned policy fields, root-only credentials, key never readable by the gateway uid.
+    try:
+        gcfg = json.loads((GATE_ETC / "gate.json").read_text())
+        for k, v in GATE_CONFIG.items():
+            if gcfg.get(k) != v:
+                fail(f"GATE_PIN {k}")
+        if not (0 < int(gcfg["max_output_tokens"]) <= 1024) or int(gcfg["budget_requests"]) > 50:
+            fail("GATE_LIMITS")
+    except (OSError, ValueError, KeyError):
+        fail("GATE_CONFIG_UNREADABLE")
+    cdir = GATE_ETC / "credentials"
+    if not cdir.is_dir() or cdir.lstat().st_uid != 0 or stat.S_IMODE(cdir.lstat().st_mode) != 0o700:
+        fail("GATE_CREDENTIALS_DIR")
+    for f in cdir.glob("*") if cdir.is_dir() else []:
+        if f.name != "groq-api-key" or f.lstat().st_uid != 0 or stat.S_IMODE(f.lstat().st_mode) != 0o600:
+            fail(f"GATE_CREDENTIAL_FILE {f.name}")
+    for forbidden in ("auth.json", ".anthropic_oauth.json", "honcho.json", "slack_tokens.json", "SOUL.md.prod",
+                      "groq.env"):
+        if (HH / forbidden).exists():
+            fail(f"FORBIDDEN_FILE {forbidden}")
+
+    if failures:
+        for f in failures:
+            print("F8_VERIFY_FAIL", f)
+        return 1
+    print("F8_VERIFY_PASS", "full" if full else "pre-start", current.name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
