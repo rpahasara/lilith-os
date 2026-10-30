@@ -85,6 +85,22 @@ class WriteAuthTest(unittest.TestCase):
         os.environ["LILITH_OS_WRITE_AUTH"] = "open-acknowledged"
         self.assertTrue(app.post_goal(dict(GOAL), x_lilith_os_write=None)["created"])
 
+    def test_the_preflight_probe_is_refused_before_body_handling(self):
+        # SECURITY-PLAN: a POST with no header and an invalid body must never reach validation or the DB on a protected service.
+        try:
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.skipTest("httpx not installed")
+        client = TestClient(app.app, raise_server_exceptions=False)
+        probe = {"title": "TEST_ONLY"}                                 # fails validation if it ever gets that far
+        self.assertEqual(client.post("/os/goals", json=probe).status_code, 503)
+        os.environ.update(LILITH_OS_WRITE_AUTH="enforced", LILITH_OS_WRITE_TOKEN=TOKEN)
+        self.assertEqual(client.post("/os/goals", json=probe).status_code, 401)
+        self.assertEqual(client.post("/os/goals", json=probe, headers={"X-LILITH-OS-Write": "wrong"}).status_code, 401)
+        self.assertEqual(client.post("/os/goals", json=probe, headers={"X-LILITH-OS-Write": TOKEN}).status_code, 400)
+        os.environ["LILITH_OS_WRITE_AUTH"] = "open-acknowledged"
+        self.assertEqual(client.post("/os/goals", json=probe).status_code, 400)
+
     def test_health_reports_the_state_and_no_secret(self):
         self.assertEqual(app.health()["writeAuth"], "refused")
         os.environ.update(LILITH_OS_WRITE_AUTH="enforced", LILITH_OS_WRITE_TOKEN=TOKEN)
