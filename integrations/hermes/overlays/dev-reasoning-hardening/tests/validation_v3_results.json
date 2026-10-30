@@ -1,0 +1,12 @@
+{
+ "PARAPHRASE_MISSED": [
+  "is the hiring manager stalling?",
+  "what's the smart play on this offer?",
+  "which of the two offers would you pick?"
+ ],
+ "FALSE_MATCHED": [
+  "what's a good job for a rainy day around the house?"
+ ],
+ "NEGATED_MATCHED": [],
+ "PRECEDENCE_MATCHED": []
+}
