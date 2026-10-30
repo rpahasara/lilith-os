@@ -89,8 +89,7 @@ class Detector(unittest.TestCase):
     def test_redteam_measured(self):
         d = self.cand.detect_reasoning_intent
         got = {"MISSED": sorted(m for m in RT.MUST_MATCH if not d(m)["any"]), "FALSE": sorted(m for m in RT.MUST_NOT_MATCH if d(m)["any"])}
-        print(f"
-REDTEAM matched {20 - len(got['MISSED'])}/20 false {len(got['FALSE'])}/25")
+        print(f"\nREDTEAM matched {20 - len(got['MISSED'])}/20 false {len(got['FALSE'])}/25")
         self.assertEqual(got, json.loads(Path(__file__).with_name("redteam_results.json").read_text(encoding="utf-8")))
 
     def test_every_accepted_r1_turn_keeps_its_result(self):
