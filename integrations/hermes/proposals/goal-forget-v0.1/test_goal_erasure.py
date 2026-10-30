@@ -169,6 +169,52 @@ class Erasure(unittest.TestCase):
         self.seed_other_stores(db, status="discarded")
         self.assertEqual(E.prune_discarded_drafts(db), 1)
 
+    def seed_world(self, db, superseded=0, ingested="2020-01-01T00:00:00+00:00"):
+        app.DB = db
+        app._world_schema_ready = False
+        conn = app.db()
+        app._ensure_world_schema(conn)
+        app._ensure_world_ingest_schema(conn)
+        conn.close()
+        c = sqlite3.connect(db)
+        c.execute("INSERT INTO world_belief (key, entity_type, entity_id, predicate, value_json, lifecycle_state, epistemic_state, confidence, confidence_tier, confidence_basis, created_at, updated_at) "
+                  "VALUES ('k', 'career.application', '14', 'p', ?, 'ACTIVE', 'OBSERVED', 1, 'HIGH', 'b', 'a', 'a')", (f'"{CANARY}"',))
+        cols = [r[1] for r in c.execute("PRAGMA table_info(world_belief_evidence)")]
+        c.execute("INSERT INTO world_belief_evidence (belief_key, source_class, value_json, epistemic_state, confidence, ingested_at, superseded) VALUES ('k', 's', ?, 'OBSERVED', 1, ?, ?)", (f'"{CANARY}"', ingested, superseded))
+        c.execute("INSERT INTO world_ingest_cursor (name, last_id, updated_at) VALUES ('career_events', 41, 'a')")
+        c.commit(); c.close()
+
+    def test_world_model_text_is_gone_and_the_cursor_stays(self):
+        db = fresh("world")
+        self.seed_world(db)
+        self.assertFalse(E.world_rows_zero(db))
+        E.erase_world_model(db)
+        self.assertTrue(E.world_rows_zero(db))
+        self.assertNotIn(CANARY.encode(), db.read_bytes())
+        c = sqlite3.connect(db)
+        self.assertEqual(c.execute("SELECT last_id FROM world_ingest_cursor").fetchone()[0], 41)    # resetting it would rebuild the beliefs
+        c.close()
+        E.erase_world_model(db)
+
+    def test_retention_removes_only_old_superseded_evidence(self):
+        db = fresh("ev1")
+        self.seed_world(db, superseded=0)
+        self.assertEqual(E.prune_superseded_evidence(db), 0)
+        db = fresh("ev2")
+        self.seed_world(db, superseded=1)
+        self.assertEqual(E.prune_superseded_evidence(db), 1)
+        db = fresh("ev3")
+        self.seed_world(db, superseded=1, ingested=datetime.now(timezone.utc).isoformat())
+        self.assertEqual(E.prune_superseded_evidence(db), 0)
+
+    def test_an_unknown_table_refuses_world_erasure_so_prod_needs_its_own_list(self):
+        db = fresh("world-other")
+        self.seed_world(db)
+        c = sqlite3.connect(db); c.execute("CREATE TABLE career_events (id INTEGER)"); c.commit(); c.close()
+        with self.assertRaises(E.Refused):
+            E.erase_world_model(db)
+        self.assertFalse(E.world_rows_zero(db))
+
 
 if __name__ == "__main__":
     unittest.main()

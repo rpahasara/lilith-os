@@ -19,14 +19,29 @@ Under 7-day retention and the full FORGET purge of `logs/`. No record holds mess
 
 ## Retention and FORGET coverage
 
-| Store | Retention | FORGET | Gap |
-|---|---|---|---|
-| Decision log | 7 days | purged | none |
-| Sessions, request dumps | 7 days after the session ends; dumps go with their session | covered | a dump's age alone does not remove it |
-| `goal`, `goal_trace` | **none** | **none** | candidate in `goal-forget-v0.1` |
-| `tasks`, `drafts` | **none** | **none** | candidate added; tasks need an owner decision on age |
-| `world_belief*` | **none** | **none** | not yet analysed; holds owner facts on PROD |
-| Backups | manual | **none** | restore gate candidate; both DEV backups hold 0 rows |
+**The deployed FORGET executor covers `state.db` and listed Hermes directories. It does not open the Core API database at all.** Read from `release/dev-f9c2/bin/hermes_forget_executor.py`.
+
+| Store | Holds | Retention | FORGET | Candidate |
+|---|---|---|---|---|
+| Decision log | metadata | 7 days | purged | none needed |
+| Sessions, request dumps | conversation; content-free dumps | 7 days after the session ends | purged | none needed |
+| `goal`, `goal_trace` | titles, reasons, provenance | **none** | **none** | erase, prune terminal |
+| `tasks` | titles, records | **none** | **none** | erase; age needs a decision |
+| `drafts` | subjects, bodies | **none** | **none** | erase, prune discarded |
+| `world_belief`, evidence, conflict, trace | facts about the owner, with sources | **none** | **none** | erase, prune superseded evidence |
+| `world_working_seed` | session focus | **none** | **none** | erase |
+| `world_ingest_cursor` | a position only | not needed | **must stay** | kept |
+| `career_events` (PROD) | the source of beliefs | unknown | **none** | not reviewed |
+| Backups | whole DB copies | manual | **none** | restore gate; both DEV backups hold 0 rows |
+
+**Rebuild risk:** beliefs are derived from `career_events` through a cursor. Resetting the cursor would rebuild every belief, and leaving `career_events` in place means the source facts survive. **World Model FORGET is not complete until `career_events` has an owner decision.**
+
+**PROD:** the candidate refuses a DB with tables it doesn't know, and `career_events` is one, so it cannot run on PROD as written. That is deliberate.
+
+**Open owner decisions:**
+1. Does principal FORGET erase `career_events`, or only what is derived from it?
+2. How long do completed tasks stay?
+3. Does `app_id` stay in records?
 
 ## Runtime hardening
 
@@ -37,5 +52,6 @@ Under 7-day retention and the full FORGET purge of `logs/`. No record holds mess
 | GETs that create schema or write traces | `_drafts_db()` runs DDL; a focus read writes | read-only paths for reads; the verifier's empty-store rule is a stopgap |
 | Adapter read budget | per entry, not per turn | one budget per turn |
 | Write auth | open on DEV and PROD | #289 and the staged plan |
+| Read auth | `GET /os/goals`, `/os/tasks`, `/os/drafts` and `/os/world` need no credential | #289 covers writes only. Extend it after stage 5, since the same routes return owner content |
 
 **Not reviewed:** PROD runtime state, which needs its own read-only approval, and live systemd sandboxing.

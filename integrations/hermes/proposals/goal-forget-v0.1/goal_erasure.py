@@ -102,6 +102,52 @@ def prune_discarded_drafts(db, days=30, now=None):
         conn.close()
 
 
+WORLD_TABLES = ("world_belief", "world_belief_evidence", "world_belief_conflict", "world_belief_trace", "world_working_seed")
+
+
+def erase_world_model(db):
+    """Principal FORGET for beliefs. The ingest cursor stays: resetting it would rebuild every belief from career_events. Idempotent."""
+    conn = _open(db)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        for table in WORLD_TABLES:
+            if table in tables:
+                conn.execute(f'DELETE FROM "{table}"')
+        conn.execute("DELETE FROM sqlite_sequence WHERE name LIKE 'world_%'")
+        _finish(conn)
+    finally:
+        conn.close()
+
+
+def world_rows_zero(db):
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return all(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] == 0 for t in tables & set(WORLD_TABLES))
+    finally:
+        conn.close()
+
+
+def prune_superseded_evidence(db, days=30, now=None):
+    """Daily retention: evidence already superseded, older than `days`. Current evidence never ages out, because a belief rests on it."""
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute("DELETE FROM world_belief_evidence WHERE superseded=1 AND ingested_at < ?", (cutoff,)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
 def goal_rows_zero(db):
     """The check the FORGET executor would add: read-only, and an absent goal table counts as zero only if the table was never made."""
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
