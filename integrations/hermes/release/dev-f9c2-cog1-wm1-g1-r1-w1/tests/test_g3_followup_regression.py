@@ -7,6 +7,7 @@ not a substitute for either live check: a model reply is only simulated here.
 from __future__ import annotations
 
 import gc
+import importlib
 import importlib.util
 import json
 import re
@@ -27,12 +28,16 @@ HIGH = {"id": "g.test-only-regress-high", "marker": "-".join(("ROWAN", "PLOVER",
 NORMAL = {"id": "g.test-only-regress-normal", "marker": "-".join(("SEDGE", "MARTEN", "1937")), "priority": "NORMAL"}
 G3_REPLY = "The goal with higher priority is **g.test-only-regress-high** (priority HIGH)."
 TITLE_REPLY = f"The priority goal is TEST_ONLY synthetic goal {HIGH['marker']}."
+CANDIDATE = REPO / "integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py"
+DEPLOYED = REPO / "integrations/hermes/overlays/dev-unified-cognition/lilith_router/world_context.py"
 NEGATIVES = (C.CONTROL, "TEST_ONLY thanks, that was helpful", "TEST_ONLY what's a good film tonight?", "TEST_ONLY my priority today is lunch")
 OVER_MATCHES = (C.CASUAL, "TEST_ONLY nice goal last night", "TEST_ONLY who scored that goal?")   # found by this test; the G3 L2 message would not have shown it
 
 
 def setUpModule():
-    C.setUpModule()
+    C.setUpModule()                                           # g2 router: Goals live, the state these findings are about
+    shutil.copy2(CANDIDATE, C.HOME / "lilith_router" / "world_context.py")
+    importlib.reload(C.STATE["wc"])
 
 
 def tearDownModule():
@@ -89,12 +94,13 @@ class PopulatedGoals(Base):
         focus = next(l for l in text.splitlines() if l.startswith("CURRENT FOCUS"))
         self.assertLess(focus.index(HIGH["id"]), focus.index(HIGH["marker"]))
 
-    @unittest.expectedFailure
     def test_the_policy_tells_the_model_to_name_a_goal_by_its_title(self):
-        # Known gap, not yet fixed in any release. Remove expectedFailure when the grounding gains this rule.
+        # Text only: whether a model follows it needs a live check, which has not run.
         self.seed("policy")
-        policy = self.route(C.QUERY, "reg-policy")["combined_ephemeral"].split("GOAL / EXECUTIVE STATE")[0].lower()
-        self.assertIn("title", policy)
+        text = self.route(C.QUERY, "reg-policy")["combined_ephemeral"]
+        rule = "- Name a goal by its title. Give its goal id only if you are asked for it.\n"
+        self.assertEqual(text.count(rule), 1)
+        self.assertLess(text.index(rule), text.index("\nGOAL / EXECUTIVE STATE (durable"))     # in the policy, ahead of the state it governs
 
     def test_the_g3_reply_shape_stays_a_title_failure(self):
         self.assertEqual(named_by(G3_REPLY, HIGH), "id")
@@ -115,29 +121,25 @@ class PopulatedGoals(Base):
             self.assertNotIn(goal["id"], raw)
             self.assertNotIn(goal["marker"], raw)
 
-    @unittest.expectedFailure
     def test_casual_mentions_of_the_word_goal_stay_out_of_the_goal_lane(self):
-        # Known defect in the deployed adapter, the one g2 carries. With Goals live and a populated store, these send every title to the provider and write a trace.
-        self.seed("over")
-        self.assertEqual([m for m in OVER_MATCHES if self.wc.detect_goal_intent(m)["any"]], [])
+        # With Goals live and a populated store: no read, no trace, no title near the prompt.
+        db = self.seed("over")
+        before = C.schema(db), C.rows(db)
+        for i, message in enumerate(OVER_MATCHES):
+            self.bridge.calls.clear()
+            self.assertIsNone(self.route(message, f"reg-over-{i}"), message)
+            self.assertEqual(self.bridge.calls, [], message)
+        self.assertEqual((C.schema(db), C.rows(db)), before)
 
-    def test_the_candidate_adapter_in_this_release_refuses_those_messages(self):
+    def test_the_deployed_adapter_still_has_the_defect(self):
+        # r1 and g2 carry this adapter. Goals stays in shadow there, so nothing reaches a provider, but g2 must not be used with real goals.
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            shutil.copy2(REPO / "integrations/hermes/overlays/dev-reasoning-hardening/lilith_router/world_context.py", Path(tmp) / "wc_w1.py")
+            shutil.copy2(DEPLOYED, Path(tmp) / "wc_dep.py")
             shutil.copy2(REPO / "integrations/hermes/home/variants/prod-lilith-01/lilith_router/world_context.py", Path(tmp) / "_prod_world_context.py")
-            spec = importlib.util.spec_from_file_location("wc_w1", Path(tmp) / "wc_w1.py")
+            spec = importlib.util.spec_from_file_location("wc_dep", Path(tmp) / "wc_dep.py")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        self.assertEqual([m for m in OVER_MATCHES if module.detect_goal_intent(m)["any"]], [])
-        self.assertTrue(module.detect_goal_intent(C.QUERY)["any"])
-
-    def test_the_over_match_exposure_is_real_when_goals_are_live(self):
-        db = self.seed("exposure")
-        before = C.rows(db)["goal_trace"][0]
-        text = self.route(C.CASUAL, "reg-exposure")["combined_ephemeral"]
-        self.assertIn(HIGH["marker"], text)
-        self.assertEqual(self.bridge.calls, [(p, 200) for p in C.GOAL_READS])
-        self.assertEqual(C.rows(db)["goal_trace"][0], before + 1)
+        self.assertEqual([m for m in OVER_MATCHES if not module.detect_goal_intent(m)["any"]], [])
 
     def test_a_live_negative_reply_must_name_neither_goal(self):
         self.assertEqual(named_by("TEST_ONLY doing well, thanks.", HIGH), "none")

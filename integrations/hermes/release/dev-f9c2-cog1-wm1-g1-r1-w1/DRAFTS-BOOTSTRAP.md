@@ -1,4 +1,6 @@
-# `drafts` schema bootstrap gate (PREPARED, NOT RUN)
+# `drafts` schema bootstrap gate (EXECUTED 2026-10-30: PASS)
+
+**Result:** owner-approved, run once, 17:29Z. `DS_BOOTSTRAP PASS`, then `DS_STATUS POST_REFERENCE`. DB `88b76a79...`, every table 0 rows, no service restarted, budget 3/5, ledger unchanged. Root-only backup kept: `7046d835...`.
 
 Workspace shadow calls `GET /os/drafts`, and `_drafts_db()` runs `CREATE TABLE IF NOT EXISTS`. Without this gate, the first
 analytic turn would change the DEV schema from inside a GET. The gate makes that change deliberate, reversible and pinned, as
@@ -36,8 +38,7 @@ adapter refuses them.
 an injected post-condition failure rolled back exactly, a second bootstrap and rollback refused, rollback refused with a draft
 row, and the three scripts identical except their `MODE` line. `ds_status_ro.sh` classified the live DB as the prior reference.
 
-**Not proven:** the write has not run on DEV. The check ran with Python on Windows, not the Core API interpreter; phase B is what
-covers that on the host.
+The whole-script simulation, `tests/sim_ds.sh` in the package, passed 107/107 before the run.
 
 ## Effect on other packages
 

@@ -9,7 +9,7 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 | 1 | r1 shadow acceptance | **done**, owner-accepted 2026-10-30 (#294) |
 | 2 | Detector candidate accepted: PR #295, merged into this branch | owner decision |
 | 3 | G3 | **closed**: owner accepted it as partial evidence, no re-run (#297) |
-| 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md): DB write, needs its own approval | owner |
+| 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md) | **done**, 2026-10-30, DB `88b76a79...` |
 | 5 | Stable candidate ids removed from the log | **done in source** |
 | 6 | #293 merged and classified. It is `CONTROL_ONLY_NO_DEPLOY` as long as it adds only new files | owner |
 
