@@ -99,3 +99,30 @@ def channel_label(source_channel):
     """Provenance: keep the channel name, drop the session key after it. `lilith_os:chat-123` becomes `lilith_os`."""
     name = str(source_channel or "").split(":", 1)[0].strip().lower()
     return name if name.replace("_", "").isalnum() else "unknown"
+
+
+def forget_step(db, hold_path):
+    """The one call the FORGET executor would make, under its own lock. Fail-closed: a hold marker that cannot be checked counts as a hold."""
+    try:
+        held = hold_path.exists()
+    except OSError:
+        held = True
+    return {"goal_forget": forget_goals_unless_held(db, held), "goal_rows_zero": goal_rows_zero(db)}
+
+
+def main(argv):
+    """python -I -B goal_erasure.py prune <db>  The retention timer's entry point. Prints a count only."""
+    if len(argv) != 3 or argv[1] != "prune":
+        print("usage: goal_erasure.py prune <db>")
+        return 2
+    try:
+        print("GOAL_RETENTION pruned=%d" % prune_terminal_goals(argv[2]))
+    except Refused as e:
+        print("GOAL_RETENTION REFUSED %s" % e)
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))

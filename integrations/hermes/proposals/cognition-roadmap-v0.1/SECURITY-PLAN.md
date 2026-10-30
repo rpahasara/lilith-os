@@ -25,10 +25,12 @@ One explicit setting, `LILITH_OS_WRITE_AUTH`, read at start:
 `PATCH /os/tasks/{id}`, `POST /os/drafts`, `DELETE /os/drafts/{id}`, through one dependency, with a test that fails if a new write route
 lacks it. `/os/conversation` keeps its existing fail-closed owner check.
 
+**Stage 1 candidate:** [`write-auth-stage1.conf`](write-auth-stage1.conf), with [`test_write_auth_stage1.py`](test_write_auth_stage1.py). Not installed. It needs a Core API restart, which is not authorized yet.
+
 ## Stages
 
 Each is a separate approval. Every stage that changes `app.py` is `DEPLOY_REQUIRED`: merging it restarts Core API and invalidates
-packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open, after the `drafts` gate.** G3 is closed. Merging stage 2 changes `app.py`, so regenerate the `drafts` gate if it has not run, and the w1 package.
+packages pinning `a9fc562f…` or PID 304463. **Run each with no gate open.** G3 and the `drafts` gate are done. Merging stage 2 changes `app.py`, so regenerate the w1 package if it has not run.
 
 | Stage | Change | State after | Proof |
 |---|---|---|---|

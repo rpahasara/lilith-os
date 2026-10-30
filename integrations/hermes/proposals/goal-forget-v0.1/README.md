@@ -17,10 +17,12 @@
 
 Changes 2, 4 and 5 alter FORGET and need their own Privacy approval.
 
+**Wiring shape:** the executor calls `forget_step(db, hold_path)` under its lock and adds `goal_rows_zero` to its checks. The retention timer runs `goal_erasure.py prune <db>` as `lilith`. Neither exists on any host.
+
 **Before real goals, also:** G3's negative control and title criterion are still unproven live. See `release/dev-f9c2-cog1-wm1-g2/G3-RESULT-20261030.md`.
 
-| 9 | Goal detector: the deployed `detect_goal_intent` matches casual uses of the word `goal`, which on a populated store sends every title to the provider and writes a trace | Router | fixed in the #293 adapter, tested offline; not deployed |
-| 10 | Title presentation: nothing tells the model to name a goal by its title | Router | expected-failure test in #293; no fix yet |
+| 9 | Goal detector: the deployed `detect_goal_intent` matches casual uses of the word `goal`, which on a populated store sends every title to the provider and writes a trace | Router | fixed in the w1 adapter, proven offline with Goals live on a populated store; not deployed |
+| 10 | Title presentation: nothing told the model to name a goal by its title | Router | rule added to the w1 adapter and proven in the prompt; **model behaviour unproven live** |
 
 ## Proof needed on DEV, with synthetic data
 

@@ -120,6 +120,30 @@ class Erasure(unittest.TestCase):
         for bad in (None, "", "a b:c", "x/y"):
             self.assertEqual(E.channel_label(bad), "unknown")
 
+    def test_forget_step_honours_a_hold_marker_and_reports_its_check(self):
+        db = fresh("step", [CANARY])
+        hold = Path(tmp) / "hold.marker"
+        hold.write_text("TEST_ONLY")
+        self.assertEqual(E.forget_step(db, hold), {"goal_forget": "held", "goal_rows_zero": False})
+        hold.unlink()
+        self.assertEqual(E.forget_step(db, hold), {"goal_forget": "erased", "goal_rows_zero": True})
+
+    def test_a_hold_marker_that_cannot_be_checked_counts_as_a_hold(self):
+        class Unreadable:
+            def exists(self):
+                raise OSError("TEST_ONLY")
+        db = fresh("step2", [CANARY])
+        self.assertEqual(E.forget_step(db, Unreadable())["goal_forget"], "held")
+
+    def test_the_retention_entry_point_prints_a_count_and_refuses_cleanly(self):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(E.main(["x", "prune", str(fresh("cli"))]), 0)
+            self.assertEqual(E.main(["x"]), 2)
+        self.assertIn("GOAL_RETENTION pruned=0", out.getvalue())
+        self.assertNotIn(CANARY, out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
