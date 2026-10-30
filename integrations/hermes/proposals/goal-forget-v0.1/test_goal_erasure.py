@@ -144,6 +144,31 @@ class Erasure(unittest.TestCase):
         self.assertIn("GOAL_RETENTION pruned=0", out.getvalue())
         self.assertNotIn(CANARY, out.getvalue())
 
+    def seed_other_stores(self, db, status="created", updated=1):
+        app.DB = db
+        app._tasks_db().close()
+        app._drafts_db().close()
+        c = sqlite3.connect(db)
+        c.execute("INSERT INTO tasks (task_id, schema_version, revision, source, kind, status, title, created_at, updated_at, record_json) VALUES ('t', 1, 1, 's', 'k', 'running', ?, 1, 1, ?)", (CANARY, CANARY))
+        c.execute("INSERT INTO drafts (draft_id, schema_version, kind, status, target_type, target_id, body, content_hash, idempotency_key, created_at, updated_at) VALUES ('d', 1, 'followup', ?, 'career.application', '1', ?, 'h', 'k', 1, ?)", (status, CANARY, updated))
+        c.commit(); c.close()
+
+    def test_task_and_draft_text_is_gone_from_the_file_bytes(self):
+        db = fresh("other")
+        self.seed_other_stores(db)
+        self.assertIn(CANARY.encode(), db.read_bytes())
+        E.erase_tasks_and_drafts(db)
+        self.assertNotIn(CANARY.encode(), db.read_bytes())
+        E.erase_tasks_and_drafts(db)
+
+    def test_retention_removes_only_old_discarded_drafts(self):
+        db = fresh("dr1")
+        self.seed_other_stores(db, status="created")
+        self.assertEqual(E.prune_discarded_drafts(db), 0)
+        db = fresh("dr2")
+        self.seed_other_stores(db, status="discarded")
+        self.assertEqual(E.prune_discarded_drafts(db), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

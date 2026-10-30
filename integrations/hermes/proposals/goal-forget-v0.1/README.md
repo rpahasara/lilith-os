@@ -23,6 +23,7 @@ Changes 2, 4 and 5 alter FORGET and need their own Privacy approval.
 
 | 9 | Goal detector: the deployed `detect_goal_intent` matches casual uses of the word `goal`, which on a populated store sends every title to the provider and writes a trace | Router | fixed in the w1 adapter, proven offline with Goals live on a populated store; not deployed |
 | 10 | Title presentation: nothing told the model to name a goal by its title | Router | rule added to the w1 adapter and proven in the prompt; **model behaviour unproven live** |
+| 11 | Tasks and drafts have the same gap as goals | Core API, Privacy | candidate `erase_tasks_and_drafts` and `prune_discarded_drafts`, tested; retention age for tasks needs a decision |
 
 ## Proof needed on DEV, with synthetic data
 

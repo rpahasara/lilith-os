@@ -70,6 +70,38 @@ def prune_terminal_goals(db, days=30, now=None):
         conn.close()
 
 
+def erase_tasks_and_drafts(db):
+    """Principal FORGET for the other two owner stores: tasks and drafts hold titles, bodies and targets. Same rules as goals. Idempotent."""
+    conn = _open(db)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        for table in sorted(tables & {"tasks", "drafts"}):
+            conn.execute(f'DELETE FROM "{table}"')
+        _finish(conn)
+    finally:
+        conn.close()
+
+
+def prune_discarded_drafts(db, days=30, now=None):
+    """Daily retention: discarded drafts older than `days`. A live draft never ages out, and nothing here decides about tasks."""
+    cutoff = int(((now or datetime.now(timezone.utc)) - timedelta(days=days)).timestamp())
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute("DELETE FROM drafts WHERE status='discarded' AND updated_at < ?", (cutoff,)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
 def goal_rows_zero(db):
     """The check the FORGET executor would add: read-only, and an absent goal table counts as zero only if the table was never made."""
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
