@@ -14,7 +14,7 @@ on any failed check.
 
 | Phase | Action |
 |---|---|
-| A, read-only | r1 current and its router; gateway 369445; gate 370064; budget 2/5; ledger 27 lines; FORGET idle; protected services; no `-journal`, `-wal` or `-shm`; DB digest `b291372517…` and file stat unchanged |
+| A, read-only | r1 current and its router; gateway 378068; gate 370064; budget 3/5; ledger 29 lines; FORGET idle; protected services; no `-journal`, `-wal` or `-shm`; DB digest `b291372517…` |
 | B, rehearsal | Core API interpreter matches the running process; `app.py` is `a9fc562f…`; the same code runs on a throwaway DB, including exact rollback and three refusals |
 | C, backup | sqlite online backup to `/var/backups/lilith-drafts-schema-20261030/` (root 0700, file 0600); logical digest equal to the reference |
 | D, write | the Core API's own `_drafts_db()` once, as `lilith`, with an empty `HERMES_HOME`. Any post-condition failure drops the table in one transaction, back to the exact reference |
@@ -42,8 +42,8 @@ covers that on the host.
 ## Effect on other packages
 
 The DB reference changes, so every package pinned to `b291372517…` must be regenerated: the G3 package in particular. G3 compares
-the full logical digest, and its seed and cleanup would refuse a DB with the `drafts` table. **Run G3 before this gate, or
-regenerate it after.**
+the full logical digest, and its seed and cleanup would refuse a DB with the `drafts` table. G3 ran once on 2026-10-30, so this gate is regenerated for the state it left (manifest `d25fb1b3…`). **Any G3 re-run must come
+before this gate, or be regenerated after it.**
 
 ## Not in scope
 
