@@ -42,6 +42,7 @@ def health():
         "version": "0.1.0",
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": DB.exists(),
+        "writeAuth": _write_auth_state(),
     }
 
 
@@ -1522,6 +1523,27 @@ def _capture_store():
     return ConversationCaptureStore(_capture_db_path(), privacy_gate=_capture_privacy_gate, provisioned_only=True)
 
 
+def _write_auth_state() -> str:
+    """enforced, open-acknowledged or refused. Anything unset or unknown is refused: a lost setting must not open writes."""
+    mode = _os.getenv("LILITH_OS_WRITE_AUTH", "")
+    if mode == "enforced":
+        return "enforced" if len(_os.getenv("LILITH_OS_WRITE_TOKEN", "")) >= 32 else "refused"
+    return "open-acknowledged" if mode == "open-acknowledged" else "refused"
+
+
+def _require_write_auth(credential) -> None:
+    """Fail-closed check for Goals, Tasks and Drafts writes. Runs before any DB access."""
+    state = _write_auth_state()
+    if state == "open-acknowledged":
+        return
+    if state == "refused":
+        raise HTTPException(status_code=503, detail="WRITE_AUTH_UNCONFIGURED")
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), _os.getenv("LILITH_OS_WRITE_TOKEN", "").encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="WRITE_NOT_AUTHENTICATED")
+
+
 def _require_capture_auth(credential) -> None:
     if not _capture_enabled():
         raise HTTPException(status_code=403, detail="CAPTURE_INACTIVE")
@@ -1797,7 +1819,8 @@ def _transition_ok(old_status, old_attempt, new_status, new_attempt):
 
 
 @app.post("/os/tasks")
-def create_task(payload: dict = _Body(default=None)):
+def create_task(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     record = payload.get("record", payload)
@@ -1868,7 +1891,8 @@ def get_task(task_id: str):
 
 
 @app.patch("/os/tasks/{task_id}")
-def update_task(task_id: str, payload: dict = _Body(default=None)):
+def update_task(task_id: str, payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     record = payload.get("record", payload)
@@ -2019,7 +2043,8 @@ def _row_to_draft(row):
 
 
 @app.post("/os/drafts")
-def create_draft(payload: dict = _Body(default=None)):
+def create_draft(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     draft_id = payload.get("draftId")
@@ -2126,7 +2151,8 @@ def get_draft(draft_id: str):
 
 
 @app.delete("/os/drafts/{draft_id}")
-def discard_draft(draft_id: str):
+def discard_draft(draft_id: str, x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     # Reversibility: soft-discard keeps the audit row but flips status.
     if not _DRAFT_ID_RE.match(draft_id or ""):
         raise HTTPException(status_code=400, detail="invalid draftId")
@@ -3391,23 +3417,10 @@ def get_goal(goal_id: str):
 
 # ── Controlled write API (typed operations; NO generic setGoal/setState) ────
 
-def _require_goal_write_auth(credential) -> None:
-    """Opt-in caller check for goal writes. With LILITH_OS_GOAL_WRITE_TOKEN unset, behaviour is unchanged."""
-    expected = _os.getenv("LILITH_OS_GOAL_WRITE_TOKEN", "")
-    if not expected:
-        return
-    if len(expected) < 32:
-        raise HTTPException(status_code=503, detail="GOAL_WRITE_CREDENTIAL_UNCONFIGURED")
-    if not isinstance(credential, str) or not _hmac.compare_digest(
-        credential.encode("utf-8"), expected.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="GOAL_WRITE_NOT_AUTHENTICATED")
-
-
 @app.post("/os/goals")
 def post_goal(payload: dict = _Body(default=None),
-              x_lilith_os_goal_write: str = _Header(default=None)):
-    _require_goal_write_auth(x_lilith_os_goal_write)
+              x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     conn = _goals_db()
@@ -3427,8 +3440,8 @@ def post_goal(payload: dict = _Body(default=None),
 
 @app.post("/os/goals/{goal_id}/transition")
 def post_goal_transition(goal_id: str, payload: dict = _Body(default=None),
-                         x_lilith_os_goal_write: str = _Header(default=None)):
-    _require_goal_write_auth(x_lilith_os_goal_write)
+                         x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):
@@ -3446,8 +3459,8 @@ def post_goal_transition(goal_id: str, payload: dict = _Body(default=None),
 
 @app.post("/os/goals/{goal_id}/link_task")
 def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None),
-                        x_lilith_os_goal_write: str = _Header(default=None)):
-    _require_goal_write_auth(x_lilith_os_goal_write)
+                        x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):

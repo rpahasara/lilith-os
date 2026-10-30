@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # api/ dir
+os.environ["LILITH_OS_WRITE_AUTH"] = "open-acknowledged"   # these tests cover goal logic; tests/test_write_auth.py covers the gate
 import app  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
