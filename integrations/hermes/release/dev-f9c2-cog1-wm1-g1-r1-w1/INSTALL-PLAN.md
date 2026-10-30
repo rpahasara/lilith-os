@@ -6,7 +6,7 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 
 | # | Blocker | Owner of it |
 |---|---|---|
-| 1 | r1 shadow acceptance: evidence passed; owner acceptance pending | owner |
+| 1 | r1 shadow acceptance | **done**, owner-accepted 2026-10-30 (#294) |
 | 2 | **Workspace must not ship with the deployed detector.** See below. The candidate in PR #295 must be accepted and added to this release | owner decision |
 | 3 | G3, if wanted, runs first. Its package pins the current DB reference | owner decision |
 | 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md): DB write, needs its own approval | owner |
