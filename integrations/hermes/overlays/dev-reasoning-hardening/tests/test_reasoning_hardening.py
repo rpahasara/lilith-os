@@ -24,6 +24,7 @@ sys.path.insert(0, str(REPO / "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-
 import holdout_corpus as H  # noqa: E402
 import redteam_corpus as RT  # noqa: E402
 import validation_pool as VP  # noqa: E402
+import validation_pool_v2 as VP2  # noqa: E402
 import test_r1_detector_corpus as R1  # noqa: E402
 
 BASE = REPO / "integrations/hermes/overlays/dev-goals-hardening/lilith_router/world_context.py"
@@ -32,7 +33,7 @@ PROD = REPO / "integrations/hermes/home/variants/prod-lilith-01/lilith_router/wo
 CANDIDATE = HERE / "lilith_router" / "world_context.py"
 LOOKUPS = ["where is the interview?", "who is the recruiter?", "is the interview tomorrow?", "did the offer arrive?", "which company is the job at?",
            "what's the salary?", "is application 9 open?", "was the application sent?", "who did I send the offer to?", "what's the job title?"]
-LOOKUPS_MATCHED = ["did the offer arrive?", "is application 9 open?", "is the interview tomorrow?", "was the application sent?", "what's the job title?", "what's the salary?", "where is the interview?", "which company is the job at?", "who did I send the offer to?", "who is the recruiter?"]
+LOOKUPS_MATCHED = []
 SCORED = ("ANALYTIC", "CASUAL", "NEGATED", "YIELDS", "MULTI_INTENT", "ADVERSARIAL")
 # Measured on the final candidate. Each entry is a defect or a limit, not an accepted behaviour.
 EXPECTED_FAILURES = json.loads((Path(__file__).with_name("holdout_results.json")).read_text(encoding="utf-8"))
@@ -104,8 +105,16 @@ class Detector(unittest.TestCase):
         print(f"\nVALIDATION matched {len(tp) - len(got['MISSED'])}/{len(tp)} false {len(got['FALSE'])}/{len(tn)}")
         self.assertEqual(got, json.loads(Path(__file__).with_name("validation_results.json").read_text(encoding="utf-8")))
 
-    def test_measured_weakness_plain_lookups_about_work_still_match(self):
-        # Finding: these want a fact, not analysis. The broad rule cannot tell them apart. Pinned so a fix shows up here.
+    def test_second_validation_half_measured(self):
+        detect = self.cand.detect_reasoning_intent
+        holdout = lambda items: [m for m in items if not VP2.in_tune(m)]
+        got = {"ANALYTIC_MISSED": sorted(m for m in holdout(VP2.ANALYTIC) if not detect(m)["any"]),
+               "LOOKUP_MATCHED": sorted(m for m in holdout(VP2.LOOKUP) if detect(m)["any"]),
+               "CASUAL_MATCHED": sorted(m for m in holdout(VP2.CASUAL) if detect(m)["any"])}
+        self.assertEqual(got, json.loads(Path(__file__).with_name("validation_v2_results.json").read_text(encoding="utf-8")))
+
+    def test_plain_lookups_about_work_no_longer_match(self):
+        # These want a fact, not analysis. A fact-style opening now needs a sign of judgement.
         d = self.cand.detect_reasoning_intent
         matched = sorted(m for m in LOOKUPS if d(m)["any"])
         print(f"\nLOOKUPS matched {len(matched)}/{len(LOOKUPS)}", matched)

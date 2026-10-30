@@ -14,6 +14,7 @@ assembles, installs or references this directory. r1 on DEV keeps the deployed d
 | Negation before the trigger or topic | ignored | that clause does not count; other clauses still do |
 | Quoted text, and reported or transformed speech | matches | removed or refused |
 | Plain look-ups (`what time`, `how many`, `show me`) | varies | refused, for the forms listed |
+| Fact-style openings (`who is`, `did the`, `what's the`) | varies | need a sign of judgement |
 | Explicit knowledge questions | not considered | World Model keeps them |
 | Common typos | missed | normalised for the detector only |
 | Input scanned | the whole message | the first 2,000 characters |
@@ -24,30 +25,33 @@ it. All four accepted r1 test turns keep their result.
 
 ## Measurements
 
-| Corpus | Deployed | Previous candidate | This candidate | Independence |
+| Corpus | Deployed | First candidate | **This candidate** | Independence |
 |---|---|---|---|---|
 | Original analytic, matched of 25 | 20 | 21 | **21** | used for tuning |
 | Original casual, false of 25 | 18 | 0 | **0** | used for tuning |
-| Held-out analytic, matched of 40 | 29 | 39 | **39** | seen before this candidate |
+| Held-out analytic, matched of 40 | 29 | 39 | **39** | seen |
 | Held-out false matches, of 75 | 47 | 0 | **0** | seen |
-| Red-team analytic, matched of 20 | 1 | 1 | **19** | seen, used for tuning |
-| Red-team false, of 25 | 16 | 6 | **0** | seen, used for tuning |
-| **Validation analytic, matched of 39** | 2 | not run | **37** | **unseen; scored once** |
-| **Validation false, of 26** | 1 | not run | **0** | **unseen; scored once** |
-| Plain look-ups about work matched, of 10 | not run | not run | **10** | written after, to attack it |
+| Red-team analytic, matched of 20 | 1 | 19 | **19** | seen, used for tuning |
+| Red-team false, of 25 | 16 | 0 | **0** | seen, used for tuning |
+| Validation 1 analytic, matched of 39 | 2 | 37 | **37** | scored unseen once for the first candidate; now seen |
+| Validation 1 false, of 26 | 1 | 0 | **0** | as above |
+| Plain look-ups about work matched, of 10 | not run | 10 | **0** | used for tuning |
+| **Validation 2 analytic, matched of 20** | 0 | not run | **20** | **unseen; scored once** |
+| **Validation 2 work look-ups, false of 17** | 0 | not run | **1** | **unseen; scored once** |
+| **Validation 2 casual, false of 11** | 0 | not run | **0** | **unseen; scored once** |
 
-**Only the validation row is independent of tuning,** and only partly. The pool (`bedfec8`) was committed first, then split by hash, and that half was
-never read until its one run. The same author wrote it, and its negatives use everyday topics also covered by the off-topic list, so
-treat 0 of 26 as optimistic. It is small: the 95% range on 37 of 39 is roughly 83% to 99%.
+**The Validation 2 rows are the only ones independent of this rule, and only partly.** The pool was committed (`2b1d8fd`) before the rule, split by hash, and that half was
+scored once after the rule was frozen. The same author wrote it, and it is small. The first run pinned its result; nothing was tuned on it. Treat these as better than real traffic will be.
 
 ## Known failures, not hidden
 
-- **Plain look-ups about work match.** `who is the recruiter?` wants a fact, and the rule can't tell. This is the main cost of the broad rule, and
-  it will also inflate Workspace reads. Real records will show how common it is.
+- **Validation 2:** `what stage is application 40 at?` is a look-up that matches.
+- **The judgement list is a list.** A work question opening `who`, `where`, `which`, `is`, `are`, `was`, `did`, `does`, `do`, `has`, `have` or `what's the` needs a word from it. Analytic questions using
+  none of those words now miss. That trade is deliberate: a false match costs up to 5 reads, a miss costs an absent shadow record.
 - **The off-topic list is a list.** It removes the senses it names and no others.
-- **Validation misses:** `can you make sense of this feedback?` and `what's the downside of accepting?`.
+- **Validation 1 misses:** `what's the status of my thinking on this offer, is it good?`, `can you make sense of this feedback?`, `what's the downside of accepting?`, `does it make sense to follow up on application 33?`.
 - **No work word means no match:** `what are the risks of declining?`, `which option looks strongest to you?`, `what are my choices here?`.
-- **Lane priority:** `reply` and `follow up on…` can read as draft requests, so those messages go to the draft path, as designed.
+- **Lane priority:** `reply` and `follow up on...` can read as draft requests, so those messages go to the draft path, as designed. `why is the draft for job 9 on hold?` is the held-out miss.
 - **Other languages:** not handled.
 - The full lists are pinned in the `tests/*_results.json` files.
 

@@ -206,6 +206,12 @@ _R_OFFTOPIC_RE = re.compile(
 _R_LOOKUP_RE = re.compile(
     r"\b(what time|what day|what date|when (is|does|did|was)|how many|how much|what('?s| is) the (name|address|email|phone|link|url)|"
     r"show me|list|remind me)\b", re.IGNORECASE)
+# A question opening like a fact look-up about work needs a sign that it wants judgement: "who is the recruiter?" no, "who should I ask?" yes.
+_R_FACT_HEAD_RE = re.compile(_R_POLITE + r"(who|who'?s|where|where'?s|which|what company|what is the|what'?s the|is|are|was|were|did|does|do|has|have)\b", re.IGNORECASE)
+_R_JUDGE_RE = re.compile(
+    r"\b(worth|fit|fits|better|best|stronger|strongest|weaker|weakest|good|bad|badly|fair|right|wrong|mistake|too|enough|should|likely|chance|risks?|trade-?offs?|"
+    r"red flags?|realistic|reasonable|interested|mean|means|imply|suggest|think|feel|seem|seems|looks?|advice|view|take on|read on|overlook(ing)?|miss(ed)?|"
+    r"undersell|oversell|holding|hold-up|paths|alternatives|blocking|leverage|upside|downside|stand|dead|smart\w*|problem|issue|concern|strategy|next move|change|on track|where are we|step backward|final|make sense)\b", re.IGNORECASE)
 _R_BELIEF_ONLY_RE = re.compile(r"\b(do you believe|what do you (currently )?know|know about|provenance|source of)\b", re.IGNORECASE)
 _R_TYPOS = ((r"\bpls\b", "please"), (r"\bcn\b", "can"), (r"\br\b", "are"), (r"\bwat\b", "what"), (r"\banali[sz]e\b", "analyze"), (r"\bevalute\b", "evaluate"))
 
@@ -213,6 +219,8 @@ _R_TYPOS = ((r"\bpls\b", "please"), (r"\bcn\b", "can"), (r"\br\b", "are"), (r"\b
 def _reasoning_broad(clause):
     m = _R_TOPIC_RE.search(clause)
     if not m or not _R_ASK_RE.match(clause) or _R_OFFTOPIC_RE.search(clause) or _R_LOOKUP_RE.search(clause):
+        return False
+    if _R_FACT_HEAD_RE.match(clause) and not _R_JUDGE_RE.search(clause):
         return False
     return not _R_NEGATED_RE.search(clause[:m.start()])
 
