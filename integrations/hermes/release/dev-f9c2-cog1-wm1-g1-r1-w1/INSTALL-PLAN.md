@@ -7,11 +7,28 @@ DEV only. This is the plan for a sealed package still to be built, on the patter
 | # | Blocker | Owner of it |
 |---|---|---|
 | 1 | r1 shadow acceptance: evidence passed; owner acceptance pending | owner |
-| 2 | Detector over-matching: 18 of 25 casual messages matched offline, and each match costs up to 5 reads under Workspace. Tighten it, or accept the read load and measure on real shadow records | owner decision |
+| 2 | **Workspace must not ship with the deployed detector.** See below. The candidate in PR #295 must be accepted and added to this release | owner decision |
 | 3 | G3, if wanted, runs first. Its package pins the current DB reference | owner decision |
 | 4 | `drafts` gate, [DRAFTS-BOOTSTRAP.md](DRAFTS-BOOTSTRAP.md): DB write, needs its own approval | owner |
-| 5 | Candidate ids accepted as sensitive metadata ([README](README.md#candidate-ids-and-privacy)) | owner |
+| 5 | Stable candidate ids must leave the shadow log: add `overlays/dev-workspace-private-trace/lilith_router/workspace.py` as a release member | engineering, then owner review |
 | 6 | #293 merged and classified. It is `CONTROL_ONLY_NO_DEPLOY` as long as it adds only new files | owner |
+
+## Why Workspace depends on the detector
+
+Workspace runs only inside a Reasoning match, so the detector sets its read load.
+
+| Held-out casual messages, of 45 | False matches | Core API reads, at up to 5 each |
+|---|---|---|
+| Deployed detector | 27 | up to 135 |
+| Candidate in #295 | 0 | 0 |
+
+The red-team corpus still gets 6 false matches of 25 from the candidate, so it reduces the load and does not remove it. The reads stay
+bounded and write nothing on an empty store.
+
+**This release is therefore not final.** It still pins the deployed adapter `07a763e1…` and an unchanged `workspace.py`. Before any host
+package is sealed, it must gain two release members with new digests: the adapter from #295 and the counts-only `workspace.py`. The
+verifier pin, `RELEASE-DELTA.json`, the installer and the simulation then move with them. A w1 host package is deliberately not
+built yet, because it would pin bytes that are going to change.
 
 ## Preflight, read-only
 
@@ -53,7 +70,7 @@ Same gate-stopped method as r1, so no request can be forwarded. Unlike r1, this 
 | T3 | `TEST_ONLY which goal has priority?` | goal, routing | 0 |
 | T4 | `TEST_ONLY hey how are you` | routing | 0 |
 
-**Pass needs all of:** exact records; 0 message text; candidate ids not printed; all reads 200 and no write; DB digest and file
+**Pass needs all of:** exact records; 0 message text; no candidate id in any record; all reads 200 and no write; DB digest and file
 stat unchanged, including `goal_trace`; budget and ledger unchanged; 0 FORWARDED; dumps content-free; same gateway PID; gate back
 with its key.
 

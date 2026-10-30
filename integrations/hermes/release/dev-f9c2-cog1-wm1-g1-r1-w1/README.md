@@ -1,7 +1,7 @@
 # DEV release candidate `f293e72-f9c2-cog1-wm1-g1-r1-w1`: Workspace in shadow (CANDIDATE, not installed)
 
 This release is `f293e72-f9c2-cog1-wm1-g1-r1` with Slice 10 Global Workspace also in **shadow**, for `lilith_os` only. World
-Model, Goals and Reasoning stay in shadow, and every other lane stays off. Nothing here has been installed.
+Model, Goals and Reasoning stay in shadow, and every other lane stays off. Nothing here has been installed. **This candidate is not final:** see [INSTALL-PLAN.md](INSTALL-PLAN.md).
 
 **Order:** r1 must run on DEV and pass its shadow test first. Then the [`drafts` bootstrap gate](DRAFTS-BOOTSTRAP.md). Only then
 this release. Unlike r1, this lane reads the Core API, so it is a separate step.
@@ -60,7 +60,9 @@ treated as sensitive metadata, the same class as `app_id`:
 | Deleting one goal | does not remove its id from existing log records, which stay until retention |
 | Observation | gates print counts and classes, never the ids |
 
-Owner acceptance of this is needed before this runs.
+**Decision: stable ids should not be in shadow logs.** Nothing reads them. The candidate in
+[`overlays/dev-workspace-private-trace`](../../overlays/dev-workspace-private-trace/README.md) records counts instead, and this release
+must adopt it before it runs.
 
 ## Install and rollback
 
