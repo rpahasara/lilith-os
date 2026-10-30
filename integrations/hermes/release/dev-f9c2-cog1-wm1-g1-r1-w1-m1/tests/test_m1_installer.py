@@ -31,6 +31,8 @@ SOURCES = {
     "router.w1.yaml": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/home/router.yaml",
     "verify_release.m1.py.tmpl": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1/templates/bin/verify_release.py.tmpl",
     "verify_release.w1.py.tmpl": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1/templates/bin/verify_release.py.tmpl",
+    "motivation.m1.py": "integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py",
+    "motivation.w1.py": "docs/architecture/slice-11/motivation.py",
     "RELEASE_ID": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1/RELEASE_ID",
 }
 
@@ -51,7 +53,9 @@ class InstallerContractTest(unittest.TestCase):
         install = TEXT.split("  install)", 1)[1].split("  revert)", 1)[0]
         home_part = install.split("PHASE=home", 1)[1]
         self.assertEqual(re.findall(r"put_router \S+", home_part), ['put_router "${PAY}/router.m1.yaml"'])
-        self.assertNotIn("put_code", TEXT)                    # m1 changes no code member
+        self.assertEqual(re.findall(r'put_code "\$\{PAY\}/(\S+)" (\S+)', home_part), [("motivation.m1.py", "motivation.py")])
+        reverting = TEXT.split("revert() {", 1)[1].split("PHASE=done", 1)[0]
+        self.assertEqual(re.findall(r'put_code "\$\{PAY\}/(\S+)" (\S+)', reverting), [("motivation.w1.py", "motivation.py")])
         self.assertIn('[[ $(sha "${LR}/world_context.py") == "${ADAPTER_SHA}" ]]', TEXT)
         self.assertIn('sys.exit("W1_RENDER_MISMATCH")', TEXT)
         self.assertIn('"${PAY}/verify_release.m1.py.tmpl" "${STAGE}/bin/verify_release.py"', TEXT)

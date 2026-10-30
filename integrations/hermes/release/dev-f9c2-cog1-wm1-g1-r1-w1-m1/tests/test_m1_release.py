@@ -62,7 +62,7 @@ class ReleaseDefinitionTest(unittest.TestCase):
         self.assertEqual((M1 / "RELEASE_ID").read_bytes(), b"f293e72-f9c2-cog1-wm1-g1-r1-w1-m1\n")
         self.assertEqual(DELTA["release"], "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1")
         self.assertEqual(DELTA["base_release"], (W1 / "RELEASE_ID").read_text().strip())
-        self.assertEqual(set(DELTA["members"]), {"RELEASE_ID", "bin/verify_release.py", "home/router.yaml"})
+        self.assertEqual(set(DELTA["members"]), {"RELEASE_ID", "bin/verify_release.py", "home/router.yaml", "home/lilith_router/motivation.py"})
         for member, change in DELTA["members"].items():
             with self.subTest(member=member):
                 if change.get("source"):
@@ -94,7 +94,7 @@ class ReleaseDefinitionTest(unittest.TestCase):
         self.assertIn('"workspace_enabled": "workspace_mode"}', removed[0])
         self.assertIn("WORKSPACE_NOT_PINNED", removed[1])
         cand = M1_TEMPLATE.read_text(encoding="utf-8")
-        self.assertIn('MOTIVATION_SHA256 = "' + sha(REPO / "docs/architecture/slice-11/motivation.py") + '"', cand)
+        self.assertIn('MOTIVATION_SHA256 = "' + sha(REPO / "integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py") + '"', cand)
         self.assertIn('"motivation_enabled": "motivation_mode"', cand)
         self.assertEqual(cand.count(C.PLACEHOLDER), W1_TEMPLATE.read_text(encoding="utf-8").count(C.PLACEHOLDER))
 
@@ -163,7 +163,7 @@ class VerifierBehaviourTest(unittest.TestCase):
             (root / "home" / "lilith_router" / name).write_bytes(source.read_bytes())
             (base / "home" / "lilith_router" / name).write_bytes(source.read_bytes())
         for host in (root, base):
-            (host / "home" / "lilith_router" / "motivation.py").write_bytes((REPO / "docs/architecture/slice-11/motivation.py").read_bytes())
+            (host / "home" / "lilith_router" / "motivation.py").write_bytes((REPO / "integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py").read_bytes())
         m1 = {c.replace(str(root), "ROOT") for c in self.codes(self.m1, root)}
         w1 = {c.replace(str(base), "ROOT") for c in self.codes(self.w1, base)}
         self.assertFalse(kinds(m1) & (LANE_CODES | C.WORLD_CONTEXT_CODES))

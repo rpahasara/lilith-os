@@ -8,9 +8,10 @@
 |---|---|
 | `RELEASE_ID` | new |
 | `home/router.yaml` | `motivation_enabled: true`, `motivation_mode: shadow` |
-| `bin/verify_release.py` | Motivation added to the shadow lanes; `motivation.py` pinned, digest `f95d4f56...` |
+| `bin/verify_release.py` | Motivation added to the shadow lanes; `motivation.py` pinned |
+| `lilith_router/motivation.py` | counts-only trace, from `overlays/dev-motivation-private-trace` |
 
-No code member changes. `motivation.py` has been in the release since f9c2, and the copy in `docs/architecture/slice-11/` is byte-identical to DEV's, checked 2026-10-30.
+The only code change is two trace lines. The base module is `docs/architecture/slice-11/motivation.py`, byte-identical to DEV's `f95d4f56...`, checked 2026-10-30.
 
 ## Behaviour in shadow, measured on the real gateway, adapter and Core API
 
@@ -21,7 +22,7 @@ No code member changes. `motivation.py` has been in the release since f9c2, and 
 | Writes | none on an empty store |
 | Provider | none. `motivation.py` imports only stdlib; no model call |
 | Reply | unchanged. Candidates do not enter the Workspace pool in shadow |
-| Record | one `motivation` record before `workspace`; metadata, drive classes and counts |
+| Record | one `motivation` record before `workspace`: drive classes, fixed cause codes and counts. No goal id, task id or condition text, even for a blocked goal |
 | Outage | fails open |
 
 **Dependencies:** Workspace, for the candidates and the turn; Goals and Tasks through read routes; World Model only through Workspace candidates. It does not use Planning.
@@ -30,11 +31,11 @@ No code member changes. `motivation.py` has been in the release since f9c2, and 
 
 **Privacy and FORGET:** records go to the decision log, under 7-day retention and the full FORGET purge of `logs/`. No new store and no change to FORGET. The snapshot is ephemeral.
 
-**Rollback:** `install_m1.sh revert` to w1: router and verifier only.
+**Rollback:** `install_m1.sh revert` to w1: router, verifier and `motivation.py`.
 
 ## Limits and blockers
 
-- **A blocked goal would put its id in the record.** `per_drive[].relatedGoalIds` carries goal ids, and `resolutionConditions` carries text. A test pins this. It cannot happen while the verifier requires an empty goal store, and **must be fixed before any goal row is allowed.**
+- **Populated stores fail closed at start only.** The install refuses a goal row and the verifier refuses to start. A goal added later would still write a focus trace, though the record stays counts-only.
 - **A focus read writes a trace when a goal exists.** Motivation adds a second focus read per turn, but a test shows one trace. Same empty-store rule.
 - **Empty stores give empty results.** Both drives read `SATISFIED`, so a DEV window proves plumbing, not drive quality.
 - **Depends on w1 acceptance.** Build the host package only after the owner accepts w1.
@@ -44,7 +45,8 @@ No code member changes. `motivation.py` has been in the release since f9c2, and 
 | Check | Result |
 |---|---|
 | `test_m1_motivation.py`, `test_m1_release.py`, `test_m1_installer.py` | 25 run: 23 pass, 2 Linux-only skipped |
-| `sim_install_m1.sh`, real installers and verifiers, chained f9c2 to w1 to m1 | 35/35, including FORGET races, revert failures, and return to r1 |
+| `sim_install_m1.sh`, real installers and verifiers, chained f9c2 to w1 to m1 | 36/36, including a refused goal row, FORGET races, revert failures, and return to r1 |
+| `dev-motivation-private-trace` tests | 3/3 |
 
 ## Planned DEV test, not built
 

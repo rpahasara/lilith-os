@@ -150,6 +150,8 @@ payload() {
   cp "${WM}/templates/bin/verify_release.py.tmpl" "$1/verify_release.m1.py.tmpl"
   cp "${W1R}/templates/bin/verify_release.py.tmpl" "$1/verify_release.w1.py.tmpl"
   cp "${WM}/RELEASE_ID" "$1/RELEASE_ID"
+  cp "${REPO}/integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py" "$1/motivation.m1.py"
+  cp "${REPO}/docs/architecture/slice-11/motivation.py" "$1/motivation.w1.py"
 }
 run() { set +e; OUT=$("$@" 2>&1); RC=$?; set -e; }
 discard_new() { [[ -e ${NEW} ]] && { chmod -R u+w "${NEW}"; rm -rf "${NEW}"; } || true; }   # simulation only
@@ -253,7 +255,7 @@ run bash "${INSTALL}" install "$P"
 check "install succeeds" '[[ $RC -eq 0 && $OUT == *"M1_INSTALLED current=f293e72-f9c2-cog1-wm1-g1-r1-w1-m1"* ]]'
 check "  current is m1 and verify --full passes" '[[ $(readlink "${BASE}/current") == releases/f293e72-f9c2-cog1-wm1-g1-r1-w1-m1 && $(verify) == "F8_VERIFY_PASS full f293e72-f9c2-cog1-wm1-g1-r1-w1-m1" ]]'
 check "  router.yaml is the m1 one, root:lilith 0640, World Model, Goals, Reasoning, Workspace and Motivation shadow on lilith_os, router mode shadow" '[[ $(sha256sum < "${LR}/router.yaml" | cut -c1-64) == $(sha256sum < "${WM}/home/router.yaml" | cut -c1-64) && $(stat -c %a:%U:%G "${LR}/router.yaml") == 640:root:lilith && $(lane) == "True shadow lilith_os" && $(goals) == "True shadow" && $(reasoning) == "True shadow" && $(wspace) == "True shadow" && $(rmode) == shadow ]]'
-check "  w1 adapter and counts-only workspace installed; PROD module unchanged" '[[ $(sha256sum < "${LR}/world_context.py" | cut -c1-16) == 848fdb7d309659bc && $(sha256sum < "${LR}/workspace.py" | cut -c1-16) == d79f67e1c761d6d9 && $(sha256sum < "${LR}/_prod_world_context.py" | cut -c1-16) == 46b8187e3f6f2ac7 ]]'
+check "  m1 counts-only motivation installed; adapter, workspace and PROD module unchanged" '[[ $(sha256sum < "${LR}/motivation.py" | cut -c1-16) == fd6c11898bce7c40 && $(sha256sum < "${LR}/world_context.py" | cut -c1-16) == 848fdb7d309659bc && $(sha256sum < "${LR}/workspace.py" | cut -c1-16) == d79f67e1c761d6d9 ]]'
 check "  m1 verifier is the m1 template with the host token" '[[ $(sha256sum < "${NEW}/bin/verify_release.py") == $(render "${WM}/templates/bin/verify_release.py.tmpl" | sha256sum) ]]'
 check "  w1, r1, wm1, cog1 and f9c2 releases untouched; the DB file unchanged" '[[ $(tree_of "${OLD}") == "$G1_TREE" && $(tree_of "${WM1REL}") == "$WM1_TREE" && $(tree_of "${COG1}") == "$COG1_TREE" && $(tree_of "${F9}") == "$F9_TREE" && $(sha256sum < "${GDB}") == "$DB0" ]]'
 check "  the installed w1 verifier refuses the m1 router (Motivation on)" '[[ $("${OLD}/venv/bin/python" -I -B "${OLD}/bin/verify_release.py" --full 2>&1) == *"LANE_NOT_OFF motivation_enabled"* ]]'
@@ -270,6 +272,7 @@ for at in revert_after_router revert_after_switch; do
 done
 run env SIM_GW="failed failed 0" bash "${INSTALL}" revert "$P"
 check "revert succeeds with the gateway in failed/failed; four lanes shadow, Motivation off again" '[[ $RC -eq 0 && $OUT == *"M1_REVERTED current=f293e72-f9c2-cog1-wm1-g1-r1-w1"* && $(state) == "$BASELINE" && $(lane) == "True shadow lilith_os" && $(goals) == "True shadow" && $(reasoning) == "True shadow" && $(wspace) == "False None" && $(sha256sum < "${GDB}") == "$DB0" ]]'
+check "  the w1 motivation.py is back" '[[ $(sha256sum < "${LR}/motivation.py" | cut -c1-16) == f95d4f56cc67d786 ]]'
 check "  m1 release kept for inspection" '[[ -d ${NEW} ]]'
 
 run bash "${W1R}/bin/install_w1.sh" revert "$P5"

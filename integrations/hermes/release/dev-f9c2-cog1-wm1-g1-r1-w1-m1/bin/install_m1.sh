@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # f9c2-cog1-wm1-g1-w1-m1 DEV install and revert (lilith-dev-01). Root only. Run from a root-owned 0700 payload directory that
-# holds exactly the five PAYLOAD files below (from Git: this release, the w1 router and the w1 verifier template):
+# holds exactly the seven PAYLOAD files below (from Git: this release, the w1 router and the w1 verifier template):
 #   sudo bash install_m1.sh install <payload-dir>    stage releases/f293e72-f9c2-cog1-wm1-g1-r1-w1-m1 beside w1, install the m1
 #                                                    router.yaml (World Model, Goals, Reasoning, Workspace and Motivation shadow on lilith_os),
 #                                                    switch current, re-pin, verify --full
@@ -37,8 +37,10 @@ DEV_MACHINE_ID=ae929170e6fa4c8ab9cc7b9547238d9d
 declare -A PAYLOAD=(
   [router.m1.yaml]=3ff4d3dc5f0dcfda11b79ca2e026e98b0be5e6460c4e936f2912e268cdd527ff       # World Model, Goals, Reasoning and Workspace shadow
   [router.w1.yaml]=0e5d43fa0fce0863d32a7afd4715f6b27b736954cbaef21fae73f80dbcd3ee11       # installed w1: World Model, Goals, Reasoning and Workspace shadow
-  [verify_release.m1.py.tmpl]=0d192dd7d2595b9b5df17aaed7f938f8945433d4acd39c3e63d05328c0cfabed
+  [verify_release.m1.py.tmpl]=9d2e914b18bac139aa62a83fb5a09b944649b98c674a1b75f7f5d5c49fae599a
   [verify_release.w1.py.tmpl]=a7e47e9d5abe141c48211d2ed5a11f68abc2c074537f7c32cf189f2bea39a8b0
+  [motivation.m1.py]=fd6c11898bce7c40d374713e270c1d3b9a6823e456f3efd70ec3e21d27a2fe42   # m1-member counts-only trace
+  [motivation.w1.py]=f95d4f56cc67d7866f9fec41be97bb96fdeb0531516ec7cc1447ae981bb90eaa   # m1-member installed w1 module
   [RELEASE_ID]=36840ea8503a96a7d932aa969bda0776272b42f10e65f4903fb7170a9c1b6b39
 )
 ADAPTER_SHA=848fdb7d309659bcc889c8b8284dbe5e5e23830bed0b70e9649f6eabe10340d1        # unchanged by m1
@@ -120,6 +122,11 @@ put_router() {   # atomic root:lilith 0640 install of $1 as router.yaml (as inst
 }
 
 
+put_code() {   # m1-member atomic root 0644 install of $1 as lilith_router/$2, as install_cog1.sh installs code
+  install -o root -g root -m 0644 "$1" "${LR}/$2.m1-new"   # m1-member
+  mv -f "${LR}/$2.m1-new" "${LR}/$2"   # m1-member
+}   # m1-member
+
 switch_current() {
   ln -sfn "releases/$1" "${BASE}/current.new" && mv -Tf "${BASE}/current.new" "${BASE}/current"
 }
@@ -128,6 +135,7 @@ revert() {   # idempotent; safe to re-run after a partial revert
   PHASE=reverting
   step "revert to ${OLD_ID}"
   put_router "${PAY}/router.w1.yaml"
+  put_code "${PAY}/motivation.w1.py" motivation.py   # m1-member
   inject revert_after_router
   switch_current "${OLD_ID}"
   inject revert_after_switch
@@ -170,6 +178,7 @@ case ${MODE} in
     [[ $(readlink -f "${BASE}/current") == "${OLD}" ]] || die "current is not ${OLD_ID}"
     [[ ! -e ${NEW} && ! -e ${NEW}.new ]] || die "${NEW_ID} already staged"
     [[ $(sha "${LR}/router.yaml") == "${PAYLOAD[router.w1.yaml]}" ]] || die "installed router.yaml is not the w1 one"
+    [[ $(sha "${LR}/motivation.py") == "${PAYLOAD[motivation.w1.py]}" ]] || die "installed motivation is not the w1 one"   # m1-member
     verify_full "${OLD_ID}" || die "w1 verify --full before install"
     avail_mb=$(df -Pm "${BASE}" | awk 'NR==2{print $4}'); used_mb=$(du -sm "${OLD}" | cut -f1)
     (( avail_mb > used_mb + 512 )) || die "not enough space to stage ${NEW_ID}"
@@ -215,6 +224,7 @@ PY
     step "install the m1 router.yaml (World Model, Goals, Reasoning, Workspace and Motivation shadow on lilith_os); switch current"
     PHASE=home
     put_router "${PAY}/router.m1.yaml"
+    put_code "${PAY}/motivation.m1.py" motivation.py   # m1-member
     inject after_home
     switch_current "${NEW_ID}"
     inject after_switch

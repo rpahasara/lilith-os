@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gc
 import json
+import shutil
 import sqlite3
 import sys
 import unittest
@@ -25,6 +26,7 @@ ANALYTIC = W.ANALYTIC
 NO_APP = W.NO_APP
 EIGHT = W.FIVE + ["/os/goals?limit=200", "/os/goals/focus", "/os/tasks?limit=200"]
 CANARY = "TEST_ONLY_MOTIVATION_CANARY_8M"
+OVERLAY = REPO / "integrations/hermes/overlays/dev-motivation-private-trace/lilith_router/motivation.py"
 TRACE_KEYS = {"correlation_id", "channel", "drive_count", "active_drive_types", "satisfied_drive_types", "highest_intensity_class", "per_drive",
               "source_availability", "partial", "fallback_reason", "schema_version", "timestamp", "duration_ms", "candidate_count", "eligible_count"}
 
@@ -34,6 +36,7 @@ def setUpModule():
     router = (M1 / "home" / "router.yaml").read_text(encoding="utf-8").replace(
         "/home/lilith/.hermes-dev/logs/lilith-router-decisions.log", C.LOG.as_posix())
     (C.HOME / "lilith_router" / "router.yaml").write_text(router, encoding="utf-8")
+    shutil.copy2(OVERLAY, C.HOME / "lilith_router" / "motivation.py")
 
 
 def tearDownModule():
@@ -121,15 +124,22 @@ class MotivationShadow(W.Base):
         self.assertNotIn("lilith_router.planning", sys.modules)
         self.assertNotIn("lilith_router.reasoning", sys.modules)
 
-    def test_a_blocked_goal_would_put_its_id_in_the_record(self):
-        # A limit, pinned: harmless while the verifier requires an empty goal store, and a blocker for non-empty stores.
-        sys.path.insert(0, str(REPO / "docs" / "architecture" / "slice-11"))
-        import motivation
-        blocked = [{"goalId": "g.test-only-m1", "lifecycleState": "BLOCKED", "isFocus": True, "userReferenced": False, "source": "USER_REQUESTED", "blockedBy": ["t.1"],
-                    "targetApp": "14", "hardBlockerFailedTaskIds": ["t.1"]}]
-        snapshot = motivation.build_snapshot(coherence=None, goal_completion=motivation.classify_goal_completion(blocked, channel="lilith_os"), safety=None,
-                                             raw_refs=None, channel="lilith_os", source_availability={}, partial=False)
-        self.assertIn("g.test-only-m1", json.dumps(motivation.build_trace(snapshot)))
+    def test_a_blocked_focus_goal_reaches_the_record_only_as_counts(self):
+        # The store the verifier refuses at start, in case one appears while running: no id or text may reach a record.
+        db = W.bootstrap_drafts("m-blocked")
+        self.populate(db)
+        conn = sqlite3.connect(db)
+        conn.execute("UPDATE goal SET lifecycle_state='BLOCKED', blocked_reason=?, blocked_by_json=? WHERE goal_id='g.test-only-m1'", (f"{CANARY} reason", json.dumps(["t.test-only-m1"])))
+        conn.commit(); conn.close()
+        self.route(ANALYTIC, "m-blocked")
+        records = self.new_log()
+        raw = json.dumps(records)
+        for secret in (CANARY, "g.test-only-m1", "t.test-only-m1", "d.test-only-m1", "blocker cleared"):
+            self.assertNotIn(secret, raw)
+        drive = next(d for d in next(r for r in records if r.get("lane") == "motivation")["trace"]["per_drive"] if d["driveType"] == "GOAL_COMPLETION")
+        self.assertEqual(drive["intensityClass"], "MILD")     # blocked, and not the focus
+        self.assertEqual((drive["relatedGoalCount"], drive["resolutionConditionCount"]), (1, 1))
+        self.assertEqual(set(drive), {"driveType", "intensityClass", "causeCodes", "sourceRefCount", "candidateEligible", "resolutionConditionCount", "relatedGoalCount"})
 
     def test_core_api_outage_fails_open(self):
         W.bootstrap_drafts("m-outage")
