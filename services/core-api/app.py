@@ -3391,8 +3391,23 @@ def get_goal(goal_id: str):
 
 # ── Controlled write API (typed operations; NO generic setGoal/setState) ────
 
+def _require_goal_write_auth(credential) -> None:
+    """Opt-in caller check for goal writes. With LILITH_OS_GOAL_WRITE_TOKEN unset, behaviour is unchanged."""
+    expected = _os.getenv("LILITH_OS_GOAL_WRITE_TOKEN", "")
+    if not expected:
+        return
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="GOAL_WRITE_CREDENTIAL_UNCONFIGURED")
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), expected.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="GOAL_WRITE_NOT_AUTHENTICATED")
+
+
 @app.post("/os/goals")
-def post_goal(payload: dict = _Body(default=None)):
+def post_goal(payload: dict = _Body(default=None),
+              x_lilith_os_goal_write: str = _Header(default=None)):
+    _require_goal_write_auth(x_lilith_os_goal_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     conn = _goals_db()
@@ -3411,7 +3426,9 @@ def post_goal(payload: dict = _Body(default=None)):
 
 
 @app.post("/os/goals/{goal_id}/transition")
-def post_goal_transition(goal_id: str, payload: dict = _Body(default=None)):
+def post_goal_transition(goal_id: str, payload: dict = _Body(default=None),
+                         x_lilith_os_goal_write: str = _Header(default=None)):
+    _require_goal_write_auth(x_lilith_os_goal_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):
@@ -3428,7 +3445,9 @@ def post_goal_transition(goal_id: str, payload: dict = _Body(default=None)):
 
 
 @app.post("/os/goals/{goal_id}/link_task")
-def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None)):
+def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None),
+                        x_lilith_os_goal_write: str = _Header(default=None)):
+    _require_goal_write_auth(x_lilith_os_goal_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):
