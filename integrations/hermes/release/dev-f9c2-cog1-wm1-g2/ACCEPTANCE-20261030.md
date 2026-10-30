@@ -1,8 +1,8 @@
 # Acceptance record: Goals live window on DEV (`f293e72-f9c2-cog1-wm1-g2`), 2026-10-30
 
-**Status:** prepared for owner decision. All criteria of the one approved window were met. Recommendation: accept as
-**PASS for live Goals plumbing on an empty store only**. This is not proof of goal prioritisation, and it authorizes
-nothing further. DEV was returned to g1 (Goals shadow); g2 is not running.
+**Decision:** owner-accepted as **PASS** on 2026-10-30, for **live Goals plumbing on an empty store only**, with the
+limitations below. This is not proof of goal prioritisation, and it authorizes nothing further. DEV was returned to g1
+(Goals shadow); g2 is not running.
 
 ## Runtime tested
 
