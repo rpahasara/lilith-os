@@ -20,11 +20,13 @@ Prepared without PROD access. Counts come from the read-only audit of 2026-10-27
 2. Take per-table counts and digests before and after, on the same logical digest used on DEV.
 3. Schema changes are additive only. `app.py` moves from `519b309`, so list every table the newer code would create.
 4. Reads must not create schema: bootstrap as a deliberate gate, as on DEV.
-5. The verifier's empty-goal-store rule **cannot apply to PROD**, because PROD has goals. So a focus read will write a trace. Before cutover, remove that write from the read path, or accept it in writing.
+5. The verifier's empty-goal-store rule **cannot apply to PROD**, because PROD has goals. So a focus read will write a trace when the focus changes. The implementation PR adds `LILITH_OS_FOCUS_READ_ONLY=1`, off by default. Before cutover, turn it on after a rehearsal, or accept the write in writing.
 
 ## Erase correctly
 
 Each erase runs in one transaction, under the FORGET lock, refuses unknown tables, honours a hold, and is checked by a separate zero-rows read. `secure_delete` and `VACUUM` remove the text from the file.
+
+**One call:** `core_erasure.erase_principal` covers goals, tasks, drafts and the World Model in one transaction, writes `PENDING` to the ledger first, and rolls everything back on any failure. Its 18 tests run on the real `app.py`.
 
 **The candidates refuse PROD's schema today.** `ALLOWED_TABLES` lacks PROD's tables, on purpose. Its list must come from the rehearsal, not from this document.
 
@@ -32,17 +34,18 @@ Each erase runs in one transaction, under the FORGET lock, refuses unknown table
 
 | Route back | Control | State |
 |---|---|---|
-| World Model rebuilt from `career_events` | Keep the cursor, and decide whether the source goes too | candidate |
-| Re-ingest of old events after a cursor reset | Never reset the cursor as part of erasure | candidate, tested |
-| Backup restore | Restore gate: a backup holding erased classes is refused, or replayed through an erasure ledger | candidate, needs a ledger |
-| Snapshots, including the 2026-10-27 preservation snapshots | Same rule. **A snapshot holds everything**, so FORGET is incomplete while one exists, and that needs an explicit owner policy | **open** |
+| World Model rebuilt from a **new** `career_events` row | **The cursor doesn't stop this.** Any new event for an application re-reads `job_applications` and rebuilds the belief. Proven on the real `app.py`. Needs tombstones in the ingest, or the source erased too | candidate, `core_erasure.py` plus the ingest guard in the implementation PR |
+| World Model rebuilt by `world_ingest_career` | The same: it reads every application | same |
+| Re-ingest of old events after a cursor reset or restore | The ledger's `through_event_id` floors the cursor | same |
+| Backup restore | Restore on a quarantine copy, replay the ledger, verify zero rows, and only then go live. An unfinished or unreadable ledger refuses | candidate, tested |
+| Snapshots, including the 2026-10-27 preservation snapshots | **A snapshot holds everything**, so FORGET is incomplete while one exists. `snapshot_report` names each one taken before an erasure, and deletes nothing. The rule needs an explicit owner policy | **owner decision** |
 | Watchers and connectors re-delivering the same item | Source-level tombstones by content id | **not designed** |
 | Hermes session history and learning | Existing FORGET scope | exists on DEV only |
 | Decision log | 7-day retention and purge | exists on DEV only |
 
 ## Owner decisions
 
-1. Does principal FORGET erase `career_events`, or only what is derived from it?
+1. Does principal FORGET erase `career_events`, `job_applications` and `companies`, or only what is derived from them? **Keeping them keeps the text in the file:** a test proves it. Tombstones then stop the beliefs returning, but the source data stays.
 2. How long do snapshots stay, and do they count against FORGET?
 3. Do erased items need tombstones, which keep a small hash after deletion?
 4. Retention age for completed tasks.

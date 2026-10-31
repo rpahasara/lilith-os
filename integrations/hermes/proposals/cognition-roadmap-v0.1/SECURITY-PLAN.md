@@ -54,7 +54,8 @@ Proven on the real app over HTTP in #289: `test_the_preflight_probe_is_refused_b
 
 | Item | State |
 |---|---|
-| `GET /os/goals/focus` writes a trace | Authentication cannot cover it. Move the trace to the first read after a change in a write path, or accept it |
+| Owner-content reads | Implementation on the stacked branch: `LILITH_OS_READ_AUTH`, `LILITH_OS_READ_TOKEN`, header `X-LILITH-OS-Read`. **Deny by default:** only `/health` is public, so a new route can't be left open. Same three states and stages as writes, with its own token. Callers (gateway adapter, Command Center) must send the header first. Not merged or deployed |
+| `GET /os/goals/focus` writes a trace | Authentication cannot cover it. The stacked branch adds `LILITH_OS_FOCUS_READ_ONLY=1`, off by default, so PROD behaviour stays until the owner chooses |
 | Core API on `0.0.0.0:8765` | Reachable off-host through IAP. Stage 6 |
 | Shared single token | Acceptable for one principal. Per-caller credentials are a later step |
 | DB mode 0644 | Plan in `goals-privacy-v0.2`, not done |

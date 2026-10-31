@@ -15,7 +15,11 @@
 | 7 | DB mode 0600 and `UMask=0077` | Core API | plan in `goals-privacy-v0.2` |
 | 8 | Decision-log goal ids | Router | the counts-only trace removes Workspace ids; `app_id` stays under 7-day retention |
 
-Changes 2, 4 and 5 alter FORGET and need their own Privacy approval.
+| 12 | Principal FORGET across every Core API owner store, in one transaction, with an erasure ledger outside the database | Core API, Privacy | candidate [`core_erasure.py`](core_erasure.py), 18 tests on the real `app.py`; not wired |
+| 13 | Reconstruction: a new `career_events` row, or the career ingest, rebuilds an erased belief. **The kept cursor doesn't stop it** | Core API | ingest guard on the implementation branch; not deployed |
+| 14 | Restore: replay on a quarantine copy, refuse on an untrusted ledger, and name snapshots from before an erasure | Privacy | candidate, tested; snapshot policy is an owner decision |
+
+Changes 2, 4, 5, 12 and 14 alter FORGET and need their own Privacy approval.
 
 **Wiring shape:** the executor calls `forget_step(db, hold_path)` under its lock and adds `goal_rows_zero` to its checks. The retention timer runs `goal_erasure.py prune <db>` as `lilith`. Neither exists on any host.
 
