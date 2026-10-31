@@ -2,7 +2,7 @@
 
 Turns `DEV-TO-PROD-READINESS.md` (A1 to A39) into a dependency order. That checklist stays the source of truth: **nothing here waives an item.** Section 6 proposes revisions, for the owner to accept or refuse.
 
-**As of 2026-10-31:** 0 of 39 items are done. PROD facts date from the 2026-10-27 read-only audit.
+**As of 2026-10-31:** 0 of 39 items are done. DEV runs p1, six lanes in shadow, pending owner acceptance. PROD facts date from the 2026-10-27 read-only audit. Capability by capability, see `PROD-PARITY-MATRIX.md`. For Phase 4, see `SNAPSHOT-REHEARSAL-DESIGN.md`.
 
 ## 1. The real constraint: PROD parity
 
