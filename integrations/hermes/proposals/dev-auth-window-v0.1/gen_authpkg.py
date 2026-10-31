@@ -315,7 +315,13 @@ SCRIPTS["status_ro.sh"] = ("status probe", r"""
 echo "MARKERS $(sudo -n find ${W} -mindepth 1 -maxdepth 1 -printf '%f@ ' 2>/dev/null)"
 echo "GATE $(systemctl show ${GATE} -p ActiveState,MainPID | LC_ALL=C sort | paste -sd' ')"
 echo "API $(systemctl show ${API} -p ActiveState,MainPID | LC_ALL=C sort | paste -sd' ')"
-echo "WINDOW_SCRIPTS_RUNNING $(pgrep -fc 'auth[-]window' || true)"
+RUNNING=0
+for q in $(pgrep -f 'auth[-]window' || true); do   # this probe's own text matches, so skip anything holding this line's name
+  c=$(tr '\0' ' ' < /proc/${q}/cmdline 2>/dev/null) || continue
+  [ -n "${c}" ] || continue
+  case "${c}" in *WINDOW_SCRIPTS_RUNNING*) ;; *) RUNNING=$((RUNNING + 1));; esac
+done
+echo "WINDOW_SCRIPTS_RUNNING ${RUNNING}"
 """)
 for name, (title, body) in SCRIPTS.items():
     text = COMMON.replace("%(title)s", title).replace("%%", "%") + body.lstrip("\n")

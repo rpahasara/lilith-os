@@ -131,6 +131,12 @@ class Static(unittest.TestCase):
             defined = set(re.findall(r"(?:^|[\s;(])(?:local )?([A-Z][A-Z0-9_]*)=", text, re.M))
             self.assertEqual(used - defined, set(), path.name)
 
+    def test_the_status_probe_does_not_count_itself(self):
+        """Found on the real host: pgrep -f matches the probe's own command line, so a lost verdict would always HOLD."""
+        text = (SCRIPTS / "status_ro.sh").read_text(encoding="ascii")
+        self.assertNotIn("pgrep -fc", text)
+        self.assertIn("*WINDOW_SCRIPTS_RUNNING*) ;;", text)
+
     def test_every_root_only_path_goes_through_sudo(self):
         for name, number, line in self.lines():
             if re.search(r"\$\{(ENVF|W|WOLD)\}", line):
