@@ -11,14 +11,14 @@ for candidate in (HERE, HERE.parent / "scripts"):
         break
 import drive_auth as D
 
-TAGS = {s[0]: s[2] for steps in D.PHASES.values() for s in steps} | {"ra": "RA_REMOVE", "rb": "RB_RECOVER"}
+TAGS = {s[0]: s[2] for steps in D.PHASES.values() for s in steps} | {"ra": "RA_REMOVE", "rb": "RB_RESTORE"}
 STATUS = "MARKERS {m}\nGATE ActiveState={g} MainPID=1\nAPI ActiveState=active MainPID=2\nWINDOW_SCRIPTS_RUNNING {r}\n"
 PRE, POST = ["a0", "a1"], ["b0", "b1", "b2", "b3", "b4", "b5", "b6"]
 
 
 class Host:
-    def __init__(self, bad=(), lost=(), markers="", gate="active", running=0):
-        self.bad, self.lost, self.calls = set(bad), set(lost), []
+    def __init__(self, bad=(), lost=(), markers="", gate="active", running=0, aborted=()):
+        self.bad, self.lost, self.aborted, self.calls = set(bad), set(lost), set(aborted), []
         self.status = STATUS.format(m=markers, g=gate, r=running)
 
     def __call__(self, name, script):
@@ -27,6 +27,8 @@ class Host:
             return self.status
         if name in self.lost:
             return ""
+        if name in self.aborted:
+            return f"{TAGS[name].split('_')[0]}_ABORTED x\n"
         return f"{TAGS[name]} {'FAIL: x' if name in self.bad else 'PASS'}\n"
 
 
@@ -46,8 +48,14 @@ class Drive(unittest.TestCase):
     def test_post_passes_without_recovery(self):
         self.assertEqual(self.go("post", Host()), ("DRIVE_COMPLETE", POST))
 
-    def test_a_failed_deploy_check_changes_nothing(self):
-        self.assertEqual(self.go("post", Host(bad=["b0"])), ("DRIVE_NOCHANGE", ["b0"]))
+    def test_an_aborted_deploy_check_changes_nothing(self):
+        self.assertEqual(self.go("post", Host(aborted=["b0"])), ("DRIVE_NOCHANGE", ["b0"]))
+
+    def test_a_failed_deploy_check_restores_the_previous_release(self):
+        self.assertEqual(self.go("post", Host(bad=["b0"])), ("DRIVE_RECOVERED", ["b0", "rb"]))
+
+    def test_recovery_is_the_previous_release_not_open_on_new_code(self):
+        self.assertEqual(D.RECOVERY["post"][1], "rb_restore_previous.sh")
 
     def test_every_later_failure_recovers_once_and_stops(self):
         for i, step in enumerate(POST[1:], 1):
@@ -78,6 +86,44 @@ class Drive(unittest.TestCase):
         for step in POST:
             _, calls = self.go("post", Host(bad=[step]))
             self.assertEqual(len(calls), len(set(calls)))
+
+
+class Gates(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.root = Path(self.dir.name)
+
+    def test_merge_is_not_ready_before_pre_completes(self):
+        raw = self.root / "raw"
+        self.assertFalse(D.merge_ready(raw))
+        D.execute("pre", Host(bad=["a0"]), raw=raw, say=lambda _: None)
+        self.assertFalse(D.merge_ready(raw))
+
+    def test_merge_is_ready_after_pre_completes(self):
+        raw = self.root / "raw"
+        D.execute("pre", Host(), raw=raw, say=lambda _: None)
+        self.assertTrue(D.merge_ready(raw))
+
+    def test_the_model_phase_needs_its_own_approval(self):
+        self.assertFalse(D.model_approved("abc", self.root))
+        (self.root / "APPROVED_MANIFEST").write_text("abc", encoding="ascii")
+        self.assertFalse(D.model_approved("abc", self.root))
+        (self.root / "APPROVED_MODEL").write_text("abd", encoding="ascii")
+        self.assertFalse(D.model_approved("abc", self.root))
+        (self.root / "APPROVED_MODEL").write_text("abc", encoding="ascii")
+        self.assertTrue(D.model_approved("abc", self.root))
+
+    def test_the_preflight_cannot_change_anything(self):
+        scripts = HERE.parent / "scripts"
+        if not (scripts / "a0_preflight_ro.sh").exists():
+            self.skipTest("run from the package")
+        body = (scripts / "a0_preflight_ro.sh").read_text(encoding="ascii").split('[ "$(hostname)" = lilith-dev-01 ]')[1]
+        for word in ("tee", "touch", "mv", "rm", "ln", "restart", "daemon-reload", "stop", "start", "conf", "link"):
+            self.assertNotRegex(body, r"(^|[\s;(])" + word + r"(\s|$)", word)
+
+    def test_pre_runs_the_preflight_first(self):
+        self.assertEqual(D.PHASES["pre"][0][0], "a0")
 
 
 class Order(unittest.TestCase):

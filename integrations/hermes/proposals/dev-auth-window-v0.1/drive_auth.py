@@ -11,7 +11,8 @@ Rules, each pinned by test_drive_auth.py:
 - A step is judged by its output, never its exit code. No step runs twice, and no phase starts twice: raw/drive.<phase>.started is exclusive and never removed.
 - One driver at a time: raw/drive.lock. raw/drive.journal is flushed around every step, and the result line is written last.
 - pre: a failed preflight changes nothing; a failed drop-in runs RA, which removes it.
-- post: a failed B0 changes nothing. Any later failure runs RB once: back to open, on the merged code, with tokens kept.
+- post: a B0 that aborts changes nothing. Any other failure, B0 included, runs RB once: the previous known-good release, as the deploy helper's own rollback would, with the same database.
+- The merge is not a driver step: --merge-ready says MERGE_READY only after pre completed. The model phase also needs raw digest in APPROVED_MODEL, written only on the owner's separate approval.
 - Lost transport: read status_ro.sh once. A pass marker means the step passed; a window script running, a gate not active or an unreadable status means HOLD. Otherwise failed.
 - A failed recovery stops at once. A driver that dies has no recovery: --status says INTERRUPTED, and nothing resumes.
 """
@@ -32,7 +33,7 @@ PHASES = {
              ("b4", "b4_router_turns.sh", "B4_TURNS", "b4.pass"), ("b5", "b5_rollback_proof.sh", "B5_ROLLBACK", "b5.pass"), ("b6", "b6_final_ro.sh", "B6_FINAL", None)),
     "model": (("m1", "m1_model_turns.sh", "M1_MODEL", "m1.pass"),),
 }
-RECOVERY = {"a1": ("ra", "ra_remove_dropin.sh", "RA_REMOVE"), "post": ("rb", "rb_recover_open.sh", "RB_RECOVER")}
+RECOVERY = {"a1": ("ra", "ra_remove_dropin.sh", "RA_REMOVE"), "post": ("rb", "rb_restore_previous.sh", "RB_RESTORE")}
 
 
 class Journal:
@@ -78,6 +79,11 @@ def status(raw=RAW):
     return "INTERRUPTED", begun[-1] if len(begun) > len(ended) else None
 
 
+def merge_ready(raw=RAW):
+    journal = raw / "drive.journal"
+    return journal.exists() and " RESULT pre DRIVE_COMPLETE" in journal.read_text(encoding="ascii")
+
+
 def real_run(name, script):
     subprocess.run([sys.executable, "-B", "dread.py", name, script], cwd=HERE)
     path = RAW / (name + ".out")
@@ -117,14 +123,17 @@ def recover(run, say, key):
 
 def drive(phase, run, say=print):
     for name, script, tag, marker in PHASES[phase]:
-        found = judge(run, run(name, script), tag, marker)
+        out = run(name, script)
+        found = judge(run, out, tag, marker)
         say(f"STEP {name} {found}")
         if found == PASS:
             continue
         if found == HOLD:
             return "DRIVE_HOLD"
-        if name in ("a0", "b0", "m1"):
-            return "DRIVE_NOCHANGE" if name != "m1" else "DRIVE_MODEL_FAILED"
+        if name == "m1":
+            return "DRIVE_MODEL_FAILED"
+        if name == "a0" or (name == "b0" and "B0_ABORTED" in out):
+            return "DRIVE_NOCHANGE"
         return recover(run, say, "a1" if phase == "pre" else "post")
     return "DRIVE_COMPLETE"
 
@@ -163,10 +172,20 @@ def execute(phase, run, raw=RAW, say=print):
     return result
 
 
+def model_approved(digest, root=HERE.parent):
+    try:
+        return (root / "APPROVED_MODEL").read_text(encoding="ascii").strip() == digest
+    except OSError:
+        return False
+
+
 def main():
     if "--status" in sys.argv:
         print("DRIVE_STATUS", *status())
         return 0
+    if "--merge-ready" in sys.argv:
+        print("MERGE_READY" if merge_ready() else "MERGE_NOT_READY")
+        return 0 if merge_ready() else 1
     got = hashlib.sha256((HERE.parent / "SHA256SUMS").read_bytes()).hexdigest()
     phase = sys.argv[sys.argv.index("--phase") + 1] if "--phase" in sys.argv else None
     if "--execute" not in sys.argv or phase not in PHASES:
@@ -178,6 +197,9 @@ def main():
         approved = None
     if got != approved:
         print("DRIVE_REFUSED manifest", got)
+        return 3
+    if phase == "model" and not model_approved(got):
+        print("DRIVE_REFUSED model phase not approved")
         return 3
     result = execute(phase, real_run)
     print(result)

@@ -37,6 +37,8 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if NEW and os.environ.get("INJECT") == "new_500" and path != "/health":
+            return self.reply(500)
         code = None if self.local() and path != "/health" and os.environ.get("LILITH_OS_READ_AUTH", "") in ("enforced", "open-acknowledged") else read_decision(path, self.headers.get("x-lilith-os-read"))
         self.reply(code or 200)
 

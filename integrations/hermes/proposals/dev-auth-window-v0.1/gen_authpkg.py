@@ -94,6 +94,7 @@ sudo -n test ! -e ${W} || { echo "A1_ABORTED window exists"; exit 3; }
 P0=$(pid ${API})
 sudo -n install -d -o root -g root -m 0700 ${W}
 current | sudo -n tee ${W}/prev >/dev/null
+appsha | sudo -n tee ${W}/prevsha >/dev/null
 sudo -n install -d -o root -g root -m 0755 ${D}
 conf open-acknowledged open-acknowledged 0 0 0
 want env_write "$(systemctl show ${API} -p Environment --value | tr ' ' '\n' | grep -c 'LILITH_OS_WRITE_AUTH=open-acknowledged')" 1
@@ -238,16 +239,20 @@ sudo -n grep -cE 'TOKEN' ${F} | grep -qx 0 && echo OK_no_token_in_dropin || fail
 for u in lilith-memory-broker lilith-authority-dev lilith-recovery-witness; do echo "SVC ${u} $(systemctl show ${u} -p ActiveState,MainPID,NRestarts | LC_ALL=C sort | paste -sd' ')"; done
 finish B6_FINAL
 """)
-SCRIPTS["rb_recover_open.sh"] = ("RB recovery after the merge: back to open, on the merged code", r"""
-NEW=$(sudo -n cat ${W}/new 2>/dev/null || true)
-if sudo -n test -e ${ENVF}; then conf open-acknowledged open-acknowledged 0 1 1; else conf open-acknowledged open-acknowledged 0 0 0; fi
-[ -n "${NEW}" ] && [ "$(current)" != "${NEW}" ] && link "${NEW}"
+SCRIPTS["rb_restore_previous.sh"] = ("RB recovery after the merge: the known-good release, by the same relink and restart as the deploy helper's own rollback", r"""
+PREV=$(sudo -n cat ${W}/prev 2>/dev/null || true); PSHA=$(sudo -n cat ${W}/prevsha 2>/dev/null || true)
+[ -n "${PREV}" ] && [ -n "${PSHA}" ] && sudo -n test -f "${PREV}/app.py" || { echo "RB_ABORTED no recorded previous release"; exit 3; }
+conf open-acknowledged open-acknowledged 0 0 0
+[ "$(current)" = "${PREV}" ] || link "${PREV}"
 restart
+want on_previous "$(current)" "${PREV}"
+want previous_app "$(appsha)" "${PSHA}"
 want local_read "$(code ${LOCAL}/os/goals?limit=1)" 200
 want remote_read "$(code ${REMOTE}/os/goals?limit=1)" 200
+want gateway "$(pid ${GW})" ${GW0}
 want gate_active "$(systemctl show ${GATE} -p ActiveState --value)" active
-dbok
-finish RB_RECOVER
+dbok; forget
+finish RB_RESTORE
 """)
 SCRIPTS["m1_model_turns.sh"] = ("M1 two model requests, budget 3 to 5, no reset, no retry", SEND + r"""
 sudo -n test -f ${W}/b5.pass || { echo "M1_ABORTED B5 did not pass"; exit 3; }

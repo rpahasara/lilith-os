@@ -68,7 +68,9 @@ cmd=$1; shift
 start_api() {
   [ -e "$S/api.pid" ] && kill "$(cat "$S/api.pid")" 2>/dev/null
   for _ in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/curl -s -o /dev/null -m 1 http://127.0.0.1:8765/health || break; /usr/bin/sleep 0.2; done
-  [ "${INJECT:-}" = api_no_start ] && [ "$(readlink -f "$APPROOT/current")" = "$(cat "$S/newrel")" ] && [ -e "$F" ] && grep -q 'READ_AUTH=enforced' "$F" && exit 1
+  rel=$(readlink -f "$APPROOT/current")
+  [ "${INJECT:-}" = new_no_start ] && [ "$rel" = "$(cat "$S/newrel")" ] && [ -e "$F" ] && grep -q 'READ_AUTH=enforced' "$F" && exit 1
+  [ "${INJECT:-}" = old_no_start ] && [ "$rel" != "$(cat "$S/newrel")" ] && [ -e "$S/armed" ] && exit 1
   stat -c %s "$S/api.log" > "$S/api.log.mark"
   ( cd "$(readlink -f "$APPROOT/current")"; set -a; LILITH_DB_PATH=$DBPATH; LILITH_DATA_DIR=$DATA_DIR
     if [ -e "$F" ]; then eval "$(sed -n 's/^Environment="\(.*\)"$/export \1/p' "$F")"; f=$(sed -n 's/^EnvironmentFile=//p' "$F"); [ -n "$f" ] && . "$f"; fi
@@ -131,6 +133,9 @@ step a1_dropin_open.sh; ok "A1" "$(got a1_dropin_open.sh A1_DROPIN)" 1
 deploy
 for pair in b0_verify_deploy_ro:B0_VERIFY b1_tokens:B1_TOKENS b2_enforce_write:B2_WRITE b3_enforce_read:B3_READ b4_router_turns:B4_TURNS b5_rollback_proof:B5_ROLLBACK b6_final_ro:B6_FINAL; do step "${pair%%:*}.sh"; ok "${pair##*:}" "$(got "${pair%%:*}.sh" "${pair##*:}")" 1; done
 ok "no token in any step output" "$(cat "$R"/out.* | grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env"))" 0
+ok "no token in any script as run" "$(cat "$R"/run/* | grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env"))" 0
+ok "no token in the drop-in" "$(grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env") "$F")" 0
+ok "no token in the access log" "$(grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env") "$S/api.log")" 0
 ok "tokens 2 lines" "$(wc -l < "$R/etc/lilith-os-api-dev/auth.env")" 2
 step m1_model_turns.sh; ok "M1" "$(got m1_model_turns.sh M1_MODEL)" 1
 ok "budget ends 5/5" "$(cat "$S/budget")" "5 5"
@@ -149,19 +154,38 @@ step b1_tokens.sh; ok "B1 refuses without B0" "$(grep -c 'B1_ABORTED B0 did not 
 echo extra >> "$LEDGER"; step a0_preflight_ro.sh; ok "A0 fails on a moved ledger" "$(grep -c '^A0_PREFLIGHT FAIL' "$R/out.a0_preflight_ro.sh")" 1
 step ra_remove_dropin.sh; ok "RA removes the drop-in" "$(test -e "$F" && echo y || echo n)$(got ra_remove_dropin.sh RA_REMOVE)" n1
 
-echo "== recovery"; setup recover
-sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/run/*.sh
-step a1_dropin_open.sh; deploy
-upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read
-step rb_recover_open.sh; ok "RB returns to open on the merged code" "$(got rb_recover_open.sh RB_RECOVER)$(/usr/bin/curl -s -o /dev/null -w '%{http_code}' "http://$NICIP:8765/os/goals?limit=1")" 1200
-ok "RB keeps the tokens" "$(test -e "$R/etc/lilith-os-api-dev/auth.env" && echo y)" y
+on_old() { test "$(readlink -f "$APPROOT/current")" = "$APPROOT/releases/old" && echo old || echo new; }
+nic() { /usr/bin/curl -s -o /dev/null -w '%{http_code}' "http://$NICIP:8765/os/goals?limit=1"; }
+fresh() { sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/run/*.sh; step a1_dropin_open.sh; deploy; }
 
-echo "== start failure"; setup nostart api_no_start
-sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/run/*.sh
-step a1_dropin_open.sh; deploy
+echo "== recovery from enforced"; setup recover; fresh
+upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read
+step rb_restore_previous.sh; ok "RB restores the previous release" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
+ok "RB leaves no enforcement in the drop-in" "$(grep -c 'enforced\|EnvironmentFile\|TRUST_LOOPBACK' "$F")" 0
+ok "RB keeps the database" "$(grep -c '^OK_DB' "$R/out.rb_restore_previous.sh")" 1
+
+echo "== new code unhealthy after deploy"; setup unhealthy new_500; fresh
+step b0_verify_deploy_ro.sh; ok "B0 fails on unhealthy new code" "$(grep -c '^B0_VERIFY FAIL' "$R/out.b0_verify_deploy_ro.sh")" 1
+step rb_restore_previous.sh; ok "RB leaves the unhealthy code" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
+
+echo "== new code won't start under enforcement"; setup nostart new_no_start; fresh
 upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read
 ok "B3 fails when Core API won't start" "$(grep -c '^B3_READ FAIL' "$R/out.b3_enforce_read.sh")" 1
-export INJECT=; step rb_recover_open.sh; ok "RB recovers it" "$(got rb_recover_open.sh RB_RECOVER)" 1
+step rb_restore_previous.sh; ok "RB recovers a dead new release" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
+
+echo "== rollback fails midway"; setup midway; fresh
+upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read b4_router_turns
+sed -i 's/^link "${NEW}"$/link "\/nonexistent"/' "$R/run/b5_rollback_proof.sh"; step b5_rollback_proof.sh
+ok "B5 fails midway" "$(grep -c '^B5_ROLLBACK FAIL' "$R/out.b5_rollback_proof.sh")" 1
+step rb_restore_previous.sh; ok "RB recovers from a broken link" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
+
+echo "== previous release won't start"; setup oldfail old_no_start; fresh
+upto b0_verify_deploy_ro b1_tokens; touch "$S/armed"
+step rb_restore_previous.sh; ok "RB says so when the previous release can't start" "$(grep -c '^RB_RESTORE FAIL' "$R/out.rb_restore_previous.sh")" 1
+touch "$S/x"; rm -f "$S/armed"
+
+echo "== no recorded previous release"; setup nowindow
+step rb_restore_previous.sh; ok "RB refuses with nothing recorded" "$(grep -c 'RB_ABORTED' "$R/out.rb_restore_previous.sh")" 1
 
 [ -e "$S/api.pid" ] && kill "$(cat "$S/api.pid")" 2>/dev/null
 echo "AUTH_SIM checks pass=$PASSN fail=$FAILN"
