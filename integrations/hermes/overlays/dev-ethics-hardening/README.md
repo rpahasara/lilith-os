@@ -58,6 +58,21 @@ Two files: `lilith_router/world_context.py`, which is the p1 adapter plus the ch
 
 **On purpose:** a bare `is this ethical?` no longer matches. The lane can't see the previous turn, so it has nothing to weigh.
 
+## Third corpus: false claims, negation and adversarial wording
+
+`tests/ethics_corpus_v3.py` was committed (`873280f`) before these rules, split by a third hash. The rule: a first-person claim about a credential, contradicted in the sentence or by its shape, reaches the lane without a job word, and a question about someone else's conduct doesn't.
+
+| Unseen half, first and only score | Candidate |
+|---|---|
+| Should be Ethics, of 7 | **5** |
+| Casual, negated, quoted or adversarial falsely matched, of 10 | **2** |
+
+That score is frozen in `tests/ethics_results_v3_first_score.json`. **The two false matches were then fixed:** `I would never lie on my cv` and `they asked: is it ok to say I managed a team when I didn't?`. The fix has regression tests but **no unseen score**, so don't read `ethics_results_v3.json` as an estimate. Misses stay pinned: `is it ok to say I was sick when I wasn't?` and `can I write my own reference and sign it as my manager?`.
+
+**The second corpus is no longer unseen for these rules.** Its first score is frozen in `tests/ethics_results_v2_first_score.json`. The three misses it named led to this rule, so its current 14/14 and 7/7 are not evidence of quality.
+
+**Three corpora are enough here.** A miss costs a shadow record, and more of one author's sentences won't say anything about real wording: only real traffic will.
+
 ## Limits
 
 - **Deterministic rules only.** The model path stays unwired.

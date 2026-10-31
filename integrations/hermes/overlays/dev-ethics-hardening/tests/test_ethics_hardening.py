@@ -24,12 +24,14 @@ sys.path.insert(0, str(REPO / "integrations" / "hermes" / "release" / "dev-f9c2-
 
 import ethics_corpus as EC  # noqa: E402
 import ethics_corpus_v2 as EC2  # noqa: E402
+import ethics_corpus_v3 as EC3  # noqa: E402
 import test_w1_workspace as W  # noqa: E402
 
 C = W.C
 O = REPO / "integrations" / "hermes" / "overlays"
 RESULTS = Path(__file__).with_name("ethics_results.json")
 RESULTS2 = Path(__file__).with_name("ethics_results_v2.json")
+RESULTS3 = Path(__file__).with_name("ethics_results_v3.json")
 WORK = "TEST_ONLY is it ethical to contact the recruiter's manager about application 14?"
 LIE = "TEST_ONLY is it okay to lie on my cover letter?"
 SALARY = "TEST_ONLY is it ok to send my salary to the recruiter without asking me?"
@@ -254,6 +256,43 @@ class Candidate(W.Base):
         if not RESULTS2.exists():
             RESULTS2.write_text(json.dumps(got, indent=2) + "\n", encoding="utf-8")
         self.assertEqual(got, json.loads(RESULTS2.read_text(encoding="utf-8")))
+
+    def test_the_third_corpus_result_is_pinned(self):
+        detect = self.wc.detect_ethics_intent
+        unseen = lambda pool: [m for m in pool if not EC3.in_tune(m)]
+        got = {"OWN_MISSED": sorted(m for m in unseen(EC3.OWN) if not detect("TEST_ONLY " + m)["any"]),
+               "DECLINE_MATCHED": sorted(m for m in unseen(EC3.DECLINE) if detect("TEST_ONLY " + m)["any"]),
+               "TUNE_OWN_MISSED": sorted(m for m in EC3.OWN if EC3.in_tune(m) and not detect("TEST_ONLY " + m)["any"]),
+               "TUNE_DECLINE_MATCHED": sorted(m for m in EC3.DECLINE if EC3.in_tune(m) and detect("TEST_ONLY " + m)["any"]),
+               "COUNTS": {"own": len(unseen(EC3.OWN)), "decline": len(unseen(EC3.DECLINE))}}
+        if not RESULTS3.exists():
+            RESULTS3.write_text(json.dumps(got, indent=2) + "\n", encoding="utf-8")
+        self.assertEqual(got, json.loads(RESULTS3.read_text(encoding="utf-8")))
+
+    def test_a_claim_about_a_credential_needs_a_credential(self):
+        detect = self.wc.detect_ethics_intent
+        self.assertTrue(detect("TEST_ONLY is it ok to say I managed a team when I didn't?")["any"])
+        for message in ("is it ok to say I'm fine when I'm tired?", "should I say hi when I see them?", "I would never lie on my cv"):
+            self.assertFalse(detect("TEST_ONLY " + message)["any"], message)
+
+    def test_negated_statements_and_quoted_asks_do_not_reach_the_lane(self):
+        detect = self.wc.detect_ethics_intent
+        for message in ("I would never lie on my cv", "they asked: is it ok to say I managed a team when I didn't?", "I could not lie to the recruiter"):
+            self.assertFalse(detect("TEST_ONLY " + message)["any"], message)
+        self.assertTrue(detect("TEST_ONLY would I be wrong to lie on my cv?")["any"])
+        self.assertTrue(detect("TEST_ONLY the recruiter asked about my degree, should I lie?")["any"])
+
+    def test_someone_else_s_conduct_is_not_the_person_s(self):
+        self.assertTrue(self.wc.detect_ethics_intent("TEST_ONLY should I lie to the recruiter?")["any"])
+        self.assertFalse(self.wc.detect_ethics_intent("TEST_ONLY how can I tell if a recruiter is lying?")["any"])
+
+    def test_a_false_credential_records_third_party_impact_without_the_claim(self):
+        W.bootstrap_drafts("c-cred")
+        records = self.turn("TEST_ONLY is it ok to say I managed a team when I didn't?", "c-cred-1")[1]
+        found = [r for r in records if r.get("lane") == "ethics"]
+        self.assertTrue(found)
+        self.assertIn("THIRD_PARTY_IMPACT", found[0]["trace"]["concern_types"])
+        self.assertNotIn("managed", json.dumps(records))
 
 
 if __name__ == "__main__":

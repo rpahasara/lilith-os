@@ -345,6 +345,8 @@ _E_CONDUCT_RE = re.compile(
     r"\b(lie(?! down)|lying|lied|fake|faking|forge|forging|fabricat\w*|falsif\w*|exaggerat\w*|inflat(e|ing)|pretend(ing)?|mislead\w*|misrepresent\w*|"
     r"backdat(e|ing)|hide|hiding|conceal\w*|secretly|cheat(ing)?|plagiari[sz]\w*)\b", re.IGNORECASE)
 _E_ASKING_RE = re.compile(r"\b(should|shall|can|could|would|may|might|is it|is that|is this|am i)\b", re.IGNORECASE)
+_E_STATEMENT_RE = re.compile(r"\bi (should|shall|can|could|would|may|might)\b", re.IGNORECASE)      # "I would never lie" states; "would I" asks
+_E_QUOTED_ASK_RE = re.compile(r"\b(asked|said|wrote|replied)\s*:", re.IGNORECASE)
 _E_ANALYSIS_MARKER_RE = re.compile(r"\b(any|what)( are the)?( ethical)? (concerns?|risks?|implications?|issues?)\b", re.IGNORECASE)
 _E_OUTWARD_VERBS = ("contact", "send_external", "disclose")
 _E_SENDS_RE = re.compile(r"\b(send|forward|e-?mail|give|hand over)\b", re.IGNORECASE)
@@ -352,6 +354,12 @@ _E_DOCUMENT_RE = re.compile(r"\b(cover letter|cv|resume|application|reference|de
 _E_FALSE_CLAIM_RE = re.compile(
     r"\b((say|claim|tell \w+(?: \w+)?)( that)? i\b.{0,60}\b(when|but) i\b|claim i have|take credit for|make up an? (reason|excuse|story)|bluff about|cover up|leave out that|"
     r"doctor my|sign the reference)\b", re.IGNORECASE)
+_E_CLAIMED_RE = re.compile(
+    r"\b((say|claim|tell \w+(?: \w+)?|imply|put|list)\b.{0,60}\b((when|but|though) i\b.{0,30}\b(didn't|did not|don't|do not|haven't|have not|never|only|wasn't|am not)|i never|i only)|"
+    r"(act|acting|pretend|pretending)( like| as if| that)? i (have|had|am|was)|claim i (have|hold|had|led|built|ran)|imply i (still )?\w+|i never (earned|had|held|did|took|finished))\b", re.IGNORECASE)
+_E_CREDENTIAL_RE = re.compile(
+    r"\b(managed|led|ran|built|experience|degree|diploma|certificat\w*|qualifi\w*|licen[sc]e\w*|course|graduated|competing offer|another offer|offer|fluent|speak \w+|project|team|reference|job|work|title|role)\b", re.IGNORECASE)
+_E_JUDGING_OTHERS_RE = re.compile(r"\b(tell|know|spot|check|see|find out)( \w+)? (if|whether)\b", re.IGNORECASE)
 _E_OTHERS_DATA_RE = re.compile(
     r"\b((co-?worker|colleague|teammate|friend|manager|employer|client|customer|company)('s|s')?( \w+){0,2} "
     r"(medical \w+|health \w+|pregnancy|home address|phone number|visa status|salary|records|documents|roadmap|code|list)|"
@@ -363,7 +371,11 @@ _E_PUBLIC_RE = re.compile(r"\b(online|publicly)\b", re.IGNORECASE)
 
 def _ethics_text(message):
     text = (message or "")[:_R_MAX_CHARS].translate({0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'})
-    return "" if _R_REPORTED_RE.search(text) else _R_QUOTED_RE.sub(" ", text)
+    return "" if _R_REPORTED_RE.search(text) or _E_QUOTED_ASK_RE.search(text) else _R_QUOTED_RE.sub(" ", text)
+
+
+def _asking(text):
+    return bool(_E_ASKING_RE.search(_E_STATEMENT_RE.sub(" ", text)))
 
 
 def _ethics_subject(text):
@@ -380,8 +392,15 @@ def _harmful_disclosure(text):
     return found if _LEGACY._E13_THIRD_PARTY_RE.search(text) or _E_PUBLIC_RE.search(text) else None
 
 
+def _false_credential(text):
+    """A first-person claim about what the person has done or holds, contradicted in the same sentence or by its shape. Needs a credential, so a white lie to a dentist stays casual."""
+    return bool(_E_CREDENTIAL_RE.search(text) and (_E_CLAIMED_RE.search(text) or _E_FALSE_CLAIM_RE.search(text)))
+
+
 def _conduct(text):
-    return bool(_E_CONDUCT_RE.search(text) or _E_FALSE_CLAIM_RE.search(text))
+    if _E_JUDGING_OTHERS_RE.search(text):
+        return False                       # "how can I tell if a recruiter is lying?" asks about someone else's conduct
+    return bool(_E_CONDUCT_RE.search(text) or _E_FALSE_CLAIM_RE.search(text) or _false_credential(text))
 
 
 def _outward_action(text):
@@ -393,12 +412,12 @@ def hardened_ethics_intent(message):
     none = {"any": False, "mode": None, "app_id": None, "trigger": None}
     try:
         text = _ethics_text(message)
-        disclosure = bool(_harmful_disclosure(text) and _E_ASKING_RE.search(text))
-        conduct = disclosure or bool(_conduct(text) and _E_ASKING_RE.search(text))
+        disclosure = bool(_harmful_disclosure(text) and _asking(text))
+        conduct = disclosure or bool(_conduct(text) and _asking(text))
         found = _PROD_ETHICS_INTENT(text)
         if not found.get("any") and not conduct:
             return none
-        if not disclosure and not _ethics_subject(text):
+        if not disclosure and not _false_credential(text) and not _ethics_subject(text):
             return none
         if conduct:
             ci, gi = _LEGACY.detect_intent(text), _LEGACY.detect_goal_intent(text)
@@ -438,7 +457,7 @@ def hardened_turn_evidence(message, corr):
         replace("contact", None)                                # a false claim reaches whoever reads it
     if others and not ev["referencedThirdPartyRoles"]:
         ev["referencedThirdPartyRoles"].append({"ref": "%s:third-party:0" % base, "role": "the public", "identityResolved": False})
-    if _conduct(text) and not ev["referencedThirdPartyRoles"] and _E_DOCUMENT_RE.search(text):
+    if _conduct(text) and not ev["referencedThirdPartyRoles"] and (_E_DOCUMENT_RE.search(text) or _false_credential(text)):
         ev["referencedThirdPartyRoles"].append({"ref": "%s:third-party:0" % base, "role": "employer", "identityResolved": False})
     return ev
 
