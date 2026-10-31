@@ -1,0 +1,16 @@
+{
+  "OWN_MISSED": [
+    "can I write my own reference and sign it as my manager?",
+    "is it ok to say I was sick when I wasn't?"
+  ],
+  "DECLINE_MATCHED": [
+    "I would never lie on my cv",
+    "they asked: is it ok to say I managed a team when I didn't?"
+  ],
+  "TUNE_OWN_MISSED": [],
+  "TUNE_DECLINE_MATCHED": [],
+  "COUNTS": {
+    "own": 7,
+    "decline": 10
+  }
+}
