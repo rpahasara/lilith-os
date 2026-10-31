@@ -2,7 +2,9 @@
 
 Classifies A1 to A39 from `DEV-TO-PROD-READINESS.md`, which stays the source of truth. **Nothing is waived:** "defer" appears only where the checklist already allows it, and each needs a signature. PROD facts date from the audit of 2026-10-27.
 
-**As of 2026-10-31, end of day:** e1 runs on DEV, seven lanes in shadow, PASS, awaiting owner acceptance. #309 merged as `59aff47`; #308 was never merged. **0 of 39 are fully done: 12 are partial, 2 are proposed and awaiting signature, and 25 are open.** A1 and A5 become done only on the owner's acceptance of e1, plus R-11 for A1.
+**As of 2026-10-31, end of day:** e1 runs on DEV, seven lanes in shadow, accepted by the owner for its shadow-only scope. #309 merged as `59aff47`; #308 was never merged.
+
+**Merging this document accepts no waiver.** Every R-numbered proposal below and in `EXECUTION-ROADMAP.md` stays a proposal until the owner says yes to it by number. **1 of 39 is done: A5.** 11 are partial, 2 are proposed and awaiting signature, and 25 are open. A1 is done only if the owner accepts R-11.
 
 ## Classes
 
@@ -21,11 +23,11 @@ An item can have more than one. The first is what blocks it now.
 
 | # | Item | Classes | Exact state | Blocker |
 |---|---|---|---|---|
-| A1 | Cross-lane regression | CUT | **PARTIAL.** Host: seven lanes, 10 turns. Source 24/24 | owner acceptance, R-11 |
+| A1 | Cross-lane regression | CUT | **PARTIAL.** Accepted on a host: seven lanes, 10 turns. Source 24/24 | R-11 |
 | A2 | Populated-store test | CUT, SNAP | **PARTIAL.** Source only | rehearsal |
 | A3 | Model in the loop | CUT, LANE | OPEN | budget approval |
 | A4 | Lane modes | OWNER, CUT | OPEN; table proposed | signature, after A3 and A8 |
-| A5 | Planning, Ethics blockers | CUT | **PARTIAL.** Planning accepted; Ethics E-1 to E-5 shown on a host in shadow | owner acceptance |
+| A5 | Planning, Ethics blockers | CUT | **DONE for shadow.** p1 and e1 accepted. Says nothing about either lane going live | none |
 | A6 | G3 title, negative control | LANE, DEFER | OPEN | only needed for goal creation, R-2 |
 | A7 | Capability inventory | CUT, SNAP | PARTIAL: matrix | signed DISABLE rows, rehearsal |
 | A8 | Persona and identity | CUT, SNAP | OPEN; prompts fixed in `IDENTITY-PROMPTS.md`, for owner review | baseline on the unchanged copy; R10 decision |
@@ -65,7 +67,7 @@ An item can have more than one. The first is what blocks it now.
 
 | # | Workstream | Done means | Items | State |
 |---|---|---|---|---|
-| 1 | Shadow integration evidence | e1 accepted on a host | A1, A5 | **PASS, awaiting owner acceptance** |
+| 1 | Shadow integration evidence | e1 accepted on a host | A1, A5 | **done** |
 | 2 | Model in the loop | 10-request window read, per the plan in `EXECUTION-ROADMAP.md`, budget approved | A3, A23 | not run |
 | 3 | Populated-store compatibility | Synthetic generator of PROD's shape, then the copy | A2 | source only |
 | 4 | Security and Privacy | Combined order in `AUTH-DEPLOYMENT-DESIGN.md`, steps 1 to 10 | A14 to A16, A19 to A21 | candidates |

@@ -2,7 +2,7 @@
 
 Turns `DEV-TO-PROD-READINESS.md` (A1 to A39) into a dependency order. That checklist stays the source of truth: **nothing here waives an item.** Section 6 proposes revisions, for the owner to accept or refuse.
 
-**As of 2026-10-31:** 0 of 39 items are done. DEV runs p1, six lanes in shadow, accepted by the owner within its shadow-only scope. e1 is sealed, not installed. Current per-item state, classes and lane modes are in `MINIMUM-FOUNDATION.md`; stages and acceptance in `ROLLOUT-PLAN.md`; real-data concerns in `PROD-POPULATED-REVIEW.md`; later work in `ADVANCED-ROADMAP.md`. PROD facts date from the 2026-10-27 read-only audit. Capability by capability, see `PROD-PARITY-MATRIX.md`. For Phase 4, see `SNAPSHOT-REHEARSAL-DESIGN.md`.
+**As of 2026-10-31:** DEV runs e1, seven lanes in shadow, accepted by the owner for that scope only. **The state column in section 3 was written before e1: `MINIMUM-FOUNDATION.md` is current.** Current per-item state, classes and lane modes are in `MINIMUM-FOUNDATION.md`; stages and acceptance in `ROLLOUT-PLAN.md`; real-data concerns in `PROD-POPULATED-REVIEW.md`; later work in `ADVANCED-ROADMAP.md`. PROD facts date from the 2026-10-27 read-only audit. Capability by capability, see `PROD-PARITY-MATRIX.md`. For Phase 4, see `SNAPSHOT-REHEARSAL-DESIGN.md`.
 
 ## 1. The real constraint: PROD parity
 
@@ -116,8 +116,8 @@ Planning and Ethics may stay in shadow **only if A4 records it,** because both a
 |---|---|---|---|
 | R-1 | A2 is met by source tests plus the rehearsal; no populated DEV window | A DEV window needs real writes and a verifier variant, and proves less than PROD-shaped data on the copy | none: the rehearsal is stricter |
 | R-2 | A6 becomes conditional: required only if conversational goal creation stays on | With creation off at first, the title criterion can't apply | re-opens if creation is enabled |
-| R-3 | A34 is met by one deliberate live return p1 to m1, then forward again, in its own window | Waiting for a real failure may never test it. It's the cheapest real rollback proof | one more restart; budget untouched |
-| R-4 | A20 may follow cutover by up to 30 days **only if** A21 proves loopback-only binding and the owner signs | Callers need a coordinated header change, and loopback closes the same exposure at first | local processes can still read. Keep A20 mandatory if A21 can't be shown |
+| R-3 | A34 is met by one deliberate live return e1 to p1, then forward again, in its own window | Waiting for a real failure may never test it. It's the cheapest real rollback proof | one more restart; budget untouched |
+| R-4 | **Withdrawn.** A20 may not follow cutover. Loopback can't be shown while the IAP tunnel is the route in, and the header work is needed anyway | see `MINIMUM-FOUNDATION.md` | none |
 | R-5 | A13 is met by a signed "owner-memory authority stays off at first" | The item already allows it; this states the expected outcome | none |
 | R-6 | Add A40: identity baseline on the **unchanged** copy before any migration step | A8 can't be judged without it, and the checklist doesn't say when it's taken | none |
 | R-7 | Add A41: recent end-to-end proof of today's PROD reply path | PROD has been idle since 09-13. A failure found after cutover couldn't be attributed | none |

@@ -4,7 +4,7 @@
 
 | # | Stage | Done when | Return path | Items |
 |---|---|---|---|---|
-| 1 | **Final DEV baseline** | e1 accepted; one deliberate live return p1 to e1 proven; A3 window read | previous release | A1, A3, A5, A34 |
+| 1 | **Final DEV baseline** | e1 accepted (done); one deliberate live return from e1 to p1 and forward again; A3 window read | previous release | A1, A3, A5, A34 |
 | 2 | **Security and FORGET hardening** | Auth stages on DEV; FORGET drill with canaries; restore proven | env flip; `open-acknowledged` | A14 to A16, A19 to A21 |
 | 3 | **Isolated snapshot rehearsal** | R0 to R9 pass with no unexplained difference | destroy the copy | A2, A7 to A11, A18, A23, A25, A29 to A31 |
 | 4 | **Migration candidate review** | One tagged candidate, build reproducible, owner reads the difference from PROD | don't proceed | A9, A10, A26 to A28, A36 |

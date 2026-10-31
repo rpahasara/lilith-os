@@ -2,7 +2,9 @@
 
 Serves A4 and A7. For every capability PROD has, it says what the first migration would do with it: **PRESERVE**, **DISABLE** on purpose, or **VALIDATE** because the evidence doesn't yet decide it. **Nothing is waived:** each DISABLE needs the owner's signature, and any row still on VALIDATE blocks cutover.
 
-**Evidence:** the read-only PROD audit of 2026-10-27 (`PROD-FEATURE-MATRIX.md`, `PROD-COGNITION-MAP.md`, `PROD-DATA-INVENTORY.md`, `PROD-PRESERVATION-RISKS.md`), recovered PROD source in `integrations/hermes/history/prod/`, and DEV as of the p1 run on 2026-10-31. PROD wasn't accessed for this. **Its facts are four days old and must be re-read in the rehearsal.**
+**Proposals only:** the actions below are proposed. Merging this document signs none of them.
+
+**Evidence:** the read-only PROD audit of 2026-10-27 (`PROD-FEATURE-MATRIX.md`, `PROD-COGNITION-MAP.md`, `PROD-DATA-INVENTORY.md`, `PROD-PRESERVATION-RISKS.md`), recovered PROD source in `integrations/hermes/history/prod/`, and DEV as of the e1 run on 2026-10-31. PROD wasn't accessed for this. **Its facts are four days old and must be re-read in the rehearsal.**
 
 **Counts:** 42 rows: 18 PRESERVE, 8 DISABLE and 17 VALIDATE. L18 counts twice, because its rows are preserved while its lane is undecided.
 
@@ -34,7 +36,7 @@ Serves A4 and A7. For every capability PROD has, it says what the first migratio
 | Workspace | live | shadow | **PRESERVE** live, with Reasoning | |
 | Motivation | live | shadow | **DISABLE** live, keep shadow | A weak input to Workspace, never shown useful |
 | Planning | live, can replace the reply | shadow | **DISABLE** live, keep shadow | Planning stops answering directly |
-| Ethics | live, advisory | off; e1 candidate built | **DISABLE** live, keep shadow | Ethics stops answering directly. Its third-party and privacy concerns were being dropped anyway |
+| Ethics | live, advisory | shadow, e1 | **DISABLE** live, keep shadow | Ethics stops answering directly. Its third-party and privacy concerns were being dropped anyway |
 | Social Cognition | shadow | off | **VALIDATE** | No DEV release carries it |
 | Memory Consolidation (L18) | shadow, 3 candidates | off | **PRESERVE** the rows, lane **VALIDATE** | |
 | Canonical memory (L04) | installed, 0 rows, off | live with owner authority | **VALIDATE** | The audit's rule: don't enable on PROD without DEV's authority chain. A12 |
@@ -71,7 +73,7 @@ Serves A4 and A7. For every capability PROD has, it says what the first migratio
 
 | Capability | PROD | Target | Action | What decides it |
 |---|---|---|---|---|
-| Core API | `519b309`, unit binds `0.0.0.0:8765` per recovered source | main plus #289 and #306 | **VALIDATE** | **#306 found `POST /os/conversation` had no owner check.** Confirm the firewall and move the bind to loopback in the rehearsal |
+| Core API | `519b309`, unit binds `0.0.0.0:8765` per recovered source | main plus #289 and #306 | **VALIDATE** | **#306 found `POST /os/conversation` had no owner check.** Recorded firewall allows the IAP range only; re-read it. Don't bind loopback while the tunnel is the route in |
 | Command Center relay | path not established by the audit | header required after #306 | **VALIDATE** | Trace it, and send the header before enforcing |
 | Backups | one disk, one crash-consistent snapshot, no schedule | scheduled, restorable | **VALIDATE** | First PROD change, before any code |
 
