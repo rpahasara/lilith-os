@@ -36,8 +36,8 @@ Covers #289 and #306. **Nothing here is merged or deployed, and auth is active o
 | Caller | Sends today | Needs |
 |---|---|---|
 | Hermes adapter `world_context.py` | nothing | read header, from a root-owned env; a **new release** with a new pin |
-| Command Center proxies under `src/app/api/lilith/` | write header on some | read header on all, server-side only |
-| `src/lib/world/client.ts` and `src/lib/api.ts` | through the proxies | no secret in the browser: **a test must prove it** |
+| Command Center proxies under `src/app/api/lilith/` | **all 7 now send it from server-only variables, when set** (`core-api-credentials.ts`, on this branch) | tokens set at stage 1 |
+| `src/lib/world/client.ts` and `src/lib/api.ts` | through the proxies | no secret in the browser: `test_caller_credentials.py` proves it from source. **`direct` mode can't send a credential, so it stops working under enforcement** |
 | Deploy health check | `/health` | nothing |
 | PROD automation | not traced | rehearsal |
 
@@ -51,14 +51,31 @@ Covers #289 and #306. **Nothing here is merged or deployed, and auth is active o
 | **3** | `WRITE_AUTH=enforced` | No caller gets 401 in a window; a wrong token does | env back to `open-acknowledged`, one restart |
 | **4** | `READ_AUTH=enforced` | The adapter's reads stay 200, and **a turn is still grounded**, not only "still working" | same |
 | **5** | `FOCUS_READ_ONLY=1` | No trace on a changed focus; same answer | unset |
-| **6** | Bind to `127.0.0.1`, A21 | `ss` shows loopback only; nothing off-host connects | previous unit |
+| **6** | Narrow the route in, per `PROD-API-EXPOSURE.md`. **Not a loopback bind while the IAP tunnel is in use:** IAP forwards to the NIC address, so loopback would cut Command Center off | named accessors only; rule tagged per VM | previous firewall and IAM |
 | **7** | Remove `open-acknowledged` from the code | After a settled period; optional for cutover | revert the commit |
 
 **One switch per window, DEV first.** Rollback is a setting and one restart, so there's never a reason to loosen the code in a hurry. **A rollback may go only as far as `open-acknowledged`, never to unset:** unset refuses everything.
 
+## Combined order with FORGET
+
+Each step depends on the ones above it. **FORGET isn't complete until steps 5 to 9 are verified,** and only step 2's code exists on any branch in full.
+
+| # | Step | Depends on | State |
+|---|---|---|---|
+| 1 | Owner decisions: source scope, snapshots, key location, FORGET authority | | open |
+| 2 | Callers carry credentials: Command Center | | **done on #306, unmerged** |
+| 3 | Callers carry credentials: Hermes adapter, in a new release, plus a verifier rule that a 401 is a failure | e1 settled | design |
+| 4 | Stages 0 to 4 above: fail-closed writes, then reads | 2, 3 | designed |
+| 5 | Focus read-only on populated goals, before any new code reads PROD goals | 4 | flag tested on #306 |
+| 6 | Ingest guard and ledger configured, with no erasure yet | 1 | guard on #306 |
+| 7 | World Model and Core API erasure wired into the executor | 1, 6, Privacy approval | candidate on #296 |
+| 8 | Persistent message tombstones in the extractor, before OAuth repair | 7 | candidate on #296; extractor unpatched |
+| 9 | Backup and snapshot policy, and the restore gate in the procedure | 1, 7 | gate tested, policy open |
+| 10 | DEV drill: canaries, every route, restore, replay, bytes checked | 2 to 9 | not run |
+
 ## PROD
 
-PROD takes stages 0 to 6 inside the migration, on the rehearsal first. Stage 6 matters most there: the recovered unit binds `0.0.0.0:8765`, and whether a firewall covers it is unconfirmed. **Confirming that port from outside needs a read-only approval of its own, and it decides how urgent this is:** until #306 reaches PROD, an open port there would relay a stranger's conversation.
+PROD takes stages 0 to 6 inside the migration, on the rehearsal first. Exposure as recorded is in `PROD-API-EXPOSURE.md`: **not public on the last read, but every accessor gets an unauthenticated trusted-operator turn.**
 
 ## Tests that exist
 
@@ -67,7 +84,7 @@ PROD takes stages 0 to 6 inside the migration, on the rehearsal first. Stage 6 m
 ## Tests still needed
 
 - The adapter sending the header, and a 401 being visible rather than silent. **A lane failing open on 401 should count as a failure in the verifier, not a quiet empty read.**
-- No token in any browser bundle.
+- No token in a built browser bundle. Source is tested; a scan of the build output isn't.
 - A pre-start check that refuses to start Core API with neither variable set.
 
 ## Decisions needed from the owner
@@ -76,4 +93,5 @@ PROD takes stages 0 to 6 inside the migration, on the rehearsal first. Stage 6 m
 |---|---|---|
 | 1 | One token per class, or per caller? | Per class at first: one principal |
 | 2 | May stage 7 follow cutover? | Yes |
-| 3 | Does R-4, read auth up to 30 days after cutover if loopback is proven, stand? | **Withdraw it.** The adapter finding means the header work has to happen anyway |
+| 3 | Does R-4, read auth up to 30 days after cutover if loopback is proven, stand? | **Withdraw it.** Loopback can't be proven while the tunnel is the route, and the header work has to happen anyway |
+| 4 | Keep the IAP tunnel to 8765, or move to SSH forwarding over IAP and close it? | Decide from `PROD-API-EXPOSURE.md` |
