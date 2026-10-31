@@ -35,7 +35,7 @@ Serves A8, A29, A30 and A31, and details section 9 of the roadmap. **Nothing her
 | **R5** | **Baseline:** digests of every table, persona and profile hashes, the capability inventory, and the fixed prompt set with the provider off | the unchanged stack doesn't run | automatic |
 | **R6** | Migrate a copy of the tree: Core API from `519b309`, additive schema only, Hermes, lanes per the signed table | any row or table changes unexpectedly | automatic |
 | **R7** | Compare with R5, row by row | any unexplained difference | automatic |
-| **R8** | **Keep-deleted:** seed synthetic canaries beside the real data, erase only the canaries' scope on a **further** copy, restore, replay, then fire both rebuild routes | a canary returns, or a real row is lost | Owner: the FORGET candidates need PROD's table list first |
+| **R8** | **Keep-deleted:** seed synthetic canaries beside the real data, erase only the canaries' scope on a **further** copy, restore, replay, then fire both rebuild routes and a simulated mail redelivery | a canary returns, or a real row is lost | Owner: the FORGET candidates need PROD's table list first, and a scoped erasure, which doesn't exist yet |
 | **R9** | Roll back to the R5 tree, timed. Re-run R7 against the baseline | not byte-identical, or longer than the agreed limit | automatic |
 | **R10** | Model window, only if separately approved: bounded budget, synthetic owner prompts, on the copy | budget reached | Owner, separate budget |
 | **R11** | Record, then destroy | | Owner |
@@ -57,7 +57,10 @@ Serves A8, A29, A30 and A31, and details section 9 of the roadmap. **Nothing her
 
 ## What must be ready first
 
-- `core_erasure.ALLOWED_TABLES` built from the real PROD table list. It refuses PROD's schema today, on purpose: `people`, `career_activities` and `os_audit_log` aren't in it.
+- `core_erasure.ALLOWED_TABLES` built from the real PROD table list. It refuses PROD's schema today, on purpose: `os_audit_log` isn't decided.
+- Message tombstones in the extractor, and every watcher off on the copy, so nothing re-delivers.
+- The Hermes adapter sending the read header. Without it, enforced read auth leaves every lane reading nothing, with no visible error.
+- Provider-bound prompts captured and measured: DEV's prompts never held real rows.
 - Core API on the rehearsal VM bound to loopback, with read and write auth enforced.
 - `LILITH_OS_FOCUS_READ_ONLY=1`. The offline sweep on a PROD-shaped store shows focus is the only GET that writes, and that the flag stops it.
 - The identity prompt set, fixed and reviewed **before** any baseline runs, so it can't be tuned to the result.

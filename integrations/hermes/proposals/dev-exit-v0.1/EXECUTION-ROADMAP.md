@@ -2,7 +2,7 @@
 
 Turns `DEV-TO-PROD-READINESS.md` (A1 to A39) into a dependency order. That checklist stays the source of truth: **nothing here waives an item.** Section 6 proposes revisions, for the owner to accept or refuse.
 
-**As of 2026-10-31:** 0 of 39 items are done. DEV runs p1, six lanes in shadow, pending owner acceptance. PROD facts date from the 2026-10-27 read-only audit. Capability by capability, see `PROD-PARITY-MATRIX.md`. For Phase 4, see `SNAPSHOT-REHEARSAL-DESIGN.md`.
+**As of 2026-10-31:** 0 of 39 items are done. DEV runs p1, six lanes in shadow, accepted by the owner within its shadow-only scope. e1 is sealed, not installed. Current per-item state, classes and lane modes are in `MINIMUM-FOUNDATION.md`; stages and acceptance in `ROLLOUT-PLAN.md`; real-data concerns in `PROD-POPULATED-REVIEW.md`; later work in `ADVANCED-ROADMAP.md`. PROD facts date from the 2026-10-27 read-only audit. Capability by capability, see `PROD-PARITY-MATRIX.md`. For Phase 4, see `SNAPSHOT-REHEARSAL-DESIGN.md`.
 
 ## 1. The real constraint: PROD parity
 
