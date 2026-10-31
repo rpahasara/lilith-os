@@ -2,7 +2,7 @@
 
 Classifies A1 to A39 from `DEV-TO-PROD-READINESS.md`, which stays the source of truth. **Nothing is waived:** "defer" appears only where the checklist already allows it, and each needs a signature. PROD facts date from the audit of 2026-10-27.
 
-**As of 2026-10-31, later in the day:** p1 owner-accepted and #304 merged; e1 sealed, not installed. **0 of 39 are fully done, and 6 are partial with new evidence.**
+**As of 2026-10-31, later in the day:** p1 owner-accepted and #304 merged; e1 sealed, not installed. **0 of 39 are fully done: 11 are partial, 2 are proposed and awaiting signature, and 26 are open.**
 
 ## Classes
 
