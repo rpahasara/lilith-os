@@ -1637,6 +1637,7 @@ def _refuse_while_forget_pending() -> None:
 def os_conversation(
     payload: dict = _Body(default=None),
     x_lilith_os_owner_capture: str = _Header(default=None),
+    x_lilith_os_read: str = _Header(default=None),
 ):
     _refuse_while_forget_pending()
     if not isinstance(payload, dict):
@@ -1649,6 +1650,9 @@ def os_conversation(
         raise HTTPException(status_code=400, detail="message is required")
     if session.startswith(_CAPTURE_PREFIX):
         return _captured_conversation(payload, message, session, x_lilith_os_owner_capture)
+    blocked = _read_auth_decision("/os/conversation", x_lilith_os_read)     # a turn returns owner context and spends the provider budget, so it is an owner read
+    if blocked:
+        raise HTTPException(status_code=blocked[0], detail=blocked[1])
     return _relay_conversation(message, session)
 
 
