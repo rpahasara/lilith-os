@@ -347,6 +347,7 @@ class RelayTests(EvidenceCase):
         CE.provision_capture_store(self.evidence_db, self.privacy_store)  # operator step; the relay never creates
         return self.call(app.os_conversation_evidence, {"action": "open"})["session"]
 
+    @mock.patch.dict(os.environ, {"LILITH_OS_READ_AUTH": "open-acknowledged"})
     def test_existing_sessions_are_relayed_exactly_as_before(self):
         for env in ({}, self.env):
             console = FakeConsole()

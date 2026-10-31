@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ownerCaptureAuthentication } from "@/lib/conversation/owner-capture-auth";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy for the LILITH OS conversation surface.
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
   try {
     const upstream = await fetch(`${base}/os/conversation`, {
       method: "POST",
-      headers,
+      headers: { ...headers, ...coreApiHeaders() },
       body: JSON.stringify({ message, session }),
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
