@@ -1,5 +1,7 @@
 # Cross-lane test matrix
 
+**Superseded for per-lane status by `COVERAGE-MATRIX.md`.** The findings below still stand.
+
 **All seven lanes are not integrated.** DEV runs six in shadow since the p1 run of 2026-10-31; Ethics is a built candidate that no host runs. `test_cross_lane.py` runs all seven together on **source**, in one assembled home, on the real gateway, adapter and Core API, with no host, no model and no real traffic.
 
 ## Evidence levels

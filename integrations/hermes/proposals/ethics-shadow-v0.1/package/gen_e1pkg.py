@@ -108,13 +108,14 @@ def s1():
     return header(base(read("s1_stop_m1.sh")), "S1 stop the p1 gateway. Any pre-check difference aborts before the stop, and rollback is then NOT run")
 
 
-CUT = len(b64) // 2
-B1, B2 = b64[:CUT].decode(), b64[CUT:].decode()
+CUT = len(b64) // 3 + 1    # three chunks: each transfer script must fit the Windows command line
+B1, B2, B3 = b64[:CUT].decode(), b64[CUT:2 * CUT].decode(), b64[2 * CUT:].decode()
+assert (B1 + B2 + B3).encode() == b64
 STAGE = "/root/e1-install-" + WINDOW_DATE; WIN = "/root/e1-window-" + WINDOW_DATE
 
 
 def s2():
-    return ("set -eu\n# S2 (NOT APPROVED, NOT RUN). Part 1 of 2: writes the first base64 chunk of the e1 bundle (%s) into a new root-only staging dir. Refuses if it exists.\n"
+    return ("set -eu\n# S2 (NOT APPROVED, NOT RUN). Part 1 of 3: writes the first base64 chunk of the e1 bundle (%s) into a new root-only staging dir. Refuses if it exists.\n"
             "D=%s\n[ \"$(hostname)\" = lilith-dev-01 ] || { echo WRONG_HOST; exit 3; }\n"
             "sudo -n test -f %s/s1.pass || { echo S1_NOT_PASSED; exit 3; }\nsudo -n test ! -e $D || { echo STAGING_DIR_EXISTS; exit 3; }\n"
             "sudo -n install -d -o root -g root -m 0700 $D\nB=%s\nprintf %%s \"$B\" | sudo -n tee $D/bundle.b64 >/dev/null\n"
@@ -122,11 +123,19 @@ def s2():
 
 
 def s2b():
-    return ("set -eu\n# S2b (NOT APPROVED, NOT RUN). Part 2 of 2: appends the second chunk, only onto exactly the first, and verifies the whole bundle.\n"
+    return ("set -eu\n# S2b (NOT APPROVED, NOT RUN). Part 2 of 3: appends the second chunk, only onto exactly the first.\n"
             "D=%s\n[ \"$(hostname)\" = lilith-dev-01 ] || { echo WRONG_HOST; exit 3; }\n"
             "[ \"$(sudo -n sha256sum $D/bundle.b64 | cut -c1-64)\" = %s ] || { echo CHUNK1_NOT_IN_PLACE; exit 3; }\necho CHUNK1_IN_PLACE\n"
             "B=%s\nprintf %%s \"$B\" | sudo -n tee -a $D/bundle.b64 >/dev/null\n"
-            "GOT=$(sudo -n sha256sum $D/bundle.b64 | cut -c1-64)\n[ \"$GOT\" = %s ] && echo \"CHUNK OK $GOT\" || { echo \"CHUNK MISMATCH $GOT\"; exit 4; }\n") % (STAGE, sha(B1.encode()), B2, sha(b64))
+            "GOT=$(sudo -n sha256sum $D/bundle.b64 | cut -c1-64)\n[ \"$GOT\" = %s ] && echo \"CHUNK2 OK $GOT\" || { echo \"CHUNK MISMATCH $GOT\"; exit 4; }\n") % (STAGE, sha(B1.encode()), B2, sha((B1 + B2).encode()))
+
+
+def s2c():
+    return ("set -eu\n# S2c (NOT APPROVED, NOT RUN). Part 3 of 3: appends the third chunk, only onto exactly the first two, and verifies the whole bundle.\n"
+            "D=%s\n[ \"$(hostname)\" = lilith-dev-01 ] || { echo WRONG_HOST; exit 3; }\n"
+            "[ \"$(sudo -n sha256sum $D/bundle.b64 | cut -c1-64)\" = %s ] || { echo CHUNK2_NOT_IN_PLACE; exit 3; }\necho CHUNK2_IN_PLACE\n"
+            "B=%s\nprintf %%s \"$B\" | sudo -n tee -a $D/bundle.b64 >/dev/null\n"
+            "GOT=$(sudo -n sha256sum $D/bundle.b64 | cut -c1-64)\n[ \"$GOT\" = %s ] && echo \"CHUNK OK $GOT\" || { echo \"CHUNK MISMATCH $GOT\"; exit 4; }\n") % (STAGE, sha((B1 + B2).encode()), B3, sha(b64))
 
 
 def lanes7(s):
@@ -236,7 +245,7 @@ def status():
     return s
 
 
-for name, fn in (("p0_e1.sh", p0), ("s1_stop_p1.sh", s1), ("s2_transfer_e1.sh", s2), ("s2b_transfer_e1.sh", s2b), ("s3_install_e1.sh", s3), ("s4_start_e1.sh", s4), ("s5_post_verify_ro.sh", s5), ("s6_shadow_test.sh", s6),
+for name, fn in (("p0_e1.sh", p0), ("s1_stop_p1.sh", s1), ("s2_transfer_e1.sh", s2), ("s2b_transfer_e1.sh", s2b), ("s2c_transfer_e1.sh", s2c), ("s3_install_e1.sh", s3), ("s4_start_e1.sh", s4), ("s5_post_verify_ro.sh", s5), ("s6_shadow_test.sh", s6),
                  ("s7_final_ro.sh", s7), ("r1_stop.sh", r1s), ("r2_revert.sh", r2s), ("r3_start_p1.sh", r3s), ("r4_final_ro.sh", r4s), ("status_ro.sh", status)):
     text = fn()
     assert "~~" not in text.split("B=")[0], name
@@ -275,6 +284,8 @@ s = R(s, 'touch "$LR/world_context.py" "$LR/workspace.py" "$LR/motivation.py" "$
 s = R(s, '"pass: 6 turns, all with the gate down" "$(wc -l < "$S/sent")$(grep -c FORWARDED "$S/gate.journal")" 60', '"pass: 10 turns, all with the gate down" "$(wc -l < "$S/sent")$(grep -c FORWARDED "$S/gate.journal")" 100', 1)
 s = R(s, '"$(grep -c \'S6_STOPPED S6 already ran once\' "$R/out.s6_shadow_test.sh")$(wc -l < "$S/sent")" 16', '"$(grep -c \'S6_STOPPED S6 already ran once\' "$R/out.s6_shadow_test.sh")$(wc -l < "$S/sent")" 110', 1)
 s = R(s, '''"$(grep -c '"lane": *"reasoning"\\|"lane":"reasoning"' "$DLOG")" 2''', '''"$(grep -c '"lane": *"reasoning"\\|"lane":"reasoning"' "$DLOG")" 3''', 1)
+s = R(s, """step s2b_transfer_e1.sh; grep -q '^CHUNK OK' "$R/out.s2b_transfer_e1.sh" || return 1""", """step s2b_transfer_e1.sh; grep -q '^CHUNK2 OK' "$R/out.s2b_transfer_e1.sh" || return 1
+  step s2c_transfer_e1.sh; grep -q '^CHUNK OK' "$R/out.s2c_transfer_e1.sh" || return 1""", 1)
 s = R(s, 'sc goal_row;', '''sc eth_text eth_text; install_seq; step s6_shadow_test.sh
 ok "eth_text: a role word in an ethics record is detected" "$(grep -c 'records_t7' "$R/out.s6_shadow_test.sh")$(marker s6.pass)" 1no
 sc eth_wrong eth_wrong; install_seq; step s6_shadow_test.sh
@@ -288,6 +299,8 @@ s = R(s, "$PKG/p1src", "$PKG/e1src") if "$PKG/p1src" in s else R(s, "$PKG/e1src"
 c = (p1pkg / "tests" / "shell_init_check.py").read_text(encoding="ascii")
 for a, b in (("s2b_transfer_p1.sh", "s2b_transfer_e1.sh"), ("s2_transfer_p1.sh", "s2_transfer_e1.sh"), ("p0_p1.sh", "p0_e1.sh"), ("s1_stop_m1.sh", "s1_stop_p1.sh"), ("s3_install_p1.sh", "s3_install_e1.sh"), ("s4_start_p1.sh", "s4_start_e1.sh"), ("r3_start_m1.sh", "r3_start_p1.sh")):
     c = R(c, a, b)
+c = R(c, '"s2b_transfer_e1.sh": "set -eu"}', '"s2b_transfer_e1.sh": "set -eu", "s2c_transfer_e1.sh": "set -eu"}', 1)
+c = R(c, '"s2_transfer_e1.sh", "s2b_transfer_e1.sh", "s3_install_e1.sh"', '"s2_transfer_e1.sh", "s2b_transfer_e1.sh", "s2c_transfer_e1.sh", "s3_install_e1.sh"', 1)
 (T / "shell_init_check.py").write_bytes(c.encode("ascii"))
 shutil.copy2(Path(__file__), pkg / "tools" / "gen_e1pkg.py")
 (pkg / "tools" / "run_sim.sh").write_text("""#!/usr/bin/env bash

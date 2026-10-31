@@ -13,12 +13,12 @@ for candidate in (HERE, HERE.parent / "scripts"):
         break
 import drive_e1 as D
 
-GOOD = {"p0": "P0_E1 PASS (x)", "s1": "S1_STOP_P1 PASS (x)", "s2": "CHUNK1 OK x", "s2b": "CHUNK OK x", "s3": "S3_INSTALL_E1 PASS (x)", "s4": "S4_START_E1 PASS (x)", "s5": "S5_POST_VERIFY PASS (x)", "s6": "S6_SHADOW_TEST PASS (x)",
+GOOD = {"p0": "P0_E1 PASS (x)", "s1": "S1_STOP_P1 PASS (x)", "s2": "CHUNK1 OK x", "s2b": "CHUNK2 OK x", "s2c": "CHUNK OK x", "s3": "S3_INSTALL_E1 PASS (x)", "s4": "S4_START_E1 PASS (x)", "s5": "S5_POST_VERIFY PASS (x)", "s6": "S6_SHADOW_TEST PASS (x)",
         "s7": "S7_FINAL_VERIFY PASS (x)", "r1": "R1_RETURN_STOP PASS (x)", "r2": "R2_RETURN_REVERT PASS (x)", "r3": "R3_RETURN_START_P1 PASS (x)", "r4": "R4_FINAL_VERIFY PASS (x)"}
-BAD = {"p0": "P0_E1 FAIL: ledger", "s1": "S1_STOP_P1 FAIL (x)", "s2": "CHUNK MISMATCH x", "s2b": "CHUNK1_NOT_IN_PLACE", "s3": "S3_INSTALL_E1 FAIL: lanes", "s4": "S4_START_E1 FAIL (x)", "s5": "S5_POST_VERIFY FAIL: x", "s6": "S6_SHADOW_TEST FAIL: core_api", "s7": "S7_FINAL_VERIFY FAIL: x",
+BAD = {"p0": "P0_E1 FAIL: ledger", "s1": "S1_STOP_P1 FAIL (x)", "s2": "CHUNK MISMATCH x", "s2b": "CHUNK1_NOT_IN_PLACE", "s2c": "CHUNK2_NOT_IN_PLACE", "s3": "S3_INSTALL_E1 FAIL: lanes", "s4": "S4_START_E1 FAIL (x)", "s5": "S5_POST_VERIFY FAIL: x", "s6": "S6_SHADOW_TEST FAIL: core_api", "s7": "S7_FINAL_VERIFY FAIL: x",
        "r1": "R1_RETURN_STOP FAIL", "r2": "R2_RETURN_REVERT FAIL", "r3": "R3_RETURN_START_P1 FAIL", "r4": "R4_FINAL_VERIFY FAIL: x"}
 STATUS = "MARKERS {m}\nGATE ActiveState={g} MainPID=1 NRestarts=0 HEALTH x\nWINDOW_SCRIPTS_RUNNING {r}\n"
-FORWARD = ["p0", "s1", "s2", "s2b", "s3", "s4", "s5", "s6", "s7"]
+FORWARD = ["p0", "s1", "s2", "s2b", "s2c", "s3", "s4", "s5", "s6", "s7"]
 BACK = ["r1", "r2", "r3", "r4"]
 
 
@@ -64,12 +64,12 @@ class Drive(unittest.TestCase):
     def test_lost_transport_with_the_pass_marker_continues(self):
         result, calls = self.run_host(Host({"s3": ""}, markers="s1.pass@1 s3.pass@2 "))
         self.assertEqual(result, "DRIVE_COMPLETE")
-        self.assertEqual(calls, ["p0", "s1", "s2", "s2b", "s3", "status_probe", "s4", "s5", "s6", "s7"])
+        self.assertEqual(calls, ["p0", "s1", "s2", "s2b", "s2c", "s3", "status_probe", "s4", "s5", "s6", "s7"])
 
     def test_lost_transport_without_a_marker_returns_to_p1(self):
         result, calls = self.run_host(Host({"s4": ""}, markers="s1.pass@1 s3.pass@2 "))
         self.assertEqual(result, "DRIVE_RETURNED_TO_P1")
-        self.assertEqual(calls, ["p0", "s1", "s2", "s2b", "s3", "s4", "status_probe"] + BACK)
+        self.assertEqual(calls, ["p0", "s1", "s2", "s2b", "s2c", "s3", "s4", "status_probe"] + BACK)
 
     def test_lost_transport_with_a_script_still_running_holds(self):
         result, calls = self.run_host(Host({"s3": ""}, markers="s1.pass@1 ", running=1))
