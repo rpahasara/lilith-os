@@ -68,7 +68,7 @@ def shift(s):
     for a, b in (("p1", "~~e"), ("m1", "p1"), ("P1", "~~E"), ("M1", "P1")):
         s = word(s, a, b)
     s = s.replace("~~e", "e1").replace("~~E", "E1")
-    s = s.replace("window-20261030", "window-" + WINDOW_DATE).replace("install-20261030", "install-" + WINDOW_DATE)
+    s = s.replace("e1-window-20261030", "e1-window-" + WINDOW_DATE).replace("e1-install-20261030", "e1-install-" + WINDOW_DATE)   # p1's own staging, the revert payload, keeps its date
     return s.replace("~~L7", LIST7).replace("~~L6", LIST6).replace("~~IP", E1ID).replace("~~IM", P1ID)
 
 

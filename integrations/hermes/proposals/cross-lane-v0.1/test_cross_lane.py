@@ -2,15 +2,17 @@
 
     python -B integrations/hermes/proposals/cross-lane-v0.1/test_cross_lane.py
 
-This is integrated SOURCE, not an integrated HOST: seven lanes are not installed together anywhere. Bytes: the p1 router plus Ethics in shadow, the
-dev-ethics-hardening adapter and ethics.py, and the counts-only planning.py and motivation.py. MATRIX.md says what ran, what is simulated and what is planned.
+This is integrated SOURCE, not an integrated HOST: seven lanes are not installed together anywhere. Bytes: the e1 release router, the dev-ethics-hardening adapter and
+ethics.py, and the counts-only planning.py and motivation.py, each checked against the e1 verifier's pins. COVERAGE-MATRIX.md says what ran, what is simulated and what is planned.
 """
 
 from __future__ import annotations
 
 import gc
+import hashlib
 import importlib
 import json
+import re
 import shutil
 import socket
 import sqlite3
@@ -32,6 +34,9 @@ import test_p1_release as PR  # noqa: E402
 C = W.C
 CANARY = "TEST_ONLY_CROSS_LANE_CANARY_7X"
 GATE_PORT = 9911
+E1 = REL / "dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1"
+FIVE = lambda world: ["/os/goals?limit=200", "/os/goals/focus", "/os/drafts?limit=200", "/os/tasks?limit=200", world]
+W14 = "/os/world?entity_type=career.application&entity_id=14"
 SEVEN = ("cognitive", "goal", "reasoning", "workspace", "motivation", "planning", "ethics")
 
 # message, then the records in order on an EMPTY store, then the reads. Each row is measured, reviewed, then pinned.
@@ -44,6 +49,7 @@ OWNERSHIP = (
     ("plan how to follow up on application 14 but do not do it", ["planning", "routing"], 6),
     ("is it okay to lie on my cover letter?", ["ethics", "routing"], 5),
     ("is it ok to send my salary to the recruiter without asking me?", ["ethics", "cognitive", "routing"], 6),
+    ("is it ok to say I managed a team when I didn't?", ["ethics", "routing"], 5),
     # false matches: no lane, no read
     ("hey how are you", ["routing"], 0),
     ("make a plan for dinner", ["routing"], 0),
@@ -54,6 +60,8 @@ OWNERSHIP = (
     ("what are my options on Netflix tonight?", ["routing"], 0),
     ('the book is called "is it ethical to lie on your resume"', ["routing"], 0),
     ("translate 'plan the job search' into French", ["routing"], 0),
+    ("I would never lie on my cv", ["routing"], 0),
+    ("how can I tell if a recruiter is lying?", ["cognitive", "routing"], 0),   # not Ethics: it asks about someone else
     # two lanes could claim it
     ("what are the risks of accepting this offer?", ["motivation", "workspace", "reasoning", "routing"], 5),
     ("what are the ethical risks of contacting the recruiter?", ["ethics", "cognitive", "routing"], 6),
@@ -70,8 +78,8 @@ FORBIDDEN = ("goal_ref", "subject_target", "plan_snapshot_id", "relatedGoalIds",
 
 def setUpModule():
     W.setUpModule()
-    router = (REL / "dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1/home/router.yaml").read_text(encoding="utf-8").replace("/home/lilith/.hermes-dev/logs/lilith-router-decisions.log", C.LOG.as_posix())
-    (C.HOME / "lilith_router" / "router.yaml").write_text(router.replace("ethics_enabled: false\n", "ethics_enabled: true\nethics_mode: shadow\n"), encoding="utf-8")
+    router = (E1 / "home/router.yaml").read_text(encoding="utf-8").replace("/home/lilith/.hermes-dev/logs/lilith-router-decisions.log", C.LOG.as_posix())
+    (C.HOME / "lilith_router" / "router.yaml").write_text(router, encoding="utf-8")
     for source, name in (("dev-motivation-private-trace/lilith_router/motivation.py", "motivation.py"), ("dev-planning-hardening/lilith_router/planning.py", "planning.py"),
                          ("dev-ethics-hardening/lilith_router/world_context.py", "world_context.py"), ("dev-ethics-hardening/lilith_router/ethics.py", "ethics.py")):
         shutil.copy2(O / source, C.HOME / "lilith_router" / name)
@@ -218,6 +226,63 @@ class Budgets(Lanes):
         for i, message in enumerate(("is it okay to lie on my cover letter?", "is it ethical to contact the recruiter's manager?")):
             trace = next(r for r in self.turn("TEST_ONLY " + message, f"x-a-{i}")[1] if r.get("lane") == "ethics")["trace"]
             self.assertEqual((trace["candidate_source"], trace["authoritative_policy_evaluation"]), ("deterministic", False))
+
+
+class ExactReads(Lanes):
+    """The window's turns: the routes themselves, in order, not only how many."""
+    TURNS = (("what are my options for application 14?", FIVE(W14)), ("what information is missing to resolve this?", FIVE("/os/world")), ("which goal has priority?", []), ("hey how are you", []),
+             ("plan how to follow up on application 14 but do not do it", FIVE(W14) + ["/os/drafts?target_id=14"]), ("make a plan for dinner", []), ("is it okay to lie on my cover letter?", FIVE("/os/world")), ("is it ok to wear jeans?", []),
+             ("what are the risks of accepting this offer?", FIVE("/os/world")), ("should we share my private legal records with the recruiter?", FIVE("/os/world") + ["/os/world?entity_type=career.application"]))
+
+    def test_each_turn_reads_exactly_these_routes(self):
+        W.bootstrap_drafts("x-r")
+        for i, (message, routes) in enumerate(self.TURNS):
+            with self.subTest(message=message):
+                self.assertEqual(self.turn("TEST_ONLY " + message, f"x-r-{i}")[2], routes)
+
+    def test_every_read_succeeds(self):
+        W.bootstrap_drafts("x-g")
+        for i, (message, _) in enumerate(self.TURNS):
+            self.turn("TEST_ONLY " + message, f"x-g-{i}")
+            self.assertFalse([c for c in self.bridge.calls if c[1] != 200], message)
+
+
+class Identity(Lanes):
+    def test_no_value_links_two_sessions(self):
+        """The same message in two sessions: nothing in a record may repeat that could follow a person across them. Fixed labels and counts may."""
+        W.bootstrap_drafts("x-i")
+        for i, (message, _, _) in enumerate(OWNERSHIP):
+            first = self.turn("TEST_ONLY " + message, f"x-i-a{i}")[1]
+            second = self.turn("TEST_ONLY " + message, f"x-i-b{i}")[1]
+            pattern = re.compile(r"\b[0-9a-f]{12,}\b|\b(?:g|d|t|ps|wc|turn)[.:][0-9a-z-]{6,}")
+            self.assertFalse(set(pattern.findall(json.dumps(first))) & set(pattern.findall(json.dumps(second))), message)
+
+    def test_a_populated_store_adds_no_identifier(self):
+        db = W.bootstrap_drafts("x-j")
+        self.populate(db)
+        for i, (message, _, _) in enumerate(OWNERSHIP):
+            for record in self.turn("TEST_ONLY " + message, f"x-j-{i}")[1]:
+                self.assertIsNone((record.get("intent") or {}).get("app_id"), message)
+
+
+class ReleaseBytes(unittest.TestCase):
+    """This suite must test what e1 would install, not a copy that drifted."""
+
+    def pin(self, name):
+        text = (E1 / "templates/bin/verify_release.py.tmpl").read_bytes().decode("utf-8")
+        return re.search(name + r' = "([0-9a-f]{64})"', text).group(1)
+
+    def digest(self, path):
+        return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+    def test_the_lanes_under_test_are_the_pinned_bytes(self):
+        home = C.HOME / "lilith_router"
+        for name, member in (("WORLD_CONTEXT_ADAPTER_SHA256", "world_context.py"), ("ETHICS_SHA256", "ethics.py"), ("PLANNING_SHA256", "planning.py")):
+            self.assertEqual(self.digest(home / member), self.pin(name), member)
+
+    def test_the_router_under_test_is_the_release_router(self):
+        got = (C.HOME / "lilith_router/router.yaml").read_bytes().replace(b"\r\n", b"\n").decode("utf-8").replace(C.LOG.as_posix(), "/home/lilith/.hermes-dev/logs/lilith-router-decisions.log")
+        self.assertEqual(got, (E1 / "home/router.yaml").read_bytes().replace(b"\r\n", b"\n").decode("utf-8"))
 
 
 class Failures(Lanes):
