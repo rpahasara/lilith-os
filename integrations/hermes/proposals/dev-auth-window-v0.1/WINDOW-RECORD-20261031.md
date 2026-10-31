@@ -30,7 +30,7 @@
 
 ## Second resume, 2026-10-31 17:01Z: PASS
 
-**Manifest `09400b96...`, `DRIVE_COMPLETE`, every step once.** Awaiting owner acceptance.
+**Manifest `09400b96...`, `DRIVE_COMPLETE`, every step once.** **Accepted by the owner as PASS.** This accepts DEV authentication only, not PROD readiness.
 
 | Step | Result |
 |---|---|

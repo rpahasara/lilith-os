@@ -2,20 +2,26 @@
 
 Detail for stages R0 to R9 of `dev-exit-v0.1/SNAPSHOT-REHEARSAL-DESIGN.md`. **Cutover 1 changes `app.py` and settings only, so this rehearsal is mostly proving that nothing else moved.** Nothing here touches PROD until its gate is approved. **The copy is never booted:** it holds real tokens and timers.
 
-| Gate | Stages | Touches PROD? | Holds real data? |
+| Gate | Stages | Touches PROD? | Real data? |
 |---|---|---|---|
-| **G1 PROD baseline** | P1, P2 | cloud reads and a snapshot call; nothing on the host | no |
-| **G2 Isolated VM** | R1 | no | no: a synthetic disk |
-| **G3 Open the copy** | R3 to R9 | no | **yes: needs the Privacy decision** |
+| **G1 PROD baseline** | P1, P2 | cloud reads and a snapshot call; nothing on the host | **creates a copy of all of it,** unopened |
+| **G2 Isolated VM** | R1 | no | none: a synthetic disk |
+| **G3 Open the copy** | R3 to R9 | no | **opened: needs the Privacy decision** |
+
+**The snapshot holds real PROD data, including sensitive files and credentials,** from the moment it exists. It's as sensitive as PROD itself, opened or not.
 
 ## G1: PROD baseline
 
 | Step | Action | Stop if |
 |---|---|---|
-| P1 | Run `core-api-security-v0.1/prod_exposure_preflight.sh` | any rule, address or forwarding beyond the recorded ones |
-| P2 | `gcloud compute disks snapshot lilith-01 --zone=asia-southeast1-b --snapshot-names=lilith-01-rehearsal-<date>`; confirm `READY` | any change to the VM or disk |
+| P1 | Network and IAP review, as gates inside the sealed G1 preflight. It replaces `core-api-security-v0.1/prod_exposure_preflight.sh`, whose last command doesn't exist in `gcloud` | any unexpected finding: nothing is created |
+| P2 | One snapshot, `lilith-01-rehearsal-20261101`, only on a fresh `PASS`, then a read-only verification | any failure: no retry |
 
-**The 2026-10-27 snapshot stays,** and the new one doesn't replace it. It's crash-consistent, as `state.db` has a live WAL.
+**Package:** `C:\Users\edufo\lilith-g1-snapshot-20261101`, manifest `6f180f208f7a4514a4b19db6e4c3acb3dd362a62e850d8242cd6e9e5af4c3839`. `GO-G1.md` there is the approval text.
+
+**G1 never boots, mounts, shares, exports or inspects the snapshot,** and the 2026-10-27 snapshot stays. **Retention:** keep until the rehearsal record is accepted and Cutover 1's return window has closed, no later than 2026-12-01 unless the owner extends it; deletion is manual, under its own approval.
+
+**Coverage:** the snapshot copies the whole disk, and G1 proves PROD has only one, so the databases and `state.db`'s WAL are included as they stand on disk. It's crash-consistent, and only R4 can confirm that on the copy.
 
 ## G2: isolated VM
 
