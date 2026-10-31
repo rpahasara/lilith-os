@@ -8,6 +8,7 @@ Builds on goal_erasure.py. Pure stdlib. Fail-closed. What it adds:
 
 Ledger lines, one JSON object each: {"erasure_id", "state": "PENDING"|"COMPLETE"|"ABORTED", "at", "through_event_id", "tombstones": [hex], "counts": {...}}. A replay's COMPLETE adds "replay": true.
 Tombstone: HMAC-SHA256 of "<entity_type>|<entity_id>" under a key held apart from the ledger, because application ids are small numbers a plain hash would give away.
+A source message gets one too, as entity type "gmail.message". Ids can't stop a redelivery: the extractor would give the same mail a new application id.
 """
 
 import hashlib
@@ -23,7 +24,11 @@ from goal_erasure import ALLOWED_TABLES, WORLD_TABLES, Refused
 
 OWNER_TABLES = ("goal_trace", "goal", "tasks", "drafts") + WORLD_TABLES
 # Sources of what the World Model derives. Erased only when the owner decides so: decision 1 in PROD-DATA-MIGRATION.md.
-SOURCE_TABLES = ("career_events", "job_applications", "companies")
+# The recovered PROD career schema also has people and career_activities, which hold personal text. Children first.
+SOURCE_TABLES = ("career_activities", "career_events", "job_applications", "people", "companies")
+
+
+MESSAGE = "gmail.message"
 
 
 def tombstone(entity_type, entity_id, key):
@@ -89,6 +94,8 @@ def _tombstones(conn, tables, key):
         found |= {("career.application", t) for (t,) in conn.execute("SELECT target_id FROM drafts WHERE target_type='career.application'")}
     if "job_applications" in tables:
         found |= {("career.application", i) for (i,) in conn.execute("SELECT id FROM job_applications")}
+    if "career_activities" in tables:
+        found |= {(MESSAGE, m) for (m,) in conn.execute("SELECT source_message_id FROM career_activities WHERE source_message_id IS NOT NULL")}
     return sorted(tombstone(a, b, key) for a, b in found)
 
 
@@ -106,6 +113,13 @@ def _delete(conn, tables, source_too):
     if "sqlite_sequence" in tables:
         conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('goal', 'goal_trace') OR name LIKE 'world_%'")
     return counts
+
+
+def message_erased(ledger, key, message_id):
+    """For a connector, before it ingests a source item. True means skip it, and so does anything the ledger can't answer: an open or unreadable ledger raises Refused."""
+    if ledger.unfinished():
+        raise Refused("erasure_in_progress")
+    return tombstone(MESSAGE, message_id, key) in {t for e in ledger.complete() for t in e.get("tombstones", [])}
 
 
 def rows_left(db):

@@ -3,8 +3,10 @@
     python -B integrations/hermes/proposals/goal-forget-v0.1/test_core_erasure.py
 """
 
+import ast
 import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -79,6 +81,96 @@ class Base(unittest.TestCase):
     def erase(self, **kw):
         kw.setdefault("allow", ALLOW)
         return E.erase_principal(self.db, self.ledger, KEY, self.hold, **kw)
+
+
+def recovered_extractor():
+    """already_processed, exactly as the recovered PROD extractor has it: the extractor's whole memory of what it has seen."""
+    source = (REPO / "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/career_extractor.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "already_processed")
+    scope = {}
+    exec(compile(ast.Module([node], []), "career_extractor", "exec"), scope)
+    return scope["already_processed"]
+
+
+class Redelivery(Base):
+    """A connector is a route back that ids can't close: the same mail arrives again and gets a new application id."""
+    MAIL = "test-only-message-1"
+
+    def setUp(self):
+        super().setUp()
+        schema = (REPO / "integrations/hermes/history/prod/hermes-home/lilith-os/apps/career/init_db.py").read_text(encoding="utf-8")
+        c = sqlite3.connect(self.db)
+        for table in ("people", "career_activities"):
+            c.execute(re.search(r"CREATE TABLE IF NOT EXISTS %s \(.*?\n\);" % table, schema, re.S).group(0))
+        c.execute("INSERT INTO people (name, email) VALUES (?, ?)", (f"{CANARY} recruiter", "test-only@example.invalid"))
+        c.execute("INSERT INTO career_activities (application_id, activity_type, details, source_message_id) VALUES (14, 'email', ?, ?)", (f"{CANARY} details", self.MAIL))
+        c.commit(); c.close()
+
+    def deliver(self, guarded):
+        """What the extractor does with a message: skip it if seen, else make an application and record the message."""
+        c = sqlite3.connect(self.db)
+        try:
+            if recovered_extractor()(c, self.MAIL):
+                return None
+            if guarded and E.message_erased(self.ledger, KEY, self.MAIL):
+                return None
+            new = c.execute("INSERT INTO job_applications (role_title, stage, status) VALUES (?, 'applied', 'open')", (f"{CANARY} role again",)).lastrowid
+            c.execute("INSERT INTO career_activities (application_id, activity_type, source_message_id) VALUES (?, 'email', ?)", (new, self.MAIL))
+            c.commit()
+            return new
+        finally:
+            c.close()
+
+    def test_while_the_activity_exists_the_extractor_skips_the_mail(self):
+        self.assertIsNone(self.deliver(guarded=False))
+
+    def test_finding_erasing_the_source_makes_the_extractor_forget_the_mail(self):
+        self.erase(source_too=True, allow=ALLOW)
+        self.assertIsNotNone(self.deliver(guarded=False))
+
+    def test_finding_the_redelivered_mail_gets_an_id_no_id_tombstone_matches(self):
+        self.erase(source_too=True, allow=ALLOW)
+        new = self.deliver(guarded=False)
+        marks = {t for e in self.ledger.complete() for t in e["tombstones"]}
+        self.assertNotIn(E.tombstone("career.application", new, KEY), marks)
+
+    def test_a_message_tombstone_stops_the_redelivery(self):
+        self.erase(source_too=True, allow=ALLOW)
+        self.assertIsNone(self.deliver(guarded=True))
+        c = sqlite3.connect(self.db)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM job_applications").fetchone()[0], 0)
+        c.close()
+
+    def test_a_new_mail_still_arrives(self):
+        self.erase(source_too=True, allow=ALLOW)
+        self.assertFalse(E.message_erased(self.ledger, KEY, "test-only-message-2"))
+
+    def test_the_message_id_is_not_in_the_ledger(self):
+        self.erase(source_too=True, allow=ALLOW)
+        self.assertNotIn(self.MAIL, self.ledger.path.read_text(encoding="utf-8"))
+
+    def test_an_open_or_unreadable_ledger_stops_ingest(self):
+        self.ledger.append({"erasure_id": "er.x", "state": "PENDING", "at": 1, "through_event_id": 0, "tombstones": [], "counts": {}})
+        with self.assertRaises(Refused):
+            E.message_erased(self.ledger, KEY, self.MAIL)
+        self.ledger.path.write_text("not json\n", encoding="utf-8")
+        with self.assertRaises(Refused):
+            E.message_erased(self.ledger, KEY, self.MAIL)
+
+    def test_people_and_activities_leave_the_file(self):
+        self.erase(source_too=True, allow=ALLOW)
+        self.assertTrue(E.text_gone(self.db, [CANARY, "test-only@example.invalid"]))
+
+    def test_a_restored_backup_keeps_the_mail_erased(self):
+        backup = self.tmp / "backup.db"
+        shutil.copy2(self.db, backup)
+        taken = time.time()
+        time.sleep(0.01)
+        self.erase(source_too=True, allow=ALLOW)
+        E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, taken, source_too=True, allow=ALLOW)
+        shutil.copy2(backup, self.db)
+        self.assertIsNone(self.deliver(guarded=True))
 
 
 class Coverage(Base):
