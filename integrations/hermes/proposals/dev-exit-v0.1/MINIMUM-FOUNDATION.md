@@ -2,7 +2,7 @@
 
 Classifies A1 to A39 from `DEV-TO-PROD-READINESS.md`, which stays the source of truth. **Nothing is waived:** "defer" appears only where the checklist already allows it, and each needs a signature. PROD facts date from the audit of 2026-10-27.
 
-**As of 2026-10-31, later in the day:** p1 owner-accepted and #304 merged; e1 sealed, not installed. #308 must not merge: it simulates `DEPLOY_REQUIRED`. #309 replaces it, awaiting approval. **0 of 39 are fully done: 11 are partial, 2 are proposed and awaiting signature, and 26 are open.**
+**As of 2026-10-31, end of day:** e1 runs on DEV, seven lanes in shadow, PASS, awaiting owner acceptance. #309 merged as `59aff47`; #308 was never merged. **0 of 39 are fully done: 12 are partial, 2 are proposed and awaiting signature, and 25 are open.** A1 and A5 become done only on the owner's acceptance of e1, plus R-11 for A1.
 
 ## Classes
 
@@ -21,16 +21,16 @@ An item can have more than one. The first is what blocks it now.
 
 | # | Item | Classes | Exact state | Blocker |
 |---|---|---|---|---|
-| A1 | Cross-lane regression | CUT | **PARTIAL.** Source 24/24, seven lanes; host six | e1 window |
+| A1 | Cross-lane regression | CUT | **PARTIAL.** Host: seven lanes, 10 turns. Source 24/24 | owner acceptance, R-11 |
 | A2 | Populated-store test | CUT, SNAP | **PARTIAL.** Source only | rehearsal |
 | A3 | Model in the loop | CUT, LANE | OPEN | budget approval |
 | A4 | Lane modes | OWNER, CUT | OPEN; table proposed | signature, after A3 and A8 |
-| A5 | Planning, Ethics blockers | CUT | **PARTIAL.** Planning shadow accepted; Ethics E-1 to E-5 fixed in source | e1 window |
+| A5 | Planning, Ethics blockers | CUT | **PARTIAL.** Planning accepted; Ethics E-1 to E-5 shown on a host in shadow | owner acceptance |
 | A6 | G3 title, negative control | LANE, DEFER | OPEN | only needed for goal creation, R-2 |
 | A7 | Capability inventory | CUT, SNAP | PARTIAL: matrix | signed DISABLE rows, rehearsal |
-| A8 | Persona and identity | CUT, SNAP | OPEN | baseline on the unchanged copy |
+| A8 | Persona and identity | CUT, SNAP | OPEN; prompts fixed in `IDENTITY-PROMPTS.md`, for owner review | baseline on the unchanged copy; R10 decision |
 | A9 | Hermes reproducible | CUT | PARTIAL: 175 of 176 | withheld file, recovery PRs |
-| A10 | `app.py` gap | CUT, SNAP | OPEN | `519b309` to main review |
+| A10 | `app.py` gap | CUT, SNAP | **PARTIAL.** `CORE-API-DELTA.md`: no existing table changes | real file digest on the copy |
 | A11 | Canonical memory | CUT, SNAP | OPEN | rehearsal |
 | A12 | L04, L18 states | OWNER | OPEN | decision |
 | A13 | Owner-memory authority | OWNER, DEFER | OPEN | signed "off at first", R-5 |
@@ -65,7 +65,7 @@ An item can have more than one. The first is what blocks it now.
 
 | # | Workstream | Done means | Items | State |
 |---|---|---|---|---|
-| 1 | Shadow integration evidence | e1 accepted on a host | A1, A5 | **blocked on approving #309** |
+| 1 | Shadow integration evidence | e1 accepted on a host | A1, A5 | **PASS, awaiting owner acceptance** |
 | 2 | Model in the loop | 10-request window read, per the plan in `EXECUTION-ROADMAP.md`, budget approved | A3, A23 | not run |
 | 3 | Populated-store compatibility | Synthetic generator of PROD's shape, then the copy | A2 | source only |
 | 4 | Security and Privacy | Combined order in `AUTH-DEPLOYMENT-DESIGN.md`, steps 1 to 10 | A14 to A16, A19 to A21 | candidates |
