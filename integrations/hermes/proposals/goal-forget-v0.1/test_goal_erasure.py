@@ -5,12 +5,14 @@
 
 import importlib.util
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
@@ -214,6 +216,59 @@ class Erasure(unittest.TestCase):
         with self.assertRaises(E.Refused):
             E.erase_world_model(db)
         self.assertFalse(E.world_rows_zero(db))
+
+
+class Retention(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="retention-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.db = self.tmp / "core.db"
+        self.hold = self.tmp / "hold"
+        conn = sqlite3.connect(self.db)
+        conn.executescript("""
+            CREATE TABLE goal (goal_id TEXT PRIMARY KEY, lifecycle_state TEXT, updated_at TEXT);
+            CREATE TABLE goal_trace (goal_id TEXT);
+            CREATE TABLE tasks (task_id TEXT PRIMARY KEY, status TEXT, updated_at INTEGER);
+            CREATE TABLE drafts (draft_id TEXT PRIMARY KEY, status TEXT, updated_at INTEGER);
+            CREATE TABLE world_belief_evidence (id INTEGER PRIMARY KEY, belief_key TEXT, created_at TEXT, superseded INTEGER);
+        """)
+        for task_id, status, at in (("old-done", "succeeded", 1), ("old-open", "running", 1), ("new-done", "succeeded", 4102444800)):
+            conn.execute("INSERT INTO tasks VALUES (?,?,?)", (task_id, status, at))
+        for draft_id, status, at in (("old-gone", "discarded", 1), ("old-live", "created", 1)):
+            conn.execute("INSERT INTO drafts VALUES (?,?,?)", (draft_id, status, at))
+        conn.commit(); conn.close()
+
+    def rows(self, table):
+        conn = sqlite3.connect(self.db)
+        try:
+            return sorted(r[0] for r in conn.execute(f"SELECT {'task_id' if table == 'tasks' else 'draft_id'} FROM {table}"))
+        finally:
+            conn.close()
+
+    def test_tasks_only_go_when_their_age_was_decided(self):
+        with mock.patch.object(E, "prune_superseded_evidence", return_value=0):
+            result = E.retention_step(self.db, self.hold)
+            self.assertEqual(result["tasks"], "not_decided")
+            self.assertEqual(self.rows("tasks"), ["new-done", "old-done", "old-open"])
+            self.assertEqual(E.retention_step(self.db, self.hold, task_days=90)["tasks"], 1)
+        self.assertEqual(self.rows("tasks"), ["new-done", "old-open"])
+
+    def test_discarded_drafts_go_and_live_ones_never_age_out(self):
+        with mock.patch.object(E, "prune_superseded_evidence", return_value=0):
+            self.assertEqual(E.retention_step(self.db, self.hold)["drafts"], 1)
+        self.assertEqual(self.rows("drafts"), ["old-live"])
+
+    def test_a_hold_stops_every_part(self):
+        self.hold.write_text("TEST_ONLY", encoding="utf-8")
+        self.assertEqual(E.retention_step(self.db, self.hold, task_days=1), {"result": "held"})
+        self.assertEqual(self.rows("tasks"), ["new-done", "old-done", "old-open"])
+        self.assertEqual(self.rows("drafts"), ["old-gone", "old-live"])
+
+    def test_an_unreadable_hold_counts_as_a_hold(self):
+        class Broken:
+            def exists(self):
+                raise OSError("TEST_ONLY")
+        self.assertEqual(E.retention_step(self.db, Broken(), task_days=1), {"result": "held"})
 
 
 if __name__ == "__main__":

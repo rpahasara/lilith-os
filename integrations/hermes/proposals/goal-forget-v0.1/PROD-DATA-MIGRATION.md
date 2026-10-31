@@ -26,7 +26,7 @@ Prepared without PROD access. Counts come from the read-only audit of 2026-10-27
 
 Each erase runs in one transaction, under the FORGET lock, refuses unknown tables, honours a hold, and is checked by a separate zero-rows read. `secure_delete` and `VACUUM` remove the text from the file.
 
-**One call:** `core_erasure.erase_principal` covers goals, tasks, drafts and the World Model in one transaction, writes `PENDING` to the ledger first, and rolls everything back on any failure. Its 18 tests run on the real `app.py`.
+**One call:** `core_erasure.erase_principal` covers goals, tasks, drafts and the World Model in one transaction, writes `PENDING` to the ledger first, and rolls everything back on any failure. A crash after the commit is finished by re-running, with the same id and tombstones: until then ingest stays stopped and restores are refused. Its 24 tests run on the real `app.py`.
 
 **The candidates refuse PROD's schema today.** `ALLOWED_TABLES` lacks PROD's tables, on purpose. Its list must come from the rehearsal, not from this document.
 
@@ -37,7 +37,7 @@ Each erase runs in one transaction, under the FORGET lock, refuses unknown table
 | World Model rebuilt from a **new** `career_events` row | **The cursor doesn't stop this.** Any new event for an application re-reads `job_applications` and rebuilds the belief. Proven on the real `app.py`. Needs tombstones in the ingest, or the source erased too | candidate, `core_erasure.py` plus the ingest guard in the implementation PR |
 | World Model rebuilt by `world_ingest_career` | The same: it reads every application | same |
 | Re-ingest of old events after a cursor reset or restore | The ledger's `through_event_id` floors the cursor | same |
-| Backup restore | Restore on a quarantine copy, replay the ledger, verify zero rows, and only then go live. An unfinished or unreadable ledger refuses | candidate, tested |
+| Backup restore | Restore on a quarantine copy, replay the ledger, verify zero rows, and only then go live. An unfinished or unreadable ledger refuses, and so does a copy of unknown age that holds rows. A backup newer than the erasure is left alone, because replaying it would destroy newer data. The whole cycle passes on the real `app.py` with the ingest guard: both rebuild routes stay shut, and a new application still ingests | candidate, tested |
 | Snapshots, including the 2026-10-27 preservation snapshots | **A snapshot holds everything**, so FORGET is incomplete while one exists. `snapshot_report` names each one taken before an erasure, and deletes nothing. The rule needs an explicit owner policy | **owner decision** |
 | Watchers and connectors re-delivering the same item | Source-level tombstones by content id | **not designed** |
 | Hermes session history and learning | Existing FORGET scope | exists on DEV only |
@@ -45,7 +45,7 @@ Each erase runs in one transaction, under the FORGET lock, refuses unknown table
 
 ## Owner decisions
 
-1. Does principal FORGET erase `career_events`, `job_applications` and `companies`, or only what is derived from them? **Keeping them keeps the text in the file:** a test proves it. Tombstones then stop the beliefs returning, but the source data stays.
+1. Does principal FORGET erase `career_events`, `job_applications` and `companies`, or only what is derived from them? **Keeping them keeps the text in the file:** a test proves it. Tombstones then stop the beliefs returning, but the source data stays. **The recovered PROD career schema also has `people` and `career_activities`,** which hold personal text and aren't in this scope yet. `ALLOWED_TABLES` refuses them on purpose, so the decision must name them too.
 2. How long do snapshots stay, and do they count against FORGET?
 3. Do erased items need tombstones, which keep a small hash after deletion?
 4. Retention age for completed tasks.

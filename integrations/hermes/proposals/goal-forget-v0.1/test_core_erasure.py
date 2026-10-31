@@ -9,13 +9,15 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(REPO / "services" / "core-api"))
+sys.path.insert(0, os.getenv("CORE_API_DIR", str(REPO / "services" / "core-api")))   # CORE_API_DIR: run against the implementation branch, which has the ingest guard
 
 import app  # noqa: E402
 import core_erasure as E  # noqa: E402
@@ -172,6 +174,36 @@ class RoutesBack(Base):
         self.assertEqual(E.tombstone("career.application", "14", b"TEST_ONLY-vector-key-0123456789abcdef"), VECTOR)
 
 
+class Recovery(Base):
+    def crash_after_commit(self):
+        """The rows are gone and the process dies before COMPLETE reaches the ledger."""
+        real = E.Ledger.append
+        def fail_on_complete(ledger, entry):
+            if entry["state"] == "COMPLETE":
+                raise OSError("TEST_ONLY crash")
+            real(ledger, entry)
+        with mock.patch.object(E.Ledger, "append", fail_on_complete):
+            with self.assertRaises(OSError):
+                self.erase()
+
+    def test_finding_a_crash_before_complete_can_be_finished(self):
+        self.crash_after_commit()
+        self.assertEqual(len(self.ledger.unfinished()), 1)
+        marks = self.ledger.entries()[0]["tombstones"]
+        self.assertTrue(marks)
+        self.assertEqual(self.erase()["result"], "erased")
+        self.assertEqual(self.ledger.unfinished(), [])
+        self.assertEqual(self.ledger.complete()[-1]["tombstones"], marks)
+        self.assertEqual(self.ledger.complete()[-1]["erasure_id"], self.ledger.entries()[0]["erasure_id"])
+
+    def test_a_failed_resume_never_closes_the_open_erasure(self):
+        self.crash_after_commit()
+        with mock.patch.object(E, "_delete", side_effect=sqlite3.OperationalError("TEST_ONLY")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.erase()
+        self.assertEqual(len(self.ledger.unfinished()), 1)
+
+
 class Restore(Base):
     def backup(self):
         path = self.tmp / "backup.db"
@@ -179,31 +211,96 @@ class Restore(Base):
         return path
 
     def test_a_backup_from_before_the_erasure_needs_a_replay(self):
-        backup = self.backup()
+        backup, taken = self.backup(), time.time()
+        time.sleep(0.01)
         self.erase()
-        self.assertEqual(E.restore_decision(backup, self.ledger), "REPLAY")
+        self.assertEqual(E.restore_decision(backup, self.ledger, taken), "REPLAY")
 
     def test_replay_runs_on_a_quarantine_copy_and_clears_it(self):
-        backup = self.backup()
+        backup, taken = self.backup(), time.time()
+        time.sleep(0.01)
         self.erase()
-        result = E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, allow=ALLOW)
+        result = E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, taken, allow=ALLOW)
         self.assertEqual(result["result"], "erased")
         self.assertEqual(set(E.rows_left(backup).values()), {0})
-        self.assertEqual(E.restore_decision(backup, self.ledger), "CLEAN")
+        self.assertEqual(E.restore_decision(backup, self.ledger, taken), "CLEAN")
 
     def test_replay_refuses_the_live_file(self):
         with self.assertRaises(Refused):
-            E.replay_after_restore(self.db, self.db, self.ledger, KEY, self.hold, allow=ALLOW)
+            E.replay_after_restore(self.db, self.db, self.ledger, KEY, self.hold, time.time(), allow=ALLOW)
 
     def test_an_unfinished_or_unreadable_ledger_refuses_a_restore(self):
         backup = self.backup()
         self.ledger.append({"erasure_id": "er.x", "state": "PENDING", "at": 1, "through_event_id": 0, "tombstones": [], "counts": {}})
-        self.assertEqual(E.restore_decision(backup, self.ledger), "REFUSE")
+        self.assertEqual(E.restore_decision(backup, self.ledger, time.time()), "REFUSE")
         self.ledger.path.write_text("{not json\n", encoding="utf-8")
-        self.assertEqual(E.restore_decision(backup, self.ledger), "REFUSE")
+        self.assertEqual(E.restore_decision(backup, self.ledger, time.time()), "REFUSE")
 
     def test_no_erasure_means_a_backup_is_clean(self):
-        self.assertEqual(E.restore_decision(self.backup(), self.ledger), "CLEAN")
+        self.assertEqual(E.restore_decision(self.backup(), self.ledger, None), "CLEAN")
+
+    def new_goal(self, goal_id="g.test-only-after"):
+        conn = app._goals_db()
+        app._create_goal_impl(conn, {"type": "test_only.synthetic", "title": "TEST_ONLY after the erasure", "source": "SYSTEM_MAINTENANCE", "owner": "user", "priority": "HIGH", "goalId": goal_id})
+        conn.close()
+
+    def test_finding_a_backup_taken_after_the_erasure_keeps_its_newer_data(self):
+        self.erase()
+        time.sleep(0.01)
+        self.new_goal()
+        backup, taken = self.backup(), time.time()
+        self.assertEqual(E.restore_decision(backup, self.ledger, taken), "CLEAN")
+        self.assertEqual(E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, taken, allow=ALLOW)["result"], "clean")
+        self.assertEqual(E.rows_left(backup)["goal"], 1)
+
+    def test_a_backup_of_unknown_age_is_refused_while_it_holds_rows(self):
+        backup = self.backup()
+        self.erase()
+        self.assertEqual(E.restore_decision(backup, self.ledger, None), "REFUSE")
+        with self.assertRaises(Refused):
+            E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, None, allow=ALLOW)
+
+    def test_finding_a_replay_does_not_move_the_erasure_boundary(self):
+        old, old_taken = self.backup(), time.time()
+        time.sleep(0.01)
+        self.erase()
+        time.sleep(0.01)
+        self.new_goal()
+        newer = self.tmp / "newer.db"
+        shutil.copy2(self.db, newer)
+        newer_taken = time.time()
+        time.sleep(0.01)
+        E.replay_after_restore(old, self.db, self.ledger, KEY, self.hold, old_taken, allow=ALLOW)
+        self.assertEqual(E.restore_decision(newer, self.ledger, newer_taken), "CLEAN")
+        self.assertEqual(E.snapshot_report({"newer": newer_taken}, self.ledger), {"newer": "AFTER_ERASURE"})
+
+    @unittest.skipUnless(hasattr(app, "_world_erasure_guard"), "needs the ingest guard from the implementation branch")
+    def test_the_whole_cycle_on_a_restored_backup(self):
+        """Backup, erase, restore on a quarantine copy, replay, go live, then the routes back. The source stays, so the guard is what holds."""
+        key = self.tmp / "key"
+        key.write_bytes(KEY)
+        env = {"LILITH_WORLD_ERASURE_LEDGER": str(self.ledger.path), "LILITH_WORLD_ERASURE_KEY": str(key)}
+        with mock.patch.dict(os.environ, env):
+            backup, taken = self.backup(), time.time()
+            time.sleep(0.01)
+            self.erase()
+            self.assertEqual(self.beliefs(), 0)
+            app._world_schema_ready = False
+            self.assertEqual(E.replay_after_restore(backup, self.db, self.ledger, KEY, self.hold, taken, allow=ALLOW)["result"], "erased")
+            shutil.copy2(backup, self.db)
+            self.assertEqual(set(E.rows_left(self.db).values()), {0})
+            self.event()
+            app.world_ingest_from_events()
+            app.world_ingest_career()
+            self.assertEqual(self.beliefs(), 0)
+            c = sqlite3.connect(self.db)
+            c.execute("INSERT INTO job_applications VALUES (15, 'TEST_ONLY new role', 'applied', 'open', '2026-10-02', 'acct', 1)")
+            c.execute("INSERT INTO career_events (entity_type, entity_id, source, confidence, created_at) VALUES ('job_application', 15, 'test', 0.9, '2026-10-02')")
+            c.commit(); c.close()
+            app.world_ingest_from_events()
+            c = sqlite3.connect(self.db)
+            self.assertEqual({r[0] for r in c.execute("SELECT DISTINCT entity_id FROM world_belief")}, {"15"})
+            c.close()
 
     def test_a_snapshot_from_before_an_erasure_is_named_and_nothing_is_deleted(self):
         self.erase()

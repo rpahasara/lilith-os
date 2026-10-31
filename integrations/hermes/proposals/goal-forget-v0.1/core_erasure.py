@@ -6,7 +6,7 @@ Builds on goal_erasure.py. Pure stdlib. Fail-closed. What it adds:
 - An erasure ledger outside the database, because the database is what a restore brings back. It holds keyed hashes and counts, never content.
 - A restore gate: a backup is replayed through the ledger on a quarantine copy, or it is refused.
 
-Ledger lines, one JSON object each: {"erasure_id", "state": "PENDING"|"COMPLETE"|"ABORTED", "at", "through_event_id", "tombstones": [hex], "counts": {...}}.
+Ledger lines, one JSON object each: {"erasure_id", "state": "PENDING"|"COMPLETE"|"ABORTED", "at", "through_event_id", "tombstones": [hex], "counts": {...}}. A replay's COMPLETE adds "replay": true.
 Tombstone: HMAC-SHA256 of "<entity_type>|<entity_id>" under a key held apart from the ledger, because application ids are small numbers a plain hash would give away.
 """
 
@@ -55,6 +55,10 @@ class Ledger:
 
     def complete(self):
         return [e for e in self.entries() if e.get("state") == "COMPLETE"]
+
+    def boundary(self):
+        """When the latest real erasure finished. A replay re-applies an old erasure to an old copy, so it must not move this: a newer backup would look older than it is."""
+        return max((e["at"] for e in self.complete() if not e.get("replay")), default=None)
 
     def unfinished(self):
         entries = self.entries()
@@ -121,29 +125,39 @@ def _hold(hold_path):
         return True
 
 
-def erase_principal(db, ledger, key, hold_path, source_too=False, allow=()):
-    """Everything in one transaction, or nothing. Ledger PENDING goes to disk before any row does, so a crash leaves a trace, and a re-run finishes the job."""
+def _open_erasure(ledger):
+    """An erasure that never reached COMPLETE: its ids, tombstones and event floor. A crash after the commit leaves its rows gone, so only the ledger still knows them."""
+    ids = ledger.unfinished()
+    lines = [e for e in ledger.entries() if e.get("erasure_id") in ids]
+    return ids, {t for e in lines for t in e.get("tombstones", [])}, max((e.get("through_event_id", 0) for e in lines), default=0)
+
+
+def erase_principal(db, ledger, key, hold_path, source_too=False, allow=(), replay=False):
+    """Everything in one transaction, or nothing. Ledger PENDING goes to disk before any row does, so a crash leaves a trace, and a re-run finishes that same erasure."""
     if _hold(hold_path):
         return {"result": "held"}
     if len(key) < 32:
         raise Refused("weak_key")
     conn = _open(db, allow)
-    eid = "er." + uuid.uuid4().hex
+    resumed, old_marks, old_through = _open_erasure(ledger)
+    eid = resumed[0] if resumed else "er." + uuid.uuid4().hex
     try:
         try:
             conn.execute("BEGIN IMMEDIATE")
         except sqlite3.OperationalError:
             raise Refused("locked")
         tables = _tables(conn)
-        marks, through = _tombstones(conn, tables, key), _through(conn, tables)
-        ledger.append({"erasure_id": eid, "state": "PENDING", "at": time.time(), "through_event_id": through, "tombstones": marks, "counts": {}})
+        marks, through = sorted(set(_tombstones(conn, tables, key)) | old_marks), max(_through(conn, tables), old_through)
+        if not resumed:
+            ledger.append({"erasure_id": eid, "state": "PENDING", "at": time.time(), "through_event_id": through, "tombstones": marks, "counts": {}})
         try:
             counts = _delete(conn, tables, source_too)
             if any(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in OWNER_TABLES if t in tables):
                 raise Refused("not_empty")
         except Exception:
             conn.execute("ROLLBACK")
-            ledger.append({"erasure_id": eid, "state": "ABORTED", "at": time.time(), "through_event_id": through, "tombstones": [], "counts": {}})
+            if not resumed:     # a resumed erasure stays open: its first run may already have committed, and its tombstones must survive
+                ledger.append({"erasure_id": eid, "state": "ABORTED", "at": time.time(), "through_event_id": through, "tombstones": [], "counts": {}})
             raise
         conn.execute("COMMIT")
         conn.execute("VACUUM")
@@ -152,35 +166,46 @@ def erase_principal(db, ledger, key, hold_path, source_too=False, allow=()):
     left = rows_left(db)
     if any(left.values()):
         raise Refused("rows_remain")
-    ledger.append({"erasure_id": eid, "state": "COMPLETE", "at": time.time(), "through_event_id": through, "tombstones": marks, "counts": counts})
+    done = {"state": "COMPLETE", "at": time.time(), "through_event_id": through, "tombstones": marks, "counts": counts}
+    if replay:
+        done["replay"] = True
+    for finished in resumed or [eid]:
+        ledger.append({"erasure_id": finished, **done})
     return {"result": "erased", "erasure_id": eid, "counts": counts, "rows_left": left}
 
 
-def restore_decision(backup_db, ledger):
-    """CLEAN: nothing has been erased since, or the copy holds no owner rows. REPLAY: usable only after replay_after_restore. REFUSE: the ledger can't be trusted."""
+def restore_decision(backup_db, ledger, taken_at):
+    """CLEAN: nothing to remove. REPLAY: usable only after replay_after_restore. REFUSE: the ledger can't be trusted, or a copy holding rows has no known age.
+
+    The age matters: rows in a backup taken after the latest erasure are newer data, not erased data."""
     try:
-        erasures = ledger.complete()
+        latest = ledger.boundary()
         if ledger.unfinished():
             return "REFUSE"
     except Refused:
         return "REFUSE"
-    if not erasures or not any(rows_left(backup_db).values()):
+    if latest is None or not any(rows_left(backup_db).values()):
         return "CLEAN"
-    return "REPLAY"
+    if taken_at is None:
+        return "REFUSE"
+    return "CLEAN" if taken_at > latest else "REPLAY"
 
 
-def replay_after_restore(quarantine_db, live_db, ledger, key, hold_path, source_too=False, allow=()):
-    """Runs on a quarantine copy, never on the live file. The copy goes live only after this returns with zero rows."""
+def replay_after_restore(quarantine_db, live_db, ledger, key, hold_path, taken_at, source_too=False, allow=()):
+    """Runs on a quarantine copy, never on the live file. The copy goes live only after this returns with zero rows, or reports it clean."""
     if Path(quarantine_db).resolve() == Path(live_db).resolve():
         raise Refused("not_a_quarantine_copy")
-    if restore_decision(quarantine_db, ledger) == "REFUSE":
+    decision = restore_decision(quarantine_db, ledger, taken_at)
+    if decision == "REFUSE":
         raise Refused("ledger_refused")
-    return erase_principal(quarantine_db, ledger, key, hold_path, source_too=source_too, allow=allow)
+    if decision == "CLEAN":
+        return {"result": "clean"}
+    return erase_principal(quarantine_db, ledger, key, hold_path, source_too=source_too, allow=allow, replay=True)
 
 
 def snapshot_report(snapshots, ledger):
     """Names each snapshot taken before the latest erasure. It only reports: deleting a snapshot is an owner decision, and this code deletes nothing."""
-    latest = max((e["at"] for e in ledger.complete()), default=None)
+    latest = ledger.boundary()
     return {name: ("PREDATES_ERASURE" if latest is not None and taken < latest else "AFTER_ERASURE") for name, taken in snapshots.items()}
 
 

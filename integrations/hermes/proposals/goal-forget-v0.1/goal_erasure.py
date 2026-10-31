@@ -102,6 +102,37 @@ def prune_discarded_drafts(db, days=30, now=None):
         conn.close()
 
 
+TASK_TERMINAL = ("succeeded", "partial", "failed", "cancelled")      # _TERMINAL_STATUSES in app.py
+
+
+def prune_terminal_tasks(db, days, now=None):
+    """Retention for finished tasks. There is no default age: that is an owner decision, so a caller must pass one."""
+    cutoff = int(((now or datetime.now(timezone.utc)) - timedelta(days=days)).timestamp())
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute(f"DELETE FROM tasks WHERE status IN ({','.join('?' * len(TASK_TERMINAL))}) AND updated_at < ?", (*TASK_TERMINAL, cutoff)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
+def retention_step(db, hold_path, goal_days=30, draft_days=30, evidence_days=30, task_days=None):
+    """The daily call. A FORGET hold stops all of it, and an unreadable hold counts as a hold. Tasks stay until their age is decided."""
+    try:
+        if hold_path.exists():
+            return {"result": "held"}
+    except OSError:
+        return {"result": "held"}
+    done = {"result": "pruned", "goals": prune_terminal_goals(db, goal_days), "drafts": prune_discarded_drafts(db, draft_days), "evidence": prune_superseded_evidence(db, evidence_days)}
+    done["tasks"] = prune_terminal_tasks(db, task_days) if task_days is not None else "not_decided"
+    return done
+
+
 WORLD_TABLES = ("world_belief", "world_belief_evidence", "world_belief_conflict", "world_belief_trace", "world_working_seed")
 
 
