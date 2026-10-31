@@ -1,6 +1,8 @@
-# Planning shadow on DEV, 2026-10-31: PASS, awaiting owner acceptance
+# Planning shadow on DEV, 2026-10-31: PASS, accepted by the owner
 
-**The owner has not yet accepted this result.** Merging this record does not accept it.
+**The owner accepted p1 as PASS on 2026-10-31, within its demonstrated shadow-only scope.** The acceptance covers the verified integration, bounded Core API reads, metadata-only decision records, zero unexpected writes, provider isolation and a stable DEV runtime.
+
+**It does not accept** Planning Live, autonomous plan execution, reasoning quality on real data, advanced plan generation or execution, or failure-triggered live rollback.
 
 **Result: every step passed, once, with no retry and no rollback.** The driver reported `DRIVE_COMPLETE`. DEV stays on p1 with World Model, Goals, Reasoning, Workspace, Motivation and Planning in shadow on `lilith_os` only. Every other lane is off.
 
@@ -16,7 +18,7 @@
 | Package | manifest `fad6cfe5...`, bundle `fcf99739...`; all 30 files verified, and merged source equal to the bundle pins, before the run |
 | Start | m1, gateway 392210, gate 392817, budget 3/5, ledger 29 lines, DB `88b76a79...` |
 
-**How it ran:** the runbook said foreground. The driver ran detached instead, so a tool timeout could not stop it partway. Nothing else about the sequence changed, and each step ran once.
+**How it ran:** the runbook said foreground. The driver ran detached instead, so a tool timeout could not stop it partway. Nothing else about the sequence changed, and each step ran once. A later review of this difference is in `integrations/hermes/proposals/ethics-shadow-v0.1/DRIVER-REVIEW.md`; it found no effect on this result.
 
 **A manifest detail:** `OWNER-APPROVAL.md` doesn't state the digest. The owner's approval gave its first 8 characters, and the computed digest matches them and the full value recorded when the package was sealed.
 
@@ -85,7 +87,7 @@ The m1 and p1 releases are intact against their manifests, and `/root/p1-install
 - **Model behaviour.** No model saw any turn, so nothing here says a reply would be better, or even coherent, with these lanes.
 - **Planning Live,** and any plan reaching the reply.
 - **Real wording.** Only 6 synthetic turns ran, with no real traffic.
-- **Failure-triggered rollback,** as above.
+- **Failure-triggered rollback,** as above: it was simulated, not exercised live.
 - **A goal added while running.** The verifier checks at start only.
 
 ## Known issues, not blocking
