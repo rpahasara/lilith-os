@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy for the durable Cognitive Core Task Store — collection
@@ -37,7 +38,7 @@ async function forward(
   try {
     const upstream = await fetch(url, {
       method,
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers: { "content-type": "application/json", accept: "application/json", ...coreApiHeaders(true) },
       body: init?.body,
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy to the private LILITH backend.
@@ -65,7 +66,7 @@ export async function GET(
 
   try {
     const upstream = await fetch(url, {
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...coreApiHeaders() },
       cache: "no-store",
       // 10s guard so a hung tunnel doesn't stall the request forever.
       signal: AbortSignal.timeout(10_000),
