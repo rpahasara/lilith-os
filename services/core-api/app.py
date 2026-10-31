@@ -1,3 +1,4 @@
+import contextvars as _contextvars
 import html
 import json
 import re
@@ -1525,6 +1526,14 @@ def _capture_store():
     return ConversationCaptureStore(_capture_db_path(), privacy_gate=_capture_privacy_gate, provisioned_only=True)
 
 
+_request_peer = _contextvars.ContextVar("lilith_request_peer", default=None)
+
+
+def _trusted_local_caller() -> bool:
+    """The on-host router. Off by default. A token adds nothing against a process that already runs as the same user and can read the database itself, and IAP arrives from its own range, never loopback."""
+    return _os.getenv("LILITH_OS_TRUST_LOOPBACK", "") == "1" and _request_peer.get() in ("127.0.0.1", "::1")
+
+
 def _write_auth_state() -> str:
     """enforced, open-acknowledged or refused. Anything unset or unknown is refused: a lost setting must not open writes."""
     mode = _os.getenv("LILITH_OS_WRITE_AUTH", "")
@@ -1540,6 +1549,8 @@ def _require_write_auth(credential) -> None:
         return
     if state == "refused":
         raise HTTPException(status_code=503, detail="WRITE_AUTH_UNCONFIGURED")
+    if _trusted_local_caller():
+        return
     if not isinstance(credential, str) or not _hmac.compare_digest(
         credential.encode("utf-8"), _os.getenv("LILITH_OS_WRITE_TOKEN", "").encode("utf-8")
     ):
@@ -1558,7 +1569,7 @@ def _read_auth_state() -> str:
     return "open-acknowledged" if mode == "open-acknowledged" else "refused"
 
 
-def _read_auth_decision(path, credential):
+def _read_auth_decision(path, credential, trust_local=True):
     """None to allow, or (status, detail). Pure, so it is tested without an HTTP client."""
     if path in _PUBLIC_READS:
         return None
@@ -1567,6 +1578,8 @@ def _read_auth_decision(path, credential):
         return None
     if state == "refused":
         return 503, "READ_AUTH_UNCONFIGURED"
+    if trust_local and _trusted_local_caller():
+        return None
     if not isinstance(credential, str) or not _hmac.compare_digest(
         credential.encode("utf-8"), _os.getenv("LILITH_OS_READ_TOKEN", "").encode("utf-8")
     ):
@@ -1576,6 +1589,7 @@ def _read_auth_decision(path, credential):
 
 @app.middleware("http")
 async def _owner_read_gate(request, call_next):
+    _request_peer.set(request.client.host if request.client else None)
     if request.method in ("GET", "HEAD"):
         blocked = _read_auth_decision(request.url.path, request.headers.get("x-lilith-os-read"))
         if blocked:
@@ -1650,7 +1664,7 @@ def os_conversation(
         raise HTTPException(status_code=400, detail="message is required")
     if session.startswith(_CAPTURE_PREFIX):
         return _captured_conversation(payload, message, session, x_lilith_os_owner_capture)
-    blocked = _read_auth_decision("/os/conversation", x_lilith_os_read)     # a turn returns owner context and spends the provider budget, so it is an owner read
+    blocked = _read_auth_decision("/os/conversation", x_lilith_os_read, trust_local=False)     # a turn returns owner context and spends the provider budget, so it is an owner read
     if blocked:
         raise HTTPException(status_code=blocked[0], detail=blocked[1])
     return _relay_conversation(message, session)
