@@ -18,6 +18,16 @@ $r = Invoke-G @('compute', 'instances', 'describe', $Vm, "--zone=$Zone", "--proj
 if ($r.Code -ne 0) { Done 'STOPPED vm describe' 2 }
 $i = $r.Text | ConvertFrom-Json
 if (@($i.serviceAccounts | Where-Object { $_ }).Count -or @($i.networkInterfaces)[0].accessConfigs -or ((@($i.networkInterfaces)[0].network -split '/')[-1]) -ne 'lilith-rehearsal') { Done 'STOPPED vm isolation changed' 2 }
+# The corrected rehearsal script replaces the dry run's copy, and the VM must prove it would accept a REAL run, before any real data exists
+foreach ($f in 'guest_rehearsal.sh') {
+    $u = Invoke-G @('compute', 'scp', (Join-Path $Here $f), "${Vm}:/tmp/$f", "--zone=$Zone", "--project=$Project", '--tunnel-through-iap', '--quiet')
+    if ($u.Code -ne 0) { Done "STOPPED copy $f rc $($u.Code)" 2 }
+}
+$m = Invoke-G @('compute', 'ssh', $Vm, "--zone=$Zone", "--project=$Project", '--tunnel-through-iap', '--quiet', '--command=sudo -n mv /tmp/guest_rehearsal.sh /var/tmp/g3/ && sudo -n sed -i "s/\r$//" /var/tmp/g3/guest_rehearsal.sh && sudo -n sha256sum /var/tmp/g3/guest_rehearsal.sh && sudo -n test ! -e /srv/rehearsal/started.REAL && sudo -n umount /mnt/g3-source 2>/dev/null; mountpoint -q /mnt/g3-source || echo READY_FOR_REAL')
+if ($m.Text -notmatch '(?m)^READY_FOR_REAL') { Done 'STOPPED VM not ready' 2 }
+$want = (Get-FileHash (Join-Path $Here 'guest_rehearsal.sh') -Algorithm SHA256).Hash.ToLower()
+$lf = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::ASCII.GetBytes(((Get-Content (Join-Path $Here 'guest_rehearsal.sh') -Raw) -replace "`r`n", "`n")))
+if ($m.Text -notmatch ([Convert]::ToHexString($lf).ToLower())) { Done 'STOPPED script on the VM differs' 2 }
 # The guard lives in the VM and a reboot clears it, so prove it now, before real data exists anywhere near this VM
 $r = Invoke-Guest 'guest_dns_check.sh' $null "$Dir\dns-check.txt"
 if ($r.Text -notmatch '(?m)^DNS_CHECK PASS') { Done 'STOPPED DNS guard not active' 2 }

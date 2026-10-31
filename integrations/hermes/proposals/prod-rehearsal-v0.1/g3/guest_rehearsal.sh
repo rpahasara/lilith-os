@@ -49,8 +49,9 @@ if [ -z "${ROOT}" ]; then
   bash "${IN}/guest_dns_check.sh" | grep -qx 'DNS_CHECK PASS' && echo OK_dns_guard || stop dns_guard_not_active
   [ "$(code -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token)" = 404 ] && echo OK_no_token || stop token_present
 fi
-[ ! -e "${W}/started" ] || stop "already ran: destroy the working tree first"
-mkdir -p "${W}" "${EVID}" "${MNT}" "$(dirname "${LINK}")"; chmod 700 "${W}"; touch "${W}/started"
+[ ! -e "${W}/started.${MODE}" ] || stop "already ran: destroy the working tree first"
+rm -rf "${TREE}" "${EVID}"          # the dry run's synthetic leftovers; each mode starts clean
+mkdir -p "${W}" "${EVID}" "${MNT}" "$(dirname "${LINK}")"; chmod 700 "${W}"; touch "${W}/started.${MODE}"
 
 echo "== R3 source, read-only"
 if [ "${MODE}" = SYNTHETIC ]; then

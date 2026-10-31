@@ -9,6 +9,12 @@ Stages R3 to R9 of `prod-rehearsal-v0.1/REHEARSAL-RUNBOOK.md`, as two approvals,
 
 **G3-B refuses** unless G3-A passed, `DECISIONS-SIGNED.txt` exists, the bindings are still gone, the snapshot id matches, the VM is still isolated, and `guest_dns_check.sh` passes **before the disk is created.** The guest checks again before mounting. A reboot clears the guard.
 
+## G3-A result
+
+**PASS, 2026-11-01.** Deployer bindings removed, owner access confirmed, DNS guard proven, synthetic dry run passed. **The DNS measurement:** open before the rule; afterwards direct UDP, direct TCP and the resolver all blocked, metadata HTTP working.
+
+**The dry run's limits:** its databases had no WAL, so WAL recovery wasn't exercised, and it used a stand-in Core API, so the real `api-venv` runs for the first time at G3-B. A failure there stops the rehearsal with nothing altered. Real-data handling follows G3-DECISIONS.
+
 ## G3-A failure recovery
 
 The policy is captured, re-parsed from the saved file and checked before any change, and it must read the same twice. After the removals, the live policy must equal the saved one minus exactly those two bindings, and the owner must log in to the VM with `sudo`. **Any later failure, or an exception, adds back exactly those two bindings,** and confirms them. Recovery is refused if a real-data copy exists or can't be ruled out, and that outcome is reported in `a\RESULT.txt`. It only ever adds those two bindings, and never rewrites the policy.
