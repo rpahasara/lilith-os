@@ -1,4 +1,6 @@
-# Motivation shadow on DEV, 2026-10-30: PASS, owner acceptance pending
+# Motivation shadow on DEV, 2026-10-30: PASS, owner accepted
+
+**The owner accepted this result on 2026-10-31, within its demonstrated shadow-only scope.**
 
 **Result: every step passed, once, with no retry and no rollback.** The driver reported `DRIVE_COMPLETE`. DEV stays on m1 with World Model, Goals, Reasoning, Workspace and Motivation in shadow on `lilith_os` only.
 
