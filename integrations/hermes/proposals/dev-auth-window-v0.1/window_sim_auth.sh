@@ -44,7 +44,7 @@ cat > "$BIN/sudo" <<'E'
 [ "$1" = -u ] && shift 2
 turn() {
   cat >/dev/null; msg=$1; ses=$2; echo "$msg" >> "$S/sent"
-  rec() { printf '%s\n' "$1" >> "$DLOG"; }
+  rec() { printf '%s\n' "$1" >> "$SIMLOG"; }
   case "$msg" in
    *options*) rec '{"ts":1,"chat_id":"'$ses'","lane":"motivation","motivation_mode":"shadow","trace":{"highest_intensity_class":"SATISFIED","satisfied_drive_types":["COHERENCE","GOAL_COMPLETION"]}}'
      rec '{"ts":1,"chat_id":"'$ses'","lane":"workspace","workspace_mode":"shadow","trace":{"deciding_rule":"NO_CANDIDATE","candidate_count":0}}'
@@ -114,11 +114,11 @@ setup() {
   ln -s "$APPROOT/releases/old" "$APPROOT/current"; echo "$APPROOT/releases/new" > "$S/newrel"
   DBPATH=$APPROOT/data/lilith-dev.db; DATA_DIR=$APPROOT/data; cp "$POSTDB" "$DBPATH"
   LEDGER=$R/var/lib/private/hermes-provider-gate-dev/ledger.log; seq 1 29 | sed 's/^/LINE /' > "$LEDGER"; LSHA=$(sha256sum "$LEDGER" | cut -c1-16)
-  for d in $(seq 1 28); do echo x > "$HH/sessions/request_dump_$d"; done
-  DLOG=$HH/logs/lilith-router-decisions.log; : > "$DLOG"; : > "$S/api.log"; : > "$S/gate.journal"; : > "$S/sent"; echo "3 5" > "$S/budget"
+  for d in $(seq 1 30); do echo x > "$HH/sessions/request_dump_$d"; done
+  SIMLOG=$HH/logs/lilith-router-decisions.log; : > "$SIMLOG"; : > "$S/api.log"; : > "$S/gate.journal"; : > "$S/sent"; echo "3 5" > "$S/budget"
   PORTX=911; F=$R/etc/systemd/system/lilith-os-api-dev.service.d/auth.conf
   for s in "$PKG"/scripts/*.sh "$PKG"/tests/prior/*.sh; do rw "$s" > "$R/run/$(basename "$s")"; done
-  export FAKE S R PY APPROOT F DBPATH DATA_DIR LEDGER DLOG; export PATH=$BIN:$ORIG
+  export FAKE S R PY APPROOT F DBPATH DATA_DIR LEDGER SIMLOG; export PATH=$BIN:$ORIG
   systemctl restart lilith-os-api-dev; for _ in $(seq 1 40); do /usr/bin/curl -s -o /dev/null -m 1 http://127.0.0.1:8765/health && break; /usr/bin/sleep 0.25; done
 }
 step() { local n=$1; ( cd "$R"; bash -c "test \"\$(hostname)\" = lilith-dev-01 || exit 97; $(cat "$R/run/$n")" ) > "$R/out.$n" 2>&1; grep -hE "^(CHECK_FAIL|[A-Z0-9]+_[A-Z0-9_]+ (PASS|FAIL))" "$R/out.$n" | tail -4 | cut -c1-130 | sed "s/^/    $n /"; }
@@ -131,7 +131,7 @@ sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/ru
 step a0_preflight_ro.sh; ok "A0" "$(got a0_preflight_ro.sh A0_PREFLIGHT)" 1
 step a1_dropin_open.sh; ok "A1" "$(got a1_dropin_open.sh A1_DROPIN)" 1
 deploy
-resume() { step b0_verify_deploy_ro.sh; step b1_tokens.sh; rm -f "$R/root/auth-window-20261101/b1.pass"; step rb_restore_previous.sh; step c0_resume_preflight_ro.sh; [ "${LATE:-}" = 1 ] && export INJECT=new_500; step b1b_resume_new.sh; }
+resume() { step b0_verify_deploy_ro.sh; step b1_tokens.sh; step rb_restore_previous.sh; mv "$R/root/auth-window2-20261101" "$R/root/auth-window-20261101"; for m in b2.pass b3.pass b4.started; do touch "$R/root/auth-window-20261101/$m"; done; step c0_resume_preflight_ro.sh; [ "${LATE:-}" = 1 ] && export INJECT=new_500; step b1b_resume_new.sh; }
 resume; ok "RECOVERED_STATE" "$(got rb_restore_previous.sh RB_RESTORE)" 1; ok "C0" "$(got c0_resume_preflight_ro.sh C0_RESUME)" 1; ok "B1B" "$(got b1b_resume_new.sh B1B_RESUME)" 1
 for pair in b2_enforce_write:B2_WRITE b3_enforce_read:B3_READ b4_router_turns:B4_TURNS b5_rollback_proof:B5_ROLLBACK b6_final_ro:B6_FINAL; do step "${pair%%:*}.sh"; ok "${pair##*:}" "$(got "${pair%%:*}.sh" "${pair##*:}")" 1; done
 ok "no token in any step output" "$(cat "$R"/out.* | grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env"))" 0

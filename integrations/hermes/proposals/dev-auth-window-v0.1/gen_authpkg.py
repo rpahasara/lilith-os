@@ -20,7 +20,9 @@ NS=hermes-gateway-dev
 D=/etc/systemd/system/lilith-os-api-dev.service.d
 F=${D}/auth.conf
 ENVF=/etc/lilith-os-api-dev/auth.env
-W=/root/auth-window-20261101
+WOLD=/root/auth-window-20261101
+W=/root/auth-window2-20261101
+DLOG=${HH}/logs/lilith-router-decisions.log
 NIC=10.20.0.3
 LOCAL=http://127.0.0.1:8765
 REMOTE=http://${NIC}:8765
@@ -74,7 +76,7 @@ want gateway "$(pid ${GW})" ${GW0}
 want gate_active "$(systemctl show ${GATE} -p ActiveState --value)" active
 want budget "$(budget)" "True OK 3 5 True"
 want ledger "$(ledger)" "${LG0}"
-want dumps "$(dumps)" 28
+want dumps "$(dumps)" 30
 dbok; forget
 want no_failed_units "$(systemctl list-units --failed --no-legend | wc -l)" 0
 sudo -n test ! -e ${F} && echo OK_no_dropin || fail dropin_exists
@@ -138,31 +140,34 @@ dbok
 finish B1_TOKENS b1.pass
 """)
 SCRIPTS["c0_resume_preflight_ro.sh"] = ("C0 read-only: DEV is exactly as the recovery left it", r"""
-PREV=$(sudo -n cat ${W}/prev); NEW=$(sudo -n cat ${W}/new)
+PREV=$(sudo -n cat ${WOLD}/prev); NEW=$(sudo -n cat ${WOLD}/new)
+sudo -n test ! -e ${W} && echo OK_no_second_window || fail second_window_exists
 want on_previous "$(current)" "${PREV}"
-want previous_app "$(appsha)" "$(sudo -n cat ${W}/prevsha)"
+want previous_app "$(appsha)" "$(sudo -n cat ${WOLD}/prevsha)"
 want new_kept "$(sudo -n sha256sum "${NEW}/app.py" | cut -c1-64)" "${APP_SHA}"
 want current "$(sudo -n readlink -f ${BASE}/current)" "${BASE}/releases/${RID}"
 want gateway "$(pid ${GW})" ${GW0}
 want gate_active "$(systemctl show ${GATE} -p ActiveState --value)" active
 want budget "$(budget)" "True OK 3 5 True"
 want ledger "$(ledger)" "${LG0}"
-want dumps "$(dumps)" 28
+want dumps "$(dumps)" 30
 dbok; forget
 want no_failed_units "$(systemctl list-units --failed --no-legend | wc -l)" 0
 want dropin_open "$(sudo -n grep -c 'open-acknowledged' ${F})" 2
 want dropin_nothing_else "$(sudo -n grep -cE 'enforced|EnvironmentFile|TRUST_LOOPBACK|FOCUS' ${F})" 0
 want tokens_mode "$(sudo -n stat -c '%U %a' ${ENVF})" "root 600"
 want tokens_lines "$(sudo -n bash -c "wc -l < ${ENVF}")" 2
-want markers "$(sudo -n ls ${W} | LC_ALL=C sort | paste -sd' ')" "a1.pass b0.pass new prev prevsha"
+want markers "$(sudo -n ls ${WOLD} | LC_ALL=C sort | paste -sd' ')" "a1.pass b0.pass b1.pass b2.pass b3.pass b4.started new prev prevsha"
 want local_read "$(code ${LOCAL}/os/goals?limit=1)" 200
 want nic_read "$(code ${REMOTE}/os/goals?limit=1)" 200
 want no_local_proxy "$(sudo -n ss -Hltnp | grep -cE 'nginx|caddy|haproxy|envoy|cloudflared|ngrok')" 0
 finish C0_RESUME
 """)
 SCRIPTS["b1b_resume_new.sh"] = ("B1B back to the merged code with the existing tokens, still open", r"""
-sudo -n test -f ${W}/b0.pass || { echo "B1B_ABORTED B0 did not pass"; exit 3; }
-sudo -n test ! -e ${W}/b1.pass || { echo "B1B_ABORTED already ran"; exit 3; }
+sudo -n test -f ${WOLD}/b0.pass || { echo "B1B_ABORTED B0 did not pass"; exit 3; }
+sudo -n test ! -e ${W} || { echo "B1B_ABORTED already ran"; exit 3; }
+sudo -n install -d -o root -g root -m 0700 ${W}
+for x in prev prevsha new; do sudo -n cp ${WOLD}/${x} ${W}/${x}; done
 link "$(sudo -n cat ${W}/new)"
 conf open-acknowledged open-acknowledged 0 1 1
 restart
@@ -205,13 +210,13 @@ finish B3_READ b3.pass
 SCRIPTS["b4_router_turns.sh"] = ("B4 two TEST_ONLY turns with the gate stopped: the router still reads under enforcement", SEND + DLOG + r"""
 sudo -n test -f ${W}/b3.pass || { echo "B4_ABORTED B3 did not pass"; exit 3; }
 sudo -n test ! -e ${W}/b4.started || { echo "B4_ABORTED already ran"; exit 3; }
-DL0=$(sudo -n bash -c "wc -l < ${HH}/logs/lilith-router-decisions.log")
+DL0=$(sudo -n bash -c "wc -l < ${DLOG}")
 sleep 2; T0=$(date -u '+%Y-%m-%d %H:%M:%S')
 sudo -n touch ${W}/b4.started
 sudo -n systemctl stop ${GATE}
 for _ in $(seq 1 30); do [ "$(ss -Hltn 'sport = :9911' | wc -l)" -eq 0 ] && break; sleep 1; done
 if [ "$(ss -Hltn 'sport = :9911' | wc -l)" -ne 0 ]; then fail gate_still_listening; else
-  SES=auth-shadow-20261101
+  SES=auth-shadow2-20261101
   echo "T1 $(send "TEST_ONLY what are my options for application 14?" ${SES}-t1)"; sleep 2
   echo "T2 $(send "TEST_ONLY hey how are you" ${SES}-t2)"; sleep 3
 fi
@@ -267,7 +272,7 @@ want ledger "$(ledger)" "${LG0}"
 dbok; forget
 want no_failed_units "$(systemctl list-units --failed --no-legend | wc -l)" 0
 want stranger "$(code ${REMOTE}/os/goals?limit=1)" 401
-want token_in_journal "$(sudo -n bash -c "journalctl -u ${API} --since '-2 hours' -o cat --no-pager | grep -cFf <(sed -n 's/^[A-Z_]*=//p' ${ENVF})")" 0
+want token_in_journal "$(sudo -n bash -c "journalctl -u ${API} --since '2 hours ago' -o cat --no-pager | grep -cFf <(sed -n 's/^[A-Z_]*=//p' ${ENVF})")" 0
 want dropin_mode "$(sudo -n stat -c '%U %a' ${F})" "root 644"
 sudo -n grep -cE 'TOKEN' ${F} | grep -qx 0 && echo OK_no_token_in_dropin || fail token_in_dropin
 for u in lilith-memory-broker lilith-authority-dev lilith-recovery-witness; do echo "SVC ${u} $(systemctl show ${u} -p ActiveState,MainPID,NRestarts | LC_ALL=C sort | paste -sd' ')"; done

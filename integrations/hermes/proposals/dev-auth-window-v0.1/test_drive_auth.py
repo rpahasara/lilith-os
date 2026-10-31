@@ -112,20 +112,28 @@ class Static(unittest.TestCase):
     def lines(self):
         for path in sorted(SCRIPTS.glob("*.sh")):
             for number, line in enumerate(path.read_text(encoding="ascii").splitlines(), 1):
-                if not line.startswith(("ENVF=", "W=", "F=", "D=", "#")):
+                if not line.startswith(("ENVF=", "W=", "WOLD=", "F=", "D=", "DLOG=", "#")):
                     yield path.name, number, line
 
     def test_no_root_only_path_is_opened_by_the_unprivileged_shell(self):
         for name, number, line in self.lines():
             if "sudo -n bash -c" in line:
                 continue                   # the whole command runs as root, redirect included
-            self.assertNotRegex(line, r"<\s*\$\{(ENVF|W|F)\}", f"{name}:{number}")
-            self.assertNotRegex(line, r">>?\s*\$\{(ENVF|W|F)", f"{name}:{number}")
+            self.assertNotRegex(line, r"<\s*\$\{(ENVF|W|WOLD|F|DLOG)\}", f"{name}:{number}")
+            self.assertNotRegex(line, r">>?\s*\$\{(ENVF|W|WOLD|F|DLOG)", f"{name}:{number}")
             self.assertNotRegex(line, r"sudo -n [^|\"]*<\s*/", f"{name}:{number}")
+
+    def test_every_variable_a_script_uses_is_defined_in_it(self):
+        """The B4 defect: set -u with a name the script never assigns, hidden because the simulation exported it."""
+        for path in sorted(SCRIPTS.glob("*.sh")):
+            text = path.read_text(encoding="ascii")
+            used = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]*)\b", text))
+            defined = set(re.findall(r"(?:^|[\s;(])(?:local )?([A-Z][A-Z0-9_]*)=", text, re.M))
+            self.assertEqual(used - defined, set(), path.name)
 
     def test_every_root_only_path_goes_through_sudo(self):
         for name, number, line in self.lines():
-            if re.search(r"\$\{(ENVF|W)\}", line):
+            if re.search(r"\$\{(ENVF|W|WOLD)\}", line):
                 self.assertIn("sudo -n", line, f"{name}:{number}")
 
     def test_the_resume_preflight_cannot_change_anything(self):
