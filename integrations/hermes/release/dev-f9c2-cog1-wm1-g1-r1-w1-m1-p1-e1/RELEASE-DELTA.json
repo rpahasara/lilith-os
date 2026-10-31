@@ -1,0 +1,36 @@
+{
+  "release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1",
+  "base_definition": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1/RELEASE-DELTA.json",
+  "note": "The p1 release with Slice 13 Ethics also authorized in SHADOW on lilith_os only. The adapter makes Reasoning yield to Ethics on conduct questions, so the verifier pins the adapter and Ethics on together. Every other lane stays off.",
+  "members": {
+    "router.e1.yaml": {
+      "sha256": "be8c08d1c5e88e03306d33869239823bd61d367740a160a8133fd9353943e6f4"
+    },
+    "router.p1.yaml": {
+      "sha256": "666b5f2003c40bbfa53a82987cddfdb0eb4511b1f8457b5d0a0d0ac60f2c77cc"
+    },
+    "verify_release.e1.py.tmpl": {
+      "sha256": "f1086cacc440d84850b30b033b23120e41f34919d2761ddb2e867761eb3b65d5"
+    },
+    "verify_release.p1.py.tmpl": {
+      "sha256": "2487b2b6217e7f1e557ced02915821399b86d223c26ae70400a9a44bd39374da"
+    },
+    "ethics.e1.py": {
+      "sha256": "d6a1c20b45557169a4fefa7b5d81907da0e0ae12519f8c63724900ac8ce47dbd"
+    },
+    "ethics.p1.py": {
+      "sha256": "b6e3ce49afad658bd314dc9c28c524f324a3123e52fbd49a55ab5e1137e50a66"
+    },
+    "world_context.e1.py": {
+      "sha256": "f1ee561dec06a7cadd282bc2e9e1315e39dd78f9be163d373237f941d84d55b2"
+    },
+    "world_context.p1.py": {
+      "sha256": "a96d705f8801f6a9689ed0d8f54383bc6de7764c2d92d91ecce00d687d9128db"
+    },
+    "RELEASE_ID": {
+      "sha256": "fb9a650f26e78992d29521abad84437e9a71737eab210d2a23083c6ec2d16a52"
+    }
+  }
+}
