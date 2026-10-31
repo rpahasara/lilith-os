@@ -85,7 +85,7 @@ That score is frozen in `tests/ethics_results_v3_first_score.json`. **The two fa
 | Item | State |
 |---|---|
 | p1 accepted on DEV | installed; see the p1 acceptance record |
-| Router, verifier pins, installer, simulation | not built; see `proposals/ethics-shadow-v0.1/RELEASE-DESIGN.md` |
+| Router, verifier pins, installer, simulation | not built; built in a separate release PR |
 | Live mode, and the model path | out of scope |
 
-**Evidence:** `tests/test_ethics_hardening.py`, 20/20, on the real gateway, adapter and Core API with the p1 router plus Ethics in shadow, including adversarial messages and a populated store.
+**Evidence:** `tests/test_ethics_hardening.py`, 25/25, on the real gateway, adapter and Core API with the p1 router plus Ethics in shadow, including adversarial messages and a populated store.
