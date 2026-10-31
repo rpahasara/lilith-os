@@ -27,3 +27,21 @@
 | RB | **PASS:** second real recovery, in 12 seconds |
 
 **State left:** Core API on `d82f7dac`, open; main holds #306. Budget 3/5, ledger 29 lines, DB `88b76a79`, 30 dumps, gate PID 413767.
+
+## Second resume, 2026-10-31 17:01Z: PASS
+
+**Manifest `09400b96...`, `DRIVE_COMPLETE`, every step once.** Awaiting owner acceptance.
+
+| Step | Result |
+|---|---|
+| C0, B1B | PASS |
+| B2, B3 enforcement | PASS |
+| B4 router turns | PASS: exact records, 5 reads all 200, 0 forwarded, gate isolated and back |
+| B5 return and forward | PASS: 2 seconds each way, database digest equal on both sides |
+| B6 final | PASS: no token in the journal |
+
+**Verified separately, read-only:** Core API `75ca0db`, `53dfae2a...`, PID 416469; writes and reads enforced, focus read-only, loopback trusted. Stranger read and write 401, router 200, `/health` 200. e1 unchanged: gateway 407521, gate 416110, no failed units. Budget 3/5, ledger 29 lines, 0 forwarded, DB `88b76a79...` with 0 rows, 32 dumps with no text, FORGET idle. The only 64-character hex values in evidence are the two `app.py` digests.
+
+**A read-only review before this run found the status probe counting itself,** which would have turned any lost verdict into a HOLD. Fixed, and tested on the host.
+
+**Not proven:** the bounded model request, Command Center against enforced DEV, which needs the tokens set by the owner, or the populated-store path with real rows.
