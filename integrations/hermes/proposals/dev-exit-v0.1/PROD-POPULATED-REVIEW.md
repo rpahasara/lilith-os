@@ -22,4 +22,4 @@
 
 1. Flag on, auth wired and FORGET ready come **before** the new stack sees PROD data, including on the rehearsal copy.
 2. OAuth repair comes **after** tombstones.
-3. **The single most useful next read:** whether PROD's port 8765 answers from outside. It needs one read-only approval, and it changes nothing.
+3. **The most useful next read:** the cloud-only network preflight in #306's `PROD-API-EXPOSURE.md`. It connects to nothing on PROD and changes nothing. Recorded evidence says 8765 isn't public; that record is days old.

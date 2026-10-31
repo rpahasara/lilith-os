@@ -61,7 +61,7 @@ Serves A8, A29, A30 and A31, and details section 9 of the roadmap. **Nothing her
 - Message tombstones in the extractor, and every watcher off on the copy, so nothing re-delivers.
 - The Hermes adapter sending the read header. Without it, enforced read auth leaves every lane reading nothing, with no visible error.
 - Provider-bound prompts captured and measured: DEV's prompts never held real rows.
-- Core API on the rehearsal VM bound to loopback, with read and write auth enforced.
+- Core API on the rehearsal VM with read and write auth enforced. The VM has no route in, so the bind isn't what protects it.
 - `LILITH_OS_FOCUS_READ_ONLY=1`. The offline sweep on a PROD-shaped store shows focus is the only GET that writes, and that the flag stops it.
 - The identity prompt set, fixed and reviewed **before** any baseline runs, so it can't be tuned to the result.
 - A scripted, offline dry run of R3 to R9 on a synthetic disk of PROD's shape.

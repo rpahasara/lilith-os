@@ -2,7 +2,7 @@
 
 Classifies A1 to A39 from `DEV-TO-PROD-READINESS.md`, which stays the source of truth. **Nothing is waived:** "defer" appears only where the checklist already allows it, and each needs a signature. PROD facts date from the audit of 2026-10-27.
 
-**As of 2026-10-31, later in the day:** p1 owner-accepted and #304 merged; e1 sealed, not installed. **0 of 39 are fully done: 11 are partial, 2 are proposed and awaiting signature, and 26 are open.**
+**As of 2026-10-31, later in the day:** p1 owner-accepted and #304 merged; e1 sealed, not installed. #308 must not merge: it simulates `DEPLOY_REQUIRED`. #309 replaces it, awaiting approval. **0 of 39 are fully done: 11 are partial, 2 are proposed and awaiting signature, and 26 are open.**
 
 ## Classes
 
@@ -40,8 +40,8 @@ An item can have more than one. The first is what blocks it now.
 | A17 | FORGET on PROD | CUT, WIN | OPEN | 14 to 16 |
 | A18 | No unaccepted identifiers | CUT, SNAP | PARTIAL: `app_id` gone; `state.db` unread | read on the copy |
 | A19 | Write auth | CUT | OPEN: code on #289 | stages in `AUTH-DEPLOYMENT-DESIGN.md` |
-| A20 | Read auth | CUT | OPEN: code on #306 | **adapter header first** |
-| A21 | Not reachable off-host | CUT, WIN | OPEN | port check approval, bind |
+| A20 | Read auth | CUT | OPEN: code on #306; Command Center header done there | **adapter header first** |
+| A21 | Not reachable off-host | CUT, WIN | OPEN. **Recorded: no external IP, IAP range only; not re-read.** A loopback bind would cut the tunnel, so see R-12 | cloud preflight approval, then narrow access |
 | A22 | Deployer least privilege | CUT, WIN | OPEN | current review |
 | A23 | Provider exposure | CUT, SNAP | OPEN | needs A3 |
 | A24 | PROD budget | CUT, WIN | OPEN | design |
@@ -61,6 +61,38 @@ An item can have more than one. The first is what blocks it now.
 | A38 | Monitoring, triggers | CUT | PROPOSED in `ROLLOUT-PLAN.md` | signature |
 | A39 | OAuth, WhatsApp | OWNER | OPEN | decision. **Repairing OAuth before message tombstones would re-deliver erased mail** |
 
+## Minimum-foundation roadmap
+
+| # | Workstream | Done means | Items | State |
+|---|---|---|---|---|
+| 1 | Shadow integration evidence | e1 accepted on a host | A1, A5 | **blocked on approving #309** |
+| 2 | Model in the loop | 10-request window read, per the plan in `EXECUTION-ROADMAP.md`, budget approved | A3, A23 | not run |
+| 3 | Populated-store compatibility | Synthetic generator of PROD's shape, then the copy | A2 | source only |
+| 4 | Security and Privacy | Combined order in `AUTH-DEPLOYMENT-DESIGN.md`, steps 1 to 10 | A14 to A16, A19 to A21 | candidates |
+| 5 | Capability parity | Every matrix row signed or passed | A7, A39 | matrix done |
+| 6 | Identity and canonical memory | Baseline on the unchanged copy, compared after | A8, A11, A12 | not run |
+| 7 | Isolated rehearsal | R0 to R9 | A29 to A31 | designed |
+| 8 | Restore and rollback | One live DEV return, one timed rehearsal return, one real backup restore | A31, A32, A34, A35 | not run |
+| 9 | Owner decisions | Listed below | | open |
+
+## Owner decisions before cutover
+
+| Decision | Blocks |
+|---|---|
+| Lane modes, and each DISABLE row | A4, A7 |
+| Hermes tools on Telegram and Discord; Telegram and Discord cognition | A7 |
+| FORGET source scope; `os_audit_log`; authority on PROD; tombstone key location | A14, A15, A17 |
+| Snapshot and backup policy; task retention | A16, A32, A33 |
+| L04, L18, owner-memory authority at first | A12, A13 |
+| OAuth and WhatsApp | A39 |
+| `USER.md`; reading `state.db` on the copy | A18 |
+| Tunnel kept or moved to SSH forwarding | A21 |
+| Rollback window after cutover; acceptance criteria | A36, A38 |
+
+## Minimum set for a safe first migration
+
+**Needed:** conversation on `lilith_os`, persona and history, World Model reads, goal reads, career reads, drafts and tasks as they are, auth, FORGET, backups, working rollback. **Telegram stays only if the owner signs its cognition and tool decision.** Everything under "Safe to defer" stays off until after.
+
 ## Safe to defer, and what stays off
 
 Conversational goal creation, Motivation drives in Workspace, model paths for Planning and Ethics, L04 expansion, Social Cognition, Memory Consolidation lanes, per-caller credentials, removing `open-acknowledged`, and tuning on real traffic. Motivation, Planning and Ethics may run in shadow on PROD **only with the signed table below**, because all three are live there today.
@@ -74,6 +106,7 @@ R-1 to R-8 from `EXECUTION-ROADMAP.md` section 6 stand, with these updates. **No
 | R-4 | **Withdrawn.** Don't let read auth follow cutover | The adapter sends no header, so the work can't be avoided | none |
 | R-9 | New: A43, verifier treats a lane read that gets 401 as a failure | Otherwise enforcing auth silently removes grounding | one more release change |
 | R-10 | New: A44, message tombstones wired before OAuth repair | Redelivery test | ties A39 to A15 |
+| R-12 | A21 reworded: "no unauthenticated route off-host", not "bound to loopback" | IAP forwards to the NIC address, so loopback cuts Command Center off | none: it's stricter about credentials |
 | R-11 | A1 met on a host by e1 **plus** source tests for the rest | Seven lanes on one host is one window; a host can't reach every message class | a host pass stays narrow; the matrix says so |
 
 ## PROD lane modes, first migration

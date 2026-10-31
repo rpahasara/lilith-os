@@ -9,7 +9,7 @@
 | 3 | **Isolated snapshot rehearsal** | R0 to R9 pass with no unexplained difference | destroy the copy | A2, A7 to A11, A18, A23, A25, A29 to A31 |
 | 4 | **Migration candidate review** | One tagged candidate, build reproducible, owner reads the difference from PROD | don't proceed | A9, A10, A26 to A28, A36 |
 | 5 | **Backup and rollback readiness on PROD** | Scheduled off-host backups, one real restore test, least privilege. **First PROD change, and it changes no cognition** | ordinary | A17 prep, A22, A24, A32, A33, A35 |
-| 6 | **Controlled deployment** | One window: fresh snapshot, schema, Core API, Hermes, lanes per the signed table, FORGET, auth, loopback bind | **snapshot taken minutes before; timed in rehearsal** | A17, A21, A37 |
+| 6 | **Controlled deployment** | One window: fresh snapshot, schema, Core API, Hermes, lanes per the signed table, FORGET, auth, narrowed firewall and tunnel access | **snapshot taken minutes before; timed in rehearsal** | A17, A21, A37 |
 | 7 | **Post-deployment validation** | Identity, data and capability checks below | same snapshot, until the owner closes it | A37, A38 |
 | 8 | **Gradual live activation** | Motivation, Planning, Ethics, one at a time, each a window with its own budget | that lane's flag | A4 |
 | 9 | **Back to DEV-first advanced work** | See `ADVANCED-ROADMAP.md` | | |
@@ -29,7 +29,7 @@ Fixed and signed **before** the window, so they can't be fitted to the result.
 | Career | one real read |
 | FORGET | drill on canaries, every route fired, nothing returns |
 | Auth | a stranger gets 401; the owner's turn is grounded |
-| Port | 8765 refuses from off-host |
+| Route in | only named IAP accessors reach 8765, and it answers none of them without a credential |
 | Provider | budget and fallback as configured; bytes per lane within the rehearsal's numbers |
 | Host | no failed units, no unexpected restarts |
 | Capabilities | every PRESERVE row passes; every DISABLE row is off |

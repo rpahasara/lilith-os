@@ -25,6 +25,21 @@
 - **Multi-intent handling comes before any lane goes live on a message class:** today the first intent wins, and the second goes unanswered.
 - **Real traffic is the only way to tune detectors.** Offline corpora have one author.
 
+## Research priorities
+
+| Priority | Question | Measure | Blocked until |
+|---|---|---|---|
+| 1. Grounded reasoning | Does each claim trace to a belief? | unsupported claims per reply | a model window |
+| 2. World Model updates | How do beliefs change without overwriting truth? | conflicts surfaced, stale beliefs | FORGET covers conversation-derived beliefs |
+| 3. Cross-session continuity | Can work resume days later? | correct resumes | task store on real data |
+| 4. Goal-driven planning | Does a plan follow real goals? | owner accepts or edits | goal creation has FORGET coverage |
+| 5. Multi-step cognition | Can lanes chain within one turn, with two intents? | second intent answered | precedence redesign |
+| 6. Memory consolidation | What deserves keeping? | owner acceptance rate | L04 authority on PROD |
+| 7. Safe action execution | One reversible action end to end | every action audited, none unapproved | policy engine on PROD |
+| 8. Autonomous assistance | Bounded background work behind explicit permission | kill switch proven, budget held | 1 to 7 |
+
+**None of this replaces a production blocker.**
+
 ## What to resist
 
 Adding lanes before evaluation exists. Without a number, each new lane is a new way to get worse unnoticed, which is what happened with PROD's detectors.
