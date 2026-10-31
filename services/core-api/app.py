@@ -7,6 +7,7 @@ import os as _os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+from fastapi.responses import JSONResponse as _JSONResponse
 from fastapi import FastAPI, HTTPException
 
 HOME = Path(_os.getenv("LILITH_HOME", Path.home()))
@@ -43,6 +44,7 @@ def health():
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": DB.exists(),
         "writeAuth": _write_auth_state(),
+        "readAuth": _read_auth_state(),
     }
 
 
@@ -1544,6 +1546,43 @@ def _require_write_auth(credential) -> None:
         raise HTTPException(status_code=401, detail="WRITE_NOT_AUTHENTICATED")
 
 
+# Owner-content reads. Deny by default: every GET is protected unless listed here, so a new route can't be left open by forgetting it.
+_PUBLIC_READS = frozenset({"/health"})
+
+
+def _read_auth_state() -> str:
+    """Same three states as writes. Anything unset or unknown is refused: a lost setting must not open owner content."""
+    mode = _os.getenv("LILITH_OS_READ_AUTH", "")
+    if mode == "enforced":
+        return "enforced" if len(_os.getenv("LILITH_OS_READ_TOKEN", "")) >= 32 else "refused"
+    return "open-acknowledged" if mode == "open-acknowledged" else "refused"
+
+
+def _read_auth_decision(path, credential):
+    """None to allow, or (status, detail). Pure, so it is tested without an HTTP client."""
+    if path in _PUBLIC_READS:
+        return None
+    state = _read_auth_state()
+    if state == "open-acknowledged":
+        return None
+    if state == "refused":
+        return 503, "READ_AUTH_UNCONFIGURED"
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), _os.getenv("LILITH_OS_READ_TOKEN", "").encode("utf-8")
+    ):
+        return 401, "READ_NOT_AUTHENTICATED"
+    return None
+
+
+@app.middleware("http")
+async def _owner_read_gate(request, call_next):
+    if request.method in ("GET", "HEAD"):
+        blocked = _read_auth_decision(request.url.path, request.headers.get("x-lilith-os-read"))
+        if blocked:
+            return _JSONResponse(status_code=blocked[0], content={"detail": blocked[1]})
+    return await call_next(request)
+
+
 def _require_capture_auth(credential) -> None:
     if not _capture_enabled():
         raise HTTPException(status_code=403, detail="CAPTURE_INACTIVE")
@@ -2494,9 +2533,36 @@ def world_freshness_sweep(now=None):
         conn.close()
 
 
+def _world_erasure_guard():
+    """None without a configured ledger. Otherwise the tombstones FORGET left. Raises on anything it can't read or trust, and the caller then ingests nothing."""
+    path = _os.getenv("LILITH_WORLD_ERASURE_LEDGER", "")
+    if not path:
+        return None
+    key = Path(_os.environ["LILITH_WORLD_ERASURE_KEY"]).read_bytes().strip()
+    if len(key) < 32:
+        raise ValueError("weak_key")
+    lines = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line] if Path(path).exists() else []
+    finished = {e["erasure_id"] for e in lines if e.get("state") in ("COMPLETE", "ABORTED")}
+    if {e["erasure_id"] for e in lines if e.get("state") == "PENDING"} - finished:
+        raise ValueError("erasure_in_progress")
+    done = [e for e in lines if e.get("state") == "COMPLETE"]
+    return {"key": key, "through": max([e["through_event_id"] for e in done], default=0),
+            "tombstones": {t for e in done for t in e["tombstones"]}}
+
+
+def _world_tombstoned(guard, entity_type, entity_id):
+    if guard is None:
+        return False
+    return _hmac.new(guard["key"], ("%s|%s" % (entity_type, entity_id)).encode("utf-8"), _hashlib.sha256).hexdigest() in guard["tombstones"]
+
+
 def world_ingest_career(limit=200):
     """First live domain. Reads job_applications (+companies). NULL fields skipped
     (R7/R8 — never ingest emptiness). follow_up is NOT emitted here (no column)."""
+    try:
+        guard = _world_erasure_guard()
+    except Exception:
+        return {"refused": "erasure_ledger_unreadable", "applications": 0, "observations": 0}
     conn = db()
     try:
         _ensure_world_schema(conn)
@@ -2507,6 +2573,8 @@ def world_ingest_career(limit=200):
         n = 0
         for a in apps:
             eid = a["id"]
+            if _world_tombstoned(guard, "career.application", eid):
+                continue
             prov = dict(source_type="career.application", source_id="career-store",
                         origin_ref="job_applications/%s" % eid, observed_at=a["last_activity"],
                         note=("acct:%s" % a["source_account"]) if a["source_account"] else None)
@@ -2708,11 +2776,17 @@ def world_ingest_from_events(limit=1000):
     duplicate evidence even if the same events are reprocessed after a crash before
     the cursor advanced. Never fabricates predicates; a missing application or NULL
     field is skipped, never written as an empty value."""
+    try:
+        guard = _world_erasure_guard()
+    except Exception:
+        return {"refused": "erasure_ledger_unreadable", "new_events": 0, "beliefs_touched": 0}
     conn = db()
     try:
         _ensure_world_schema(conn)
         _ensure_world_ingest_schema(conn)
         last = _world_cursor_get(conn, "career_events")
+        if guard is not None:
+            last = max(last, guard["through"])      # a restored cursor must not replay events FORGET already covered
         events = conn.execute(
             "SELECT id, entity_type, entity_id, source, confidence, created_at "
             "FROM career_events WHERE id > ? ORDER BY id LIMIT ?", (last, limit)).fetchall()
@@ -2728,6 +2802,8 @@ def world_ingest_from_events(limit=1000):
                 latest_evt[e["entity_id"]] = (e["id"], e["source"], e["confidence"], e["created_at"])
         touched = 0
         for aid, (evid, src, conf, cat) in latest_evt.items():
+            if _world_tombstoned(guard, "career.application", aid):
+                continue
             row = conn.execute(
                 "SELECT ja.id, ja.role_title, ja.stage, ja.last_activity, ja.source_account, "
                 "c.name AS company FROM job_applications ja LEFT JOIN companies c ON c.id = ja.company_id "
@@ -3395,7 +3471,8 @@ def goal_focus():
     conn = _goals_db()
     try:
         result = _arbitrate(conn)
-        _record_focus_trace(conn, result)
+        if _os.getenv("LILITH_OS_FOCUS_READ_ONLY") != "1":      # off until the owner decides: PROD has goals, so today every changed focus read writes a trace
+            _record_focus_trace(conn, result)
         return result
     finally:
         conn.close()
