@@ -113,6 +113,8 @@ R-1 to R-8 from `EXECUTION-ROADMAP.md` section 6 stand, with these updates. **No
 
 ## PROD lane modes, first migration
 
+**Superseded by `MIGRATION-PLAN.md`:** every lane stays live at Cutover 1. This table is kept as the earlier proposal, and as the input to later lane promotions.
+
 **Rule: no silent loss.** A shadow lane on PROD is a named, signed loss. Evidence levels are from `cross-lane-v0.1/COVERAGE-MATRIX.md`.
 
 | Lane | PROD today | Proposed | Evidence for it | What could overturn it |

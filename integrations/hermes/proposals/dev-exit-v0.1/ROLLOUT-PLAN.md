@@ -1,5 +1,7 @@
 # Production rollout plan (PROPOSAL, nothing approved)
 
+**`MIGRATION-PLAN.md` sets the sequence and what's in Cutover 1.** The acceptance checks and rollback triggers below still apply.
+
 **Goal: upgrade the existing LILITH, keeping her identity and real state.** Not a replacement, and not one big switch: each stage ends at a checkpoint you can stop or return from. **Each stage needs its own owner approval.**
 
 | # | Stage | Done when | Return path | Items |

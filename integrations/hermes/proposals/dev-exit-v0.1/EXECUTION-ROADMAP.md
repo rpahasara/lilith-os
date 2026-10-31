@@ -92,6 +92,8 @@ Planning and Ethics may stay in shadow **only if A4 records it,** because both a
 
 ## 5. Proposed lane modes for the first migration (A4)
 
+**Superseded by `MIGRATION-PLAN.md`:** preserve first, every lane live.
+
 **Principle: no silent loss.** Every PROD-live lane is either kept live, or moved to shadow by a signed decision naming what's lost.
 
 | Lane | PROD today | Proposed first-migration mode | Why |
@@ -163,6 +165,8 @@ Planning and Ethics may stay in shadow **only if A4 records it,** because both a
 7. Record. **Any unexplained difference stops the plan.**
 
 ## 10. Recommended migration approach
+
+**Superseded by `MIGRATION-PLAN.md`.**
 
 **Rehearse, then one governed cutover.** PROD is idle, which removes the usual reason for a gradual move, and a long dual-running period adds risk without traffic to compare. But the first change on PROD should be backups, not code.
 

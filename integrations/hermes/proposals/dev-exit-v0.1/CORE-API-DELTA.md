@@ -26,7 +26,7 @@ Compared offline: `519b309` against the #306 tree, which is main plus #289 and #
 
 ## Must be checked on the copy
 
-- **PROD's file may not equal `519b309`.** Hand edits are recorded on the VM before that import, and a deploy backup dated 2026-09-13 is in recovered history. The rehearsal compares the real file's digest first. **A mismatch stops this conclusion.**
+- **PROD's file equalled `519b309` on the last read:** the audit recorded `bb0a4139`, and that's this commit's digest. The rehearsal re-reads it. **A mismatch stops this conclusion.**
 - **The real table list.** `app.py` holds 10 tables; recovered career code adds `companies`, `people`, `job_applications`, `career_activities` and `career_events`, and `os_audit_log` is named by the audit. Only the copy gives the full list.
 - **Tables outside `app.py`** stay untouched: this delta says nothing about them.
 
