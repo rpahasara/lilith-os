@@ -117,7 +117,7 @@ setup() {
   for d in $(seq 1 28); do echo x > "$HH/sessions/request_dump_$d"; done
   DLOG=$HH/logs/lilith-router-decisions.log; : > "$DLOG"; : > "$S/api.log"; : > "$S/gate.journal"; : > "$S/sent"; echo "3 5" > "$S/budget"
   PORTX=911; F=$R/etc/systemd/system/lilith-os-api-dev.service.d/auth.conf
-  for s in "$PKG"/scripts/*.sh; do rw "$s" > "$R/run/$(basename "$s")"; done
+  for s in "$PKG"/scripts/*.sh "$PKG"/tests/prior/*.sh; do rw "$s" > "$R/run/$(basename "$s")"; done
   export FAKE S R PY APPROOT F DBPATH DATA_DIR LEDGER DLOG; export PATH=$BIN:$ORIG
   systemctl restart lilith-os-api-dev; for _ in $(seq 1 40); do /usr/bin/curl -s -o /dev/null -m 1 http://127.0.0.1:8765/health && break; /usr/bin/sleep 0.25; done
 }
@@ -131,7 +131,9 @@ sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/ru
 step a0_preflight_ro.sh; ok "A0" "$(got a0_preflight_ro.sh A0_PREFLIGHT)" 1
 step a1_dropin_open.sh; ok "A1" "$(got a1_dropin_open.sh A1_DROPIN)" 1
 deploy
-for pair in b0_verify_deploy_ro:B0_VERIFY b1_tokens:B1_TOKENS b2_enforce_write:B2_WRITE b3_enforce_read:B3_READ b4_router_turns:B4_TURNS b5_rollback_proof:B5_ROLLBACK b6_final_ro:B6_FINAL; do step "${pair%%:*}.sh"; ok "${pair##*:}" "$(got "${pair%%:*}.sh" "${pair##*:}")" 1; done
+resume() { step b0_verify_deploy_ro.sh; step b1_tokens.sh; rm -f "$R/root/auth-window-20261101/b1.pass"; step rb_restore_previous.sh; step c0_resume_preflight_ro.sh; [ "${LATE:-}" = 1 ] && export INJECT=new_500; step b1b_resume_new.sh; }
+resume; ok "RECOVERED_STATE" "$(got rb_restore_previous.sh RB_RESTORE)" 1; ok "C0" "$(got c0_resume_preflight_ro.sh C0_RESUME)" 1; ok "B1B" "$(got b1b_resume_new.sh B1B_RESUME)" 1
+for pair in b2_enforce_write:B2_WRITE b3_enforce_read:B3_READ b4_router_turns:B4_TURNS b5_rollback_proof:B5_ROLLBACK b6_final_ro:B6_FINAL; do step "${pair%%:*}.sh"; ok "${pair##*:}" "$(got "${pair%%:*}.sh" "${pair##*:}")" 1; done
 ok "no token in any step output" "$(cat "$R"/out.* | grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env"))" 0
 ok "no token in any script as run" "$(cat "$R"/run/* | grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env"))" 0
 ok "no token in the drop-in" "$(grep -cFf <(sed -n 's/^[A-Z_]*=//p' "$R/etc/lilith-os-api-dev/auth.env") "$F")" 0
@@ -150,8 +152,8 @@ echo "== guards"; setup noauthcode
 sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/run/*.sh
 step a1_dropin_open.sh
 step b0_verify_deploy_ro.sh; ok "B0 fails if the merged code never arrived" "$(grep -c '^B0_VERIFY FAIL' "$R/out.b0_verify_deploy_ro.sh")" 1
-step b1_tokens.sh; ok "B1 refuses without B0" "$(grep -c 'B1_ABORTED B0 did not pass' "$R/out.b1_tokens.sh")" 1
-echo extra >> "$LEDGER"; step a0_preflight_ro.sh; ok "A0 fails on a moved ledger" "$(grep -c '^A0_PREFLIGHT FAIL' "$R/out.a0_preflight_ro.sh")" 1
+step b1b_resume_new.sh; ok "B1B refuses without B0" "$(grep -c 'B1B_ABORTED B0 did not pass' "$R/out.b1b_resume_new.sh")" 1
+echo extra >> "$LEDGER"; step c0_resume_preflight_ro.sh; ok "C0 fails on a moved ledger" "$(grep -c '^C0_RESUME FAIL' "$R/out.c0_resume_preflight_ro.sh")" 1
 step ra_remove_dropin.sh; ok "RA removes the drop-in" "$(test -e "$F" && echo y || echo n)$(got ra_remove_dropin.sh RA_REMOVE)" n1
 
 on_old() { test "$(readlink -f "$APPROOT/current")" = "$APPROOT/releases/old" && echo old || echo new; }
@@ -159,28 +161,28 @@ nic() { /usr/bin/curl -s -o /dev/null -w '%{http_code}' "http://$NICIP:8765/os/g
 fresh() { sed -i 's/want no_local_proxy .*/true/; s/want no_failed_units .*/true/' "$R"/run/*.sh; step a1_dropin_open.sh; deploy; }
 
 echo "== recovery from enforced"; setup recover; fresh
-upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read
+resume; upto b2_enforce_write b3_enforce_read
 step rb_restore_previous.sh; ok "RB restores the previous release" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
 ok "RB leaves no enforcement in the drop-in" "$(grep -c 'enforced\|EnvironmentFile\|TRUST_LOOPBACK' "$F")" 0
 ok "RB keeps the database" "$(grep -c '^OK_DB' "$R/out.rb_restore_previous.sh")" 1
 
-echo "== new code unhealthy after deploy"; setup unhealthy new_500; fresh
-step b0_verify_deploy_ro.sh; ok "B0 fails on unhealthy new code" "$(grep -c '^B0_VERIFY FAIL' "$R/out.b0_verify_deploy_ro.sh")" 1
+echo "== new code unhealthy on resume"; setup unhealthy; fresh
+LATE=1; resume; LATE=; ok "B1B fails on unhealthy new code" "$(grep -c '^B1B_RESUME FAIL' "$R/out.b1b_resume_new.sh")" 1
 step rb_restore_previous.sh; ok "RB leaves the unhealthy code" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
 
 echo "== new code won't start under enforcement"; setup nostart new_no_start; fresh
-upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read
+resume; upto b2_enforce_write b3_enforce_read
 ok "B3 fails when Core API won't start" "$(grep -c '^B3_READ FAIL' "$R/out.b3_enforce_read.sh")" 1
 step rb_restore_previous.sh; ok "RB recovers a dead new release" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
 
 echo "== rollback fails midway"; setup midway; fresh
-upto b0_verify_deploy_ro b1_tokens b2_enforce_write b3_enforce_read b4_router_turns
+resume; upto b2_enforce_write b3_enforce_read b4_router_turns
 sed -i 's/^link "${NEW}"$/link "\/nonexistent"/' "$R/run/b5_rollback_proof.sh"; step b5_rollback_proof.sh
 ok "B5 fails midway" "$(grep -c '^B5_ROLLBACK FAIL' "$R/out.b5_rollback_proof.sh")" 1
 step rb_restore_previous.sh; ok "RB recovers from a broken link" "$(got rb_restore_previous.sh RB_RESTORE)$(on_old)$(nic)" 1old200
 
 echo "== previous release won't start"; setup oldfail old_no_start; fresh
-upto b0_verify_deploy_ro b1_tokens; touch "$S/armed"
+resume; touch "$S/armed"
 step rb_restore_previous.sh; ok "RB says so when the previous release can't start" "$(grep -c '^RB_RESTORE FAIL' "$R/out.rb_restore_previous.sh")" 1
 touch "$S/x"; rm -f "$S/armed"
 

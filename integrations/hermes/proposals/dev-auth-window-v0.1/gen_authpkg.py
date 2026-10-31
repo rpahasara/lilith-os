@@ -130,12 +130,46 @@ sudo -n test ! -e ${ENVF} || { echo "B1_ABORTED tokens exist"; exit 3; }
 sudo -n install -d -o root -g root -m 0700 /etc/lilith-os-api-dev
 sudo -n python3 -I -c 'import os, secrets; f=os.open("'${ENVF}'", os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); os.write(f, ("LILITH_OS_READ_TOKEN=%s\nLILITH_OS_WRITE_TOKEN=%s\n" % (secrets.token_hex(32), secrets.token_hex(32))).encode()); os.close(f)'
 want token_mode "$(sudo -n stat -c '%U %a' ${ENVF})" "root 600"
-want token_lines "$(sudo -n wc -l < ${ENVF})" 2
+want token_lines "$(sudo -n bash -c "wc -l < ${ENVF}")" 2
 conf open-acknowledged open-acknowledged 0 1 1
 restart
 want local_read "$(code ${LOCAL}/os/goals?limit=1)" 200
 dbok
 finish B1_TOKENS b1.pass
+""")
+SCRIPTS["c0_resume_preflight_ro.sh"] = ("C0 read-only: DEV is exactly as the recovery left it", r"""
+PREV=$(sudo -n cat ${W}/prev); NEW=$(sudo -n cat ${W}/new)
+want on_previous "$(current)" "${PREV}"
+want previous_app "$(appsha)" "$(sudo -n cat ${W}/prevsha)"
+want new_kept "$(sudo -n sha256sum "${NEW}/app.py" | cut -c1-64)" "${APP_SHA}"
+want current "$(sudo -n readlink -f ${BASE}/current)" "${BASE}/releases/${RID}"
+want gateway "$(pid ${GW})" ${GW0}
+want gate_active "$(systemctl show ${GATE} -p ActiveState --value)" active
+want budget "$(budget)" "True OK 3 5 True"
+want ledger "$(ledger)" "${LG0}"
+want dumps "$(dumps)" 28
+dbok; forget
+want no_failed_units "$(systemctl list-units --failed --no-legend | wc -l)" 0
+want dropin_open "$(sudo -n grep -c 'open-acknowledged' ${F})" 2
+want dropin_nothing_else "$(sudo -n grep -cE 'enforced|EnvironmentFile|TRUST_LOOPBACK|FOCUS' ${F})" 0
+want tokens_mode "$(sudo -n stat -c '%U %a' ${ENVF})" "root 600"
+want tokens_lines "$(sudo -n bash -c "wc -l < ${ENVF}")" 2
+want markers "$(sudo -n ls ${W} | LC_ALL=C sort | paste -sd' ')" "a1.pass b0.pass new prev prevsha"
+want local_read "$(code ${LOCAL}/os/goals?limit=1)" 200
+want nic_read "$(code ${REMOTE}/os/goals?limit=1)" 200
+want no_local_proxy "$(sudo -n ss -Hltnp | grep -cE 'nginx|caddy|haproxy|envoy|cloudflared|ngrok')" 0
+finish C0_RESUME
+""")
+SCRIPTS["b1b_resume_new.sh"] = ("B1B back to the merged code with the existing tokens, still open", r"""
+sudo -n test -f ${W}/b0.pass || { echo "B1B_ABORTED B0 did not pass"; exit 3; }
+sudo -n test ! -e ${W}/b1.pass || { echo "B1B_ABORTED already ran"; exit 3; }
+link "$(sudo -n cat ${W}/new)"
+conf open-acknowledged open-acknowledged 0 1 1
+restart
+want app_sha "$(appsha)" "${APP_SHA}"
+want local_read "$(code ${LOCAL}/os/goals?limit=1)" 200
+dbok
+finish B1B_RESUME b1.pass
 """)
 SCRIPTS["b2_enforce_write.sh"] = ("B2 enforce writes", r"""
 sudo -n test -f ${W}/b1.pass || { echo "B2_ABORTED B1 did not pass"; exit 3; }
@@ -286,4 +320,7 @@ for name, (title, body) in SCRIPTS.items():
 for n in ("drive_auth.py",):
     shutil.copy2(Path(__file__).with_name(n), S / n)
 shutil.copy2(e1 / "scripts/dread.py", S / "dread.py")
+prior = pkg / "tests" / "prior"; prior.mkdir(parents=True, exist_ok=True)
+for n in ("a0_preflight_ro.sh", "a1_dropin_open.sh", "ra_remove_dropin.sh", "b0_verify_deploy_ro.sh", "b1_tokens.sh"):      # already ran on DEV; kept only to build the simulation's starting state
+    shutil.move(str(S / n), str(prior / n))
 (pkg / "auth.conf.template").write_bytes(b"[Service]\nEnvironment=\"LILITH_OS_WRITE_AUTH=open-acknowledged\"\nEnvironment=\"LILITH_OS_READ_AUTH=open-acknowledged\"\n")
