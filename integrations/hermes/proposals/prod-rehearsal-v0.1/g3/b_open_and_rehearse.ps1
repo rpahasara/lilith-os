@@ -18,6 +18,9 @@ $r = Invoke-G @('compute', 'instances', 'describe', $Vm, "--zone=$Zone", "--proj
 if ($r.Code -ne 0) { Done 'STOPPED vm describe' 2 }
 $i = $r.Text | ConvertFrom-Json
 if (@($i.serviceAccounts | Where-Object { $_ }).Count -or @($i.networkInterfaces)[0].accessConfigs -or ((@($i.networkInterfaces)[0].network -split '/')[-1]) -ne 'lilith-rehearsal') { Done 'STOPPED vm isolation changed' 2 }
+# The guard lives in the VM and a reboot clears it, so prove it now, before real data exists anywhere near this VM
+$r = Invoke-Guest 'guest_dns_check.sh' $null "$Dir\dns-check.txt"
+if ($r.Text -notmatch '(?m)^DNS_CHECK PASS') { Done 'STOPPED DNS guard not active' 2 }
 New-Item -ItemType File "$Dir\started" | Out-Null
 $r = Invoke-G @('compute', 'disks', 'create', $Copy, "--source-snapshot=$Snapshot", '--type=pd-balanced', "--zone=$Zone", "--project=$Project", '--labels=app=lilith,purpose=rehearsal,go=g3-20261101') "$Dir\disk.txt"
 if ($r.Code -ne 0) { Done "STOPPED disk create rc $($r.Code)" 2 }

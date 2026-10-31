@@ -29,6 +29,25 @@ function Get-DeployerBindings {
     return $found
 }
 
+function Test-NoRealCopy {
+    # True only on a successful read showing no disk built from a snapshot and no disk of the copy's name. A failed read is not a clear result.
+    $r = Invoke-G @('compute', 'disks', 'list', "--project=$Project", '--format=json')
+    if ($r.Code -ne 0) { return $false }
+    return (@(@($r.Text | ConvertFrom-Json) | Where-Object { $_.sourceSnapshot -or $_.name -eq $Copy }).Count -eq 0)
+}
+
+function Restore-Deployer {
+    # Only the two approved bindings, by add, so it can't disturb anything else in the policy. Refused while real data may exist.
+    if (-not (Test-NoRealCopy)) { return 'REFUSED a real-data copy exists or could not be ruled out' }
+    foreach ($role in $Roles) {
+        $r = Invoke-G @('projects', 'add-iam-policy-binding', $Project, "--member=$Deployer", "--role=$role", '--condition=None', '--format=none')
+        if ($r.Code -ne 0) { return "FAILED $role rc $($r.Code)" }
+    }
+    $back = @(Get-DeployerBindings | Where-Object { $Roles -contains $_.role -and -not $_.condition })
+    if ($back.Count -ne $Roles.Count) { return 'FAILED bindings not confirmed' }
+    return 'RESTORED'
+}
+
 function Invoke-Guest([string]$File, [string]$Argument, [string]$OutFile) {
     $script = (Get-Content (Join-Path $Here $File) -Raw) -replace "`r`n", "`n"
     if ($Argument) { $tail = "sudo -n bash /var/tmp/g3/$File $Argument" } else { $tail = $null }

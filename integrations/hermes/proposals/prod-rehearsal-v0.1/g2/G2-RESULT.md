@@ -4,6 +4,8 @@
 
 **The sealed verifier reported `VERIFY FAIL`, and that stays on record.** Its one failure was the probe's `access_config` check, which treated any listing as an address. Read directly on the VM, the metadata server lists one placeholder, `access-configs/0`, type `ONE_TO_ONE_NAT`, with an **empty** `external-ip`. The cloud API shows no access config. So the failure was the check, not the VM. Every other check passed.
 
+**The sealed package and `verify\VERIFY-RESULT.json` are unchanged.** The copy of the probe in PR #311 carries a corrected check for any later run. It doesn't alter this result.
+
 | Resource | Name | Id |
 |---|---|---|
 | Network | `lilith-rehearsal` | `8830151153817456136` |

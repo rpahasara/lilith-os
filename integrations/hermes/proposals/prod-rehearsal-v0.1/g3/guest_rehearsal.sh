@@ -46,10 +46,7 @@ echo "HOST $(hostname) MODE ${MODE} T0 $(date -u +%FT%TZ)"
 
 echo "== guards"
 if [ -z "${ROOT}" ]; then
-  iptables -C OUTPUT -d 169.254.169.254 -p udp --dport 53 -j DROP 2>/dev/null || stop dns_guard_missing_udp
-  iptables -C OUTPUT -d 169.254.169.254 -p tcp --dport 53 -j DROP 2>/dev/null || stop dns_guard_missing_tcp
-  [ "$(timeout 8 getent hosts example.com | wc -l)" = 0 ] || stop dns_still_resolves
-  echo OK_dns_guard
+  bash "${IN}/guest_dns_check.sh" | grep -qx 'DNS_CHECK PASS' && echo OK_dns_guard || stop dns_guard_not_active
   [ "$(code -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token)" = 404 ] && echo OK_no_token || stop token_present
 fi
 [ ! -e "${W}/started" ] || stop "already ran: destroy the working tree first"
