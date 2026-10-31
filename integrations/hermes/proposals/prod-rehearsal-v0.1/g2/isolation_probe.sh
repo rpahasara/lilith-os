@@ -14,7 +14,7 @@ blocked google_api 199.36.153.8 443
 C=$(curl -s -o /dev/null -m 5 -w '%{http_code}' -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token)
 [ "${C}" = 404 ] && echo "OK no_service_account_token" || fail "metadata_token_${C}"
 [ "$(curl -s -m 5 -H 'Metadata-Flavor: Google' http://169.254.169.254/computeMetadata/v1/instance/service-accounts/ | wc -c)" -eq 0 ] && echo "OK no_service_accounts" || fail service_accounts_listed
-curl -s -m 5 -H 'Metadata-Flavor: Google' 'http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/' | grep -q . && fail access_config || echo "OK no_access_config"
+[ -z "$(curl -s -m 5 -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)" ] && echo "OK no_external_ip" || fail external_ip
 python3 -c 'import sqlite3' && echo OK_sqlite || fail no_sqlite
 DEV=/dev/disk/by-id/google-synthetic
 sudo -n test -b ${DEV} || fail no_synthetic_disk
