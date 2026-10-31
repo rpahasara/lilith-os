@@ -1,6 +1,6 @@
-# Seven-lane shadow on DEV, 2026-10-31: PASS, awaiting owner acceptance
+# Seven-lane shadow on DEV, 2026-10-31: PASS, accepted by the owner
 
-**The owner has not yet accepted this result.** Merging this record does not accept it.
+**The owner accepted e1 as PASS for its demonstrated shadow-only scope.** This is not acceptance of live cognition, populated-state behaviour or production readiness.
 
 **Result: every step passed, once, with no retry and no rollback.** The driver reported `DRIVE_COMPLETE`. DEV stays on e1 with World Model, Goals, Reasoning, Workspace, Motivation, Planning and Ethics in shadow on `lilith_os` only. Every other lane is off.
 
