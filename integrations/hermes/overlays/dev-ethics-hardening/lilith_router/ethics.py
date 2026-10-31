@@ -148,6 +148,17 @@ def _clip(s, n=240):
     return s if len(s) <= n else (s[: n - 3] + "...")
 
 
+def _quoted_data(dscope):
+    return _clip(", ".join(d.get("assertion", "") for d in dscope), 80)
+
+
+def _own_words(concern, ei):
+    """The concern's text without the user's quoted data scope. The ban covers what Ethics says: "share my private legal records" quotes the user and rules on nothing."""
+    blob = json.dumps(concern, ensure_ascii=False)
+    quoted = json.dumps(_quoted_data(_te(ei).get("referencedDataScope") or []), ensure_ascii=False)[1:-1]
+    return (blob.replace(quoted, "") if quoted else blob).lower()
+
+
 def _as_str_list(v, limit=12):
     if isinstance(v, str):
         v = [v]
@@ -317,7 +328,7 @@ def deterministic_concern_candidates(ei, applic):
             "sourceRefs": [d.get("ref") for d in dscope] + [a.get("ref")],
             "causeCodes": codes,
             "rationaleSummary": "the action would disclose personal data you flagged (%s)"
-                                % _clip(", ".join(d.get("assertion", "") for d in dscope), 80),
+                                % _quoted_data(dscope),
             "sourceScope": "USER_SPECIFIC",
         })
 
@@ -422,8 +433,7 @@ def validate_concerns(grounded, ei, applic, max_concerns=DEFAULT_MAX_CONCERNS):
             why = "NO_SOURCE_REF"
             summary["SOURCE_REFERENCE_STATUS"] = "DROPPED_PRESENT"
         else:
-            blob = json.dumps(c, ensure_ascii=False).lower()
-            if any(t in blob for t in _BANNED_TERMS):
+            if any(t in _own_words(c, ei) for t in _BANNED_TERMS):
                 why = "BANNED_VOCABULARY"
                 summary["VOCABULARY_STATUS"] = "DROPPED_PRESENT"
         if why:

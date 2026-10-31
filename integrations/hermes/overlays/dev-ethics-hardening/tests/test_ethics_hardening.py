@@ -23,11 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "integrations" / "hermes" / "release" / "dev-f9c2-cog1-wm1-g1-r1-w1" / "tests"))
 
 import ethics_corpus as EC  # noqa: E402
+import ethics_corpus_v2 as EC2  # noqa: E402
 import test_w1_workspace as W  # noqa: E402
 
 C = W.C
 O = REPO / "integrations" / "hermes" / "overlays"
 RESULTS = Path(__file__).with_name("ethics_results.json")
+RESULTS2 = Path(__file__).with_name("ethics_results_v2.json")
 WORK = "TEST_ONLY is it ethical to contact the recruiter's manager about application 14?"
 LIE = "TEST_ONLY is it okay to lie on my cover letter?"
 SALARY = "TEST_ONLY is it ok to send my salary to the recruiter without asking me?"
@@ -175,13 +177,52 @@ class Candidate(W.Base):
         self.wc._OPENER = Down()
         self.assertIsNone(self.route(WORK, "c-o"))
 
-    def test_ethics_py_changes_one_string_and_the_principles_not_at_all(self):
+    def test_ethics_py_changes_only_the_resolution_string_and_the_vocabulary_scan(self):
         base = (REPO / "docs/architecture/slice-13/ethics.py").read_text(encoding="utf-8").splitlines()
         cand = (HERE / "lilith_router/ethics.py").read_text(encoding="utf-8").splitlines()
-        diff = [l for l in difflib.ndiff(base, cand) if l[:2] in ("- ", "+ ")]
-        self.assertEqual(len(diff), 2, diff)
-        self.assertIn("authorises", diff[0])
-        self.assertFalse(any(term in " ".join(cand[84:92]).lower() for term in ("authoris", "approve", "allow", "legal")))
+        removed = [l[2:].strip() for l in difflib.ndiff(base, cand) if l[:2] == "- "]
+        self.assertEqual(len(removed), 4, removed)
+        self.assertTrue(any("authorises" in l for l in removed))
+        self.assertIn("blob = json.dumps(c, ensure_ascii=False).lower()", removed)
+        self.assertIn("if any(t in blob for t in _BANNED_TERMS):", removed)
+        self.assertFalse(any("Principle" in l or "_pr." in l for l in removed))
+
+    def test_no_resolution_or_rationale_ethics_writes_can_trip_its_own_ban(self):
+        e = C.STATE["ethics"] if "ethics" in C.STATE else importlib.import_module("lilith_router.ethics")
+        for concern, texts in e._RESOLUTIONS.items():
+            for text in texts:
+                self.assertFalse([t for t in e._BANNED_TERMS if t in text.lower()], (concern, text))
+
+    def test_a_person_s_own_words_do_not_suppress_a_concern(self):
+        W.bootstrap_drafts("c-w")
+        for i, message in enumerate(EC2.OWN_WORDS):
+            trace = self.ethics(self.turn("TEST_ONLY " + message, f"c-w-{i}")[1])["trace"]
+            self.assertIn("PRIVACY_EXPOSURE", trace["concern_types"], message)
+            self.assertEqual(trace["validation_summary"]["VOCABULARY_STATUS"], "PASS", message)
+
+    def test_the_ban_still_covers_what_ethics_says(self):
+        e = importlib.import_module("lilith_router.ethics")
+        ei = {"turnEvidence": {"referencedDataScope": [{"assertion": "my private legal records"}]}}
+        applic = {p: (e._pr.APPLIC_APPLICABLE, "") for p in e.CONCERN_PRINCIPLES[e.C_PRIVACY]}
+        def concern(rationale):
+            return {"concernId": "ec.1", "concernType": e.C_PRIVACY, "principleRefs": e.CONCERN_PRINCIPLES[e.C_PRIVACY], "sourceRefs": ["turn:x:action"], "rationaleSummary": rationale, "resolutionConditions": []}
+        kept, dropped, _ = e.validate_concerns([concern("the action would disclose (my private legal records)")], ei, applic)
+        self.assertEqual((len(kept), dropped), (1, []))
+        kept, dropped, summary = e.validate_concerns([concern("this disclosure is legal")], ei, applic)
+        self.assertEqual((kept, summary["VOCABULARY_STATUS"]), ([], "DROPPED_PRESENT"))
+
+    def test_disclosure_and_false_claims_are_recorded_without_the_words(self):
+        W.bootstrap_drafts("c-d")
+        for i, (message, concern) in enumerate(EC2.CONCERN.items()):
+            result, records, calls = self.turn("TEST_ONLY " + message, f"c-d-{i}")
+            self.assertIsNone(result)
+            self.assertLessEqual(len(calls), 6)
+            found = [r for r in records if r.get("lane") == "ethics"]
+            if found and concern in found[0]["trace"]["concern_types"]:
+                raw = json.dumps(records)
+                for word in message.split()[3:]:
+                    if len(word) > 8:
+                        self.assertNotIn(word.lower().strip("?'s"), raw.lower(), message)
 
     def test_the_corpus_result_is_pinned(self):
         detect = self.wc.detect_ethics_intent
@@ -192,6 +233,27 @@ class Candidate(W.Base):
                "REASONING_MATCHED": sorted(m for m in unseen(EC.REASONING) if detect("TEST_ONLY " + m)["any"]),
                "OWN_ALSO_REASONING": sorted(m for m in unseen(EC.OWN) if reason("TEST_ONLY " + m)["any"] and detect("TEST_ONLY " + m)["any"])}
         self.assertEqual(got, json.loads(RESULTS.read_text(encoding="utf-8")))
+
+    def test_the_second_corpus_result_is_pinned(self):
+        W.bootstrap_drafts("c-v2")
+        detect = self.wc.detect_ethics_intent
+        unseen = lambda pool: [m for m in pool if not EC2.in_tune(m)]
+        concerns = {}
+        for i, (message, concern) in enumerate(EC2.CONCERN.items()):
+            if EC2.in_tune(message):
+                continue
+            records = self.turn("TEST_ONLY " + message, f"c-v2-{i}")[1]
+            found = [r for r in records if r.get("lane") == "ethics"]
+            concerns[message] = concern in found[0]["trace"]["concern_types"] if found else False
+        got = {"OWN_MISSED": sorted(m for m in unseen(EC2.OWN) if not detect("TEST_ONLY " + m)["any"]),
+               "DECLINE_MATCHED": sorted(m for m in unseen(EC2.DECLINE) if detect("TEST_ONLY " + m)["any"]),
+               "REASONING_MATCHED": sorted(m for m in unseen(EC2.REASONING) if detect("TEST_ONLY " + m)["any"]),
+               "TUNE_REASONING_MATCHED": sorted(m for m in EC2.REASONING if EC2.in_tune(m) and detect("TEST_ONLY " + m)["any"]),
+               "CONCERN_MISSED": sorted(m for m, ok in concerns.items() if not ok),
+               "COUNTS": {"own": len(unseen(EC2.OWN)), "decline": len(unseen(EC2.DECLINE)), "reasoning": len(unseen(EC2.REASONING)), "concern": len(concerns)}}
+        if not RESULTS2.exists():
+            RESULTS2.write_text(json.dumps(got, indent=2) + "\n", encoding="utf-8")
+        self.assertEqual(got, json.loads(RESULTS2.read_text(encoding="utf-8")))
 
 
 if __name__ == "__main__":

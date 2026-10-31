@@ -349,6 +349,16 @@ _E_ANALYSIS_MARKER_RE = re.compile(r"\b(any|what)( are the)?( ethical)? (concern
 _E_OUTWARD_VERBS = ("contact", "send_external", "disclose")
 _E_SENDS_RE = re.compile(r"\b(send|forward|e-?mail|give|hand over)\b", re.IGNORECASE)
 _E_DOCUMENT_RE = re.compile(r"\b(cover letter|cv|resume|application|reference|degree|employment|salary history|job|interview)\b", re.IGNORECASE)
+_E_FALSE_CLAIM_RE = re.compile(
+    r"\b((say|claim|tell \w+(?: \w+)?)( that)? i\b.{0,60}\b(when|but) i\b|claim i have|take credit for|make up an? (reason|excuse|story)|bluff about|cover up|leave out that|"
+    r"doctor my|sign the reference)\b", re.IGNORECASE)
+_E_OTHERS_DATA_RE = re.compile(
+    r"\b((co-?worker|colleague|teammate|friend|manager|employer|client|customer|company)('s|s')?( \w+){0,2} "
+    r"(medical \w+|health \w+|pregnancy|home address|phone number|visa status|salary|records|documents|roadmap|code|list)|"
+    r"(internal|client|customer) (salary spreadsheet|records|documents|roadmap|code|list)|(code|documents) from my (last|old|previous) job|"
+    r"what my (teammate|colleague|co-?worker) earns)\b", re.IGNORECASE)
+_E_DISCLOSE_RE = re.compile(r"\b(share|forward|leak|post|reveal|give|show|send|tell)\b", re.IGNORECASE)
+_E_PUBLIC_RE = re.compile(r"\b(online|publicly)\b", re.IGNORECASE)
 
 
 def _ethics_text(message):
@@ -362,6 +372,18 @@ def _ethics_subject(text):
     return bool(_R_TOPIC_RE.search(text) or _R_WORK_RE.search(text) or _LEGACY._E13_THIRD_PARTY_RE.search(text) or any(p.search(text) for p in _LEGACY._E13_DATA_PATTERNS))
 
 
+def _harmful_disclosure(text):
+    """Someone else's data, going to someone outside. Needs all three, so sharing a dessert or a screen stays casual, and the person's own data keeps PROD's path."""
+    found = _E_OTHERS_DATA_RE.search(text)
+    if not found or not _E_DISCLOSE_RE.search(text):
+        return None
+    return found if _LEGACY._E13_THIRD_PARTY_RE.search(text) or _E_PUBLIC_RE.search(text) else None
+
+
+def _conduct(text):
+    return bool(_E_CONDUCT_RE.search(text) or _E_FALSE_CLAIM_RE.search(text))
+
+
 def _outward_action(text):
     action = _LEGACY._e13_action(text)
     return bool(action) and action.get("verb") in _E_OUTWARD_VERBS or (bool(_E_SENDS_RE.search(text)) and any(p.search(text) for p in _LEGACY._E13_DATA_PATTERNS))
@@ -371,11 +393,12 @@ def hardened_ethics_intent(message):
     none = {"any": False, "mode": None, "app_id": None, "trigger": None}
     try:
         text = _ethics_text(message)
-        conduct = bool(_E_CONDUCT_RE.search(text) and _E_ASKING_RE.search(text))
+        disclosure = bool(_harmful_disclosure(text) and _E_ASKING_RE.search(text))
+        conduct = disclosure or bool(_conduct(text) and _E_ASKING_RE.search(text))
         found = _PROD_ETHICS_INTENT(text)
         if not found.get("any") and not conduct:
             return none
-        if not _ethics_subject(text):
+        if not disclosure and not _ethics_subject(text):
             return none
         if conduct:
             ci, gi = _LEGACY.detect_intent(text), _LEGACY.detect_goal_intent(text)
@@ -404,11 +427,18 @@ def hardened_turn_evidence(message, corr):
         ev["referencedAction"] = {"ref": "%s:action" % base, "verb": verb, "capabilityRef": None, "impactClass": impact, "bypassConfirmation": bypass}
         if ev["referencedTargets"]:
             ev["referencedAction"]["target"] = ev["referencedTargets"][0]["targetRef"]
-    if ev["referencedDataScope"] and _E_SENDS_RE.search(text) and (action is None or action.get("verb") != "disclose"):
+    others = _harmful_disclosure(text)
+    if others:                                                  # someone else's data: the PROD patterns only know the person's own
+        if not ev["referencedDataScope"]:
+            ev["referencedDataScope"].append({"ref": "%s:data-scope:0" % base, "assertion": others.group(0), "userAsserted": True, "overBroad": False})
+        replace("disclose", "DATA_DISCLOSURE")
+    elif ev["referencedDataScope"] and _E_SENDS_RE.search(text) and (action is None or action.get("verb") != "disclose"):
         replace("disclose", "DATA_DISCLOSURE")                  # "send my salary to the recruiter": the send pattern only knows mail and messages
-    elif _E_CONDUCT_RE.search(text) and (action is None or action.get("verb") not in _E_OUTWARD_VERBS):
+    elif _conduct(text) and (action is None or action.get("verb") not in _E_OUTWARD_VERBS):
         replace("contact", None)                                # a false claim reaches whoever reads it
-    if _E_CONDUCT_RE.search(text) and not ev["referencedThirdPartyRoles"] and _E_DOCUMENT_RE.search(text):
+    if others and not ev["referencedThirdPartyRoles"]:
+        ev["referencedThirdPartyRoles"].append({"ref": "%s:third-party:0" % base, "role": "the public", "identityResolved": False})
+    if _conduct(text) and not ev["referencedThirdPartyRoles"] and _E_DOCUMENT_RE.search(text):
         ev["referencedThirdPartyRoles"].append({"ref": "%s:third-party:0" % base, "role": "employer", "identityResolved": False})
     return ev
 
