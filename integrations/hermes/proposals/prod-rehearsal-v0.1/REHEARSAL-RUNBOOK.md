@@ -12,6 +12,8 @@ Detail for stages R0 to R9 of `dev-exit-v0.1/SNAPSHOT-REHEARSAL-DESIGN.md`. **Cu
 
 ## G1: PROD baseline
 
+**COMPLETE, 2026-10-31.** Preflight `PASS`, including the instance's own tunnel permissions, read for the first time: no bindings. Snapshot `lilith-01-rehearsal-20261101`, id `9145142762520941677`, `READY`, source disk `7294208679113823152`. The October snapshot is unchanged. **Delete manually, under its own approval; keep no later than 2026-12-01 unless the owner extends it.**
+
 | Step | Action | Stop if |
 |---|---|---|
 | P1 | Network and IAP review, as gates inside the sealed G1 preflight. It replaces `core-api-security-v0.1/prod_exposure_preflight.sh`, whose last command doesn't exist in `gcloud` | any unexpected finding: nothing is created |
@@ -25,9 +27,13 @@ Detail for stages R0 to R9 of `dev-exit-v0.1/SNAPSHOT-REHEARSAL-DESIGN.md`. **Cu
 
 ## G2: isolated VM
 
-1. New VPC `lilith-rehearsal`: no external IP, no NAT, no peering, deny-all egress, IAP SSH only.
-2. New VM, new service account with no roles. Boot image: stock Ubuntu, **never the snapshot.**
+**Package:** `C:\Users\edufo\lilith-g2-rehearsal-20261101`, manifest `b4a1840b1c6ab12c03fbd4f268e1f68a054809483602a6ff5189da227e15691b`; approval text in `g2/GO-G2.md`. Not run.
+
+1. New VPC `lilith-rehearsal`: no external IP, no NAT, no peering, deny-all egress before any VM, IAP SSH only.
+2. New VM with no service account. Boot image: stock Ubuntu, **never the snapshot.**
 3. Attach a synthetic disk. A probe to the internet, the DEV VPC and PROD's address must all fail.
+
+**Before G3:** `github-lilith-deployer@` holds project-wide tunnel and admin login, so it would reach a VM holding real data. Remove or condition that for the window, or sign the exception.
 
 **Stop if** any outbound succeeds.
 
