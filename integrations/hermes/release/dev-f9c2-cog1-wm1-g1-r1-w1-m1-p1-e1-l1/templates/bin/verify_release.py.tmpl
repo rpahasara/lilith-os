@@ -139,7 +139,7 @@ def check_secret_file(path: Path, *, mode: int, allowed: set[str], group_ok: boo
 
 
 def check_cognition_schema() -> None:
-    """The goal and drafts tables exist with exactly their columns, and the goal store is empty. Read-only (mode=ro)."""
+    """The goal and drafts tables exist with exactly their columns. Read-only (mode=ro). l1: goal rows are allowed (Goals is live)."""
     if not GOAL_DB.is_file() or GOAL_DB.is_symlink():
         return fail("GOAL_DB_MISSING")
     try:
@@ -151,8 +151,6 @@ def check_cognition_schema() -> None:
                     fail(f"COGNITION_SCHEMA_NOT_BOOTSTRAPPED {table}")
                 elif got != columns:
                     fail(f"COGNITION_SCHEMA_MISMATCH {table}")
-            if conn.execute('SELECT COUNT(*) FROM "goal"').fetchone()[0] != 0:
-                fail("GOAL_STORE_NOT_EMPTY")
         finally:
             conn.close()
     except sqlite3.Error:
