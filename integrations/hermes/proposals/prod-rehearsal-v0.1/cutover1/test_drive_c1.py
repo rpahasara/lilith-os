@@ -69,6 +69,9 @@ class Drive(unittest.TestCase):
         self.assertEqual(self.go("window", Host(lost=["w3"], gate="failed"))[0], "DRIVE_HOLD")
         self.assertEqual(self.go("window", Host(lost=["w3"], running=1))[0], "DRIVE_HOLD")
 
+    def test_a_fail_anywhere_outranks_a_pass(self):
+        self.assertEqual(D.verdict("W0 PASS\nW0 FAIL: x\n", "W0"), D.FAIL)
+
     def test_return_alone_runs_one_step(self):
         self.assertEqual(self.go("return", Host()), ("DRIVE_COMPLETE", ["rb"]))
         self.assertEqual(self.go("return", Host(bad=["rb"]))[0], "DRIVE_RECOVERY_FAILED")

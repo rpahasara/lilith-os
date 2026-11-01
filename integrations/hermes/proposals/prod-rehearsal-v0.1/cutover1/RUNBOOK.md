@@ -99,10 +99,10 @@ Starts when `w5` passes; `RETURN-WINDOW.txt` holds the close.
 
 | Check | Result | Kind |
 |---|---|---|
-| `test_drive_c1.py` | 22/22 | Driver order, recovery, approvals, deploy, on a fake host |
+| `test_drive_c1.py` | 23/23 | Driver order, recovery, approvals, deploy, on a fake host |
 | `test_live_compare.py` | 9/9 | Real SQLite in WAL mode, with writers open |
-| `sim_c1.sh` | 50/50 | Real guest script as root in Linux, stand-in Core API, real databases |
-| `test_cloud.ps1` | 58/58 | Real PowerShell against a scripted gcloud |
+| `sim_c1.sh` | 51/51 | Real guest script as root in Linux, stand-in Core API, real databases |
+| `test_cloud.ps1` | 66/66 | Real PowerShell against a scripted gcloud |
 | `deploy.yml`'s unit suite | 328 run, 36 skipped, 5 modules unimportable here | Local venv lacks `cryptography`. CI passed the full suite at `75ca0db` |
 | Real `app.py`, every auth stage | 9/9 | From the DEV auth package; `app.py` is byte-identical |
 | DEV auth window | PASS | Real host, 2026-10-31 |

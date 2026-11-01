@@ -24,7 +24,7 @@ setup() {
   done
   cat > "$BIN/hostname" <<E
 #!/bin/bash
-[ "\$1" = -I ] && echo "$NIC " || echo lilith-01
+case "\$1" in -I) echo "$NIC ";; -s) echo lilith-01;; *) echo lilith-01.asia-southeast1-b.c.lilith-agent-260823-27389.internal;; esac
 E
   printf '#!/bin/bash\n/usr/bin/sleep 0.1\n' > "$BIN/sleep"
   printf '#!/bin/bash\nshift 3\nexec "$@"\n' > "$BIN/runuser"
@@ -134,6 +134,7 @@ check 'temporary copies removed' '[ -z "$(ls $R/tmp)" ]'; down
 
 echo "== wrong host"
 setup; printf '#!/bin/bash\necho lilith-dev-01\n' > "$BIN/hostname"; C1_ROOT= bash "$R/var/tmp/c1/guest_c1.sh" w0 p0 > "$S/last" 2>&1; check 'refused on DEV' 'last WRONG_HOST'; down
+setup; C1_ROOT= bash "$R/var/tmp/c1/guest_c1.sh" status > "$S/last" 2>&1; check 'PROD real hostname form is accepted' '! last WRONG_HOST'; down
 
 echo "SIM pass=$PASS fail=$BAD"
 [ "$BAD" = 0 ]

@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $src = Split-Path $PSScriptRoot -Parent
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("c1-" + [guid]::NewGuid().ToString('n'))
 New-Item -ItemType Directory $tmp | Out-Null
-foreach ($f in 'common.ps1', 'prepare.ps1', 'undo_prepare.ps1', 'restore_disk.ps1', 'cc_env.ps1', 'guest_c1.sh', 'stage_c1.sh', 'live_compare.py', 'rehearsal_compare.py') { Copy-Item "$src\$f" $tmp }
+foreach ($f in 'common.ps1', 'prepare.ps1', 'undo_prepare.ps1', 'restore_disk.ps1', 'cc_env.ps1', 'restage.ps1', 'guest_c1.sh', 'stage_c1.sh', 'live_compare.py', 'rehearsal_compare.py') { Copy-Item "$src\$f" $tmp }
 "@python -B `"$PSScriptRoot\fake_gcloud.py`" %*" | Set-Content -Encoding ascii "$tmp\fake.cmd"
 "@python -B `"$PSScriptRoot\fake_gcloud.py`" %*" | Set-Content -Encoding ascii "$tmp\fakeiap.cmd"
 'x' | Set-Content "$tmp\MANIFEST.txt"
@@ -61,6 +61,14 @@ $l = Log
 Check 'new disk made before the VM stops' ($l.IndexOf('disks create') -lt $l.IndexOf('instances stop')) 'True'
 Check 'old disk never deleted' ($l -match 'disks delete') 'False'
 Check 'schedule follows the new disk' ($l -match 'disks add-resource-policies lilith-01-restored') 'True'
+"== restage"
+Reset; Remove-Item -Recurse -Force "$tmp\raw-attempt1" -ErrorAction SilentlyContinue; New-Item -ItemType Directory "$tmp\raw" | Out-Null
+$o = Run 'restage.ps1' @('-Confirm', 'yes'); Check 'needs the phrase' ($o -match 'REFUSED confirmation') 'True'
+Set-Content "$tmp\APPROVED_PREPARE" 'old'; $o = Run 'restage.ps1' @('-Confirm', 'RESTAGE-CUTOVER1'); Check 'old approval refused' ($o -match 'REFUSED not approved') 'True'; Set-Content "$tmp\APPROVED_PREPARE" $digest
+$env:C_FAKE = 'stage_fails'; $o = Run 'restage.ps1' @('-Confirm', 'RESTAGE-CUTOVER1'); Check 'unconfirmed files stop' ($o -match 'not confirmed') 'True'; Check 'spent attempt kept' (Test-Path "$tmp\raw") 'True'
+$env:C_FAKE = ''; $o = Run 'restage.ps1' @('-Confirm', 'RESTAGE-CUTOVER1'); Check 'restage passes' ($o -match 'RESTAGE PASS') 'True'; Check 'attempt archived' (Test-Path "$tmp\raw-attempt1") 'True'
+$o = Run 'restage.ps1' @('-Confirm', 'RESTAGE-CUTOVER1'); Check 'runs once' ($o -match 'already ran') 'True'
+Check 'changes no IAM, firewall or schedule' ((Log) -match 'iam-policy-binding|firewall-rules update|resource-policies') 'False'
 "== Command Center"
 $E = @('-EnvFile', "$tmp\.env.local")
 Reset; Set-Content "$tmp\.env.local" 'NEXT_PUBLIC_LILITH_API_URL=http://x'; $o = Run 'cc_env.ps1' $E; Check 'refuses direct mode' ($o -match 'REFUSED direct mode') 'True'
@@ -73,7 +81,7 @@ Check 'both tokens set once' ((([regex]::Matches($t, '(?m)^LILITH_OS_READ_TOKEN=
 Check 'old token gone' ($t -match 'TOKEN=old') 'False'
 Check 'other lines kept' ($t -match 'OTHER=1' -and $t -match 'LILITH_API_URL=') 'True'
 "== static"
-foreach ($w in 'snapshots delete', 'disks delete', 'projects add-iam-policy-binding', 'lilith-dev-01"') { foreach ($f in 'prepare.ps1', 'undo_prepare.ps1', 'restore_disk.ps1', 'cc_env.ps1') { if (Select-String -Path "$src\$f" -SimpleMatch $w -Quiet) { Check "$f has no '$w'" $false $true } } }
+foreach ($w in 'snapshots delete', 'disks delete', 'projects add-iam-policy-binding', 'lilith-dev-01"') { foreach ($f in 'prepare.ps1', 'undo_prepare.ps1', 'restore_disk.ps1', 'cc_env.ps1', 'restage.ps1') { if (Select-String -Path "$src\$f" -SimpleMatch $w -Quiet) { Check "$f has no '$w'" $false $true } } }
 Remove-Item -Recurse -Force $tmp
 "CLOUD_TESTS pass=$pass fail=$bad"
 if ($bad) { exit 1 }

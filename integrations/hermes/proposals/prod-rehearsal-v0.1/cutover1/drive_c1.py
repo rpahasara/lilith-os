@@ -132,10 +132,10 @@ def real_run(name, stage):
 
 
 def verdict(out, tag):
+    if re.search(r"^(%s FAIL|%s_ABORTED|%s_ABORTED|WRONG_HOST)" % (tag, tag, tag.split("_")[0]), out, re.M):
+        return FAIL   # checked first: a FAIL anywhere outranks a PASS
     if re.search(r"^%s PASS" % tag, out, re.M):
         return PASS
-    if re.search(r"^(%s FAIL|%s_ABORTED|%s_ABORTED|WRONG_HOST)" % (tag, tag, tag.split("_")[0]), out, re.M):
-        return FAIL
     return LOST
 
 

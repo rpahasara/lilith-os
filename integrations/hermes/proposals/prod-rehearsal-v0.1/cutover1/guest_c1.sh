@@ -58,7 +58,7 @@ finish() { echo "T1 $(date -u +%FT%TZ)"; if [ -z "${FAILS}" ]; then [ -n "${2:-}
 need() { [ -f "${W}/$1" ] || { echo "$2_ABORTED $1 is missing"; exit 3; }; }
 
 echo "HOST $(hostname) STAGE ${STAGE} ${ARG} T0 $(date -u +%FT%TZ)"
-[ -n "${ROOT}" ] || [ "$(hostname)" = "${HOST_NAME}" ] || { echo "WRONG_HOST"; exit 3; }
+[ -n "${ROOT}" ] || [ "$(hostname -s)" = "${HOST_NAME}" ] || { echo "WRONG_HOST"; exit 3; }
 [ "$(id -u)" = 0 ] || { echo "WRONG_HOST needs root"; exit 3; }
 install -d -m 0700 "${W}"
 
