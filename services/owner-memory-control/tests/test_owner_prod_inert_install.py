@@ -238,11 +238,14 @@ class StaticTests(unittest.TestCase):
         self.assertIn('WITNESS_USER = "lilith-recovery-witness"', installer)
         self.assertEqual(INST.PRINCIPALS, ("lilith-authority-dev", "lilith-recovery-witness"))
         self.assertIn('"--system", "--user-group"', self.source)
-        self.assertNotRegex(self.source, r"--(uid|gid)\b|\b(985|995)\b")      # no numeric id is ever requested
+        code = self.source.split('"""', 2)[2]                                # the code, not the docstring
+        self.assertNotRegex(code, r"--(uid|gid)\b|\b(985|995)\b")             # no numeric id is ever requested
 
     def test_the_only_commands_are_useradd_and_userdel(self):
         self.assertEqual(self.source.count("self.run(["), 2)
-        self.assertEqual(sorted(set(__import__("re").findall(r'"/usr/sbin/(\w+)"', self.source))), ["useradd", "userdel"])
+        self.assertIn("self.run([*USERADD, name])", self.source)
+        self.assertIn("self.run([USERDEL, name])", self.source)
+        self.assertEqual((INST.USERADD[0], INST.USERDEL), ("/usr/sbin/useradd", "/usr/sbin/userdel"))
 
     def test_the_isolated_store_and_deployment_match_the_host_and_p2(self):
         self.assertEqual("/" + INST.CANONICAL, "/home/lilith/.hermes/lilith-os/canonical")
