@@ -117,10 +117,11 @@ def tree(root: Path) -> dict:
 
 
 def age_atimes(root: Path) -> None:
+    """Files AND symlinks get an access time older than their mtime, so any read (or readlink) would bump it."""
     for path in root.rglob("*"):
-        if path.is_file() and not path.is_symlink():
+        if path.is_symlink() or path.is_file():
             st = os.lstat(path)
-            os.utime(path, ns=(OLD * 10**9, st.st_mtime_ns))
+            os.utime(path, ns=(OLD * 10**9, st.st_mtime_ns), follow_symlinks=False)
 
 
 @unittest.skipUnless(LINUX, "O_NOATIME needs Linux")
@@ -258,7 +259,7 @@ class AuditRunTests(unittest.TestCase):
         cases = {
             "absolute link to the canonical file": ("/usr/lib/os-release", None),
             "link to another file": ("../home/lilith/.hermes/SOUL.md", "ValueError"),
-            "link climbing above the root": ("../../../usr/lib/os-release", None),   # normpath stays inside the root
+            "an unexpected link length": ("../../../usr/lib/os-release", "ValueError"),
             "link to a near miss": ("../usr/lib/os-release.d", "ValueError"),
         }
         for label, (target, error) in cases.items():
@@ -286,6 +287,15 @@ class AuditRunTests(unittest.TestCase):
         link.write_text('ID=ubuntu\nVERSION_ID="24.04"\n', encoding="ascii")    # a plain regular file is fine
         _a, code, lines = self.audit()
         self.assertEqual(code, 0)
+
+    def test_a_same_length_decoy_link_cannot_redirect_the_read(self):
+        link = self.root / "etc/os-release"
+        (self.root / "usr/lib/os-releasX").write_text('ID=evil\nVERSION_ID="0"\n', encoding="ascii")
+        link.unlink()
+        link.symlink_to("../usr/lib/os-releasX")                          # same length as the Ubuntu target
+        _a, code, lines = self.audit()
+        self.assertEqual(code, 0)
+        self.assertIn("A host os ubuntu-24.04", lines)                    # the canonical file, never the link target
 
     def test_no_other_symlink_is_followed(self):
         for relative in (AUD.HERMES + "/SOUL.md", AUD.DATA + "/lilith.db", "proc/meminfo"):
@@ -491,10 +501,11 @@ class StaticTests(unittest.TestCase):
     def test_reads_use_noatime_nofollow_readonly(self):
         self.assertIn("os.O_RDONLY | os.O_NOATIME | os.O_NOFOLLOW", self.code)
         self.assertEqual(self.code.count("os.open("), 1)
-        # the one symlink exception: read in os_release only, for exactly the Ubuntu os-release link
-        self.assertEqual(self.code.count("os.readlink("), 1)
+        # no symlink is ever read or followed: the os-release link is lstat-ed only (its size), the canonical file read
+        self.assertNotIn("readlink", self.code)
         body = self.code.split("def os_release", 1)[1].split("\n    def ", 1)[0]
-        self.assertIn("os.readlink(self.p(OS_RELEASE))", body)
+        self.assertIn("os.lstat(self.p(OS_RELEASE))", body)
+        self.assertIn("relative = OS_RELEASE_CANONICAL", body)
         self.assertIn('OS_RELEASE, OS_RELEASE_CANONICAL = "etc/os-release", "usr/lib/os-release"', self.code)
         self.assertNotIn("realpath(self.p(OS_RELEASE", self.code)
 

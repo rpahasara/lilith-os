@@ -13,8 +13,10 @@ Guarantees:
   if ever needed, comes from an isolated copy of an existing snapshot, never from the live files.
 - **No access time is changed; hashing streams.** Every file is read with `O_RDONLY | O_NOATIME | O_NOFOLLOW` in
   1 MiB chunks; SHA-256 is streamed (one chunk in memory at a time) and a whole-file read is refused over 4 MiB; without `O_NOATIME`
-  the audit refuses. Symlinks are never followed, with exactly one validated exception: `/etc/os-release` may be
-  Ubuntu's link whose target resolves to exactly `/usr/lib/os-release` (itself opened with `O_NOFOLLOW`).
+  the audit refuses. No symlink is ever followed or read (no `readlink`: reading a link bumps the link's own atime,
+  which `O_NOATIME` cannot prevent). For Ubuntu's `/etc/os-release` link the audit only `lstat`s it (its size must be
+  the length of `../usr/lib/os-release` or `/usr/lib/os-release`) and reads the canonical `/usr/lib/os-release`
+  (os-release(5)'s fallback) directly with `O_NOFOLLOW`, so a different link target can never redirect the read.
 - **Units by type:** a service is read as LoadState, ActiveState, SubState, MainPID, NRestarts and UnitFileState; a
   timer as LoadState, ActiveState, SubState, UnitFileState and Result. A missing unit shows as `LoadState=not-found`.
 - **Nothing is written:** no file, directory, socket or unit change. The only subprocesses are
@@ -100,8 +102,10 @@ UNIT_PROPS = {
     "service": ("LoadState", "ActiveState", "SubState", "MainPID", "NRestarts", "UnitFileState"),
     "timer": ("LoadState", "ActiveState", "SubState", "UnitFileState", "Result"),
 }
-# The ONE symlink the audit follows, and only exactly this one: Ubuntu's /etc/os-release -> ../usr/lib/os-release.
+# Ubuntu's /etc/os-release is a link to ../usr/lib/os-release. The audit never follows or reads the link: it lstats it
+# (the size of a symlink is the length of its target) and reads the canonical file itself.
 OS_RELEASE, OS_RELEASE_CANONICAL = "etc/os-release", "usr/lib/os-release"
+OS_RELEASE_LINK_SIZES = (len("../usr/lib/os-release"), len("/usr/lib/os-release"))
 
 
 class Refused(Exception):
@@ -224,16 +228,14 @@ class Audit:
         raise ValueError("ROOT_MOUNT_NOT_FOUND")
 
     def os_release(self) -> str:
-        """`etc/os-release`, or, only when it is a symlink whose target resolves (inside the audited root) to exactly
-        `usr/lib/os-release`, that regular file. The target is itself read with O_NOFOLLOW: no chain, no other path."""
+        """`etc/os-release` when it is a regular file; when it is a symlink of exactly the Ubuntu target length, the
+        canonical `usr/lib/os-release`, read directly with O_NOFOLLOW (the link is lstat-ed only, never followed or read,
+        so its atime is untouched and its target cannot redirect the read). Anything else is an error."""
         relative = OS_RELEASE
         st = os.lstat(self.p(OS_RELEASE))
         if stat.S_ISLNK(st.st_mode):
-            target = os.readlink(self.p(OS_RELEASE))
-            base = "/" if target.startswith("/") else "/" + os.path.dirname(OS_RELEASE)
-            resolved = os.path.normpath(os.path.join(base, target)).lstrip("/")
-            if resolved != OS_RELEASE_CANONICAL:
-                raise ValueError("OS_RELEASE_TARGET_UNEXPECTED")
+            if st.st_size not in OS_RELEASE_LINK_SIZES:
+                raise ValueError("OS_RELEASE_LINK_UNEXPECTED")
             relative = OS_RELEASE_CANONICAL
         elif not stat.S_ISREG(st.st_mode):
             raise ValueError("OS_RELEASE_NOT_REGULAR")
