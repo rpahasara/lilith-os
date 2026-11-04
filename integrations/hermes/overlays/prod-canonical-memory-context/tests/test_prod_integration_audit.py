@@ -149,6 +149,17 @@ class AuditRunTests(unittest.TestCase):
             self.assertIn(kind, ("A", "AUDIT", "PROD_INTEGRATION_AUDIT_COMPLETE"))
             self.assertLessEqual(len(rest), 3, line)
 
+    def test_negative_control_the_no_mutation_check_detects_an_atime_change(self):
+        """Without O_NOATIME the same reads bump access times on this relatime filesystem, and `tree` sees it."""
+        before = tree(self.root)
+        with mock.patch.object(os, "O_NOATIME", 0):
+            _a, code, _lines = self.audit()
+        self.assertEqual(code, 0)
+        changed = [k for k, v in tree(self.root).items() if v != before.get(k)]
+        if not changed:
+            self.skipTest("this filesystem does not update atime on read (noatime); the control is not meaningful")
+        self.assertTrue(any(k.endswith("SOUL.md") for k in changed), changed)
+
     def test_live_wal_and_shm_files_are_only_lstat_ed(self):
         data = self.root / AUD.DATA
         self.assertTrue((data / "lilith.db-wal").exists() and (data / "lilith.db-shm").exists())
