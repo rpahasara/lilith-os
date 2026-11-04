@@ -1,6 +1,8 @@
-# LILITH First Memory: one read-only Hermes context request (DEV_SYNTHETIC). The release CLI checks the root-owned host
-# tree, drops the host permanently to lilith, gives it only the context token and forwards only LOOKUP_EVIDENCE_USE to
-# the signer. Owner-personal memories need the root-owned owner-channel grant and the Hermes Privacy floor.
+# LILITH First Memory: one read-only Hermes context request (DEV_SYNTHETIC). canonical_context_service.py runs the
+# installed release's own `first-memory-context` code: it checks the root-owned host tree, drops the host permanently to
+# lilith, gives it only the context token and forwards only LOOKUP_EVIDENCE_USE to the signer. Owner-personal memories
+# need the root-owned owner-channel grant: v1 = exact session AND the Hermes Privacy floor; v2 (owner decision D-2) =
+# forgetScope CANONICAL_RECORDS_ONLY, i.e. FORGET erases canonical records, never claims conversation history.
 [Unit]
 Description=LILITH First Memory read-only Hermes context, one connection (DEV_SYNTHETIC)
 ConditionPathExists=/opt/lilith-first-memory-dev/current
@@ -8,7 +10,7 @@ ConditionPathExists=/opt/lilith-first-memory-dev/current
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/sbin/lilith-authority-ledger-dev first-memory-context
+ExecStart=/opt/lilith-authority-dev/current/venv/bin/python -I -B /usr/local/lib/lilith-canonical-context/canonical_context_service.py
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal

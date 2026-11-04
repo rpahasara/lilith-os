@@ -14,7 +14,13 @@ The relationship-origin FORGET executor installed at `/opt/lilith-hermes-forget-
 The drop-ins, `/etc/hermes-forget/executor.json` and the pinned Core API copies are generated on the host by the
 installers (`release/dev-f9c2/bin/install_f9c.sh --repin`); the Core API files are the repository's own.
 
-## `dev-planned-memory-context/` (PLANNED, not deployed)
+## `dev-canonical-memory-context/` (installed and validated on DEV, 2026-11-04)
+
+The canonical-memory read route for the `lilith_os` console: adapter hunk on the f9c2/e1 adapter `8c3b0055…`,
+the context module, the root context service (owner decision D-2) and the `cm1_window.sh` DEV window. See its
+README for the route, the stated FORGET scope and the DEV state.
+
+## `dev-planned-memory-context/` (SUPERSEDED by `dev-canonical-memory-context/`, never deployed)
 
 An optional canonical-memory context route for the `lilith_os` console adapter. It is not installed on any host.
 

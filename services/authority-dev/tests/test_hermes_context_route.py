@@ -73,8 +73,9 @@ class UnitAssetTests(unittest.TestCase):
             self.assertIn(expected, socket_unit)
         self.assertEqual(HMC.DEFAULT_SOCKET, "/run/lilith-first-memory-context.sock")
         service = self.lines("lilith-first-memory-context@.service")
-        self.assertEqual([line for line in service if line.startswith("Exec")],
-                         ["ExecStart=/usr/local/sbin/lilith-authority-ledger-dev first-memory-context"])
+        self.assertEqual([line for line in service if line.startswith("Exec")],      # the release's form, via D-2's
+                         ["ExecStart=/opt/lilith-authority-dev/current/venv/bin/python -I -B "   # service
+                          "/usr/local/lib/lilith-canonical-context/canonical_context_service.py"])
         for expected in ("User=root", "StandardInput=socket", "StandardOutput=socket", "RestrictAddressFamilies=AF_UNIX",
                          "IPAddressDeny=any", "CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE "
                          "CAP_DAC_READ_SEARCH", "AmbientCapabilities="):
