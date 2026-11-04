@@ -28,10 +28,8 @@ A `PIN … DIFF` is a finding (PROD drifted from the recorded pin), not an audit
 
 from __future__ import annotations
 
-import grp
 import hashlib
 import os
-import pwd
 import re
 import stat
 import subprocess
@@ -262,6 +260,9 @@ class Audit:
             yield "secret_meta", name, lambda name=name: self.meta(f"{DATA}/{name}")
         for relative in ABSENT:
             yield "absent", "/" + relative, lambda relative=relative: self.absent(relative)
+        import grp
+        import pwd
+
         for name in PRINCIPALS:
             yield "principal", name, lambda name=name: "user=%s,group=%s" % (
                 _exists(pwd.getpwnam, name), _exists(grp.getgrnam, name))
