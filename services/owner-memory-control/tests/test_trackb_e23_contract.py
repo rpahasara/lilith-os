@@ -52,7 +52,8 @@ class ContractTests(unittest.TestCase):
         E23.check_payload(H.e23_new_payloads(), installed)
         for member, (before, after) in E23.PAYLOAD_DELTA.items():
             self.assertEqual(sha(H.old_bytes(member)), before, member)          # proven against Git history
-            self.assertEqual(sha(RFS.runtime_payloads(ROOT)[member]), after, member)
+            now = H.e23_new_bytes(member) if member in H.OWNER_PROD_INSTALLED else RFS.runtime_payloads(ROOT)[member]
+            self.assertEqual(sha(now), after, member)                  # OWNER_PROD (P2) later moved some on
 
     def test_any_other_difference_is_refused(self):
         installed = {member: sha(data) for member, data in H.installed_payloads().items()}

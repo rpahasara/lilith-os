@@ -114,6 +114,16 @@ DEV_SYNTHETIC_CUSTODY_PROFILE = CustodyProfileV1(
     profile=PROFILE, environment=ENVIRONMENT, initial_key_id=INITIAL_KEY_ID, credential_name=CREDENTIAL_NAME,
     current_path=CURRENT_PATH, prepared_path=PREPARED_PATH, retired_path=RETIRED_PATH)
 
+# OWNER_PROD (2026-11): the production owner's K-ACT custody, environment `prod` only. Same slot, unit and path names
+# as DEV (documented naming debt); a distinct `prod.` key id that can never parse as a DEV key or DEV successor. RC1
+# has the initial key only: successor rotation (`successor_identity`) stays DEV_SYNTHETIC.
+PROD_PROFILE = "OWNER_PROD"
+PROD_ENVIRONMENT = "prod"
+PROD_INITIAL_KEY_ID = "prod.owner-prod.actor.1"
+OWNER_PROD_CUSTODY_PROFILE = CustodyProfileV1(
+    profile=PROD_PROFILE, environment=PROD_ENVIRONMENT, initial_key_id=PROD_INITIAL_KEY_ID,
+    credential_name=CREDENTIAL_NAME, current_path=CURRENT_PATH, prepared_path=PREPARED_PATH, retired_path=RETIRED_PATH)
+
 
 # Environment isolation. `CustodyProfileV1.environment` is the caller's
 # explicit, trusted EXPECTED environment, and every record (hold, ceremony
@@ -131,14 +141,21 @@ def is_dev_synthetic(profile: Any) -> bool:
             and dataclasses.replace(profile, environment=ENVIRONMENT) == DEV_SYNTHETIC_CUSTODY_PROFILE)
 
 
+def is_owner_prod(profile: Any) -> bool:
+    return isinstance(profile, CustodyProfileV1) and profile == OWNER_PROD_CUSTODY_PROFILE
+
+
 def custody_profile(expected_environment: str) -> CustodyProfileV1:
-    """The DEV_SYNTHETIC profile bound to one exact expected environment."""
+    """The fixed profile for one exact expected environment: OWNER_PROD for `prod`, DEV_SYNTHETIC otherwise."""
+    if expected_environment == PROD_ENVIRONMENT:
+        return OWNER_PROD_CUSTODY_PROFILE
     return require_dev_synthetic(dataclasses.replace(DEV_SYNTHETIC_CUSTODY_PROFILE, environment=expected_environment))
 
 
 def require_dev_synthetic(profile: Any) -> CustodyProfileV1:
-    """The only accepted profile shape. PROD and any other value are refused."""
-    if not is_dev_synthetic(profile):
+    """An accepted fixed profile: DEV_SYNTHETIC (never `prod`) or exactly OWNER_PROD (only `prod`). Any other value is
+    refused with the original reason."""
+    if not (is_dev_synthetic(profile) or is_owner_prod(profile)):
         raise ContractViolation("PROFILE_NOT_DEV_SYNTHETIC")
     return profile
 
@@ -252,7 +269,8 @@ def publication_profile_reason(value: Mapping[str, Any], parsed: RC.KeyPublicati
     custody = value.get("custodyEvidence")
     if not isinstance(custody, Mapping):
         return "PUBLICATION_PROFILE_MISMATCH"
-    if (value.get("profile") != KEY_PUBLICATION_PROFILE or parsed.environment != profile.environment
+    if (value.get("profile") != (KEY_PUBLICATION_PROFILE if is_dev_synthetic(profile) else profile.profile)
+            or parsed.environment != profile.environment
             or parsed.signing_domain != profile.signing_domain or parsed.evidence_types != (profile.evidence_type,)
             or custody.get("credentialName") != profile.credential_name
             or custody.get("withKey") != KEY_PUBLICATION_WITH_KEY):

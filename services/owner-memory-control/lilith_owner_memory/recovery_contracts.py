@@ -52,6 +52,8 @@ LEDGER_EPOCH_PREFIX = "lep1."
 WITNESS_PROTOCOL = "LILITH_RECOVERY_WITNESS"
 WITNESS_SCHEMA_VERSION = 1
 TEST_ONLY_WITNESS_PREFIX = "test-only.witness."
+# OWNER_PROD (2026-11): under a `prod` context only a `prod.witness.` anchor; `dev`/`test` unchanged.
+PROD_WITNESS_PREFIX = "prod.witness."
 LEDGER_HEAD_GENESIS = "0" * 64
 
 # Epoch comparison, from the point of view of a reference (the witness).
@@ -221,6 +223,11 @@ class TrustedWitnessAnchorV1:
     def test_only(self) -> bool:
         return self.witness_key_id.startswith(TEST_ONLY_WITNESS_PREFIX)
 
+    def admissible_for(self, environment: str) -> bool:
+        if environment == "prod":
+            return self.witness_key_id.startswith(PROD_WITNESS_PREFIX) and not self.test_only
+        return self.test_only
+
 
 VERIFIED_WITNESS = "VERIFIED_WITNESS"
 WITNESS_NOT_VERIFIED = "WITNESS_NOT_VERIFIED"
@@ -271,7 +278,8 @@ def verify_recovery_witness(*, anchor: TrustedWitnessAnchorV1, witness: Mapping[
         _require(isinstance(anchor, TrustedWitnessAnchorV1) and isinstance(registry_root, A.TrustedRegistryRootV1)
                  and environment in DEPLOYMENT_ENVIRONMENTS and isinstance(authority_public_keys, frozenset),
                  "MALFORMED_CONTEXT")
-        _require(anchor.test_only, "WITNESS_ANCHOR_NOT_TEST_ONLY")
+        _require(anchor.admissible_for(environment),
+                 "WITNESS_ENVIRONMENT_MISMATCH" if environment == "prod" else "WITNESS_ANCHOR_NOT_TEST_ONLY")
         _require(anchor.public_key != registry_root.public_key and anchor.public_key not in authority_public_keys,
                  "WITNESS_KEY_IS_AUTHORITY_KEY")
         _require(witness is not None, "WITNESS_MISSING")

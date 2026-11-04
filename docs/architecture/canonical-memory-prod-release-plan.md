@@ -11,6 +11,7 @@ decisions D-1 to D-5 (2026-11-04).
 | D-3 | PROD USER.md stays authoritative until reviewed reconciliation; no silent import, overwrite or deletion |
 | D-4 | the existing manual Privacy unlock after each reboot is accepted for the first release; recall fails closed while locked and LILITH otherwise works normally; no automatic-unlock engineering |
 | D-5 | personal recall in the authenticated Command Center first, then the owner's private Telegram chat; never in shared Discord channels |
+| D-6 | provisionally: the existing V1 HMAC FORGET authorization for the first `OWNER_PROD` release, limited to `CANONICAL_RECORDS_ONLY`, owner-authorized, never silent or automatic; signed V2 stays a separate later improvement |
 
 ## 1. The 73 DEV-profile references and 41 authority paths, classified
 
@@ -64,19 +65,39 @@ selected.
 | ledger DDL | `CHECK(profile='DEV_SYNTHETIC')` | the same DDL generated with `'OWNER_PROD'` (a fresh PROD ledger; the DEV DDL bytes are pinned unchanged) |
 | Privacy FORGET authorization | interim V1 (HMAC), DEV only | see 2.2 |
 
-### 2.2 One decision inside the profile work (D-6, needs the owner)
+### 2.2 FORGET authorization (D-6, provisionally accepted 2026-11-04: V1 HMAC)
 
 The FORGET runner only implements the interim V1 HMAC authorization and gates it to DEV. The design notes say a
 signed `PrivacyAuthorizationV2` should come "before any live owner conversation". The V2 contract and verifier exist;
 there is no PRIVACY-domain key and the runner is not wired for it.
 
-- **D-6a (smallest): allow V1 HMAC under `OWNER_PROD`.** This matches PROD's existing Privacy V1 key class
+- **D-6a: allow V1 HMAC under `OWNER_PROD`.** This matches PROD's existing Privacy V1 key class
   (`privacy_authority.key` already lives in PROD's data dir). The limit, documented: anyone with root on PROD could
   forge a FORGET. The worst case is unwanted erasure of canonical records, never disclosure.
 - **D-6b: wire signed V2.** Add a PRIVACY-domain owner key and teach the runner to verify V2. Every FORGET would need
   an offline owner signature. This adds real engineering to the critical path.
 
-Recommendation: D-6a for RC1, with V2 as a tracked follow-up. FORGET is rare, and D-2 already limits its claim.
+**Owner ruling: D-6a, provisionally**, under three conditions. The source already enforces each one.
+
+| Condition | How it holds (unchanged code paths) |
+|---|---|
+| limited to `CANONICAL_RECORDS_ONLY` | the origin FORGET profile (`RELATIONSHIP_ORIGIN_FORGET`) has exactly the owners L04 and L18_V2; the Hermes owner joins only where a governed floor names it, and RC1 provisions none |
+| owner authorization preserved | a FORGET starts only from `relationship_origin_forget … forget --owner-approval REF`, with owner evidence issued by the actor authority (K-ACT) for that one action; owners erase only after the durability barrier: the new suppression anchored by the witness (K-PAN) and checkpointed by the owner's device (K-PCK) |
+| no silent or automatic erasure | no HTTP route, timer, chat directive or model path can start a FORGET; the intent is a root-held file; every step is logged in Privacy (authorization, owner results, receipt) |
+
+**Limitations of V1 HMAC, stated for the owner:**
+1. The HMAC key is a host secret (PROD's existing `privacy_authority.key` class). Root on PROD could forge the Privacy
+   authorization step itself. It still could not forge the owner's K-PCK checkpoint, which every erasure waits for.
+   So the realistic forged outcome is a stuck hold, not a silent erasure. Even a full compromise yields deletion,
+   never disclosure.
+2. The authorization is not independently verifiable off the host. A signed V2 would let the owner verify every
+   erasure afterwards from the owner's own device.
+3. FORGET is hold-first: while one runs, the Hermes gateway is stopped, so LILITH is offline on every channel for the
+   minutes it takes. It needs its own owner-approved window.
+4. Conversation history is never erased (D-2): Hermes `state.db` and Telegram keep earlier replies.
+
+Signed V2 (`PrivacyAuthorizationV2`: contract and verifier exist; key and runner wiring do not) is a separate later
+improvement, outside this release.
 
 ### 2.3 Size
 
@@ -89,7 +110,43 @@ tests gain PROD cases plus "DEV bytes unchanged" pins. Signer-pinned SHARED modu
 
 It is one source PR and three builds. No new contract, protocol, operation or store is involved.
 
-### 2.4 Kept as-is in RC1 (naming debt, documented)
+### 2.4 Implementation spec (P2; one source PR)
+
+**Selection.** A host's profile is fixed by its root-owned units, the existing mechanism. The signer and witness
+servers already refuse to start unless `LILITH_ENV` is exactly their environment. In the PROD units it becomes
+`LILITH_ENV=prod`. The profile is then a pure function of that environment: `dev → DEV_SYNTHETIC`,
+`prod → OWNER_PROD`; `test` keeps its TEST fixtures. Nothing new is read from a file or the network. No new module:
+a new signer-release member would break the layout-v3 pins, so every addition goes into the existing module that owns
+the DEV value.
+
+| Module | Change (DEV values and DDL bytes unchanged; a test pins each) |
+|---|---|
+| `lilith_authority_dev/profile.py` | `OWNER_PROD` constants beside the DEV ones; `ProdOwnerSignerProfileV1` (environment `prod`, key ids `prod.…owner…`, refuses `test-only.`); `runtime_profile(environment)` returning the DEV or PROD profile; `dev_runtime_profile()` unchanged |
+| `lilith_authority_dev/{issuance,evidence_minter,recovery}.py` | accept either profile type (each already validates its profile) |
+| `lilith_authority_dev/ledger.py` | DDL produced from the profile: `'DEV_SYNTHETIC'` exactly as today, `'OWNER_PROD'` for a PROD ledger |
+| `lilith_authority_dev/server.py`, `recovery-witness/.../server.py` | `LILITH_ENV ∈ {dev, prod}` and pick that profile; any other value still refuses |
+| `lilith_authority_host/inputs.py` | owner registration: DEV keeps the synthetic owner only; PROD requires a non-`.invalid` owner identity matching the `OWNER_PROD` owner-proof policy |
+| `lilith_authority_root/verifier.py` | `prod_slot_contract()` beside the DEV one |
+| `core-api/lilith_memory/owner_proof.py` | policy kind `OWNER_PROD`: requires `LILITH_ENV=prod`, a real RP id and `https://` origin, refuses `.invalid`; owner principal from the PROD registration |
+| `lilith_owner_memory/pr1_bootstrap.py` | `OWNER_PROD_WITNESS_PROFILE`; the `prod` refusal stays for the DEV profile constructor only |
+| `lilith_owner_memory/successor_custody.py`, `successor_readiness.py`, `witness_readiness.py` | `OWNER_PROD_CUSTODY_PROFILE` / slot contract; `is_known_profile()` beside `is_dev_synthetic()`; every entry point already takes `profile=` |
+| `lilith_owner_memory/{owner_acceptance,owner_freshness,verifier}.py` | add `OWNER_PROD` to `REAL_PROFILES` and `PROFILE_ENVIRONMENTS`; the RR-39 owner check takes the registered PROD owner |
+| `lilith_owner_memory/first_memory_conversation.py` + host `first_memory_dev_host.py` | `ENVIRONMENT` from the host profile; the PROD host tree binds PROD's Privacy DB path |
+| `core-api/lilith_memory/{privacy_forget_runner,hermes_erasure_owner,privacy_schema_v2,privacy_freshness_host}.py` | the interim V1 gate admits `{DEV_SYNTHETIC, OWNER_PROD}` (D-6); the schema v2 CHECK is generated per profile (PROD DB: `'OWNER_PROD'`); the Hermes floor provisioning stays DEV-only (RC1 has no Hermes owner) |
+| `recovery-witness/.../{profile,credential,privacy_anchor,core,writer}.py` | the witness and Privacy anchor environment follow the selected profile |
+| ceremony `lilith_authority_keygen_dev.py`, `lilith_authority_owner_dev.py`, `install_authority_dev_v3.py` | `--profile OWNER_PROD`: PROD key ids, PROD owner registration, PROD units with `LILITH_ENV=prod` |
+| `release_file_set.py` SHARED_HASHES, broker `SHARED_FILES` | re-pinned to the new module digests (expected) |
+
+**Tests.** For every module: a PROD case, a "DEV unchanged" pin (the DEV DDL strings, profile constants and refusals
+byte-identical), and cross-refusals (DEV refuses `prod.` keys and the PROD owner; PROD refuses `test-only.` keys,
+`.invalid` RPs and `LILITH_ENV=dev`). The DEV vertical suites (First Memory, origin, context route) must pass
+unchanged. A PROD-profile vertical (the same suites with `LILITH_ENV=prod` fixtures) must pass too.
+
+**Expected blast radius.** Signer, witness and broker release pins move. The repo-vs-installed-DEV delta tests are
+re-derived, as every earlier slice did. The historical operator tools under `owner-memory-control/tools/` do not
+change, and they keep pinning the DEV releases they ran.
+
+### 2.5 Kept as-is in RC1 (naming debt, documented)
 
 Unit, user and path names keep their `-dev` spelling on PROD: `/opt/lilith-authority-dev`,
 `lilith-authority-dev.service` and so on. Renaming touches 41 files and every installer and operator pin, and it buys
@@ -118,25 +175,31 @@ rename can follow once RC1 is accepted.
 
 `verify <copy> <out>` proves at any time that the copy is unchanged and every proposal is still pending.
 
-## 4. Private Telegram owner channel: the minimum
+## 4. Private Telegram owner channel: the minimum (prepared: `integrations/hermes/overlays/prod-canonical-memory-context/`)
 
 The console path validated on DEV does not carry over as is. Telegram's adapter is upstream Hermes code, so there is
 no LILITH adapter hook, and PROD's lean social route builds its own prompt.
 
 | # | Change | Where | Why |
 |---|---|---|---|
-| T1 | one hunk in the existing PROD `gateway/run.py` patch: before the agent-cache signature, call `lilith_router.canonical_note(ctx)` and append it to `combined_ephemeral` | PROD Hermes patch (already carries P1 and the router seam) | one injection point for every platform; the note is then part of the cache signature, so a changed or forgotten memory forces a fresh agent (verified in Hermes `_agent_config_signature`) |
-| T2 | `canonical_note(ctx)`: `lilith_os` → channel `lilith_os`; Telegram **only** when `chat_type` is private AND `user_id` equals the owner id already in PROD's Telegram allowlist → channel `telegram_owner_dm`; anything else (Discord, groups, other users) → channel `public` | `lilith_router` (new small module) | channel isolation is decided in root-owned, pinned gateway code; Discord never asks for an owner channel |
-| T3 | the lean social reply (`social_lean.reply`) receives the note too | `gateway_integration.py` / `social_lean.py` | today `groq_lean` uses `SOCIAL_POLICY` only, so a casual Telegram turn would drop the memory |
-| T4 | the grant v2 gains `"channels": ["lilith_os", "telegram_owner_dm"]` (exact set, no wildcard) in place of the single `channel` | `canonical_context_service.py` + tests | the owner authorizes each owner channel explicitly; `public` can never be granted |
-| T5 | the console then uses T1 too, and the DEV-style adapter hunk is not needed on PROD | — | one code path to validate |
+| T1 | **revised: no Hermes core change.** The existing router seam already receives the cached agent and accepts `combined_ephemeral` + `force_rebuild`. A `route_turn` wrapper asks for the note before routing and merges it into every main-agent route, rebuilding the cached agent once whenever the note changes | `gateway_integration.py` (deployed `99fe9064`, 4 hunks) | `gateway/run.py` (a protected PROD file) stays byte-identical |
+| T2 | `canonical_memory.owner_channel`: `lilith_os` → `lilith_os`; Telegram **only** when `chat_type` is private/dm AND `user_id` is a configured owner id AND equals the chat id → `telegram_owner_dm`; everything else → `public`. Settings in a root-owned `lilith_router/canonical_memory.json` (absent = off), so PROD's `config.py` stays unchanged | new `lilith_router/canonical_memory.py` | isolation is decided in root-owned, pinned gateway code, and the router also refuses to render personal memory for `public` |
+| T3 | the lean social reply gets the note appended to its policy argument | one hunk in `gateway_integration.py`; `social_lean.py` unchanged | today `groq_lean` uses `SOCIAL_POLICY` only |
+| T4 | grant **v3** `{"schemaVersion":3,"channels":[…],"sessionScope":"ALL_OWNER_CHANNEL_SESSIONS",…}`: a non-empty subset of `lilith_os` and `telegram_owner_dm`; v1/v2 unchanged | `canonical_context_service.py` + tests | each owner channel is authorized explicitly; `public` can never be granted |
+| T5 | the console uses the same router path on PROD; the DEV adapter hunk is not installed there | — | one code path |
 
 What T1–T5 do not change: Discord behaviour, SOUL.md, USER.md loading, routing lanes, tools. Telegram-specific
 limitation (D-2): Telegram keeps its own copy of every message LILITH sends, and so does `state.db`. A FORGET never
 reaches those.
 
-Validation before enabling Telegram: offline seam tests (private owner DM gets personal memory; a group, another
-user and Discord get only `public`); then one owner Telegram check in its own approved window.
+Offline validation done: channel isolation (owner DM; owner in a group; a chat id different from the user id;
+another user; Telegram channel; Discord DM and group), settings refusals, merge on every route, one rebuild on a
+note change, ready replies untouched, and the patch against the deployed base. Still to do before PROD (P2/P8):
+- the Cutover 2 corpus harness with the feature off (byte-identical turns);
+- one owner console check, one owner Telegram DM check and one Discord check, each in its own approved window.
+
+Accepted limitation: a Reasoning, Planning or Ethics lane that answers by itself (its own model call or a ready
+reply) does not see the note in RC1.
 
 ## 5. D-4: the owner procedure after a PROD reboot
 
@@ -173,15 +236,15 @@ only Telegram change. Every PROD window starts with a fresh snapshot and has a r
 
 | Step | Where | What | Done when |
 |---|---|---|---|
-| P0 | owner | D-6 (recommend 6a); approve the read-only `memories/` copy; review draft PR #312 | decisions recorded |
+| P0 | owner | D-6 provisionally accepted (2026-11-04); still open: the read-only `memories/` copy; review of draft PR #312 | decisions recorded |
 | P1 | source | merge #312 (routine DEV Core API deploy; the DEV route is unaffected: its files live outside the Core API) | main green, DEV re-checked with `cm1_window.sh check` |
-| P2 | source | PROD profile PR (§2) + PROD adapter path (§4 T1–T5 for the console; Telegram behind its own flag) | offline suites green, DEV bytes pinned unchanged |
+| P2 | source | PROD profile PR (§2.4); the router overlay and grant v3 (§4, already prepared) ride with it; corpus harness with the feature off | offline suites green, DEV bytes pinned unchanged, corpus byte-identical |
 | P3 | DEV | build the new signer/witness/broker releases from P2's merge; one DEV transition (FM-2 ladder); DR-5 EQUAL; `cm1_window.sh check` + one bounded recall turn | DEV unchanged in behaviour on the new release |
 | P4 | owner | PROD custody ceremony with `--profile OWNER_PROD`: K-ROOT, K-ACT, K-WIT, K-PAN, K-PCK, owner credential; offline backups made and verified | pins recorded, no DEV key involved |
 | P5 | PROD | snapshot; inert install: authority/witness/broker releases, Core API memory package, L04 v1→v3 and Privacy V1→v2 migrations with backups (existing rows proven equal), anchor, host tree, owner registration; `canonicalLtmEnabled=false`; context units installed **but no grant** | existing data equal; gateway and the 14 protected files untouched; LILITH unchanged |
 | P6 | PROD | Privacy activation: pins, genesis, K-PCK checkpoint, first unlock → READY | gate READY; still no grant |
-| P7 | owner + PROD | origin statement re-admitted (enable only its capability, one consented turn, disable); importer proposals reviewed (`decide`); then the console grant v2 (`lilith_os` only) | owner console check: origin recalled, voice and routing unchanged, no-write check equal |
-| P8 | owner + PROD | Telegram: grant adds `telegram_owner_dm`; one owner Telegram DM check; Discord check shows no personal memory | owner acceptance |
+| P7 | owner + PROD | origin statement re-admitted (enable only its capability, one consented turn, disable); importer proposals reviewed (`decide`); then the router overlay (`canonical_memory.py`, patched `gateway_integration.py`), settings with no Telegram id, and grant v3 `channels: [lilith_os]` | owner console check: origin recalled, voice and routing unchanged, no-write check equal |
+| P8 | owner + PROD | Telegram: settings gain the owner's Telegram user id; grant v3 adds `telegram_owner_dm`; one owner Telegram DM check; one Discord check shows no personal memory | owner acceptance |
 
 G-3 (Hermes conversation-history erasure) is not on this path (D-2). An owner-profile canonical family (needed to admit
 USER.md facts) is a separate, later slice; until then USER.md stays authoritative.

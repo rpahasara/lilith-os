@@ -37,6 +37,14 @@ RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/
                           "lilith_authority_root/clients.py",
                           # First Memory privilege fix: the root bridge (`first-memory` form).
                           "lilith_authority_root/cli.py"})
+# OWNER_PROD (P2, 2026-11): the production profile beside DEV_SYNTHETIC. Installed DEV (d82f7da) still runs these
+# members' earlier bytes; the P3 transition installs them (the witness restarts from NEW, as FM-1 did).
+OWNER_PROD_CHANGED = frozenset({"lilith_authority_dev/evidence_minter.py", "lilith_authority_dev/recovery.py",
+                                "lilith_owner_memory/authority_contracts.py", "lilith_owner_memory/authority_verifier.py",
+                                "lilith_owner_memory/pr1_bootstrap.py", "lilith_owner_memory/recovery_contracts.py",
+                                "lilith_owner_memory/rotation_contracts.py", "lilith_owner_memory/successor_custody.py",
+                                "lilith_owner_memory/verifier.py", "lilith_recovery_witness/credential.py",
+                                "lilith_recovery_witness/server.py"})
 
 
 def sha(data: bytes) -> str:
@@ -88,7 +96,8 @@ class LayoutV3Tests(unittest.TestCase):
         source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
         e23 = {member: IL.old_source_bytes(source_of[member], IL.E23_RELEASE) for member in V2.RUNTIME_PATHS}
         self.assertEqual(set(payloads) - set(e23), V3.ADDED_RUNTIME_PATHS)
-        self.assertEqual({m for m in e23 if payloads[m] != e23[m]}, RR39_CHANGED)
+        self.assertEqual({m for m in e23 if payloads[m] != e23[m]},
+                         RR39_CHANGED | (OWNER_PROD_CHANGED - V3.ADDED_RUNTIME_PATHS))
         # The shared verifier is carried at its pinned bytes; the witness, root and host trees are untouched.
         self.assertEqual(sha(payloads["lilith_owner_memory/verifier.py"]),
                          RFS.SHARED_HASHES["services/owner-memory-control/lilith_owner_memory/verifier.py"])

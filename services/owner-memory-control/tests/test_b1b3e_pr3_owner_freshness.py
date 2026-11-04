@@ -363,7 +363,8 @@ class IsolationTests(unittest.TestCase):
         mixed.append(copy.deepcopy(self.owner.records[1]))
         mixed[1].update(environment="dev", authorityProfile="DEV_SYNTHETIC")
         self.assertEqual(OF.verify_owner_register(rehash(mixed)).reason, "REGISTER_ENVIRONMENT_CHANGED")
-        self.assertEqual(OF.PROFILE_ENVIRONMENTS, {"TEST_ONLY": "test", "DEV_SYNTHETIC": "dev"})
+        self.assertEqual(OF.PROFILE_ENVIRONMENTS, {"TEST_ONLY": "test", "DEV_SYNTHETIC": "dev",
+                                                   "OWNER_PROD": "prod"})          # OWNER_PROD: `prod` only
 
 
 class GateAndProposalTests(unittest.TestCase):

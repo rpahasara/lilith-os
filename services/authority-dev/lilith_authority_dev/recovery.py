@@ -147,7 +147,10 @@ class RecoveryHandlerV1:
 
     def __init__(self, *, view: Callable[[], SignerViewV1], open_ledger: Callable[[], DurableAuthorityLedgerV1],
                  record_ledger_advance: Callable[[str, int, str], Mapping[str, Any]],
-                 profile: SC.CustodyProfileV1 = SC.DEV_SYNTHETIC_CUSTODY_PROFILE):
+                 profile: SC.CustodyProfileV1 | None = None, environment: str | None = None):
+        # OWNER_PROD (2026-11): the server names only its deployment environment; DEV keeps the DEV profile default.
+        if profile is None:
+            profile = SC.custody_profile(environment) if environment is not None else SC.DEV_SYNTHETIC_CUSTODY_PROFILE
         SC.require_dev_synthetic(profile)
         self._view = view
         self._open_ledger = open_ledger

@@ -1,0 +1,60 @@
+--- a/lilith_router/gateway_integration.py
++++ b/lilith_router/gateway_integration.py
+@@ -44,6 +44,7 @@
+ from . import policy as _policy
+ from . import social_guard as _social_guard
+ from . import social_lean as _social_lean
++from . import canonical_memory as _canonical_memory
+ from . import world_context as _world_context
+ from .classifier import SOCIAL, WORK, classify
+ from .state import STATE
+@@ -397,8 +398,20 @@
+     reasoning_config=None,
+     cached_agent=None,
+ ):
++    # Canonical memory (read-only; off unless lilith_router/canonical_memory.json enables it): the note for this
++    # turn's channel. Personal memory only for an owner channel the owner's grant lists; never Discord or groups.
++    note, session_key = None, None
++    try:
++        source = getattr(ctx, "source", None)
++        if source is not None:
++            platform = _platform_name(source)
++            session_key = getattr(ctx, "session_key", None) or f"{platform}:{getattr(source, 'chat_id', '') or ''}"
++            note = _canonical_memory.turn_note(_canonical_memory.load_settings(_config._hermes_home()),
++                                               platform, source, session_key)
++    except Exception:
++        note = None
+     try:
+-        return _route_turn_impl(
++        result = _route_turn_impl(
+             runner=runner,
+             ctx=ctx,
+             model=model,
+@@ -411,7 +424,15 @@
+     except Exception:
+         # Absolute guarantee: the router can never break a turn.
+         logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
+-        return None
++        result = None
++    if session_key is None:
++        return result
++    try:
++        return _canonical_memory.merge(result, note=note, combined_ephemeral=combined_ephemeral,
++                                       session_key=session_key, cached_agent=cached_agent)
++    except Exception:
++        logger.debug("lilith_router: canonical memory merge failed (no note)", exc_info=True)
++        return result
+ 
+ 
+ def _route_turn_impl(
+@@ -757,7 +778,9 @@
+             if not why:
+                 text, why = _social_lean.reply(
+                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
+-                    message=message, policy=_policy.SOCIAL_POLICY, runtime=groq_runtime)
++                    message=message, runtime=groq_runtime,
++                    policy=_policy.SOCIAL_POLICY + ("\n\n" + _canonical_memory.current_note()
++                                                    if _canonical_memory.current_note() else ""))
+                 if text:
+                     _note_social_route(cfg, platform, chat_id, "groq_lean")
+                     return {"final_response": text, "mode": SOCIAL}

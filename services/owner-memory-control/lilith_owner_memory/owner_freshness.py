@@ -56,8 +56,8 @@ RECORD_TYPE = "LILITH_OWNER_FRESHNESS_RECORD"
 RECORD_SCHEMA_VERSION = 1
 RECORD_DOMAIN_SEPARATOR = b"LILITH_OWNER_FRESHNESS_RECORD_V1\x00"
 
-# authorityProfile -> the only environment it admits. PROD is not modelled.
-PROFILE_ENVIRONMENTS = {"TEST_ONLY": "test", "DEV_SYNTHETIC": "dev"}
+# authorityProfile -> the only environment it admits (OWNER_PROD: `prod` only).
+PROFILE_ENVIRONMENTS = {"TEST_ONLY": "test", "DEV_SYNTHETIC": "dev", "OWNER_PROD": "prod"}
 
 ACCEPT_CURRENT = "ACCEPT_CURRENT"
 REJECT_CANDIDATE = "REJECT_CANDIDATE"

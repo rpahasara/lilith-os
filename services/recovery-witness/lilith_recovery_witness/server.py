@@ -42,7 +42,10 @@ from lilith_authority_host import inputs as HI
 from . import privacy_anchor as PAN
 from . import protocol as W
 from .core import RecoveryWitnessCoreV1, authority_public_keys
-from .credential import CREDENTIAL_ABSENT, WitnessCredentialError, load_privacy_anchor_key, load_witness_signing_key
+from lilith_owner_memory import pr1_bootstrap as B
+
+from .credential import (CREDENTIAL_ABSENT, PROD_PRIVACY_ANCHOR_ENVIRONMENT, PROD_PRIVACY_ANCHOR_KEY_ID,
+                         WitnessCredentialError, load_privacy_anchor_key, load_witness_signing_key)
 from .profile import (DISTINCT_PRINCIPALS, ENVIRONMENT, OWNER_SOCKET_PATH, SERVICE_GROUP, SERVICE_USER,
                       SIGNER_PEER_USER, SIGNER_SOCKET_PATH, STATE_DIR)
 from .storage import FilesystemWitnessStorageV1
@@ -145,9 +148,12 @@ def serve_forever(core: RecoveryWitnessCoreV1, listeners: dict[str, socket.socke
             serve_connection(conn, core, role=ROLE_BY_NAME[key.data], authorized_uid=uids[key.data], anchor=anchor)
 
 
-def check_environment(environ: dict[str, str]) -> None:
-    if environ.get("LILITH_ENV") != ENVIRONMENT:
+def check_environment(environ: dict[str, str], *, deployment_environment: str = ENVIRONMENT) -> None:
+    """`LILITH_ENV` must be exactly this host's deployment environment; DEV hosts unchanged (DEV_ONLY)."""
+    if deployment_environment == ENVIRONMENT and environ.get("LILITH_ENV") != ENVIRONMENT:
         raise ServerError("DEV_ONLY")
+    if deployment_environment != ENVIRONMENT and environ.get("LILITH_ENV") != deployment_environment:
+        raise ServerError("DEPLOYMENT_ENVIRONMENT_MISMATCH")
     if environ.get("PYTHONPATH"):
         raise ServerError("PYTHONPATH_FORBIDDEN")
     extra = sorted(key for key in environ if key.startswith("LILITH_") and key not in ALLOWED_ENVIRONMENT)
@@ -198,23 +204,28 @@ def _group(name: str) -> int | None:
         return None
 
 
-def build_core(signing_key, *, state_dir: str = STATE_DIR, read_inputs=None, clock=utc_now) -> RecoveryWitnessCoreV1:
+def build_core(signing_key, *, state_dir: str = STATE_DIR, read_inputs=None, clock=utc_now,
+               environment: str = ENVIRONMENT) -> RecoveryWitnessCoreV1:
     storage = FilesystemWitnessStorageV1(state_dir)
-    writer = DevSyntheticWitnessWriterV1(signing_key=signing_key, storage=storage)
-    reader = read_inputs or (lambda: HI.read_host_inputs(environment=ENVIRONMENT))
+    writer = DevSyntheticWitnessWriterV1(signing_key=signing_key, storage=storage,
+                                         profile=B.witness_profile(environment))
+    reader = read_inputs or (lambda: HI.read_host_inputs(environment=environment))
     return RecoveryWitnessCoreV1(writer=writer, storage=storage, inputs=reader, clock=clock)
 
 
 def build_anchor_service(witness_key, credentials_directory: str | None, *, state_dir: str = PAN.STATE_DIR,
-                         clock=utc_now) -> PAN.PrivacyAnchorServiceV1:
+                         clock=utc_now, environment: str = ENVIRONMENT) -> PAN.PrivacyAnchorServiceV1:
     """K-PAN is optional for the witness: absent -> every anchor operation refuses ANCHOR_KEY_ABSENT (the Core API
     freshness gate then refuses memory), while RecoveryWitnessV2 serving is unaffected. An invalid K-PAN, or one equal
     to K-WIT, is refused the same way, never used."""
+    prod = environment == "prod"
     try:
-        key = load_privacy_anchor_key(credentials_directory, witness_key=witness_key)
+        key = load_privacy_anchor_key(credentials_directory, witness_key=witness_key, **(
+            {"anchor_key_id": PROD_PRIVACY_ANCHOR_KEY_ID, "environment": PROD_PRIVACY_ANCHOR_ENVIRONMENT} if prod else {}))
     except WitnessCredentialError:
         key = None
-    return PAN.PrivacyAnchorServiceV1(store=PAN.AnchorStoreV1(state_dir), signing_key=key, clock=clock)
+    return PAN.PrivacyAnchorServiceV1(store=PAN.AnchorStoreV1(state_dir), signing_key=key, clock=clock,
+                                      **({"environment": PROD_PRIVACY_ANCHOR_ENVIRONMENT} if prod else {}))
 
 
 def startup_recovery(core: RecoveryWitnessCoreV1, storage: FilesystemWitnessStorageV1, inputs: HI.HostInputsV1):
@@ -227,25 +238,31 @@ def startup_recovery(core: RecoveryWitnessCoreV1, storage: FilesystemWitnessStor
 
 def main() -> int:
     try:
-        check_environment(dict(os.environ))
+        try:
+            deployment_environment, _profile = HI.read_deployment()
+        except ValueError as exc:
+            raise ServerError(str(exc)) from exc
+        check_environment(dict(os.environ), deployment_environment=deployment_environment)
         signer_uid = check_identity(os.getuid(), os.getgid(), os.getgroups(), user_lookup=_user, group_lookup=_group)
     except ServerError as exc:
         print(f"lilith-recovery-witness: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED
     try:
-        key = load_witness_signing_key(os.environ.get("CREDENTIALS_DIRECTORY"))
+        key = load_witness_signing_key(os.environ.get("CREDENTIALS_DIRECTORY"),
+                                       witness_key_id=B.witness_profile(deployment_environment).witness_key_id)
     except WitnessCredentialError as exc:
         print(f"lilith-recovery-witness: {exc.state}", file=sys.stderr)
         return EXIT_CREDENTIAL_ABSENT if exc.state == CREDENTIAL_ABSENT else EXIT_CREDENTIAL_INVALID
-    core = build_core(key)
+    core = build_core(key, environment=deployment_environment)
     storage = core._storage
-    run = startup_recovery(core, storage, HI.read_host_inputs(environment=ENVIRONMENT))
+    run = startup_recovery(core, storage, HI.read_host_inputs(environment=deployment_environment))
     if run is not None and run.after.fail_closed:
         print(f"lilith-recovery-witness: STORE_FAIL_CLOSED {run.after.classification}", file=sys.stderr)
         return EXIT_STORE_FAIL_CLOSED
     try:
         serve_forever(core, inherited_listeners(), signer_uid=signer_uid,
-                      anchor=build_anchor_service(key, os.environ.get("CREDENTIALS_DIRECTORY")))
+                      anchor=build_anchor_service(key, os.environ.get("CREDENTIALS_DIRECTORY"),
+                                                  environment=deployment_environment))
     except ServerError as exc:
         print(f"lilith-recovery-witness: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED
