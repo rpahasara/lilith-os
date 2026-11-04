@@ -197,7 +197,13 @@ class WitnessKeyPublicationV1:
         if value["publicationType"] != WITNESS_PUBLICATION_TYPE or type(value["schemaVersion"]) is not int \
                 or value["schemaVersion"] != WITNESS_PUBLICATION_SCHEMA_VERSION:
             raise ContractViolation("UNSUPPORTED_SCHEMA_VERSION")
-        if value["profile"] != WITNESS_PROFILE:
+        # OWNER_PROD (P3): the production keygen publishes `OWNER_PROD`, and only for `prod`; DEV is unchanged.
+        if value["profile"] != WITNESS_PROFILE and not (
+                value["profile"] == OWNER_PROD_WITNESS_PROFILE.profile
+                and isinstance(value.get("witnessKey"), dict) and value["witnessKey"].get("environment") == "prod"):
+            raise ContractViolation("WITNESS_PUBLICATION_PROFILE")
+        if value["profile"] == WITNESS_PROFILE and isinstance(value.get("witnessKey"), dict) \
+                and value["witnessKey"].get("environment") == "prod":
             raise ContractViolation("WITNESS_PUBLICATION_PROFILE")
         key, custody = value["witnessKey"], value["custodyEvidence"]
         _exact(key, _WITNESS_KEY_FIELDS)
@@ -229,7 +235,7 @@ def witness_publication(public_key: bytes, ciphertext: bytes, machine_id: str, *
         raise ContractViolation(reason)
     return {
         "publicationType": WITNESS_PUBLICATION_TYPE, "schemaVersion": WITNESS_PUBLICATION_SCHEMA_VERSION,
-        "profile": WITNESS_PROFILE,
+        "profile": profile.profile,
         "witnessKey": {"witnessKeyId": profile.witness_key_id, "environment": profile.environment,
                        "algorithm": A.ALGORITHM, "publicKey": _b64u(public_key),
                        "publicKeySha256": hashlib.sha256(public_key).hexdigest()},

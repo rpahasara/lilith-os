@@ -68,7 +68,9 @@ TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_prepar
                         # The canonical-memory context service (owner decision D-2) over that route.
                         "test_canonical_context_service.py",
                         # OWNER_PROD: the production profile beside DEV_SYNTHETIC (P2).
-                        "test_owner_prod_profile.py"})
+                        "test_owner_prod_profile.py",
+                        # OWNER_PROD: the production ceremony forms (P3).
+                        "test_owner_prod_ceremony.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
@@ -132,7 +134,7 @@ SHARED_HASHES = {
     "services/owner-memory-control/lilith_owner_memory/successor_custody.py": "8b1da78c000f16ec843683329b59d25b99b1d10dce6527e1815b84952c6cb6e9",
     "services/owner-memory-control/lilith_owner_memory/successor_readiness.py": "842176d06954607aed39d8988764fc253fa8bd4c41ca49fcd5e2a4532c5ecc16",
     "services/owner-memory-control/lilith_owner_memory/authority_ledger_journal.py": "f0d554c53948723c80f5cfbfd638d60855e92ddb562137370d12f9c7eeec49ce",
-    "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "45dda5a2548e46abac16eb77e8e9adeb8ed0b52f4c89bf08cc33407b689a2ac4",
+    "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "ed21bbf9f97623633f8e8c8f52869ebe75f937f4fecd788f29e0eeb858ad8e48",
     "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py": "d3df4cfca975b31cbe526805d6573e7d4760ef376ad02f3cb8e0ac7cece4049b",
     # RR-39: the B2a owner-proof verifier the issuance path imports (an addition; it now also admits exactly the
     # fixed DEV_SYNTHETIC owner identity pinned in owner_proof.py). No existing entry is re-pinned.
