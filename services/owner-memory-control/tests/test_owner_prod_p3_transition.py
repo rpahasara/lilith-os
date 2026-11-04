@@ -575,7 +575,7 @@ class PinTests(unittest.TestCase):
             self.assertNotIn(needle, source, needle)
         self.assertEqual(source.count("read_bytes()"), 1)
         for name in ("owner_prod_release_stages.py", "owner_prod_operator.py", "owner_prod_signer_upgrade.py"):
-            text = (TOOLS / name).read_text(encoding="utf-8")
+            text = X.body((TOOLS / name).read_text(encoding="utf-8"))       # the code (docstrings may say "no PROD")
             for needle in ("deployment.json", "lilith-01", "prod.", "LILITH_ENV"):
                 self.assertNotIn(needle, text, (name, needle))
 
