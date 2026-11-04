@@ -94,6 +94,20 @@ def build(root: Path) -> None:
     (root / "proc/self/mounts").write_text("/dev/sda1 / ext4 rw,relatime 0 0\n", encoding="ascii")
 
 
+def _entries(root: Path) -> list[Path]:
+    """Every entry under `root`, by lstat only: `os.walk` and `Path.rglob` call `is_dir()`, which follows a symlink
+    (and bumps its atime) even when recursion does not follow it."""
+    found, stack = [], [Path(root)]
+    while stack:
+        top = stack.pop()
+        with os.scandir(top) as it:
+            for entry in sorted(it, key=lambda e: e.name):
+                found.append(Path(entry.path))
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(Path(entry.path))
+    return sorted(found)
+
+
 def tree(root: Path) -> dict:
     """Everything a mutation could touch, observed WITHOUT following any link (lstat only; `is_file()` / `is_dir()`
     would follow a symlink and bump its atime). Files: bytes, mode, size, inode, mtime_ns, atime_ns. Symlinks: mode,
@@ -101,33 +115,29 @@ def tree(root: Path) -> dict:
     lists every directory itself, and on a relatime filesystem its own listing can bump a directory's atime. The audit
     never lists a directory, so a new, removed or renamed entry still shows as a different listing."""
     out = {}
-    for top, dirs, files in os.walk(root, followlinks=False):
-        for name in sorted(dirs + files):
-            path = Path(top) / name
-            st = os.lstat(path)
-            key = str(path.relative_to(root))
-            if stat.S_ISDIR(st.st_mode):
-                out[key] = ("dir", st.st_mode, st.st_ino, st.st_mtime_ns, tuple(sorted(os.listdir(path))))
-            elif stat.S_ISREG(st.st_mode):
-                fd = os.open(path, os.O_RDONLY | os.O_NOATIME | os.O_NOFOLLOW)   # the comparison must not bump atime
-                try:
-                    digest = hashlib.sha256(os.read(fd, 1 << 27)).hexdigest()
-                finally:
-                    os.close(fd)
-                out[key] = (st.st_mode, st.st_size, st.st_ino, st.st_mtime_ns, st.st_atime_ns, digest)
-            else:
-                out[key] = (st.st_mode, st.st_size, st.st_ino, st.st_mtime_ns, st.st_atime_ns, None)
+    for path in _entries(root):
+        st = os.lstat(path)
+        key = str(path.relative_to(root))
+        if stat.S_ISDIR(st.st_mode):
+            out[key] = ("dir", st.st_mode, st.st_ino, st.st_mtime_ns, tuple(sorted(os.listdir(path))))
+        elif stat.S_ISREG(st.st_mode):
+            fd = os.open(path, os.O_RDONLY | os.O_NOATIME | os.O_NOFOLLOW)   # the comparison must not bump atime
+            try:
+                digest = hashlib.sha256(os.read(fd, 1 << 27)).hexdigest()
+            finally:
+                os.close(fd)
+            out[key] = (st.st_mode, st.st_size, st.st_ino, st.st_mtime_ns, st.st_atime_ns, digest)
+        else:
+            out[key] = (st.st_mode, st.st_size, st.st_ino, st.st_mtime_ns, st.st_atime_ns, None)
     return out
 
 
 def age_atimes(root: Path) -> None:
     """Files AND symlinks get an access time older than their mtime, so any read (or readlink) would bump it."""
-    for top, dirs, files in os.walk(root, followlinks=False):
-        for name in files + [d for d in dirs if os.path.islink(os.path.join(top, d))]:
-            path = os.path.join(top, name)
-            st = os.lstat(path)
-            if stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
-                os.utime(path, ns=(OLD * 10**9, st.st_mtime_ns), follow_symlinks=False)
+    for path in _entries(root):
+        st = os.lstat(path)
+        if stat.S_ISREG(st.st_mode) or stat.S_ISLNK(st.st_mode):
+            os.utime(path, ns=(OLD * 10**9, st.st_mtime_ns), follow_symlinks=False)
 
 
 @unittest.skipUnless(LINUX, "O_NOATIME needs Linux")
