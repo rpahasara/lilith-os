@@ -189,6 +189,30 @@ class GrantTests(unittest.TestCase):
                 self.write(raw=raw)
                 self.assertIsNone(self.basis())
 
+    def v3(self, **fields):
+        value = {"schemaVersion": 3, "channels": ["lilith_os", "telegram_owner_dm"],
+                 "sessionScope": "ALL_OWNER_CHANNEL_SESSIONS", "forgetScope": "CANONICAL_RECORDS_ONLY",
+                 "grantedAt": stamp(NOW - timedelta(hours=1)), "expiresAt": stamp(NOW + timedelta(days=2)), **fields}
+        self.write(raw=json.dumps(value))
+
+    def test_a_v3_grant_names_each_owner_channel(self):
+        self.v3()
+        self.assertEqual(self.basis(channel="lilith_os"), S.V2)
+        self.assertEqual(self.basis(channel="telegram_owner_dm", session="agent:main:telegram:dm:42"), S.V2)
+        for channel in ("public", "telegram", "discord", "telegram_group"):
+            self.assertIsNone(self.basis(channel=channel))                    # never an owner channel
+        self.v3(channels=["lilith_os"])
+        self.assertIsNone(self.basis(channel="telegram_owner_dm"))            # Telegram only when listed
+        self.assertEqual(self.basis(channel="lilith_os"), S.V2)
+        for fields in ({"channels": []}, {"channels": ["lilith_os", "lilith_os"]}, {"channels": ["public"]},
+                       {"channels": ["lilith_os", "discord"]}, {"channels": "lilith_os"},
+                       {"sessionScope": "ALL_LILITH_OS_SESSIONS"}, {"forgetScope": "ALL"}, {"channel": "lilith_os"}):
+            with self.subTest(fields=fields):
+                self.v3(**fields)
+                self.assertIsNone(self.basis(channel="lilith_os"))
+        self.write(channel="lilith_os")                                       # a v2 grant never covers Telegram
+        self.assertIsNone(self.basis(channel="telegram_owner_dm"))
+
     def test_a_v1_grant_keeps_the_release_meaning(self):
         v1 = {"schemaVersion": 1, "channel": "lilith_os", "sessionId": "sess.owner",
               "grantedAt": stamp(NOW - timedelta(hours=1)), "expiresAt": stamp(NOW + timedelta(days=1))}

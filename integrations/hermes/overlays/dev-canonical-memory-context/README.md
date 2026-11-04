@@ -41,6 +41,9 @@ erasure is claimed. That needs the Hermes FORGET executor work for the PROD Herm
   (socket started, **not enabled**: a reboot removes the route until it is started again, and Privacy needs its
   per-boot unlock first anyway), the adapter and context module in `HERMES_HOME/plugins/lilith_os/`, and the v2
   grant (`ALL_LILITH_OS_SESSIONS`, expires 2026-11-07T08:30:11Z; after that personal memory stops, the codename stays).
+- DEV runs the service as installed on 2026-11-04 (`187e30c9…`: grant v1/v2). The source here has since added
+  the v3 grant (owner channels list, D-5); `cm1_window.sh` now pins those bytes, so a DEV re-install would carry
+  them. The installed DEV grant is v2 and is unaffected.
 - Provider gate back to its exact pre-install `gate.json` (`b652422f…`, budget exhausted 22/5).
 - `cm1_window.sh revert` restores every pre-install byte (`critical.sha256` is compared with the saved copy).
 

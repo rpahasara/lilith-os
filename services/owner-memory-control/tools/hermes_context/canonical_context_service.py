@@ -18,6 +18,15 @@ The grant, `/etc/lilith-first-memory-dev/hermes-owner-channel.json` (root-owned,
     {"schemaVersion": 2, "channel": "lilith_os", "sessionScope": "ALL_LILITH_OS_SESSIONS" | "<exact session id>",
      "forgetScope": "CANONICAL_RECORDS_ONLY", "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>"}
 
+schemaVersion 3 (owner decision D-5) names the owner channels explicitly instead of one channel; the only owner
+channels are the console and the owner's private Telegram chat, and the gateway decides which a turn is in:
+
+    {"schemaVersion": 3, "channels": ["lilith_os", "telegram_owner_dm"] (a non-empty subset, no duplicates),
+     "sessionScope": "ALL_OWNER_CHANNEL_SESSIONS" | "<exact session id>", "forgetScope": "CANONICAL_RECORDS_ONLY",
+     "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>"}
+
+`public` (Discord, groups, any other chat) can never be granted.
+
 What `forgetScope: CANONICAL_RECORDS_ONLY` states, and the answer repeats: a FORGET of a memory erases its canonical
 records (L04 / L18) and, because the context note is rebuilt from canonical storage on every turn and never persisted,
 stops it reaching any later turn. It does NOT erase what LILITH already said in past chat turns (Hermes `state.db`).
@@ -37,10 +46,14 @@ from typing import Any, Callable, Optional
 RELEASE = "/opt/lilith-authority-dev/current"
 GRANT_PATH = "/etc/lilith-first-memory-dev/hermes-owner-channel.json"
 GRANT_V2_FIELDS = frozenset({"schemaVersion", "channel", "sessionScope", "forgetScope", "grantedAt", "expiresAt"})
+GRANT_V3_FIELDS = frozenset({"schemaVersion", "channels", "sessionScope", "forgetScope", "grantedAt", "expiresAt"})
 ALL_SESSIONS = "ALL_LILITH_OS_SESSIONS"
+ALL_OWNER_SESSIONS = "ALL_OWNER_CHANNEL_SESSIONS"
 CANONICAL_ONLY = "CANONICAL_RECORDS_ONLY"
 GRANT_MAX_SECONDS = 7 * 24 * 3600
 OWNER_CHANNEL = "lilith_os"
+TELEGRAM_OWNER_DM = "telegram_owner_dm"
+OWNER_CHANNELS = frozenset({OWNER_CHANNEL, TELEGRAM_OWNER_DM})     # never "public"
 OWNER_PERSONAL = "OWNER_PERSONAL"
 
 V1 = "V1_EXACT_SESSION_AND_HERMES_FLOOR"     # the release's own rule
@@ -51,7 +64,7 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
                 now: Optional[Callable[[], datetime]] = None) -> Optional[str]:
     """V2, V1 or None. A missing, foreign-owned, writable, oversized, malformed, expired or not-yet-valid grant is no
     grant; a v1 grant is judged by the release itself."""
-    if channel != OWNER_CHANNEL:
+    if channel not in OWNER_CHANNELS:
         return None
     try:
         meta = os.lstat(path)
@@ -64,11 +77,23 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
         return None
     if grant.get("schemaVersion") == 1:
         return V1 if cli.owner_channel_granted(channel, session, path=path, owner_uid=owner_uid, now=now) else None
-    if set(grant) != GRANT_V2_FIELDS or grant["schemaVersion"] != 2 or grant["channel"] != OWNER_CHANNEL \
-            or grant["forgetScope"] != CANONICAL_ONLY:
+    if grant.get("schemaVersion") == 2:
+        if set(grant) != GRANT_V2_FIELDS or grant["channel"] != OWNER_CHANNEL or channel != OWNER_CHANNEL:
+            return None
+        everyone = ALL_SESSIONS
+    elif grant.get("schemaVersion") == 3:
+        channels = grant.get("channels")
+        if set(grant) != GRANT_V3_FIELDS or not isinstance(channels, list) or not channels \
+                or len(set(channels)) != len(channels) or not set(channels) <= OWNER_CHANNELS \
+                or channel not in channels:
+            return None
+        everyone = ALL_OWNER_SESSIONS
+    else:
+        return None
+    if grant["forgetScope"] != CANONICAL_ONLY:
         return None
     scope = grant["sessionScope"]
-    if not (isinstance(scope, str) and (scope == ALL_SESSIONS or cli._SESSION.match(scope))):
+    if not (isinstance(scope, str) and (scope == everyone or cli._SESSION.match(scope))):
         return None
     if not all(isinstance(grant[k], str) and cli._INSTANT.match(grant[k]) for k in ("grantedAt", "expiresAt")):
         return None
@@ -77,7 +102,7 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
     current = (now or (lambda: datetime.now(timezone.utc)))()
     if not granted <= current < expires or (expires - granted).total_seconds() > GRANT_MAX_SECONDS:
         return None
-    return V2 if scope in (ALL_SESSIONS, session) else None
+    return V2 if scope in (everyone, session) else None
 
 
 def context_response(cli: Any, raw: bytes, *, host_context: Callable[[str], bytes],

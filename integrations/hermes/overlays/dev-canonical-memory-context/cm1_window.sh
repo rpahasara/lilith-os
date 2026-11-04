@@ -43,7 +43,7 @@ declare -A PAYLOAD=(
   [adapter.cm1.py]=f89303601c2b6901e4d5111242a4949a9ce1df7249a9d358edda6c69b021c0e3
   [adapter.e1.py]=8c3b00552d83adb4e7d6c0af5a9aa081cb60d92879dc14db3baf71537ca32a4a
   [lilith_memory_context.py]=a32c5e4120d26bd2b7e9e72726e5f8349e714c10e51940d1eaa31cac6022dfd6
-  [canonical_context_service.py]=187e30c93c2e812a308b5a6b9f4159164ad6ebf98a29b9922810b047e4023df9
+  [canonical_context_service.py]=09c0dec20688d450b0bdd0647ec7c265f71c92302857b4114027757fe30ca0c0
   [lilith-first-memory-context.socket]=d1370434aa754516ea1e13db7187b8bbbcc85829de30141d8f34964beead0f86
   [lilith-first-memory-context@.service]=930d4c704fed1540f0ca55b4cf9ac1183e782f5da1297bad2385d046ca888427
 )
