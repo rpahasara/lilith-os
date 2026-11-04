@@ -384,6 +384,19 @@ the fixed helper is COMPLETE. The next run needs its own authorization and must 
 - **Allowlist:** the Telegram allowlist key count in `config.yaml` is **0**.
 - **ids:** gid **995 in use**.
 
+**Run 2 (2026-11-05, `I authorize P3-PROD-AUDIT-RO 13e4ff72d6df 298abaf159da14a7`): COMPLETE.**
+`PROD_INTEGRATION_AUDIT_COMPLETE observed=70`, 0 errors, exit 0. Results:
+- **Pins:** 22/22 MATCH.
+- **Host:** `ubuntu-24.04`; 1,300 MB available, 5.8 GB free.
+- **Store digests:** all unchanged from run 1. Every other stable observation is identical to run 1.
+- **Services:** the gateway and Core API run with the same PIDs.
+- **Timers:** `lilith-career-watcher.timer` and `lilith-gmail-watcher.timer` are active. `lilith-morning-brief-watcher.timer`
+  and `lilith-meeting-prep-watcher.timer` are `LoadState=not-found`. Those two names in the audit's unit list were
+  guesses (the failed unit is `lilith-meeting-prep.service`). This is a naming finding about the audit, not a PROD
+  fault. Their real timer names are to be confirmed before any window uses unit states.
+
+The staged in-place installation's resource condition is met.
+
 ### 10.2 R3g: collision-safe service ids
 
 DEV's numeric ids (recorded 995/985) must never be assumed on PROD, and gid 995 is taken there. The PROD installer:
