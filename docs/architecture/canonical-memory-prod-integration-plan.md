@@ -378,7 +378,8 @@ the fixed helper is COMPLETE. The next run needs its own authorization and must 
 - **Host:** system Python 3.12.3 and glibc 2.39 (C-5 resolved); 2 vCPU; 1,299 of 1,961 MB available; 5.8 GB disk
   free; root mounted `relatime`.
 - **Hermes:** `f293e72`, venv Python 3.11.
-- **New components absent:** every canonical-memory path, socket, settings file and principal.
+- **New components absent:** every canonical-memory path, socket and settings file. The principal observations
+  used guessed names and are not evidence (§11).
 - **Stores and keys:** the 15B2a keys are present (32 B, `0600`); store digests are recorded.
 - **Services:** the gateway and Core API are active with 0 restarts. Failed units: only the two known ones.
 - **Allowlist:** the Telegram allowlist key count in `config.yaml` is **0**.
