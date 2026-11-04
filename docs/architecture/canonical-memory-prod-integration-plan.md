@@ -163,7 +163,7 @@ Each row is its own owner approval and window. LILITH's behaviour is unchanged u
 | R0 | source | this record, the read-only audit script and its offline test (this PR) | no |
 | R1 | owner | decisions D-7 to D-12 (§7) | no |
 | R2 | PROD, read-only | `prod_integration_audit_ro.py` (§6.1), one approved read; workstation `gcloud` reads of the snapshot schedule and the latest snapshot | no |
-| R3 | source, offline | (a) `PROD_PATHS` → isolated store (D-7 A); (b) PROD installer mode + return + simulation on a PROD-shaped fake host; (c) overlay rebased onto `4db8bb58` with `native_self_status` merge tests and the corpus with the feature off; (d) compat pins updated from R2; (e) machine-ID pin (D-9); (f) the broker question (§2) settled in source | no |
+| R3 | source, offline | (a) `PROD_PATHS` → isolated store (D-7 A); (b) PROD installer mode + return + simulation on a PROD-shaped fake host; (c) overlay rebased onto `4db8bb58` with `native_self_status` merge tests and the corpus with the feature off; (d) compat pins updated from R2; (e) machine-ID pin (D-9); (f) the broker question (§2) settled in source; (g) collision-safe service uid/gid selection (§10.2); (h) `prod_compat_ro.sh` rebased onto the no-SQLite rule | no |
 | R4 | DEV | only if R3 changes the signed release payload: attested build A = B and a DEV transition (P3 ladder). If R3 touches only host-tree and tooling files, the release stays `88a1168` and DEV gets only a host-tree update | no |
 | R5 | owner + PROD | key ceremony (P4 order: K-ROOT, K-ACT, K-WIT, K-PAN, registry, anchor, owner credential, K-PCK, verified backups) | no |
 | R6 | PROD | fresh snapshot; inert install (authority release `88a1168`, witness, host tree, context units with **no grant**, `canonicalLtmEnabled=false`) | no |
@@ -326,8 +326,10 @@ To decide: A or B, and the backup or loss plan. On loss, a new credential needs 
 | B: PROD installer mode not built (C-3) | R3b, offline with a PROD-shaped simulation |
 | B: overlay base drift (C-2) | R3c rebase + corpus |
 | B: owner decisions D-7 to D-12 | §7 |
-| R: Python/wheel mismatch (C-5) | R2 reads it first |
-| R: memory headroom on e2-small with a ~245 MB gateway | R2; the DEV evidence suggests about 100 MB extra |
+| ~~R: Python/wheel mismatch (C-5)~~ | observed in run 1: system Python 3.12.3, glibc 2.39 (§10) |
+| R: memory headroom on e2-small | observed in run 1: 1,299 MB available, 5.8 GB disk free; DEV needs about 95 MB for the stack (§10) |
+| B: uid/gid collisions (gid 995 in use on PROD) | R3g: collision-safe id selection (§10.2) |
+| B: Telegram owner-ID source unresolved | needed only at R10; §10.3 |
 | R: intermittent OS Login refusal on `lilith-01` (2026-11-04) | every window starts with a stable-SSH check and HOLDs on refusal |
 | R: per-boot unlock dependency (unattended upgrades may reboot) | D-4 accepted; the socket enabled; recall fails closed |
 | R: K-PCK loss means no unlock ever | the verified offline backup is an R7 prerequisite |
@@ -343,8 +345,80 @@ Documentation and offline tests only:
   - no byte, inode, mtime or atime changes, and no new file;
   - the fail-closed paths: missing, permission, symlink, failed, empty, partial or timed-out commands, unsafe
     values, exceptions and missing observations;
+  - streaming hashing (a 64 MiB file under a 3 MiB peak) and the 4 MiB whole-read limit;
+  - the PROD-shaped fixture: run 1's five errors reproduced under the old rules, COMPLETE now; the os-release link
+    variants; no other symlink followed;
   - the refusals happen before any read;
   - sanitization and the static command boundary.
 
 No runtime, release, router or Core API file changes. Nothing is installed, and PROD is not contacted. The PROD
 deploy workflow stays `disabled_manually`.
+
+## 10. PROD audit run 1 (2026-11-05) and R3 findings
+
+### 10.1 Run 1: INCOMPLETE, kept as evidence
+
+One owner-authorized run (`I authorize P3-PROD-AUDIT-RO 5a90108c6ce8 d1f1cf453cd4d271`) ended
+`PROD_INTEGRATION_AUDIT_INCOMPLETE errors=5 observed=70 expected=70` (exit 3). That is a STOP. The run is never
+reinterpreted as COMPLETE and was not retried. Its output is sealed on the owner workstation.
+
+**The five errors were audit defects, each caught by fail-closed:**
+- `host os` OSError: `/etc/os-release` is Ubuntu's symlink to `../usr/lib/os-release`, and `O_NOFOLLOW` refused it;
+- four timer units ValueError: a timer has no `MainPID` / `NRestarts`, so the service-only schema could never be
+  complete.
+
+The fix follows exactly that one link when its target resolves to `usr/lib/os-release`, which is itself opened with
+`O_NOFOLLOW`. Services and timers now have their own property sets, plus `LoadState`, so a missing unit cannot pass
+as inactive. On a PROD-shaped fixture, the run-1 helper reproduces exactly these five errors with the same counts;
+the fixed helper is COMPLETE. The next run needs its own authorization and must be COMPLETE with zero errors.
+
+**Observed in run 1** (individual observations; the run as a whole is INCOMPLETE):
+- **All 22 pins MATCH:** identity files, `config.yaml`, `router.yaml`, the 12 router modules (`gateway_integration`
+  `4db8bb58`), the 4 Hermes files and `app.py`.
+- **Host:** system Python 3.12.3 and glibc 2.39 (C-5 resolved); 2 vCPU; 1,299 of 1,961 MB available; 5.8 GB disk
+  free; root mounted `relatime`.
+- **Hermes:** `f293e72`, venv Python 3.11.
+- **New components absent:** every canonical-memory path, socket, settings file and principal.
+- **Stores and keys:** the 15B2a keys are present (32 B, `0600`); store digests are recorded.
+- **Services:** the gateway and Core API are active with 0 restarts. Failed units: only the two known ones.
+- **Allowlist:** the Telegram allowlist key count in `config.yaml` is **0**.
+- **ids:** gid **995 in use**.
+
+### 10.2 R3g: collision-safe service ids
+
+DEV's numeric ids (recorded 995/985) must never be assumed on PROD, and gid 995 is taken there. The PROD installer:
+- creates each service principal by **name** with `useradd --system` / `groupadd --system`, letting the OS pick a
+  free system id;
+- refuses if the name already exists with any other shape;
+- records the chosen ids in the install record;
+- pins every later check (units, tmpfiles, ownership, the deployer-boundary proof) to the recorded names and ids,
+  never to DEV's numbers.
+
+The return removes exactly the recorded principals and nothing else. The R2 audit reports the four names absent and
+which of 985/995 are in use. The installer's preflight repeats that check in the same session as the creation.
+
+### 10.3 Telegram owner-ID source: unresolved (needed only at R10)
+
+From the Hermes source at `f293e72` (offline), the gateway's Telegram allowlist comes from:
+- the `TELEGRAM_ALLOWED_USERS` value (profile secret scope or the process environment: `~/.hermes/.env` or the unit
+  environment);
+- `config.yaml` `telegram.allow_from`, which Hermes copies into that variable;
+- the DM pairing store `{HERMES_HOME}/platforms/pairing`;
+- the allow-all flags `TELEGRAM_ALLOW_ALL_USERS` / `GATEWAY_ALLOW_ALL_USERS`.
+
+Run 1's count of 0 rules out `config.yaml`.
+
+The router's `telegram_owner_dm` channel never reads any of these. Its owner ID comes only from the root-owned
+`canonical_memory.json`, which the owner supplies at R10. So the source matters for one check only: the owner ID in
+the settings must be one the gateway already admits.
+
+**Proposed, if the owner wants it:** a separate, narrowly scoped, owner-approved provenance check. It never prints
+an ID, token or value. It reports only:
+1. which of the four sources holds a value: key-name presence in `.env`, the pairing-store entry count and whether
+   each allow-all flag is set;
+2. the number of admitted Telegram IDs;
+3. for each admitted ID, `sha256("lilith-tg-owner-v1\0" + id)`, so the owner can confirm, by computing the same
+   fingerprint locally, that the ID they intend to configure is admitted.
+
+Reading `.env` means touching a credential file (only key names are matched, in memory). For that reason this check
+is not part of the R2 audit; it would run only under its own approval, or by the owner.
