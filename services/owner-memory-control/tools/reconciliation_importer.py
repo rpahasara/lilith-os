@@ -18,6 +18,7 @@ reviewed and reconciled; the original files, history and databases are preserved
 
     python reconciliation_importer.py propose <memories-copy-dir> <out-dir> [--canonical <context.json>]
     python reconciliation_importer.py verify  <memories-copy-dir> <out-dir>
+    python reconciliation_importer.py decide  <out-dir> <decisions.json>   (validate the owner's decisions; admits nothing)
 
 `--canonical` takes a `LilithCanonicalMemoryContextV1` answer (as the context route returns it) so proposals that
 repeat an admitted canonical value are marked ALREADY_CANONICAL instead of being proposed again.
@@ -306,8 +307,72 @@ def verify(root: Path, out: Path) -> dict:
     return {"inputsUnchanged": current == recorded, "allPending": pending, "proposals": len(result["proposals"])}
 
 
+DECISIONS_SCHEMA = "LilithReconciliationDecisionsV1"
+ADMISSIBLE_FAMILIES = frozenset()     # owner-profile facts: no reviewed family yet (codename/origin are not imported)
+
+
+def check_decisions(out: Path, decisions: dict) -> dict:
+    """Validate the owner's decisions file against the proposal set; write nothing, admit nothing.
+
+    `decisions` = {"schema": DECISIONS_SCHEMA, "proposalSetSha256": <sha of proposals.json>,
+                   "decisions": {<proposalId>: {"decision": <one of DECISIONS>, "correctedText"?: str, "note"?: str}}}
+    The result lists what is still pending, what is invalid, what USER.md keeps, and the admission queue: CONFIRM /
+    CORRECT entries that WOULD be admitted by a later, separately approved step once their family exists."""
+    raw = (Path(out) / "proposals.json").read_bytes()
+    result = json.loads(raw.decode("utf-8"))
+    if result.get("schema") != SCHEMA:
+        raise ImportRefused("NOT_A_PROPOSAL_SET")
+    if not isinstance(decisions, dict) or decisions.get("schema") != DECISIONS_SCHEMA \
+            or set(decisions) != {"schema", "proposalSetSha256", "decisions"}:
+        raise ImportRefused("NOT_A_DECISIONS_FILE")
+    if decisions["proposalSetSha256"] != _sha256(raw):
+        raise ImportRefused("DECISIONS_FOR_ANOTHER_PROPOSAL_SET")
+    given = decisions["decisions"]
+    if not isinstance(given, dict):
+        raise ImportRefused("NOT_A_DECISIONS_FILE")
+    ids = {p["proposalId"]: p for p in result["proposals"]}
+    invalid, pending, queue, kept, rejected, stale = [], [], [], [], [], []
+    for pid in given:
+        if pid not in ids:
+            invalid.append({"proposalId": pid, "reason": "UNKNOWN_PROPOSAL"})
+    for pid, p in ids.items():
+        d = given.get(pid)
+        if d is None:
+            pending.append(pid)
+            continue
+        if not isinstance(d, dict) or d.get("decision") not in DECISIONS or not set(d) <= {"decision", "correctedText", "note"}:
+            invalid.append({"proposalId": pid, "reason": "MALFORMED_DECISION"})
+            continue
+        corrected = d.get("correctedText")
+        if (d["decision"] == "CORRECT") != (isinstance(corrected, str) and bool(normalize(corrected))):
+            invalid.append({"proposalId": pid, "reason": "CORRECT_NEEDS_CORRECTED_TEXT_ONLY"})
+            continue
+        if d["decision"] in ("CONFIRM", "CORRECT") and p["proposedTarget"]["status"] == "NOT_A_MEMORY_FACT":
+            invalid.append({"proposalId": pid, "reason": "OPERATING_RULE_IS_NOT_A_MEMORY"})
+            continue
+        if d["decision"] in ("CONFIRM", "CORRECT"):
+            queue.append({"proposalId": pid, "value": normalize(corrected) if corrected else p["normalizedText"],
+                          "family": p["proposedTarget"]["family"],
+                          "admissibleNow": p["proposedTarget"]["family"] in ADMISSIBLE_FAMILIES})
+        elif d["decision"] == "KEEP_IN_USER_MD_ONLY":
+            kept.append(pid)
+        elif d["decision"] == "REJECT":
+            rejected.append(pid)
+        else:
+            stale.append(pid)
+    return {"status": "COMPLETE" if not pending and not invalid else "INCOMPLETE",
+            "rule": "Nothing is admitted, written, overwritten or deleted by this check. USER.md is never edited by "
+                    "this tool; REJECT and MARK_STALE are recorded decisions only.",
+            "pending": pending, "invalid": invalid, "keptInUserMd": kept, "rejected": rejected, "markedStale": stale,
+            "admissionQueue": queue, "admissibleNow": sum(1 for q in queue if q["admissibleNow"])}
+
+
 def main(argv: list[str]) -> int:
     try:
+        if len(argv) == 3 and argv[0] == "decide":
+            outcome = check_decisions(Path(argv[1]), json.loads(Path(argv[2]).read_text(encoding="utf-8")))
+            print(json.dumps(outcome, indent=2, ensure_ascii=False))
+            return 0 if outcome["status"] == "COMPLETE" else 1
         if len(argv) in (3, 5) and argv[0] == "propose":
             canonical = None
             if len(argv) == 5:

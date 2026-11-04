@@ -140,6 +140,43 @@ class ImporterTests(unittest.TestCase):
         self.assertEqual(RI.main(["verify", str(self.mem), str(self.out)]), 1)
         self.assertEqual(RI.main(["admit", str(self.mem), str(self.out)]), 2)
 
+    def test_decisions_are_validated_and_nothing_is_admitted(self):
+        result = self.run_propose()
+        raw = (self.out / "proposals.json").read_bytes()
+        import hashlib
+        digest = hashlib.sha256(raw).hexdigest()
+        rule = self.by_text(result, "Autonomy:")[0]["proposalId"]
+        career = self.by_text(result, "landscape architect")[0]["proposalId"]
+        robin = self.by_text(result, "Robin")[0]["proposalId"]
+        sam = self.by_text(result, "called Sam")[0]["proposalId"]
+        decisions = {"schema": RI.DECISIONS_SCHEMA, "proposalSetSha256": digest, "decisions": {
+            rule: {"decision": "KEEP_IN_USER_MD_ONLY"},
+            career: {"decision": "CORRECT", "correctedText": "TEST_ONLY user is a landscape architect."},
+            robin: {"decision": "CONFIRM"}, sam: {"decision": "REJECT"}}}
+        before = self.snapshot()
+        out = RI.check_decisions(self.out, decisions)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((self.out / "proposals.json").read_bytes(), raw)      # never rewritten
+        self.assertEqual(out["status"], "INCOMPLETE")                        # the rest are still pending
+        self.assertEqual(len(out["pending"]), len(result["proposals"]) - 4)
+        self.assertEqual(out["keptInUserMd"], [rule])
+        self.assertEqual(out["rejected"], [sam])
+        self.assertEqual([q["proposalId"] for q in out["admissionQueue"]], [career, robin])
+        self.assertEqual(out["admissionQueue"][0]["value"], "TEST_ONLY user is a landscape architect.")
+        self.assertEqual(out["admissibleNow"], 0)                            # no family exists yet
+        bad = {**decisions, "decisions": {rule: {"decision": "CONFIRM"}, career: {"decision": "CORRECT"},
+                                          "rprop.nope": {"decision": "REJECT"}, robin: {"decision": "MAYBE"}}}
+        reasons = sorted(i["reason"] for i in RI.check_decisions(self.out, bad)["invalid"])
+        self.assertEqual(reasons, ["CORRECT_NEEDS_CORRECTED_TEXT_ONLY", "MALFORMED_DECISION",
+                                   "OPERATING_RULE_IS_NOT_A_MEMORY", "UNKNOWN_PROPOSAL"])
+        with self.assertRaises(RI.ImportRefused) as ctx:
+            RI.check_decisions(self.out, {**decisions, "proposalSetSha256": "0" * 64})
+        self.assertEqual(ctx.exception.code, "DECISIONS_FOR_ANOTHER_PROPOSAL_SET")
+        everything = {pid: {"decision": "MARK_STALE"} for pid in (p["proposalId"] for p in result["proposals"])}
+        everything[rule] = {"decision": "KEEP_IN_USER_MD_ONLY"}
+        done = RI.check_decisions(self.out, {**decisions, "decisions": everything})
+        self.assertEqual((done["status"], done["admissionQueue"]), ("COMPLETE", []))
+
     def test_the_tool_cannot_reach_the_runtime(self):
         source = TOOL.read_text(encoding="utf-8")
         for forbidden in ("import sqlite3", "import socket", "lilith_memory", "lilith_owner_memory", "subprocess",
