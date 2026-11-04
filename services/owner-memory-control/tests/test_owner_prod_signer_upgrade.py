@@ -22,11 +22,29 @@ def sha(data: bytes) -> str:
 
 
 class ContractTests(unittest.TestCase):
-    def test_not_ready_until_new_is_pinned_from_the_merge_build(self):
-        self.assertIsNone(C.NEW_RELEASE)
-        self.assertIsNone(C.NEW_MANIFEST_SHA256)
-        self.assertFalse(C.ready_to_transition())
+    def test_new_is_the_attested_merge_build_and_ready(self):
+        self.assertEqual(C.NEW_RELEASE, "88a1168bd41797109772ffce7df7352c1ae40e4c")
+        self.assertEqual(C.NEW_MANIFEST_SHA256, "072001af671feca6564906d3d685f89bfc608f9d595aed58bae0f72a25777684")
+        self.assertEqual(C.NEW_RELEASE_ATTESTATION["archiveSha256"],
+                         "53ae457b8b907e12282ed468da0387620b7a376a46ab1c450709b67540b43c07")
+        self.assertTrue(C.ready_to_transition())
         self.assertEqual(C.OLD_RELEASE, "d82f7dac669f37c494beebf9bbb99dffdb6c23f5")
+        self.assertNotEqual(C.NEW_RELEASE_ATTESTATION["archiveSha256"], C.REHEARSAL["archiveSha256"])
+        # NEW's payload is the rehearsal's: only the release manifest (it names the candidate) differs.
+        self.assertEqual(C.NEW_RELEASE_ATTESTATION["archiveByteSize"], C.REHEARSAL["archiveByteSize"] + 1)
+
+    def test_the_pinned_new_is_main_history_and_its_runtime_equals_this_tree(self):
+        merged = subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", C.NEW_RELEASE, "HEAD"])
+        if merged.returncode == 128:
+            self.skipTest("shallow clone without the merge commit")
+        self.assertEqual(merged.returncode, 0)
+        source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}
+        for member, data in RFS.runtime_payloads(ROOT).items():
+            if member not in source_of:
+                continue
+            new = subprocess.run(["git", "-C", str(ROOT), "show", f"{C.NEW_RELEASE}:{source_of[member]}"],
+                                 capture_output=True, check=True).stdout
+            self.assertEqual(new, data, member)
 
     def test_the_delta_is_the_git_bytes_of_d82f7da_against_this_tree(self):
         source_of = {target: source for source, target in RFS.RUNTIME_SOURCE_MAP.items()}

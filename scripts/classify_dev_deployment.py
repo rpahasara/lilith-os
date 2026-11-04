@@ -90,6 +90,16 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tests/test_personal_memory_fm2_transition.py",
         "services/owner-memory-control/tests/test_relationship_origin_forget_dev.py",
         "docs/architecture/personal-memory-fm2-dev-activation.md",
+        # OWNER_PROD P3: the DEV transition contract, the same owner-side tooling moved to it, and its record (never in
+        # the Core API bundle). A merge of these alone must not deploy: the transition baseline includes the Core API
+        # incarnation.
+        "services/owner-memory-control/tools/owner_prod_signer_upgrade.py",
+        "services/owner-memory-control/tools/owner_prod_release_stages.py",
+        "services/owner-memory-control/tools/owner_prod_operator.py",
+        "services/owner-memory-control/tests/owner_prod_transform.py",
+        "services/owner-memory-control/tests/test_owner_prod_signer_upgrade.py",
+        "services/owner-memory-control/tests/test_owner_prod_p3_transition.py",
+        "docs/architecture/canonical-memory-p3-dev-transition.md",
         # 2026-10 source consolidation record (ADR-0016). Documentation only, admitted at the exact reviewed
         # revision pinned below (the two engineering records at their PROD-recovery revision of 2026-10-27);
         # any other revision takes full deployment.
