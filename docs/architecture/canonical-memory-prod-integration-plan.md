@@ -17,7 +17,7 @@ its date); **A** = assumption; **M** = missing evidence (§6 lists the read that
 | --- | --- | --- |
 | Host | `lilith-01`, GCE e2-small (2 shared vCPU, 2 GB RAM, 20 GB disk, no swap assumed), `asia-southeast1-b`; OS Login over IAP; one boot disk; daily snapshot schedule `lilith-01-daily` (30 days) attached 2026-11-01 | V (records 2026-11-01/02) |
 | Hermes gateway | `hermes-gateway`: NousResearch/hermes-agent `f293e72` (v0.20.5) + 15B2a containment + Router V2 seam; Python 3.11 venv; `run.py` `31fef97d` (P1 persist fix); channels Telegram, Discord, `lilith_os` (console). WhatsApp disconnected and out of scope | V (2026-10-22, 11-03) |
-| Router (`~/.hermes/lilith_router`) | Router V2 + seven Cutover 2 lanes; `gateway_integration.py` **`4db8bb58…`** (C2 `99fe9064` → T4 `7f83cf9c` → T4 wording `4db8bb58`, deployed 2026-11-04 07:36Z); lean social `social_lean.py` `5c4c2d1f` (Groq Qwen); `world_context` `ebe62158`; social guard `3a0906b5`; `router.yaml` lanes live | V (deploy records 2026-11-03/04) |
+| Router (`~/.hermes/lilith_router`) | Router V2 + seven Cutover 2 lanes; `gateway_integration.py` **`4db8bb58…`** (C2 `99fe9064` → T4 `7f83cf9c` → T4 wording `4db8bb58`, deployed 2026-11-04 07:36Z); lean social `social_lean.py` `5c4c2d1f` (Groq Qwen); `world_context.py` `91deea97` with `_prod_world_context.py` `ebe62158`; social guard `3a0906b5`; `router.yaml` lanes live | V (deploy records 2026-11-03/04) |
 | Identity | `SOUL.md` (~32 KB) and `memories/USER.md` (1,241 B, static since 09-06) loaded by Hermes; `MEMORY.md` empty; `memories/{decisions,projects,relationships,tasks}/` notes | V (2026-10-27, 11-02) |
 | Conversation history | Hermes `state.db` (3,600+ messages; all channels persisted since P1) | V (2026-11-03) |
 | Core API | `lilith-os-api`: single-file FastAPI `app.py` `53dfae2a` (Cutover 1), reads/writes enforced, loopback trusted; `lilith.db` (World Model 31 beliefs, goals, CRM, drafts). No `lilith_memory` package. PROD deploy workflow `disabled_manually` | V (2026-11-01) |
@@ -162,7 +162,7 @@ Each row is its own owner approval and window. LILITH's behaviour is unchanged u
 | --- | --- | --- | --- |
 | R0 | source | this record, the read-only audit script and its offline test (this PR) | no |
 | R1 | owner | decisions D-7 to D-12 (§7) | no |
-| R2 | PROD, read-only | `prod_integration_audit_ro.sh` + `prod_compat_ro.sh`, one approved read; workstation `gcloud` reads of the snapshot schedule and the latest snapshot | no |
+| R2 | PROD, read-only | `prod_integration_audit_ro.py` (§6.1), one approved read; workstation `gcloud` reads of the snapshot schedule and the latest snapshot | no |
 | R3 | source, offline | (a) `PROD_PATHS` → isolated store (D-7 A); (b) PROD installer mode + return + simulation on a PROD-shaped fake host; (c) overlay rebased onto `4db8bb58` with `native_self_status` merge tests and the corpus with the feature off; (d) compat pins updated from R2; (e) machine-ID pin (D-9); (f) the broker question (§2) settled in source | no |
 | R4 | DEV | only if R3 changes the signed release payload: attested build A = B and a DEV transition (P3 ladder). If R3 touches only host-tree and tooling files, the release stays `88a1168` and DEV gets only a host-tree update | no |
 | R5 | owner + PROD | key ceremony (P4 order: K-ROOT, K-ACT, K-WIT, K-PAN, registry, anchor, owner credential, K-PCK, verified backups) | no |
@@ -177,11 +177,37 @@ exists and was validated on DEV.
 
 ## 6. Validation and readiness
 
-1. **Read-only audit (R2).** `prod_integration_audit_ro.sh` closes every **M** above: OS, system Python and glibc,
-   memory and disk, identity and router hashes, store shapes and schema digests, the absence of every new path and
-   principal, uid/gid collisions, units and failed units, and the allowlist count. It writes nothing, prints no
-   content, and refuses any host but `lilith-01`. `prod_compat_ro.sh` stays the pre-window pin check, with pins
-   updated in R3d.
+1. **Read-only audit (R2): `prod_integration_audit_ro.py`.** One root Python process reads its own source from
+   stdin (`sudo -n /usr/bin/python3 -I -B -`, payload pinned by SHA-256), so nothing is written and no bytecode is
+   cached.
+   - **Live databases are never opened by SQLite.** `cognitive_memory.db`, `privacy_governance.db` and `lilith.db`
+     are judged by byte digest and file metadata. `state.db` gets metadata only. Their `-wal`, `-shm` and `-journal`
+     companions are only `lstat`ed, so no lock, journal, WAL or shared-memory file can be created or changed. Under
+     D-7 (isolated store) their schema is not needed. If a schema or row count is ever needed, it comes from an
+     isolated copy of an existing snapshot, under its own approval, never from the live files.
+   - **No access time changes:** every read is `O_RDONLY | O_NOATIME | O_NOFOLLOW`, and the audit refuses if
+     `O_NOATIME` is missing. The root mount's atime option is recorded.
+   - **Command boundary:** the only subprocesses are `/usr/bin/systemctl show` and `list-units`, with fixed
+     arguments, a fixed environment and a 30 s timeout. Users and groups come from `pwd`/`grp`; memory from
+     `/proc/meminfo`; disk from `statvfs`. Git and the Hermes Python are not executed (`.git/HEAD` and `pyvenv.cfg`
+     are read).
+   - **Host restriction:** root only; the short hostname must be `lilith-01`; refuses the DEV machine ID. All three
+     guards run before any other read.
+   - **Sanitized output:** every value must match `[A-Za-z0-9._:/=,|+@-]{1,240}`, or that observation is an error.
+     Digests, sizes, modes, counts, versions and states only. The two 15B2a keys are `lstat`ed only. Credential files
+     (`.env`, `groq.env`, `auth.json`) are never touched. The Telegram allowlist is a count; the machine ID is a
+     SHA-256.
+   - **Exact pins:** 22 full SHA-256 pins from the last accepted windows (identity files, `config.yaml`,
+     `router.yaml`, 12 router modules, 4 Hermes files, Core API `app.py`), each reported `MATCH` or `DIFF`. A DIFF is
+     a drift finding, not an audit error.
+   - **Fail closed:** any missing file, permission error, empty or partial command output, timeout, unparseable or
+     unsafe value, or exception is an `ERR` line. `PROD_INTEGRATION_AUDIT_COMPLETE` (exit 0) appears only with zero
+     errors and every expected observation made. Otherwise the result is `…_INCOMPLETE` (exit 3); a refusal is
+     `…_REFUSED` (exit 2).
+   - **Unavoidable side effects of any login:** OS Login session records, sudo and journal entries. None touches a
+     LILITH file.
+   - `prod_compat_ro.sh` (the P3 pre-window check) still opens SQLite with `mode=ro`, so it is superseded for R2. It
+     must be rebased onto the same no-SQLite rule (R3d) before any window uses it.
 2. **Snapshots and backups.** A scheduled snapshot READY within 24 h, plus a fresh manual snapshot at the start of
    R6, R7, R9 and R10 (`lilith-01-canonical-<step>-<UTC>`). K-ROOT and K-PCK offline backups are verified before R7.
 3. **Pins.**
@@ -204,7 +230,8 @@ exists and was validated on DEV.
    - the router files other than the two the overlay changes in R9;
    - `run.py`, the console adapter and Core API `app.py`;
    - `lilith.db`, `cognitive_memory.db` and `privacy_governance.db` digests (D-7 A);
-   - the `state.db` row fingerprint (append-only growth allowed, no existing row changed);
+   - `state.db`: no existing row changed, judged on isolated copies of the window's pre and post snapshots (never on
+     the live file); during the window, metadata only (append-only growth allowed);
    - the two 15B2a key metadata.
 6. **Functional acceptance.**
    - **R6/R7:** LILITH is unchanged. The owner's five-prompt identity baseline, the career route ("how's my job
@@ -233,13 +260,64 @@ exists and was validated on DEV.
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D-7 | store: isolated canonical store vs in-place migration of the live stores and keys | isolated (§4.5) |
+| D-7 | store: isolated canonical store vs in-place migration of the live stores and keys | **provisionally chosen by the owner 2026-11-04: isolated**; existing cognitive memory, Privacy databases and 15B2a keys stay untouched |
 | D-8 | relying party: RP id, origin, principal | a domain the owner controls |
 | D-9 | approve the one machine-ID read and pin | approve with R2 |
 | D-10 | K-ROOT location, passphrase custody, offline backup | owner device, offline, one verified backup |
 | D-11 | K-PCK custody folder and offline backup | new WSL folder plus one verified offline backup |
 | D-12 | owner credential form | WSL software credential (validated), or hardware if preferred |
 | — | already decided | D-1 new PROD keys only; D-2 canonical-records-only FORGET; D-3 USER.md authoritative; D-4 manual unlock; D-5 console then Telegram DM, never Discord; D-6 V1 HMAC (provisional) |
+
+Installation mode: the owner prefers staged in-place on `lilith-01` (§4.1 A), conditional on the R2 audit confirming
+sufficient resources.
+
+### 7.1 What each open decision needs (no key or credential is generated by preparing this)
+
+**D-8: relying party.** Three strings, fixed for the life of the PROD owner registration. Every owner proof binds
+them, so changing one later means a new registration and new owner credentials. The rules are enforced by
+`lilith_authority_host/inputs.py`:
+
+| Item | Rule | Example shape |
+| --- | --- | --- |
+| RP id | a lowercase DNS name with a letter TLD; 253 characters at most; never `.invalid` | `example.org` or `lilith.example.org` |
+| Origin | exactly `https://<rp-id>`, or `https://<sub>.<rp-id>` | `https://lilith.example.org` |
+| Principal | `user:<name>@<domain>`; name `[A-Za-z0-9._%+-]{1,64}`; never the DEV synthetic identity | `user:owner@example.org` |
+
+To decide: which domain you control and will keep renewing; the principal's local part; and which credential form
+(D-12) goes with it. A WSL software credential needs no web page at that origin (assumption, matching the DEV
+pattern). A hardware authenticator used through a browser needs a page actually served at that HTTPS origin, which
+is new infrastructure.
+
+**D-10: K-ROOT (registry root).**
+- **Form:** one Ed25519 key, stored as PKCS#8 DER encrypted under a passphrase of at least 12 characters (entered at
+  the terminal, never echoed), written once with mode `0600` (`owner_prod_owner_tool.py root-keygen`). Its public
+  anchor is printed.
+- **Purpose:** it signs registry v1 and any later registry update. Without it the registry cannot change, but the
+  running services keep working.
+- **To decide:**
+  - the machine it is generated on: the workstation in WSL, or another offline device;
+  - where the encrypted file lives;
+  - where the passphrase lives (never beside the file);
+  - one verified offline backup: medium and location, plus the restore test (load with the passphrase on a second
+    copy).
+
+**D-11: K-PCK (Privacy checkpoint).**
+- **Form:** `privacy_checkpoint_tool.py keygen` creates a **new** custody directory (`0700`) holding a raw Ed25519
+  key, `kpck.key` (`0600`, **unencrypted at rest**), its public pin and the checkpoint chain.
+- **Purpose:** it signs every post-reboot unlock and each checkpoint. Losing it means PROD Privacy can never be
+  unlocked again, and personal recall stays off for good.
+- **To decide:**
+  - the custody directory's location (inside WSL, never the DEV folder);
+  - whether that disk is encrypted;
+  - one verified offline backup, encrypted, made **before** activation (R7). The DEV backup was never made.
+
+**D-12: owner credential.**
+- **Option A, a WSL software credential (the DEV pattern):** no new hardware, validated end to end on DEV. The
+  private key sits on the workstation, so a workstation compromise is an owner compromise.
+- **Option B, a hardware authenticator:** the key never leaves the device. But the owner tooling and WSL USB access
+  (usbipd) are untested, and the browser route needs the D-8 origin served. That is offline engineering before R5.
+
+To decide: A or B, and the backup or loss plan. On loss, a new credential needs a new owner registration under K-ROOT.
 
 ## 8. Risks and blockers
 
@@ -259,8 +337,14 @@ exists and was validated on DEV.
 
 Documentation and offline tests only:
 - this record;
-- `integrations/hermes/overlays/prod-canonical-memory-context/prod_integration_audit_ro.sh` (prepared, not run);
-- its static safety test `tests/test_prod_integration_audit.py`.
+- `integrations/hermes/overlays/prod-canonical-memory-context/prod_integration_audit_ro.py` (prepared, not run);
+- its offline test `tests/test_prod_integration_audit.py`. It runs the audit on a synthetic root with a live WAL
+  store and secrets, and proves:
+  - no byte, inode, mtime or atime changes, and no new file;
+  - the fail-closed paths: missing, permission, symlink, failed, empty, partial or timed-out commands, unsafe
+    values, exceptions and missing observations;
+  - the refusals happen before any read;
+  - sanitization and the static command boundary.
 
 No runtime, release, router or Core API file changes. Nothing is installed, and PROD is not contacted. The PROD
 deploy workflow stays `disabled_manually`.
