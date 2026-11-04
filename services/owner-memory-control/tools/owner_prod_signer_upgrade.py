@@ -3,11 +3,10 @@
 
 Record: docs/architecture/canonical-memory-p3-release-preparation.md. Nothing here is authorized to run on a host.
 
-OLD is the installed FM-2 release (d82f7da, archive 9588c85b). NEW is the attested build of the merge of the OWNER_PROD
-stack (rpahasara/lilith-os#312 -> #313 -> #314 -> the P3 PR); `NEW_RELEASE` and `NEW_MANIFEST_SHA256` are None until
-that merge is built A = B and attested, exactly as FM-2 pinned its NEW after #264. The payload delta below is exact
-already: a rehearsal build of the P3 source (706873c, A = B on Windows and WSL, archive f22bf71b, manifest b136366b)
-differs from OLD in exactly these 18 members and the release manifest. None is added or removed; units, tmpfiles,
+OLD is the installed FM-2 release (d82f7da, archive 9588c85b). NEW is the attested build of the collapsed OWNER_PROD
+stack's merge into main (rpahasara/lilith-os#312, merge 88a1168): built A = B on Windows and WSL, attestation
+REPRODUCED, exactly as FM-2 pinned its NEW after #264. Its payload differs from OLD in exactly these 18 members and the
+release manifest, byte-identical to the rehearsal build of the P3 source (706873c, archive f22bf71b, manifest b136366b). None is added or removed; units, tmpfiles,
 CLIs, lock and wheels are byte-identical, so archive layout v3 and `install_authority_dev_v3` apply unchanged.
 
 Two of the members are recovery-witness code (`credential.py`, `server.py`), so the transition stops BOTH units before
@@ -37,9 +36,21 @@ MODE = "UPGRADE_OWNER_PROD_PROFILE_DEV_SYNTHETIC"
 OLD_RELEASE = FM2.NEW_RELEASE                                    # d82f7da (FM-2 F7)
 OLD_MANIFEST_SHA256 = FM2.NEW_MANIFEST_SHA256
 OLD_ARCHIVE_SHA256 = FM2.NEW_RELEASE_ATTESTATION["archiveSha256"]
-# Pinned after the stack merges, from its independently attested build (A = B, attestation REPRODUCED).
-NEW_RELEASE: Optional[str] = None
-NEW_MANIFEST_SHA256: Optional[str] = None
+# The independently attested build of the #312 merge (A = B on Windows and WSL, attestation REPRODUCED).
+NEW_RELEASE: Optional[str] = "88a1168bd41797109772ffce7df7352c1ae40e4c"
+NEW_MANIFEST_SHA256: Optional[str] = "072001af671feca6564906d3d685f89bfc608f9d595aed58bae0f72a25777684"
+# Build provenance (a record only; the archive is verified by its builder stamp and NEW_MANIFEST_SHA256).
+NEW_RELEASE_ATTESTATION = {
+    "archiveSha256": "53ae457b8b907e12282ed468da0387620b7a376a46ab1c450709b67540b43c07",
+    "archiveByteSize": 5391582,
+    "builderStampSha256": "05346fc48dc473f477168fcb43661cc45f66adb64cf068cd6e2a98eec83111af",
+    "attestationDigest": "b2f08910794cdd585c15b53c3568136a8ee0a67e7791ebf484609e1e08204f90",
+    "buildRecipeSha256": "baa80670562d019a5aaed943604397754368e4cee040dbac75434774a12b3aa0",
+    "authorityReleaseDigest": "4067cd5da8380fa8278c6942b08fdc66b021ab818d32de463010ccdef3c0de12",
+    "recoveryWitnessReleaseDigest": "ccc9c5bfed6e2fcba0b584d364deb578232d4429bfbb8657eb4049ac3ec6c790",
+    "identitySha256": "1dafd1c9bb2045443f7579d28d496bf7dbe8a5015ff6c30a70c83a040248553a",
+    "evidenceManifestSha256": "ef5ee745abea9a65c3f1ecd72b06ea0ebd95132f1bc8b274d8b355d72697aabc",
+}
 # The rehearsal build of the P3 source: evidence that the delta below is exact, never an installable NEW.
 REHEARSAL = {
     "candidateSha": "706873c48edfe9efc0d3363aaa8ea910772e18d9",
@@ -150,5 +161,5 @@ def check_payload(payloads: Mapping[str, bytes], installed: Mapping[str, str]) -
 
 
 def ready_to_transition() -> bool:
-    """False until NEW is pinned from the attested merge build: no stage or operator may run before that."""
+    """True only once NEW is pinned from the attested merge build: no stage or operator may run before that."""
     return isinstance(NEW_RELEASE, str) and isinstance(NEW_MANIFEST_SHA256, str)

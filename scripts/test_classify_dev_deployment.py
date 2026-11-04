@@ -260,6 +260,29 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
 
+    def test_owner_prod_p3_transition_tooling_is_control_only_and_nothing_else_is(self):
+        p3 = (
+            "services/owner-memory-control/tools/owner_prod_release_stages.py",
+            "services/owner-memory-control/tools/owner_prod_operator.py",
+            "services/owner-memory-control/tests/owner_prod_transform.py",
+            "services/owner-memory-control/tests/test_owner_prod_p3_transition.py",
+            "docs/architecture/canonical-memory-p3-dev-transition.md",
+        )
+        modified = ("services/owner-memory-control/tools/owner_prod_signer_upgrade.py",
+                    "services/owner-memory-control/tests/test_owner_prod_signer_upgrade.py")
+        this_pr = (*(changed(path, "A", "000000") for path in p3), *(changed(path) for path in modified),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py"))
+        self.assertEqual(self.classify(*this_pr), gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("services/authority-dev/lilith_authority_dev/profile.py"),      # release payload
+            changed("services/core-api/lilith_memory/privacy_forget_runner.py"),    # Core API runtime
+            changed("services/owner-memory-control/tools/owner_prod_keygen.py"),    # a PROD ceremony tool
+            changed(p3[1], "M", "100644", "120000"),                               # symlink swap
+            changed(modified[0], "D", "100644", "000000"),                         # a deletion
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
+
     def test_source_consolidation_record_is_control_only_at_its_reviewed_revision(self):
         record = {
             "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "A",
