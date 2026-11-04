@@ -532,6 +532,12 @@ class StaticTests(unittest.TestCase):
         self.assertNotIn("lilith-meeting-prep-watcher.timer", AUD.UNITS)
         self.assertFalse((HERE.parent / "prod_compat_ro.sh").exists())  # superseded by the helper's gate (no SQLite)
 
+    def test_principals_are_the_installers_real_service_accounts(self):
+        source = (ROOT / "services/authority-dev/ceremony/install_authority_dev.py").read_text(encoding="utf-8")
+        for name in AUD.PRINCIPALS:
+            self.assertTrue(f'SERVICE_USER = "{name}"' in source or f'WITNESS_USER = "{name}"' in source, name)
+        self.assertEqual(len(AUD.PRINCIPALS), 2)
+
     def test_unit_schemas_cover_every_audited_unit_type(self):
         self.assertEqual({u.rsplit(".", 1)[1] for u in AUD.UNITS}, set(AUD.UNIT_PROPS))
         self.assertNotIn("MainPID", AUD.UNIT_PROPS["timer"])

@@ -86,7 +86,9 @@ ABSENT = ("etc/lilith-authority-dev", "opt/lilith-authority-dev", "opt/lilith-fi
           "etc/lilith-first-memory-dev", "usr/local/lib/lilith-canonical-context", "var/lib/lilith-authority-dev",
           "run/lilith-privacy-fresh", "run/lilith-first-memory-context.sock", "home/lilith/.hermes/lilith-os/canonical",
           HERMES + "/lilith_router/canonical_memory.py", HERMES + "/lilith_router/canonical_memory.json")
-PRINCIPALS = ("lilith-authority", "lilith-witness", "lilith-broker", "lilith-forget")
+# The installer's real service principals (install_authority_dev.SERVICE_USER / WITNESS_USER; names keep the -dev
+# naming debt). Runs 1 and 2 checked guessed names (lilith-authority, -witness, -broker, -forget): not evidence.
+PRINCIPALS = ("lilith-authority-dev", "lilith-recovery-witness")
 IDS = (985, 995)
 # Timer names from the repository's preserved PROD units (integrations/hermes/history/prod/systemd/*.timer); audit
 # run 2 showed that the two earlier guesses (`lilith-morning-brief-watcher`, `lilith-meeting-prep-watcher`) do not exist.
