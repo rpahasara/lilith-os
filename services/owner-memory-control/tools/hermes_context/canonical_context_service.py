@@ -18,10 +18,12 @@ The grant, `/etc/lilith-first-memory-dev/hermes-owner-channel.json` (root-owned,
     {"schemaVersion": 2, "channel": "lilith_os", "sessionScope": "ALL_LILITH_OS_SESSIONS" | "<exact session id>",
      "forgetScope": "CANONICAL_RECORDS_ONLY", "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>"}
 
-schemaVersion 3 (owner decision D-5) names the owner channels explicitly instead of one channel; the only owner
-channels are the console and the owner's private Telegram chat, and the gateway decides which a turn is in:
+schemaVersion 3 (owner decision D-5) names the owner channels explicitly instead of one channel. The service is
+channel-independent: a channel is an opaque label the root-owned gateway code assigns (today `lilith_os` and
+`telegram_owner_dm`; a future authenticated interface needs only its own label and a grant entry, no change here),
+and owner-personal memory reaches a label only while the owner's grant lists it:
 
-    {"schemaVersion": 3, "channels": ["lilith_os", "telegram_owner_dm"] (a non-empty subset, no duplicates),
+    {"schemaVersion": 3, "channels": ["lilith_os", "telegram_owner_dm"] (non-empty, no duplicates, well-formed labels),
      "sessionScope": "ALL_OWNER_CHANNEL_SESSIONS" | "<exact session id>", "forgetScope": "CANONICAL_RECORDS_ONLY",
      "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>"}
 
@@ -37,6 +39,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import sys
 from datetime import datetime, timezone
@@ -53,7 +56,13 @@ CANONICAL_ONLY = "CANONICAL_RECORDS_ONLY"
 GRANT_MAX_SECONDS = 7 * 24 * 3600
 OWNER_CHANNEL = "lilith_os"
 TELEGRAM_OWNER_DM = "telegram_owner_dm"
-OWNER_CHANNELS = frozenset({OWNER_CHANNEL, TELEGRAM_OWNER_DM})     # never "public"
+OWNER_CHANNELS = frozenset({OWNER_CHANNEL, TELEGRAM_OWNER_DM})     # the labels the gateway assigns today
+PUBLIC = "public"                     # every non-owner chat: reserved, can never be granted
+_LABEL = re.compile(r"[a-z][a-z0-9_]{1,31}\Z")
+
+
+def _grantable(label: Any) -> bool:
+    return isinstance(label, str) and bool(_LABEL.match(label)) and label != PUBLIC
 OWNER_PERSONAL = "OWNER_PERSONAL"
 
 V1 = "V1_EXACT_SESSION_AND_HERMES_FLOOR"     # the release's own rule
@@ -64,7 +73,7 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
                 now: Optional[Callable[[], datetime]] = None) -> Optional[str]:
     """V2, V1 or None. A missing, foreign-owned, writable, oversized, malformed, expired or not-yet-valid grant is no
     grant; a v1 grant is judged by the release itself."""
-    if channel not in OWNER_CHANNELS:
+    if not _grantable(channel):
         return None
     try:
         meta = os.lstat(path)
@@ -84,7 +93,7 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
     elif grant.get("schemaVersion") == 3:
         channels = grant.get("channels")
         if set(grant) != GRANT_V3_FIELDS or not isinstance(channels, list) or not channels \
-                or len(set(channels)) != len(channels) or not set(channels) <= OWNER_CHANNELS \
+                or len(set(channels)) != len(channels) or not all(_grantable(c) for c in channels) \
                 or channel not in channels:
             return None
         everyone = ALL_OWNER_SESSIONS
