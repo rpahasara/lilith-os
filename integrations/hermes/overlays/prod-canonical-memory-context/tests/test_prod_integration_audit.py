@@ -38,10 +38,22 @@ def done(code=0, out=b""):
     return subprocess.CompletedProcess([], code, out, b"")
 
 
+# What systemd 255 (DEV, same Ubuntu 24.04 as PROD) prints: only the properties the unit type has. A timer has no
+# MainPID or NRestarts, so a service-only schema can never be complete for a timer (the run-1 failure).
+SYSTEMD_PROPS = {
+    "service": {"LoadState": "loaded", "ActiveState": "active", "SubState": "running", "MainPID": "42",
+                "NRestarts": "0", "UnitFileState": "enabled", "Result": "success"},
+    "timer": {"LoadState": "loaded", "ActiveState": "active", "SubState": "waiting", "UnitFileState": "enabled",
+              "Result": "success"},
+}
+
+
 def systemctl_ok(argv):
     assert argv[0] == AUD.SYSTEMCTL and argv[1] in ("show", "list-units"), argv
     if argv[1] == "show":
-        return done(0, b"ActiveState=active\nSubState=running\nMainPID=42\nNRestarts=0\nUnitFileState=enabled\n")
+        known = SYSTEMD_PROPS[argv[2].rsplit(".", 1)[1]]
+        wanted = [a.split("=", 1)[1] for a in argv[3:] if a.startswith("--property=")]
+        return done(0, "".join(f"{k}={known[k]}\n" for k in wanted if k in known).encode())
     return done(0, b"lilith-career-watcher.service loaded failed failed Career\n")
 
 
@@ -74,7 +86,9 @@ def build(root: Path) -> None:
     for d in ("etc", "proc/self"):
         (root / d).mkdir(parents=True, exist_ok=True)
     (root / "etc/machine-id").write_text("0123456789abcdef0123456789abcdef\n", encoding="ascii")
-    (root / "etc/os-release").write_text('ID=ubuntu\nVERSION_ID="24.04"\n', encoding="ascii")
+    (root / "usr/lib").mkdir(parents=True)
+    (root / "usr/lib/os-release").write_text('ID=ubuntu\nVERSION_ID="24.04"\n', encoding="ascii")
+    (root / "etc/os-release").symlink_to("../usr/lib/os-release")          # exactly as on Ubuntu 24.04
     (root / "proc/meminfo").write_text("MemTotal: 2000000 kB\nMemAvailable: 900000 kB\n", encoding="ascii")
     (root / "proc/self/mounts").write_text("/dev/sda1 / ext4 rw,relatime 0 0\n", encoding="ascii")
 
@@ -199,6 +213,96 @@ class AuditRunTests(unittest.TestCase):
         _a, code, lines = self.audit()
         self.fails_closed(lines, code, "channels telegram_allowlist_keys ValueError")
         self.assertTrue(any(l.startswith("A pin config.yaml DIFF:") for l in lines))   # hashing it still streams
+
+    def test_run1_five_failures_reproduced_with_the_old_rules(self):
+        """The PROD-shaped fixture under the run-1 rules (os-release read with O_NOFOLLOW, one service-only schema for
+        every unit) gives exactly run 1's five errors; the current rules give COMPLETE."""
+        def old_os_release(audit):
+            fields = dict(line.split("=", 1) for line in audit.read("etc/os-release").decode("ascii").splitlines()
+                          if "=" in line)
+            return fields["ID"]
+
+        service = AUD.UNIT_PROPS["service"][1:]                            # run 1: no LoadState, no per-type schema
+        with mock.patch.object(AUD.Audit, "os_release", old_os_release), \
+                mock.patch.dict(AUD.UNIT_PROPS, {"service": service, "timer": service}):
+            _a, code, lines = self.audit()
+        errors = sorted(l for l in lines if l.startswith("ERR "))
+        self.assertEqual(code, 3)
+        self.assertEqual(errors, sorted(["ERR host os OSError"] + [
+            f"ERR unit {t} ValueError" for t in AUD.UNITS if t.endswith(".timer")]))
+        self.assertEqual(len(errors), 5)
+        _a, code, lines = self.audit()
+        self.assertEqual(code, 0, [l for l in lines if l.startswith("ERR")])
+        self.assertIn("A host os ubuntu-24.04", lines)
+        timers = [l for l in lines if l.startswith("A unit ") and ".timer " in l]
+        self.assertEqual(len(timers), 4)
+        for line in timers:
+            self.assertIn("LoadState=loaded|ActiveState=active|SubState=waiting|UnitFileState=enabled|Result=success",
+                          line)
+        self.assertTrue(any(l.startswith("A unit hermes-gateway.service LoadState=loaded|") and "MainPID=42" in l
+                            for l in lines))
+
+    def test_os_release_follows_only_the_exact_ubuntu_link(self):
+        link = self.root / "etc/os-release"
+        canonical = self.root / "usr/lib/os-release"
+        cases = {
+            "absolute link to the canonical file": ("/usr/lib/os-release", None),
+            "link to another file": ("../home/lilith/.hermes/SOUL.md", "ValueError"),
+            "link climbing above the root": ("../../../usr/lib/os-release", None),   # normpath stays inside the root
+            "link to a near miss": ("../usr/lib/os-release.d", "ValueError"),
+        }
+        for label, (target, error) in cases.items():
+            with self.subTest(label):
+                link.unlink()
+                link.symlink_to(target)
+                _a, code, lines = self.audit()
+                if error is None:
+                    self.assertIn("A host os ubuntu-24.04", lines)
+                else:
+                    self.fails_closed(lines, code, f"host os {error}")
+        link.unlink()
+        link.symlink_to("../usr/lib/os-release")
+        canonical.rename(self.root / "usr/lib/os-release.real")
+        canonical.symlink_to("os-release.real")                           # a chain: the target itself is a link
+        _a, code, lines = self.audit()
+        self.fails_closed(lines, code, "host os OSError")
+        canonical.unlink()
+        (self.root / "usr/lib/os-release.real").rename(canonical)
+        link.unlink()
+        link.mkdir()                                                       # not a file at all
+        _a, code, lines = self.audit()
+        self.fails_closed(lines, code, "host os ValueError")
+        link.rmdir()
+        link.write_text('ID=ubuntu\nVERSION_ID="24.04"\n', encoding="ascii")    # a plain regular file is fine
+        _a, code, lines = self.audit()
+        self.assertEqual(code, 0)
+
+    def test_no_other_symlink_is_followed(self):
+        for relative in (AUD.HERMES + "/SOUL.md", AUD.DATA + "/lilith.db", "proc/meminfo"):
+            with self.subTest(relative):
+                path = self.root / relative
+                saved = path.read_bytes()
+                path.unlink()
+                (self.root / "decoy").write_bytes(saved)
+                path.symlink_to(self.root / "decoy")
+                _a, code, lines = self.audit()
+                self.assertEqual(code, 3)
+                self.assertTrue(any(l.startswith("ERR ") and "OSError" in l for l in lines))
+                path.unlink()
+                path.write_bytes(saved)
+                (self.root / "decoy").unlink()
+
+    def test_a_missing_timer_is_visible_not_inactive(self):
+        def run(argv):
+            if argv[1] == "show" and argv[2] == "lilith-gmail-watcher.timer":
+                return done(0, b"LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\n"
+                               b"Result=success\n")
+            return systemctl_ok(argv)
+
+        _a, code, lines = self.audit(run=run)
+        self.assertEqual(code, 0)
+        self.assertIn("A unit lilith-gmail-watcher.timer LoadState=not-found|ActiveState=inactive|SubState=dead|"
+                      "UnitFileState=-|Result=success", lines)
 
     def test_live_wal_and_shm_files_are_only_lstat_ed(self):
         data = self.root / AUD.DATA
@@ -325,6 +429,19 @@ class StaticTests(unittest.TestCase):
     def test_reads_use_noatime_nofollow_readonly(self):
         self.assertIn("os.O_RDONLY | os.O_NOATIME | os.O_NOFOLLOW", self.code)
         self.assertEqual(self.code.count("os.open("), 1)
+        # the one symlink exception: read in os_release only, for exactly the Ubuntu os-release link
+        self.assertEqual(self.code.count("os.readlink("), 1)
+        body = self.code.split("def os_release", 1)[1].split("\n    def ", 1)[0]
+        self.assertIn("os.readlink(self.p(OS_RELEASE))", body)
+        self.assertIn('OS_RELEASE, OS_RELEASE_CANONICAL = "etc/os-release", "usr/lib/os-release"', self.code)
+        self.assertNotIn("realpath(self.p(OS_RELEASE", self.code)
+
+    def test_unit_schemas_cover_every_audited_unit_type(self):
+        self.assertEqual({u.rsplit(".", 1)[1] for u in AUD.UNITS}, set(AUD.UNIT_PROPS))
+        self.assertNotIn("MainPID", AUD.UNIT_PROPS["timer"])
+        self.assertNotIn("NRestarts", AUD.UNIT_PROPS["timer"])
+        for schema in AUD.UNIT_PROPS.values():
+            self.assertEqual(schema[0], "LoadState")
 
     def test_secrets_credentials_and_history_are_never_read(self):
         for name in ("groq.env", "auth.json", '/.env'):

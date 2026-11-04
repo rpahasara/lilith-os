@@ -13,7 +13,10 @@ Guarantees:
   if ever needed, comes from an isolated copy of an existing snapshot, never from the live files.
 - **No access time is changed; hashing streams.** Every file is read with `O_RDONLY | O_NOATIME | O_NOFOLLOW` in
   1 MiB chunks; SHA-256 is streamed (one chunk in memory at a time) and a whole-file read is refused over 4 MiB; without `O_NOATIME`
-  the audit refuses.
+  the audit refuses. Symlinks are never followed, with exactly one validated exception: `/etc/os-release` may be
+  Ubuntu's link whose target resolves to exactly `/usr/lib/os-release` (itself opened with `O_NOFOLLOW`).
+- **Units by type:** a service is read as LoadState, ActiveState, SubState, MainPID, NRestarts and UnitFileState; a
+  timer as LoadState, ActiveState, SubState, UnitFileState and Result. A missing unit shows as `LoadState=not-found`.
 - **Nothing is written:** no file, directory, socket or unit change. The only subprocesses are
   `/usr/bin/systemctl show` and `/usr/bin/systemctl list-units`, with fixed arguments.
 - **Content-free output:** SHA-256 digests, sizes, modes, counts, versions and states only. Every printed value must
@@ -86,7 +89,14 @@ IDS = (985, 995)
 UNITS = ("hermes-gateway.service", "lilith-os-api.service", "lilith-morning-brief-watcher.timer",
          "lilith-career-watcher.timer", "lilith-meeting-prep-watcher.timer", "lilith-gmail-watcher.timer",
          "unattended-upgrades.service")
-UNIT_PROPS = ("ActiveState", "SubState", "MainPID", "NRestarts", "UnitFileState")
+# Per unit type: systemd prints only the properties a unit type has (a timer has no MainPID / NRestarts). LoadState
+# makes a missing unit (`not-found`, otherwise shown as inactive) visible.
+UNIT_PROPS = {
+    "service": ("LoadState", "ActiveState", "SubState", "MainPID", "NRestarts", "UnitFileState"),
+    "timer": ("LoadState", "ActiveState", "SubState", "UnitFileState", "Result"),
+}
+# The ONE symlink the audit follows, and only exactly this one: Ubuntu's /etc/os-release -> ../usr/lib/os-release.
+OS_RELEASE, OS_RELEASE_CANONICAL = "etc/os-release", "usr/lib/os-release"
 
 
 class Refused(Exception):
@@ -177,11 +187,12 @@ class Audit:
         return result.stdout.decode("ascii")
 
     def unit(self, name: str) -> str:
-        text = self.systemctl("show", name, *(f"--property={p}" for p in UNIT_PROPS))
+        schema = UNIT_PROPS[name.rsplit(".", 1)[1]]                         # KeyError for any other unit type
+        text = self.systemctl("show", name, *(f"--property={p}" for p in schema))
         props = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
-        if set(props) != set(UNIT_PROPS):
+        if set(props) != set(schema):
             raise ValueError("UNIT_INCOMPLETE")
-        return "|".join(f"{p}={props[p] or '-'}" for p in UNIT_PROPS)
+        return "|".join(f"{p}={props[p] or '-'}" for p in schema)
 
     def failed_units(self) -> str:
         text = self.systemctl("list-units", "--state=failed", "--no-legend", "--plain", "--no-pager")
@@ -206,7 +217,20 @@ class Audit:
         raise ValueError("ROOT_MOUNT_NOT_FOUND")
 
     def os_release(self) -> str:
-        fields = dict(line.split("=", 1) for line in self.read("etc/os-release").decode("ascii").splitlines()
+        """`etc/os-release`, or, only when it is a symlink whose target resolves (inside the audited root) to exactly
+        `usr/lib/os-release`, that regular file. The target is itself read with O_NOFOLLOW: no chain, no other path."""
+        relative = OS_RELEASE
+        st = os.lstat(self.p(OS_RELEASE))
+        if stat.S_ISLNK(st.st_mode):
+            target = os.readlink(self.p(OS_RELEASE))
+            base = "/" if target.startswith("/") else "/" + os.path.dirname(OS_RELEASE)
+            resolved = os.path.normpath(os.path.join(base, target)).lstrip("/")
+            if resolved != OS_RELEASE_CANONICAL:
+                raise ValueError("OS_RELEASE_TARGET_UNEXPECTED")
+            relative = OS_RELEASE_CANONICAL
+        elif not stat.S_ISREG(st.st_mode):
+            raise ValueError("OS_RELEASE_NOT_REGULAR")
+        fields = dict(line.split("=", 1) for line in self.read(relative).decode("ascii").splitlines()
                       if "=" in line)
         return f"{fields['ID'].strip(chr(34))}-{fields['VERSION_ID'].strip(chr(34))}"
 
