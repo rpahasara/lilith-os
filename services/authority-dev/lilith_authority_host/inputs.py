@@ -197,9 +197,37 @@ def _read_registries(root: Path, *, environment: str, owner_uid: int, reasons: l
     return tuple(registries)
 
 
+# ------------------------------------------------------------------ deployment (OWNER_PROD, 2026-11) ---
+
+DEV_DEPLOYMENT = ("dev", "DEV_SYNTHETIC")
+PROD_DEPLOYMENT = ("prod", "OWNER_PROD")
+DEPLOYMENT_FIELDS = frozenset({"schemaVersion", "environment", "profile"})
+
+
+def read_deployment(*, root: Path | str = Path("/"), owner_uid: int = 0) -> tuple[str, str]:
+    """(environment, profile) of this host. No `deployment.json` (every DEV host today) is DEV_SYNTHETIC, exactly as
+    before. A present file must be root-owned, not group/other-writable and exactly one of the two fixed pairs; any
+    other content raises (fail closed: a host never silently falls back to another profile). `root` and `owner_uid`
+    are TEST seams."""
+    root = Path(root)
+    path = _host(root, P.DEPLOYMENT)
+    if not os.path.lexists(path):
+        return DEV_DEPLOYMENT
+    document, _raw, status = _read_document(root, P.DEPLOYMENT, owner_uid=owner_uid)
+    if status != "OK" or not isinstance(document, dict) or set(document) != DEPLOYMENT_FIELDS \
+            or document["schemaVersion"] != 1 or type(document["schemaVersion"]) is not int:
+        raise ValueError("DEPLOYMENT_INVALID")
+    pair = (document["environment"], document["profile"])
+    if pair not in (DEV_DEPLOYMENT, PROD_DEPLOYMENT):
+        raise ValueError("DEPLOYMENT_INVALID")
+    return pair
+
+
 # ------------------------------------------------- owner registration (First Memory, DEV_SYNTHETIC) ---
 
 OWNER_REGISTRATION_PROTOCOL = "LILITH_OWNER_REGISTRATION_DEV"
+# OWNER_PROD: its own protocol name, so a DEV registration can never be read as a PROD one or the reverse.
+OWNER_REGISTRATION_PROTOCOLS = {"dev": OWNER_REGISTRATION_PROTOCOL, "prod": "LILITH_OWNER_REGISTRATION_PROD"}
 OWNER_REGISTRATION_FIELDS = frozenset({
     "protocol", "schemaVersion", "environment", "ownerPrincipal", "rpId", "origin", "registryTupleVersion",
     "privacyNoticeVersion", "brokerReleases", "credentials"})
@@ -236,10 +264,13 @@ def parse_owner_registration(document: Mapping[str, Any], *, environment: str) -
     if not isinstance(document, Mapping) or set(document) != OWNER_REGISTRATION_FIELDS:
         raise ValueError("OWNER_REGISTRATION_FIELDS")
     if (document["protocol"], document["schemaVersion"], document["environment"]) != (
-            OWNER_REGISTRATION_PROTOCOL, 1, environment) or type(document["schemaVersion"]) is not int:
+            OWNER_REGISTRATION_PROTOCOLS.get(environment, OWNER_REGISTRATION_PROTOCOL), 1, environment) \
+            or type(document["schemaVersion"]) is not int:
         raise ValueError("OWNER_REGISTRATION_CONTEXT")
     identity = (document["ownerPrincipal"], document["rpId"], document["origin"])
-    if identity != (OP._DEV_SYNTHETIC_OWNER, OP.SYNTHETIC_RP_ID, OP.SYNTHETIC_ORIGIN):
+    if environment == "prod":
+        _require_prod_owner(identity, OP)
+    elif identity != (OP._DEV_SYNTHETIC_OWNER, OP.SYNTHETIC_RP_ID, OP.SYNTHETIC_ORIGIN):
         raise ValueError("OWNER_REGISTRATION_NOT_DEV_SYNTHETIC")
     for name in ("registryTupleVersion", "privacyNoticeVersion"):
         if not isinstance(document[name], str) or not 0 < len(document[name]) <= 128:
@@ -257,13 +288,27 @@ def parse_owner_registration(document: Mapping[str, Any], *, environment: str) -
             credential = OP.OwnerCredentialV1.from_dict(value)
         except (OwnerProofError, TypeError, KeyError) as exc:
             raise ValueError("OWNER_REGISTRATION_CREDENTIAL") from exc
-        if (credential.owner_principal, credential.rp_id) != (OP._DEV_SYNTHETIC_OWNER, OP.SYNTHETIC_RP_ID):
+        if (credential.owner_principal, credential.rp_id) != (identity[0], identity[1]):
             raise ValueError("OWNER_REGISTRATION_CREDENTIAL_IDENTITY")
         parsed.append(credential.to_dict())
     if len({c["recordId"] for c in parsed}) != len(parsed) or len({c["credentialId"] for c in parsed}) != len(parsed):
         raise ValueError("OWNER_REGISTRATION_DUPLICATE_CREDENTIAL")
     return OwnerRegistrationV1(identity[0], identity[1], identity[2], document["registryTupleVersion"],
                                document["privacyNoticeVersion"], frozenset(releases), tuple(parsed))
+
+
+_PROD_PRINCIPAL = re.compile(r"user:[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\Z")
+_RP_ID = re.compile(r"(?=.{1,253}\Z)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z")
+
+
+def _require_prod_owner(identity: tuple, OP: Any) -> None:
+    """OWNER_PROD: the owner's own principal and a real relying party; never the synthetic DEV identity or `.invalid`."""
+    principal, rp_id, origin = identity
+    if not (isinstance(principal, str) and _PROD_PRINCIPAL.match(principal) and isinstance(rp_id, str)
+            and _RP_ID.match(rp_id) and not rp_id.endswith(".invalid") and isinstance(origin, str)
+            and (origin == "https://" + rp_id or (origin.startswith("https://") and origin.endswith("." + rp_id)))
+            and principal != OP._DEV_SYNTHETIC_OWNER and not principal.endswith(".invalid")):
+        raise ValueError("OWNER_REGISTRATION_NOT_OWNER_PROD")
 
 
 def read_owner_registration(*, environment: str, root: Path | str = Path("/"),

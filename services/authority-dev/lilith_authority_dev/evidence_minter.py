@@ -100,8 +100,8 @@ class OwnerActorEvidenceMinterV1:
             raise MinterConfigurationError("the key record names another key")
         if key_record.signing_domain != SIGNING_DOMAIN or key_record.evidence_types != frozenset({EVIDENCE_TYPE}):
             raise MinterConfigurationError("the key record is not an OWNER_ACTOR OWNER_MEMORY_OPERATION key")
-        if key_record.environment != ENVIRONMENT:
-            raise MinterConfigurationError("the key record is not a dev key")
+        if key_record.environment != profile.environment:
+            raise MinterConfigurationError("the key record is not a key of this profile's environment")
         if not key_record.current:
             raise MinterConfigurationError("the key record is retired or revoked")
         if key_record.policy_version != profile.policy_version:
@@ -147,7 +147,7 @@ class OwnerActorEvidenceMinterV1:
             raise MintRefused("SIGNING_DOMAIN_REFUSED")
         if evidence["evidenceType"] != EVIDENCE_TYPE:
             raise MintRefused("EVIDENCE_TYPE_REFUSED")
-        if evidence["environment"] != ENVIRONMENT:
+        if evidence["environment"] != profile.environment:
             raise MintRefused("ENVIRONMENT_REFUSED")
         if evidence["keyId"] != record.key_id:
             raise MintRefused("KEY_ID_MISMATCH")

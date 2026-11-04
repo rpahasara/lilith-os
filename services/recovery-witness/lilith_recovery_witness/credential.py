@@ -48,6 +48,9 @@ MAX_CREDENTIAL_BYTES = 256
 PRIVACY_ANCHOR_CREDENTIAL_NAME = "privacy-anchor-signing-key"
 PRIVACY_ANCHOR_KEY_ID = "kpan.dev-synthetic.01"
 PRIVACY_ANCHOR_ENVIRONMENT = "DEV_SYNTHETIC"
+# OWNER_PROD (2026-11): the production K-PAN and its Privacy environment.
+PROD_PRIVACY_ANCHOR_KEY_ID = "kpan.owner-prod.01"
+PROD_PRIVACY_ANCHOR_ENVIRONMENT = "OWNER_PROD"
 
 
 class WitnessCredentialError(Exception):
@@ -62,8 +65,9 @@ class WitnessSigningKeyV1:
     def __init__(self, private_key: Ed25519PrivateKey, *, witness_key_id: str = WITNESS_KEY_ID):
         if not isinstance(private_key, Ed25519PrivateKey):
             raise TypeError("an in-process Ed25519 key object is required")
-        if not isinstance(witness_key_id, str) or not witness_key_id.startswith(R.TEST_ONLY_WITNESS_PREFIX):
-            raise ValueError("the K-WIT key ID must be a test-only witness key ID")
+        if not isinstance(witness_key_id, str) or not witness_key_id.startswith(
+                (R.TEST_ONLY_WITNESS_PREFIX, R.PROD_WITNESS_PREFIX)):
+            raise ValueError("the K-WIT key ID must be a test-only or prod witness key ID")
         self.__key = private_key
         self.witness_key_id = witness_key_id
 
@@ -99,7 +103,8 @@ class WitnessSigningKeyV1:
 
 
 def load_witness_signing_key(credentials_directory: str | None, *,
-                             expected_directory: str = CREDENTIALS_DIRECTORY) -> WitnessSigningKeyV1:
+                             expected_directory: str = CREDENTIALS_DIRECTORY,
+                             witness_key_id: str = WITNESS_KEY_ID) -> WitnessSigningKeyV1:
     """Load K-WIT from the unit's own credentials directory, or refuse.
 
     Unset -> `CREDENTIAL_ABSENT` (systemd delivered nothing). Another
@@ -134,7 +139,7 @@ def load_witness_signing_key(credentials_directory: str | None, *,
         raise WitnessCredentialError(CREDENTIAL_INVALID) from exc
     if not isinstance(key, Ed25519PrivateKey):
         raise WitnessCredentialError(CREDENTIAL_INVALID)
-    return WitnessSigningKeyV1(key)
+    return WitnessSigningKeyV1(key, witness_key_id=witness_key_id)
 
 
 class PrivacyAnchorSigningKeyV1:
@@ -187,7 +192,9 @@ class PrivacyAnchorSigningKeyV1:
 
 
 def load_privacy_anchor_key(credentials_directory: str | None, *, expected_directory: str = CREDENTIALS_DIRECTORY,
-                            witness_key: WitnessSigningKeyV1 | None = None) -> PrivacyAnchorSigningKeyV1:
+                            witness_key: WitnessSigningKeyV1 | None = None,
+                            anchor_key_id: str = PRIVACY_ANCHOR_KEY_ID,
+                            environment: str = PRIVACY_ANCHOR_ENVIRONMENT) -> PrivacyAnchorSigningKeyV1:
     """Load K-PAN from the unit's own credentials directory, or refuse, by the same rules as K-WIT. Key material
     identical to the loaded K-WIT is refused: the two families never share a key."""
     if not credentials_directory:
@@ -219,7 +226,7 @@ def load_privacy_anchor_key(credentials_directory: str | None, *, expected_direc
         raise WitnessCredentialError(CREDENTIAL_INVALID) from exc
     if not isinstance(key, Ed25519PrivateKey):
         raise WitnessCredentialError(CREDENTIAL_INVALID)
-    anchor_key = PrivacyAnchorSigningKeyV1(key)
+    anchor_key = PrivacyAnchorSigningKeyV1(key, anchor_key_id=anchor_key_id, environment=environment)
     if witness_key is not None and anchor_key.public_key() == witness_key.public_key():
         raise WitnessCredentialError(CREDENTIAL_INVALID)
     return anchor_key

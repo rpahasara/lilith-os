@@ -139,13 +139,13 @@ class PrivacyBindingV1:
 
     def __init__(self, privacy_db: Path, privacy_store: Any, cognitive_db: Path, *,
                  authoritative: Path = AUTHORITATIVE_PRIVACY_DB, stale: Path = STALE_PRIVACY_DB,
-                 freshness: Optional[F.PrivacyFreshnessGate] = None):
+                 freshness: Optional[F.PrivacyFreshnessGate] = None, environment: str = ENVIRONMENT):
         self.privacy_db, self._stale = Path(privacy_db), Path(stale)
         _need(self.privacy_db == Path(authoritative) and self.privacy_db != self._stale,
               "PRIVACY_DB_NOT_AUTHORITATIVE")
         self._check_stale()
         self.freshness = freshness if freshness is not None else F.PrivacyFreshnessGate(
-            self.privacy_db, environment=ENVIRONMENT)
+            self.privacy_db, environment=environment)
         _need(isinstance(self.freshness, F.PrivacyFreshnessGate), "FRESHNESS_GATE_REQUIRED")
         self.resolver = memory_v2.restore_gated_hold_resolver(privacy_store, Path(cognitive_db),
                                                               freshness=self.freshness)

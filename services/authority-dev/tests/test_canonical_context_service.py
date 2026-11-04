@@ -199,13 +199,17 @@ class GrantTests(unittest.TestCase):
         self.v3()
         self.assertEqual(self.basis(channel="lilith_os"), S.V2)
         self.assertEqual(self.basis(channel="telegram_owner_dm", session="agent:main:telegram:dm:42"), S.V2)
-        for channel in ("public", "telegram", "discord", "telegram_group"):
-            self.assertIsNone(self.basis(channel=channel))                    # never an owner channel
+        for channel in ("public", "telegram", "discord", "telegram_group", "voice_owner"):
+            self.assertIsNone(self.basis(channel=channel))                    # not listed: no personal memory
         self.v3(channels=["lilith_os"])
         self.assertIsNone(self.basis(channel="telegram_owner_dm"))            # Telegram only when listed
         self.assertEqual(self.basis(channel="lilith_os"), S.V2)
+        self.v3(channels=["lilith_os", "voice_owner"])                       # a future authenticated interface:
+        self.assertEqual(self.basis(channel="voice_owner"), S.V2)            # a grant entry, no service change
+        self.assertIsNone(self.basis(channel="telegram_owner_dm"))
         for fields in ({"channels": []}, {"channels": ["lilith_os", "lilith_os"]}, {"channels": ["public"]},
-                       {"channels": ["lilith_os", "discord"]}, {"channels": "lilith_os"},
+                       {"channels": ["lilith_os", "public"]}, {"channels": ["Bad Label"]}, {"channels": [""]},
+                       {"channels": ["lilith_os", 7]}, {"channels": "lilith_os"},
                        {"sessionScope": "ALL_LILITH_OS_SESSIONS"}, {"forgetScope": "ALL"}, {"channel": "lilith_os"}):
             with self.subTest(fields=fields):
                 self.v3(**fields)
