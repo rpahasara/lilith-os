@@ -565,10 +565,18 @@ COMMANDS: dict[str, Callable[[list[str], int], dict[str, Any]]] = {
 }
 
 
-def main(name: str, argv: list[str], *, euid: int | None = None) -> int:
+def main(name: str, argv: list[str], *, euid: int | None = None, deployment: Callable[[], tuple] | None = None) -> int:
+    global ENVIRONMENT
     handler = COMMANDS.get(name)
     if handler is None:
         print(f"{name}: REFUSED UNKNOWN_CLI", file=sys.stderr)
+        return 2
+    # OWNER_PROD (2026-11): this host's deployment environment, from the root-installed deployment selection (absent:
+    # `dev`, exactly as before). Read once, before any form runs; an invalid selection refuses every form.
+    try:
+        ENVIRONMENT = (deployment or HI.read_deployment)()[0]
+    except (ValueError, OSError):
+        print(f"{name}: REFUSED DEPLOYMENT_INVALID", file=sys.stderr)
         return 2
     try:
         result = handler(list(argv), os.geteuid() if euid is None else euid)

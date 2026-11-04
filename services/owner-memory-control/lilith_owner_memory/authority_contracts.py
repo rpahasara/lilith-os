@@ -71,6 +71,9 @@ REVOCATION_REASONS = frozenset({"ROUTINE", COMPROMISED, "SUPERSEDED"})
 # B1b-3a refuses any registry root that is not explicitly labelled TEST-ONLY.
 # Promoting these contracts to a real root requires a new, reviewed version.
 TEST_ONLY_ROOT_PREFIX = "test-only."
+# OWNER_PROD (2026-11): under a `prod` verification context only a `prod.` registry root is admissible, and a
+# `test-only.` root never. Every `dev`/`test` context keeps the B1b-3a rule exactly: `test-only.` roots only.
+PROD_ROOT_PREFIX = "prod."
 
 _MAX_JSON_INT = 2**53 - 1
 _EPOCH_RANDOM = re.compile(r"[0-9a-f]{32}\Z")
@@ -302,6 +305,12 @@ class TrustedRegistryRootV1:
     @property
     def test_only(self) -> bool:
         return self.root_key_id.startswith(TEST_ONLY_ROOT_PREFIX)
+
+    def admissible_for(self, environment: str) -> bool:
+        """The trust-root class the verifying context demands: `prod.` for `prod`, `test-only.` otherwise."""
+        if environment == "prod":
+            return self.root_key_id.startswith(PROD_ROOT_PREFIX) and not self.test_only
+        return self.test_only
 
 
 class _SignedEvidence:

@@ -41,6 +41,11 @@ except ImportError:  # deploy-exact flat-directory tests
     import privacy_governance as P
 
 DEV_SYNTHETIC = "DEV_SYNTHETIC"
+# Owner decision D-6 (2026-11-04, provisional): the interim V1 (HMAC) path also serves the first OWNER_PROD release,
+# for canonical records only. The Hermes erasure owner stays DEV_SYNTHETIC-only (hermes_erasure_owner), so no PROD
+# FORGET can name the conversation store. Signed PrivacyAuthorizationV2 is a later, separate improvement.
+OWNER_PROD = "OWNER_PROD"
+V1_ENVIRONMENTS = frozenset({DEV_SYNTHETIC, OWNER_PROD})
 IDENTITY = MA.FIRST_INTERACTION_IDENTITY
 # Governed owner policy of the First Interaction family, in execution order (L04 before L18_V2: L04 admissions
 # reference L18 proposal rows). Floor owners follow, sorted.
@@ -116,7 +121,7 @@ class FirstInteractionForgetRunner:
         FORGET stays INCOMPLETE_HOLD_ACTIVE with nothing erased (``resume`` continues once the checkpoint is applied).
         The governed barrier is ``privacy_freshness.DurabilityBarrier``. The historical F9c2 DEV_SYNTHETIC drill ran
         before Track B with none; a runner without one is now refused, so no composition can erase undurably."""
-        if deployment_environment != DEV_SYNTHETIC:
+        if deployment_environment not in V1_ENVIRONMENTS:
             raise ForgetRunnerError("INTERIM_V1_PATH_DEV_SYNTHETIC_ONLY")
         for name, owner in owners.items():
             if name not in P.OWNER_SET or getattr(owner, "OWNER", None) != name:

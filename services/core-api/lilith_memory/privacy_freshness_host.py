@@ -346,6 +346,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--kpan-pin", default=str(DEFAULT_KPAN_PIN))
     parser.add_argument("--kpck-pin", default=str(DEFAULT_KPCK_PIN))
     parser.add_argument("--witness-socket", default=str(DEFAULT_WITNESS_SOCKET))
+    # OWNER_PROD (2026-11): the Privacy environment the pins and anchor name; DEV_SYNTHETIC unless stated.
+    parser.add_argument("--environment", default=ENVIRONMENT, choices=(ENVIRONMENT, "OWNER_PROD"))
     sub = parser.add_subparsers(dest="form", required=True)
     sub.add_parser("status")
     sub.add_parser("plan")
@@ -361,7 +363,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         _need(hasattr(os, "geteuid") and os.geteuid() == 0, "NOT_ROOT")
         _need(bool(args.privacy_db) and Path(args.privacy_db).is_file(), F.PRIVACY_UNREADABLE)
-        keys = load_keys(Path(args.kpan_pin), Path(args.kpck_pin))
+        keys = load_keys(Path(args.kpan_pin), Path(args.kpck_pin), environment=args.environment)
         client = WitnessAnchorClient(unix_socket_transport(Path(args.witness_socket)), keys)
         db = Path(args.privacy_db)
         boot_id = F.read_boot_id()
