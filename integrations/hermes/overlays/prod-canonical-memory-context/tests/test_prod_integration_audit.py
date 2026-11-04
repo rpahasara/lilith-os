@@ -94,10 +94,17 @@ def build(root: Path) -> None:
 
 
 def tree(root: Path) -> dict:
-    """Everything a mutation could touch: names, bytes, mode, size, inode, mtime_ns, atime_ns."""
+    """Everything a mutation could touch. Files and links: bytes, mode, size, inode, mtime_ns, atime_ns. Directories:
+    mode, inode, mtime_ns and their entry names, but NOT atime: this snapshot itself lists every directory, and on a
+    relatime filesystem its own first listing can bump a directory's atime. The audit never lists a directory (it only
+    lstats, readlinks and opens files), so a new, removed or renamed entry still shows as a different listing."""
     out = {}
     for path in sorted(root.rglob("*")):
         st = os.lstat(path)
+        if path.is_dir() and not path.is_symlink():
+            out[str(path.relative_to(root))] = ("dir", st.st_mode, st.st_ino, st.st_mtime_ns,
+                                                tuple(sorted(os.listdir(path))))
+            continue
         digest = None
         if path.is_file() and not path.is_symlink():
             fd = os.open(path, os.O_RDONLY | os.O_NOATIME)                # the comparison itself must not bump atime
