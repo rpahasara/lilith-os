@@ -109,7 +109,7 @@ class FoundationTests(unittest.TestCase):
         return {r: tree(self.root)[r] for r in INST.LIVE}
 
     def test_install_creates_exactly_the_four_items_with_collision_free_ids(self):
-        before = self.live()
+        before, before_tree = self.live(), tree(self.root)
         f = self.f()
         result = f.install(f.approval())
         self.assertEqual(result["result"], "FOUNDATION_INSTALLED")
@@ -125,9 +125,12 @@ class FoundationTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "services/authority-dev"))
         from lilith_authority_host import inputs as HI
         self.assertEqual(HI.read_deployment(root=self.root, owner_uid=os.getuid()), HI.PROD_DEPLOYMENT)
-        created = set(tree(self.root)) - {"var/lib", "etc", "etc/machine-id"} - set(INST.LIVE)
-        created = {c for c in created if not any(r.startswith(c + "/") or r == c for r in INST.LIVE)}
-        self.assertEqual(created, {INST.CANONICAL, INST.AUTHORITY_CONFIG, INST.DEPLOYMENT, INST.STATE, INST.JOURNAL})
+        after_tree = tree(self.root)
+        self.assertEqual(set(after_tree) - set(before_tree),
+                         {INST.CANONICAL, INST.AUTHORITY_CONFIG, INST.DEPLOYMENT, INST.STATE, INST.JOURNAL})
+        changed = {k for k in before_tree if after_tree.get(k) != before_tree[k]}
+        # only the parents that gained exactly one of those entries changed their listing
+        self.assertEqual(changed, {"etc", "var/lib", "home/lilith/.hermes/lilith-os"})
 
     def test_every_preflight_stop_changes_nothing(self):
         cases = {
@@ -199,8 +202,10 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(result["removed"], ["file:deployment", "dir:authority-config", "dir:canonical",
                                              "principal:lilith-recovery-witness", "principal:lilith-authority-dev"])
         after = tree(self.root)
-        self.assertEqual({k: v for k, v in after.items() if not k.startswith(INST.STATE)},
-                         {k: v for k, v in before.items() if not k.startswith(INST.STATE)})
+        kept = lambda k: not k.startswith(INST.STATE) and k != "var/lib"     # the returned journal stays as evidence
+        self.assertEqual({k: v for k, v in after.items() if kept(k)}, {k: v for k, v in before.items() if kept(k)})
+        self.assertEqual(after["var/lib"][2], ["lilith-owner-prod-install"])
+        self.assertEqual(sorted(os.listdir(self.root / INST.STATE)), ["foundation.journal.returned"])
         self.assertEqual(self.accounts.users, accounts)
 
     def test_a_refused_return_changes_nothing(self):
