@@ -160,6 +160,46 @@ class AuditRunTests(unittest.TestCase):
             self.skipTest("this filesystem does not update atime on read (noatime); the control is not meaningful")
         self.assertTrue(any(k.endswith("SOUL.md") for k in changed), changed)
 
+    def test_large_files_are_hashed_streaming_without_loading_them(self):
+        """A 64 MiB file is hashed correctly while Python's peak allocation stays near one chunk."""
+        import tracemalloc
+
+        big = self.root / AUD.DATA / "big.bin"
+        size = 64 << 20
+        with open(big, "wb") as f:                     # the test's own fixture (sparse); the audit never writes
+            f.seek(size - 1)
+            f.write(b"\x01")
+        want = hashlib.sha256()
+        with open(big, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                want.update(block)
+        audit = AUD.Audit(self.root, run=systemctl_ok, hostname="lilith-01", euid=0, out=lambda line: None)
+        sizes: list[int] = []
+        real_read = os.read
+
+        def spy(fd, n):
+            sizes.append(n)
+            return real_read(fd, n)
+
+        tracemalloc.start()
+        try:
+            with mock.patch.object(AUD.os, "read", spy):
+                got = audit.sha(str(big.relative_to(self.root)))
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(got, want.hexdigest())
+        self.assertEqual(set(sizes), {AUD.CHUNK})
+        self.assertGreaterEqual(len(sizes), size // AUD.CHUNK)
+        self.assertLess(peak, 3 * AUD.CHUNK, f"peak {peak} bytes for a {size}-byte file")
+
+    def test_a_whole_file_read_over_the_limit_fails_closed(self):
+        config = self.root / AUD.HERMES / "config.yaml"
+        config.write_bytes(b"x" * (AUD.MAX_READ + 1))
+        _a, code, lines = self.audit()
+        self.fails_closed(lines, code, "channels telegram_allowlist_keys ValueError")
+        self.assertTrue(any(l.startswith("A pin config.yaml DIFF:") for l in lines))   # hashing it still streams
+
     def test_live_wal_and_shm_files_are_only_lstat_ed(self):
         data = self.root / AUD.DATA
         self.assertTrue((data / "lilith.db-wal").exists() and (data / "lilith.db-shm").exists())

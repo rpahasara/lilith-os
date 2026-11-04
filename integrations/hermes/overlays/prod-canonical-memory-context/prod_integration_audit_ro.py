@@ -11,7 +11,8 @@ Guarantees:
   their `-wal` / `-shm` companions, which are only `lstat`ed, so no lock, journal, WAL or shared-memory file can be
   created or changed. Under D-7 (isolated canonical store) their schema is not needed. A schema or row-count reading,
   if ever needed, comes from an isolated copy of an existing snapshot, never from the live files.
-- **No access time is changed.** Every file is read with `O_RDONLY | O_NOATIME | O_NOFOLLOW`; without `O_NOATIME`
+- **No access time is changed; hashing streams.** Every file is read with `O_RDONLY | O_NOATIME | O_NOFOLLOW` in
+  1 MiB chunks; SHA-256 is streamed (one chunk in memory at a time) and a whole-file read is refused over 4 MiB; without `O_NOATIME`
   the audit refuses.
 - **Nothing is written:** no file, directory, socket or unit change. The only subprocesses are
   `/usr/bin/systemctl show` and `/usr/bin/systemctl list-units`, with fixed arguments.
@@ -35,7 +36,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Iterator, Sequence
 
 SAFE = re.compile(r"[A-Za-z0-9._:/=,|+@-]{1,240}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -44,6 +45,8 @@ DEV_MACHINE_ID_SHA256 = hashlib.sha256(b"ae929170e6fa4c8ab9cc7b9547238d9d\n").he
 HERMES = "home/lilith/.hermes"
 DATA = HERMES + "/lilith-os/data"
 SYSTEMCTL = "/usr/bin/systemctl"
+CHUNK = 1 << 20                   # bounded read size (1 MiB); hashing streams, never loads a whole file
+MAX_READ = 4 << 20                # whole-file reads are only for small text metadata files
 
 # The exact pins recorded by the last accepted PROD windows (Cutover 2 2026-11-03, T4 wording fix 2026-11-04).
 PINS = {
@@ -101,21 +104,35 @@ class Audit:
     def p(self, relative: str) -> Path:
         return self.root / relative
 
-    def read(self, relative: str) -> bytes:
-        """The whole file, without following a symlink and without changing its access time."""
+    def chunks(self, relative: str) -> Iterator[bytes]:
+        """The file in bounded chunks (CHUNK bytes), without following a symlink and without changing its access
+        time. The single open in this module."""
         fd = os.open(self.p(relative), os.O_RDONLY | os.O_NOATIME | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
         try:
-            chunks = []
             while True:
-                chunk = os.read(fd, 1 << 20)
+                chunk = os.read(fd, CHUNK)
                 if not chunk:
-                    return b"".join(chunks)
-                chunks.append(chunk)
+                    return
+                yield chunk
         finally:
             os.close(fd)
 
+    def read(self, relative: str) -> bytes:
+        """A small text file whole (config, os-release, /proc, git and venv metadata); over MAX_READ is an error."""
+        parts, size = [], 0
+        for chunk in self.chunks(relative):
+            size += len(chunk)
+            if size > MAX_READ:
+                raise ValueError("FILE_TOO_LARGE_TO_READ")
+            parts.append(chunk)
+        return b"".join(parts)
+
     def sha(self, relative: str) -> str:
-        return hashlib.sha256(self.read(relative)).hexdigest()
+        """Streaming SHA-256: at most one CHUNK is held at a time, whatever the file size."""
+        digest = hashlib.sha256()
+        for chunk in self.chunks(relative):
+            digest.update(chunk)
+        return digest.hexdigest()
 
     # ------------------------------------------------------------- recording ---
     def emit(self, kind: str, section: str, name: str, value: object) -> None:
