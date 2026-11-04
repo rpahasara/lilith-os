@@ -147,7 +147,10 @@ class DurableLedgerTests(unittest.TestCase):
                                                      genesis=J.genesis_op(PB.g1()), expected_uid=X.UID)
             self.assertEqual(caught.exception.reason, "LEDGER_PATH_UNSAFE")
             path = state_dir(directory) / "authority_ledger.db"
-            for environment, genesis, reason in (("prod", J.genesis_op(PB.g1()), "LEDGER_ENVIRONMENT_INVALID"),
+            for environment, genesis, reason in (("staging", J.genesis_op(PB.g1()), "LEDGER_ENVIRONMENT_INVALID"),
+                                                 # OWNER_PROD: `prod` is a ledger environment now; a TEST genesis
+                                                 # still never provisions one
+                                                 ("prod", J.genesis_op(PB.g1()), "LEDGER_GENESIS_INVALID"),
                                                  ("dev", J.genesis_op(PB.g1()), "LEDGER_GENESIS_INVALID"),
                                                  (X.ENV, {"op": "PREPARE"}, "LEDGER_GENESIS_INVALID")):
                 with self.assertRaises(L.LedgerError) as caught:

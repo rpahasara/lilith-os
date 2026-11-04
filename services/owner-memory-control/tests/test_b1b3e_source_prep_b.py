@@ -807,7 +807,7 @@ class RecoveryGateTests(unittest.TestCase):
         # (`server.py`) constructs it only with the per-request owner-registration reader.
         self.assertEqual(wired, ["issuance.py", "recovery.py"])
         server = (ROOT / "services/authority-dev/lilith_authority_dev/server.py").read_text(encoding="utf-8")
-        self.assertIn("registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT)", server)
+        self.assertIn("registration=lambda: HI.read_owner_registration(environment=environment)", server)
         self.assertNotIn("successor_readiness", server)
         for tree in ("services/core-api", "services/memory-broker"):
             for path in (ROOT / tree).rglob("*.py"):
@@ -1570,8 +1570,10 @@ class EnvironmentIsolationTests(unittest.TestCase):
             self.assertNotIn("'test'", source, module.__name__)
         self.assertEqual(SC.custody_profile("dev"), self.DEV)
         self.assertEqual(B.PROFILE.environment, "test")
-        with self.assertRaises(Exception):
-            SC.custody_profile("prod")
+        # OWNER_PROD (2026-11): `prod` selects its own fixed profile; it is never the DEV profile re-labelled.
+        self.assertIs(SC.custody_profile("prod"), SC.OWNER_PROD_CUSTODY_PROFILE)
+        self.assertFalse(SC.is_dev_synthetic(SC.custody_profile("prod")))
+        self.assertNotEqual(SC.custody_profile("prod").initial_key_id, self.DEV.initial_key_id)
         self.assertFalse(SC.is_dev_synthetic(dataclasses.replace(self.DEV, environment="staging")))
 
     def test_hold_records_bind_the_exact_expected_environment(self):

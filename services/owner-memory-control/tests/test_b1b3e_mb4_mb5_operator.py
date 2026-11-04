@@ -101,7 +101,10 @@ class PinTests(unittest.TestCase):
             # The installed bytes (First Memory changed `lilith_authority_host/{inputs,paths}.py` after E-23).
             data = E23H.installed_source_bytes(mapping[prefix] + module[len(prefix):])
             self.assertEqual(sha(data), pin, module)
-        source = (ROOT / "services/authority-dev/release_file_set.py").read_text(encoding="utf-8")
+        # Before OWNER_PROD (P2) re-pinned SHARED_HASHES: the file set as of main 75ca0db.
+        import e23_installed as H
+        source = subprocess.run(["git", "-C", str(ROOT), "show", f"{H.P2_BASE}:services/authority-dev/release_file_set.py"],
+                                capture_output=True, check=True).stdout.decode("utf-8")
         for module, pin in O.RELEASE_MODULES.items():
             if not module.startswith("lilith_authority_host/"):
                 self.assertIn(pin, source, module)            # equal to the release file-set SHARED_HASHES

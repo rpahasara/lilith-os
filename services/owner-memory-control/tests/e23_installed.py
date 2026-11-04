@@ -37,8 +37,27 @@ RR39_CHANGED = frozenset({"lilith_authority_dev/core.py", "lilith_authority_dev/
                           "lilith_authority_root/clients.py",
                           # First Memory privilege fix: the root bridge (`first-memory` form).
                           "lilith_authority_root/cli.py"})
+# OWNER_PROD (P2, 2026-11): the production profile beside DEV_SYNTHETIC. Installed DEV (d82f7da) still runs these
+# members' earlier bytes; the P3 transition installs them (the witness restarts from NEW, as FM-1 did).
+OWNER_PROD_CHANGED = frozenset({"lilith_authority_dev/evidence_minter.py", "lilith_authority_dev/recovery.py",
+                                "lilith_owner_memory/authority_contracts.py", "lilith_owner_memory/authority_verifier.py",
+                                "lilith_owner_memory/pr1_bootstrap.py", "lilith_owner_memory/recovery_contracts.py",
+                                "lilith_owner_memory/rotation_contracts.py", "lilith_owner_memory/successor_custody.py",
+                                "lilith_owner_memory/verifier.py", "lilith_recovery_witness/credential.py",
+                                "lilith_recovery_witness/server.py"})
+# Every signer-payload member P2 moved past the installed FM-2 release (d82f7da): the RR-39/First Memory members it
+# touched again plus OWNER_PROD_CHANGED. `P2_BASE` is the last main commit before P2 (75ca0db, #306), whose payload
+# equals d82f7da's.
+P2_BASE = "75ca0db084ef43f39462e3fe77b2f3fce8f5a0e2"
+OWNER_PROD_TREE_DELTA = OWNER_PROD_CHANGED | frozenset({
+    "lilith_authority_dev/core.py", "lilith_authority_dev/ledger.py", "lilith_authority_dev/profile.py",
+    "lilith_authority_dev/server.py", "lilith_authority_host/inputs.py", "lilith_authority_host/paths.py",
+    "lilith_authority_root/cli.py"})
+OWNER_PROD_SOURCES = frozenset(SOURCE_OF[m] for m in OWNER_PROD_TREE_DELTA)
+# Only members the E-23 era release carries (RR-39's layout-v3 additions, e.g. the shared verifier, are not).
+OWNER_PROD_INSTALLED = OWNER_PROD_CHANGED - V3.ADDED_RUNTIME_PATHS
 # Every repository member whose installed bytes differ, and every member the installed release does not carry.
-INSTALLED_DELTA = frozenset(E23.PAYLOAD_DELTA) | RR39_CHANGED
+INSTALLED_DELTA = frozenset(E23.PAYLOAD_DELTA) | RR39_CHANGED | OWNER_PROD_INSTALLED
 NOT_INSTALLED = frozenset(E23.PAYLOAD_ADDED) | V3.ADDED_RUNTIME_PATHS
 
 
@@ -52,6 +71,14 @@ def old_bytes(member: str) -> bytes:
     return out.stdout
 
 
+@lru_cache(maxsize=None)
+def e23_new_bytes(member: str) -> bytes:
+    """The E-23 NEW (57bff671) bytes of one member (`git show <NEW_RELEASE>:<source>`)."""
+    out = subprocess.run(["git", "show", f"{E23.NEW_RELEASE}:{SOURCE_OF[member]}"], cwd=ROOT, capture_output=True,
+                         check=True)
+    return out.stdout
+
+
 def e23_new_payloads(root: Path = ROOT) -> dict[str, bytes]:
     """The E-23 NEW payload (archive layout v2): the repository payload with the RR-39 change reverted."""
     payloads = dict(RFS.runtime_payloads(root))
@@ -59,6 +86,8 @@ def e23_new_payloads(root: Path = ROOT) -> dict[str, bytes]:
         payloads.pop(member)
     for member in RR39_CHANGED:
         payloads[member] = old_bytes(member)
+    for member in OWNER_PROD_INSTALLED:          # P2 moved them on from their E-23 NEW bytes
+        payloads[member] = e23_new_bytes(member)
     return payloads
 
 
