@@ -52,7 +52,7 @@ from .contracts import ContractViolation, _canonical, _choice
 #
 #     REAL_ACCEPTANCE_ENABLED != PR-1B authorized (B-5) != M-B1 authorized
 #     enabled != any record exists;  enabled != freshness CURRENT
-REAL_PROFILES = frozenset({"DEV_SYNTHETIC"})
+REAL_PROFILES = frozenset({"DEV_SYNTHETIC", "OWNER_PROD"})
 REAL_ACCEPTANCE_ENABLED = True
 REAL_ACCEPTANCE_BLOCK_REASON = "REAL_ACCEPTANCE_DISABLED_IN_SOURCE"
 

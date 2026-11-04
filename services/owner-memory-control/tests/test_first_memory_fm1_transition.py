@@ -565,8 +565,9 @@ class PinTests(unittest.TestCase):
         repo = {m: IL.old_source_bytes(source_of[m], IL.FM1_RELEASE) for m in current}   # FM-1 NEW, as merged
         # The tree has moved past e2324a5 by exactly the successor signer delta (a later transition): the
         # relationship-origin purpose and the read-only Hermes context form of the root bridge.
+        import e23_installed as H                                  # ... and then by the OWNER_PROD (P2) delta
         self.assertEqual({m for m in current if current[m] != repo[m]},
-                         {"lilith_authority_dev/protocol.py", "lilith_authority_root/cli.py"})
+                         {"lilith_authority_dev/protocol.py", "lilith_authority_root/cli.py"} | H.OWNER_PROD_TREE_DELTA)
         for member, (before, after) in FM1.PAYLOAD_DELTA.items():
             self.assertEqual(sha(IL.old_source_bytes(source_of[member], IL.E23_RELEASE)), before, member)
             self.assertEqual(sha(repo[member]), after, member)

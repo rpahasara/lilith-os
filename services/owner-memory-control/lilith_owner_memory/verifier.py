@@ -279,6 +279,15 @@ def _dev_synthetic_owner(context: K.AcceptanceContextV1) -> bool:
         P._DEV_SYNTHETIC_OWNER, P.SYNTHETIC_RP_ID, P.SYNTHETIC_ORIGIN)
 
 
+def _prod_owner(context: K.AcceptanceContextV1) -> bool:
+    """OWNER_PROD: the registered production owner context (built by the host from the root-owned owner registration).
+    `prod` only, a real RP (never `.invalid`) and an https origin on it; never the synthetic DEV identity."""
+    rp, origin = context.rp_id, context.origin
+    return (context.deployment_environment == "prod" and isinstance(rp, str) and not rp.endswith(".invalid")
+            and isinstance(origin, str) and (origin == "https://" + rp or origin.endswith("." + rp))
+            and origin.startswith("https://") and context.owner_principal != P._DEV_SYNTHETIC_OWNER)
+
+
 def _verify_owner_proof(context, action, challenge_json, challenge_record, assertion,
                         owner_credential, *, dev_synthetic_owner: bool = False) -> VerifiedOwnerProofV1:
     # 1. Trusted context: the synthetic TEST environment; on the V2 owner-proof path only, also exactly the fixed
@@ -287,7 +296,8 @@ def _verify_owner_proof(context, action, challenge_json, challenge_record, asser
     _parse(lambda value: value.validate(), context)
     _require((context.deployment_environment == "test" and context.rp_id.endswith(".invalid")
               and context.origin == "https://" + context.rp_id)
-             or (dev_synthetic_owner and _dev_synthetic_owner(context)), "ENVIRONMENT_NOT_SUPPORTED")
+             or (dev_synthetic_owner and (_dev_synthetic_owner(context) or _prod_owner(context))),
+             "ENVIRONMENT_NOT_SUPPORTED")
 
     # 2. The intended operation (the frozen action) is required and must be valid.
     _require(action is not None, "ACTION_MISSING")

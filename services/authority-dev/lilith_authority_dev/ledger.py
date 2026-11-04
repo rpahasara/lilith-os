@@ -47,7 +47,9 @@ from lilith_owner_memory.contracts import _canonical
 from .profile import LEDGER_PATH, PROFILE
 
 SCHEMA_VERSION = 1
-LEDGER_ENVIRONMENTS = frozenset({"dev", "test"})  # never prod; the caller passes its exact expected value
+LEDGER_ENVIRONMENTS = frozenset({"dev", "test", "prod"})  # the caller passes its exact expected value
+# OWNER_PROD (2026-11): a `prod` ledger is its own schema (below); `dev`/`test` keep SCHEMA byte for byte.
+_PROFILE_OF = {"dev": PROFILE, "test": PROFILE, "prod": "OWNER_PROD"}
 
 _TERMINAL_CHALLENGE = "('CONSUMED','EXPIRED','CANCELLED','FAILED','VOIDED_BY_RECOVERY')"
 _TERMINAL_USE = "('CONSUMED','ABANDONED','QUARANTINED_BY_RECOVERY')"
@@ -116,6 +118,18 @@ def schema_fingerprint_of(statements: Sequence[str]) -> str:
 
 
 SCHEMA_FINGERPRINT = schema_fingerprint_of(SCHEMA)
+_DEV_META = SCHEMA[0]
+PROD_SCHEMA = (_DEV_META.replace("CHECK (environment IN ('dev','test'))", "CHECK (environment = 'prod')")
+               .replace("CHECK (profile = 'DEV_SYNTHETIC')", "CHECK (profile = 'OWNER_PROD')"),) + SCHEMA[1:]
+assert PROD_SCHEMA[0] != _DEV_META and PROD_SCHEMA[1:] == SCHEMA[1:]
+PROD_SCHEMA_FINGERPRINT = schema_fingerprint_of(PROD_SCHEMA)
+
+
+def schema_for(environment: str) -> tuple[tuple[str, ...], str, str]:
+    """(statements, fingerprint, profile) for one ledger environment."""
+    if environment == "prod":
+        return PROD_SCHEMA, PROD_SCHEMA_FINGERPRINT, _PROFILE_OF["prod"]
+    return SCHEMA, SCHEMA_FINGERPRINT, PROFILE
 
 LEDGER_ERROR_REASONS = (
     "AUTHORITY_STATE_MISSING",
@@ -315,10 +329,10 @@ class DurableAuthorityLedgerV1:
                 if conn.execute("PRAGMA journal_mode = WAL").fetchone()[0].lower() != "wal":
                     raise LedgerError("LEDGER_IO_ERROR", "WAL")
                 conn.execute("BEGIN IMMEDIATE")
-                for statement in SCHEMA:
+                for statement in schema_for(environment)[0]:
                     conn.execute(statement)
                 conn.execute("INSERT INTO authority_meta_v1 (singleton, schema_version, environment, profile) "
-                             "VALUES (1, ?, ?, ?)", (SCHEMA_VERSION, environment, PROFILE))
+                             "VALUES (1, ?, ?, ?)", (SCHEMA_VERSION, environment, schema_for(environment)[2]))
                 _write_ops(conn, (), (dict(genesis),))
                 conn.execute("COMMIT")
             finally:
@@ -334,10 +348,10 @@ class DurableAuthorityLedgerV1:
 
     def _verify_schema(self) -> None:
         try:
-            if schema_fingerprint_of(_schema_statements(self._conn)) != SCHEMA_FINGERPRINT:
+            if schema_fingerprint_of(_schema_statements(self._conn)) != schema_for(self.environment)[1]:
                 raise LedgerError("LEDGER_SCHEMA_MISMATCH")
             meta = self._conn.execute("SELECT schema_version, environment, profile FROM authority_meta_v1").fetchall()
-            if meta != [(SCHEMA_VERSION, self.environment, PROFILE)]:
+            if meta != [(SCHEMA_VERSION, self.environment, schema_for(self.environment)[2])]:
                 raise LedgerError("LEDGER_META_MISMATCH")
             if self._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
                 raise LedgerError("LEDGER_SCHEMA_MISMATCH", "journal_mode")

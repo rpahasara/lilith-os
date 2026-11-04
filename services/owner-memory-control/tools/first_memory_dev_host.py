@@ -108,6 +108,15 @@ class HostPathsV1:
 
 DEV_PATHS = HostPathsV1()
 
+# OWNER_PROD (2026-11): PROD's existing Core API data directory (`lilith-01`), its own 15B2a keys (D-6), the same
+# canonical-config path (naming debt). The stale path is one PROD never has; the binding refuses if it ever appears.
+PROD_DATA = Path("/home/lilith/.hermes/lilith-os/data")
+PROD_PATHS = HostPathsV1(
+    privacy_db=PROD_DATA / "privacy_governance.db", authoritative_privacy_db=PROD_DATA / "privacy_governance.db",
+    stale_privacy_db=PROD_DATA / "privacy_governance.dev.db", cognitive_db=PROD_DATA / "cognitive_memory.db",
+    actor_secret=PROD_DATA / "actor_authority.key", privacy_secret=PROD_DATA / "privacy_authority.key")
+PRIVACY_ENVIRONMENT = {"dev": "DEV_SYNTHETIC", "prod": "OWNER_PROD"}
+
 
 class HostRefused(RuntimeError):
     def __init__(self, code: str):
@@ -279,19 +288,22 @@ class FirstMemoryDevHostV1:
 
     def __init__(self, *, transport: SignerTransportV1, paths: HostPathsV1 = DEV_PATHS,
                  freshness: Optional[F.PrivacyFreshnessGate] = None,
-                 now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc), environment: str = ENVIRONMENT):
+        _need(environment in PRIVACY_ENVIRONMENT, "DEPLOYMENT_INVALID")
         self._transport, self._paths, self._freshness, self._now = transport, paths, freshness, now_fn
+        self._env = environment
+        self._signer = SIGNER_PROFILE.runtime_profile(environment)
 
     # inputs, re-read per composition ------------------------------------------------------------------------
 
     def _registration(self) -> HI.OwnerRegistrationV1:
-        registration, reason = HI.read_owner_registration(environment=ENVIRONMENT, root=self._paths.host_root,
+        registration, reason = HI.read_owner_registration(environment=self._env, root=self._paths.host_root,
                                                           owner_uid=self._paths.host_owner_uid)
         _need(registration is not None, str(reason))
         return registration
 
     def _authority(self) -> tuple[A.TrustedRegistryRootV1, dict[str, Any], A.RecoveryEpochV1]:
-        inputs = HI.read_host_inputs(environment=ENVIRONMENT, root=self._paths.host_root,
+        inputs = HI.read_host_inputs(environment=self._env, root=self._paths.host_root,
                                      owner_uid=self._paths.host_owner_uid)
         _need(inputs.registry_root is not None and inputs.registries, "AUTHORITY_INPUTS_INCOMPLETE")
         head = max(inputs.registries, key=lambda registry: registry["registryVersion"])
@@ -310,7 +322,7 @@ class FirstMemoryDevHostV1:
         privacy_store = PG.PrivacyGovernanceStore(paths.privacy_db, paths.privacy_secret.read_bytes(), actor)
         binding = FMC.PrivacyBindingV1(paths.privacy_db, privacy_store, paths.cognitive_db,
                                        authoritative=paths.authoritative_privacy_db, stale=paths.stale_privacy_db,
-                                       freshness=self._freshness)
+                                       freshness=self._freshness, environment=PRIVACY_ENVIRONMENT[self._env])
         capabilities = frozenset(t.capability for t in TUPLES) & settings.active_capabilities
         policy = CA.MemoryPolicyStore(paths.cognitive_db, actor, active_capabilities=capabilities)
         consent = CA.ConsentStore(paths.cognitive_db, actor, policy_store=policy)
@@ -322,20 +334,20 @@ class FirstMemoryDevHostV1:
         tuples = memory_v2.CanonicalTupleRegistry(TUPLES)
         links = AD.L04AdmissionLinkStoreV1(paths.cognitive_db)
         uses = SignerEvidenceUseLedgerV1(self._transport)
-        ledger_epoch = R.ledger_epoch_id(epoch, ENVIRONMENT)
+        ledger_epoch = R.ledger_epoch_id(epoch, self._env)
         owner_context = K.AcceptanceContextV1(
-            deployment_environment=ENVIRONMENT, authority_domain=SIGNER_PROFILE.DEV_AUTHORITY_DOMAIN,
-            logical_owner_id=SIGNER_PROFILE.DEV_LOGICAL_OWNER, owner_principal=registration.owner_principal,
-            rp_id=registration.rp_id, origin=registration.origin, policy_version=SIGNER_PROFILE.DEV_POLICY_VERSION,
+            deployment_environment=self._env, authority_domain=self._signer.authority_domain,
+            logical_owner_id=self._signer.logical_owner_id, owner_principal=registration.owner_principal,
+            rp_id=registration.rp_id, origin=registration.origin, policy_version=self._signer.policy_version,
             registry_tuple_version=registration.registry_tuple_version, ledger_epoch=ledger_epoch,
             privacy_notice_version=registration.privacy_notice_version,
             broker_releases=frozenset(registration.broker_releases))
 
         def authority_context(purpose: str) -> A.AuthorityVerificationContextV1:
             return A.AuthorityVerificationContextV1(
-                environment=ENVIRONMENT, purpose=purpose, registry_root=registry_root,
+                environment=self._env, purpose=purpose, registry_root=registry_root,
                 trusted_minimum_registry_version=head["registryVersion"], expected_recovery_epoch=epoch,
-                policy_version=SIGNER_PROFILE.DEV_POLICY_VERSION)
+                policy_version=self._signer.policy_version)
 
         def store(**overrides: Any) -> canonical_store.CanonicalMemoryStoreV2:
             values = dict(
@@ -370,8 +382,8 @@ class FirstMemoryDevHostV1:
             "protocol": OP.PROTOCOL, "schemaVersion": K.CHALLENGE_V2_SCHEMA_VERSION,
             "ownerPrincipal": registration.owner_principal,
             "privacyNoticeVersion": registration.privacy_notice_version, "rpId": registration.rp_id,
-            "deploymentEnvironment": ENVIRONMENT, "authorityDomain": SIGNER_PROFILE.DEV_AUTHORITY_DOMAIN,
-            "logicalOwnerId": SIGNER_PROFILE.DEV_LOGICAL_OWNER, "policyVersion": SIGNER_PROFILE.DEV_POLICY_VERSION,
+            "deploymentEnvironment": self._env, "authorityDomain": self._signer.authority_domain,
+            "logicalOwnerId": self._signer.logical_owner_id, "policyVersion": self._signer.policy_version,
             "registryTupleVersion": registration.registry_tuple_version, "ledgerEpoch": ledger_epoch}
         conversation = FMC.FirstMemoryConversationV1(
             privacy=binding, l04=FMC.L04ComponentsV1(actor, policy, consent, learning), adapter=adapter,
@@ -436,7 +448,9 @@ def main(argv: list[str]) -> int:
         _need(refused is None, str(refused))
         bridge = socket.socket(fileno=BRIDGE_FD)
         _need(bridge.family == socket.AF_UNIX, "BRIDGE_UNAVAILABLE")
-        host = FirstMemoryDevHostV1(transport=BridgeTransportV1(bridge))
+        environment = HI.read_deployment()[0]          # absent: dev, exactly as before
+        host = FirstMemoryDevHostV1(transport=BridgeTransportV1(bridge), environment=environment,
+                                    paths=PROD_PATHS if environment == "prod" else DEV_PATHS)
         text = sys.stdin.readline().rstrip("\n")
         if argv[0] == "recall":
             emit(recall(host, argv[1], text))

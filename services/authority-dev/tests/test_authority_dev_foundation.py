@@ -172,7 +172,7 @@ class CredentialAbsenceTests(unittest.TestCase):
                     S._process_identity)
         try:
             S._process_identity = lambda: (990, 980, [980])
-            S.check_environment = lambda environ: None
+            S.check_environment = lambda environ, **_deployment: None
             S.check_identity = lambda *a, **k: None
             S.serve_forever = served.append
             for status, code in ((ABSENT, S.EXIT_CREDENTIAL_ABSENT), (INVALID, S.EXIT_CREDENTIAL_INVALID)):
@@ -213,7 +213,8 @@ class ReadinessTests(unittest.TestCase):
         core = CORE.DevAuthoritySignerCoreV1(PRESENT)
         # PR-1S: two optional collaborators (the C-4 handler and the self-view), neither a key or a minter.
         # RR-39: a third, the governed issuance handler; absent unless constructed (never in the DEV runtime).
-        self.assertEqual(set(vars(core)), {"_credential", "_recovery", "_self_view", "_issuance"})
+        self.assertEqual(set(vars(core)), {"_credential", "_recovery", "_self_view", "_issuance",
+                                           "_profile_name"})                 # OWNER_PROD: a name, not a key
         self.assertIsNone(core._recovery)
         self.assertIsNone(core._self_view)
         self.assertIsNone(core._issuance)

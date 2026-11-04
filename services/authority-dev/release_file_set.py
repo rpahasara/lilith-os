@@ -64,7 +64,13 @@ TEST_FILES = frozenset({"test_authority_dev_foundation.py", "test_custody_prepar
                         # Relationship origin: the same vertical with the origin family.
                         "test_relationship_origin_dev_vertical.py",
                         # The read-only Hermes canonical-memory route (`first-memory-context`).
-                        "test_hermes_context_route.py"})
+                        "test_hermes_context_route.py",
+                        # The canonical-memory context service (owner decision D-2) over that route.
+                        "test_canonical_context_service.py",
+                        # OWNER_PROD: the production profile beside DEV_SYNTHETIC (P2).
+                        "test_owner_prod_profile.py",
+                        # OWNER_PROD: the production ceremony forms (P3).
+                        "test_owner_prod_ceremony.py"})
 # Owner ceremony tooling (B1b-3d L2, B1b-3e PR-1S). Never runtime payload; the
 # keygen is shipped separately as the release member `cli/lilith-authority-keygen-dev`.
 CEREMONY_FILES = frozenset({"lilith_authority_keygen_dev.py", "install_authority_dev.py",
@@ -118,21 +124,21 @@ SHARED_HASHES = {
     "services/owner-memory-control/lilith_owner_memory/contracts.py":
         "ff5075f1131f84348bdbc5d3fbd3410e53c7da39e265476a0b57ace6ff8ef5c7",
     "services/owner-memory-control/lilith_owner_memory/authority_contracts.py":
-        "fabd8fd24f45febe83f8fd67c3fc39f277278e9145df9c55d5e03e5e8598e74f",
+        "2f7dde524e4944182a7adb351ab865336162549673f3944c8cb9a75add42bd02",
     # B1b-3e PR-1S: the accepted pure contracts the signer, witness, and root
     # tooling import. Unchanged accepted modules keep their merged bytes.
-    "services/owner-memory-control/lilith_owner_memory/authority_verifier.py": "3c808267e56e9abc1ea1e848881cefd20a56fde51d9e803ac90f7f0c7517e83a",
-    "services/owner-memory-control/lilith_owner_memory/recovery_contracts.py": "f4a14cff094d167a2a7925622031352955291c18244545e95c0003fb9231b95e",
-    "services/owner-memory-control/lilith_owner_memory/rotation_contracts.py": "8f9df8dcd3e8a1b0cd8f03169bf7a51d4b6726cbb708cadfb3025586211996b0",
+    "services/owner-memory-control/lilith_owner_memory/authority_verifier.py": "093b77d6192c46ec07aaad5d8bd2321f3fdcdd56ebf716df40dff18286e94052",
+    "services/owner-memory-control/lilith_owner_memory/recovery_contracts.py": "6bfd45d3943ed046dbce64039f1b889b93363e8b9d2e6c8e28cec5d422612e51",
+    "services/owner-memory-control/lilith_owner_memory/rotation_contracts.py": "181acda2fd4c68aca7051669a04da43b07d72984e724e906481dfda7280fe70d",
     "services/owner-memory-control/lilith_owner_memory/witness_readiness.py": "129d4479a7c86a6ef33acfb27da4f5cd6c6a6947b89184863a50117091fe3cbd",
-    "services/owner-memory-control/lilith_owner_memory/successor_custody.py": "29e99a7b179d58dd4f8e9cd576ed544f207145f25f89c92e97ca0e6efa65cb72",
+    "services/owner-memory-control/lilith_owner_memory/successor_custody.py": "8b1da78c000f16ec843683329b59d25b99b1d10dce6527e1815b84952c6cb6e9",
     "services/owner-memory-control/lilith_owner_memory/successor_readiness.py": "842176d06954607aed39d8988764fc253fa8bd4c41ca49fcd5e2a4532c5ecc16",
     "services/owner-memory-control/lilith_owner_memory/authority_ledger_journal.py": "f0d554c53948723c80f5cfbfd638d60855e92ddb562137370d12f9c7eeec49ce",
-    "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "9a09a4726bb473067e84e7664dca49d51b90ced1e012564526bae07656d3d5fd",
+    "services/owner-memory-control/lilith_owner_memory/pr1_bootstrap.py": "ed21bbf9f97623633f8e8c8f52869ebe75f937f4fecd788f29e0eeb858ad8e48",
     "services/owner-memory-control/lilith_owner_memory/pr1_acceptance.py": "d3df4cfca975b31cbe526805d6573e7d4760ef376ad02f3cb8e0ac7cece4049b",
     # RR-39: the B2a owner-proof verifier the issuance path imports (an addition; it now also admits exactly the
     # fixed DEV_SYNTHETIC owner identity pinned in owner_proof.py). No existing entry is re-pinned.
-    "services/owner-memory-control/lilith_owner_memory/verifier.py": "4e119272430d529a64df0666b0dea4f70c413731d990f905f2dbb8784625789c",
+    "services/owner-memory-control/lilith_owner_memory/verifier.py": "6f214b8ff5d3b87f2ba2f0159df3dce03e4cbc092b38249265ac5f50908e2cbd",
     # Track B (B4): the pure Privacy anchor/checkpoint contract the witness K-PAN module imports. An addition only;
     # no existing entry is re-pinned. The signer never imports it.
     "services/core-api/lilith_memory/privacy_anchor_contracts.py": "58e954af7988115740fee8097d8d3248f47861a7b4046fc63bf9b0f3903fd768",

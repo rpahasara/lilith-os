@@ -539,7 +539,10 @@ class PinTests(unittest.TestCase):
         current = RFS.runtime_payloads(ROOT)
         new = {m: IL.old_source_bytes(source_of[m], NEW) for m in current}
         old = {m: IL.old_source_bytes(source_of[m], OLD) for m in current}
-        self.assertEqual(current, new)                                   # the tree IS the FM-2 NEW signer payload
+        # The tree is the FM-2 NEW signer payload moved on by exactly the OWNER_PROD (P2) delta.
+        import e23_installed as H
+        self.assertEqual({m for m in current if current[m] != new[m]}, H.OWNER_PROD_TREE_DELTA)
+        self.assertEqual(set(current), set(new))
         self.assertEqual({m for m in current if old[m] != new[m]}, set(FM2.PAYLOAD_DELTA))
         for member, (before, after) in FM2.PAYLOAD_DELTA.items():
             self.assertEqual((sha(old[member]), sha(new[member])), (before, after), member)

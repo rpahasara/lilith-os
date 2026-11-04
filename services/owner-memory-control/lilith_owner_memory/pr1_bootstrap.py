@@ -103,6 +103,14 @@ DEV_SYNTHETIC_WITNESS_PROFILE = WitnessProfileV1(
     credential_name=WITNESS_CREDENTIAL_NAME, credential_path=WITNESS_CREDENTIAL_PATH,
     service_user=WITNESS_SERVICE_USER, service_unit=WITNESS_SERVICE_UNIT, state_dir=WITNESS_STATE_DIR)
 
+# OWNER_PROD (2026-11): the production K-WIT, `prod` only, under `prod.witness.` (recovery_contracts.PROD_WITNESS_PREFIX).
+# Same credential, account and state names as DEV (documented naming debt).
+PROD_WITNESS_KEY_ID = "prod.witness.owner-prod.1"
+OWNER_PROD_WITNESS_PROFILE = WitnessProfileV1(
+    profile="OWNER_PROD", environment="prod", witness_key_id=PROD_WITNESS_KEY_ID,
+    credential_name=WITNESS_CREDENTIAL_NAME, credential_path=WITNESS_CREDENTIAL_PATH,
+    service_user=WITNESS_SERVICE_USER, service_unit=WITNESS_SERVICE_UNIT, state_dir=WITNESS_STATE_DIR)
+
 WITNESS_PROFILE_REASONS = (
     "WITNESS_PROFILE_MALFORMED",
     "WITNESS_PROFILE_PROD",
@@ -123,7 +131,8 @@ def witness_profile_reason(profile: Any) -> str | None:
     if not isinstance(profile, WitnessProfileV1) or profile.environment not in DEPLOYMENT_ENVIRONMENTS:
         return "WITNESS_PROFILE_MALFORMED"
     if profile.environment == "prod":
-        return "WITNESS_PROFILE_PROD"
+        # OWNER_PROD: exactly the fixed production profile; anything else claiming `prod` keeps the DEV refusal.
+        return None if profile == OWNER_PROD_WITNESS_PROFILE else "WITNESS_PROFILE_PROD"
     if profile.witness_key_id == SC.INITIAL_KEY_ID or SC.successor_ordinal_of_key_id(profile.witness_key_id) is not None:
         return "WITNESS_KEY_ID_IS_AUTHORITY_KEY_ID"
     if not isinstance(profile.witness_key_id, str) or not profile.witness_key_id.startswith(R.TEST_ONLY_WITNESS_PREFIX):
@@ -145,7 +154,9 @@ def witness_profile_reason(profile: Any) -> str | None:
 
 
 def witness_profile(expected_environment: str) -> WitnessProfileV1:
-    """The DEV_SYNTHETIC witness profile bound to one exact expected environment."""
+    """The fixed witness profile for one exact expected environment: OWNER_PROD for `prod`, else DEV_SYNTHETIC."""
+    if expected_environment == "prod":
+        return OWNER_PROD_WITNESS_PROFILE
     profile = dataclasses.replace(DEV_SYNTHETIC_WITNESS_PROFILE, environment=expected_environment)
     reason = witness_profile_reason(profile)
     if reason is not None:
@@ -186,7 +197,13 @@ class WitnessKeyPublicationV1:
         if value["publicationType"] != WITNESS_PUBLICATION_TYPE or type(value["schemaVersion"]) is not int \
                 or value["schemaVersion"] != WITNESS_PUBLICATION_SCHEMA_VERSION:
             raise ContractViolation("UNSUPPORTED_SCHEMA_VERSION")
-        if value["profile"] != WITNESS_PROFILE:
+        # OWNER_PROD (P3): the production keygen publishes `OWNER_PROD`, and only for `prod`; DEV is unchanged.
+        if value["profile"] != WITNESS_PROFILE and not (
+                value["profile"] == OWNER_PROD_WITNESS_PROFILE.profile
+                and isinstance(value.get("witnessKey"), dict) and value["witnessKey"].get("environment") == "prod"):
+            raise ContractViolation("WITNESS_PUBLICATION_PROFILE")
+        if value["profile"] == WITNESS_PROFILE and isinstance(value.get("witnessKey"), dict) \
+                and value["witnessKey"].get("environment") == "prod":
             raise ContractViolation("WITNESS_PUBLICATION_PROFILE")
         key, custody = value["witnessKey"], value["custodyEvidence"]
         _exact(key, _WITNESS_KEY_FIELDS)
@@ -218,7 +235,7 @@ def witness_publication(public_key: bytes, ciphertext: bytes, machine_id: str, *
         raise ContractViolation(reason)
     return {
         "publicationType": WITNESS_PUBLICATION_TYPE, "schemaVersion": WITNESS_PUBLICATION_SCHEMA_VERSION,
-        "profile": WITNESS_PROFILE,
+        "profile": profile.profile,
         "witnessKey": {"witnessKeyId": profile.witness_key_id, "environment": profile.environment,
                        "algorithm": A.ALGORITHM, "publicKey": _b64u(public_key),
                        "publicKeySha256": hashlib.sha256(public_key).hexdigest()},

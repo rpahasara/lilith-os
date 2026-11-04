@@ -142,9 +142,13 @@ def serve_forever(core: DevAuthoritySignerCoreV1) -> None:
             future.add_done_callback(lambda _finished: gate.release())
 
 
-def check_environment(environ: dict[str, str]) -> None:
-    if environ.get("LILITH_ENV") != "dev":
+def check_environment(environ: dict[str, str], *, deployment_environment: str = ENVIRONMENT) -> None:
+    """`LILITH_ENV` must be exactly this host's deployment environment (`dev` unless the root-installed
+    deployment says `prod`). DEV hosts are unchanged: `dev` only, refused otherwise with DEV_ONLY."""
+    if deployment_environment == ENVIRONMENT and environ.get("LILITH_ENV") != "dev":
         raise ServerError("DEV_ONLY")
+    if deployment_environment != ENVIRONMENT and environ.get("LILITH_ENV") != deployment_environment:
+        raise ServerError("DEPLOYMENT_ENVIRONMENT_MISMATCH")
     if environ.get("PYTHONPATH"):
         raise ServerError("PYTHONPATH_FORBIDDEN")
     extra = sorted(key for key in environ if key.startswith("LILITH_") and key not in ALLOWED_ENVIRONMENT)
@@ -194,7 +198,8 @@ def _process_identity() -> tuple[int, int, list[int]]:
     return os.getuid(), os.getgid(), os.getgroups()  # Linux-only
 
 
-def build_core(credential: CredentialStatusV1, *, credentials_directory: str | None = None) -> DevAuthoritySignerCoreV1:
+def build_core(credential: CredentialStatusV1, *, credentials_directory: str | None = None,
+               environment: str = ENVIRONMENT) -> DevAuthoritySignerCoreV1:
     """The PR-1S runtime: fixed-path readers, the durable ledger (never
     created here), the witness signer-socket client, and the C-4 handler.
     Construction performs no I/O; every read happens per request.
@@ -210,30 +215,37 @@ def build_core(credential: CredentialStatusV1, *, credentials_directory: str | N
     from .credential import load_owner_actor_signing_key
     from .issuance import IssuanceHandlerV1
     from .ledger import DurableAuthorityLedgerV1
-    from .profile import dev_runtime_profile
+    from .profile import PROFILE_BY_ENVIRONMENT, runtime_profile
     from .recovery import RecoveryHandlerV1
 
     def view():
-        return state.signer_view(environment=ENVIRONMENT)
+        return state.signer_view(environment=environment)
 
     def open_ledger():
-        return DurableAuthorityLedgerV1.open_existing(LEDGER_PATH, environment=ENVIRONMENT)
+        return DurableAuthorityLedgerV1.open_existing(LEDGER_PATH, environment=environment)
 
     recovery = RecoveryHandlerV1(view=view, open_ledger=open_ledger,
-                                 record_ledger_advance=witness_client.record_ledger_advance)
+                                 record_ledger_advance=witness_client.record_ledger_advance,
+                                 environment=environment)
     issuance = IssuanceHandlerV1(
-        profile=dev_runtime_profile(), view=view, open_ledger=open_ledger,
+        profile=runtime_profile(environment), view=view, open_ledger=open_ledger,
         load_signing_key=lambda: load_owner_actor_signing_key(credentials_directory),
         record_ledger_advance=witness_client.record_ledger_advance,
-        registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT))
+        registration=lambda: HI.read_owner_registration(environment=environment))
     return DevAuthoritySignerCoreV1(credential, recovery=recovery, issuance=issuance,
-                                    self_view=lambda: state.self_view(view(), open_ledger))
+                                    self_view=lambda: state.self_view(view(), open_ledger),
+                                    profile_name=PROFILE_BY_ENVIRONMENT[environment])
 
 
 def main() -> int:
     """Operational entrypoint for a later, separately authorized DEV install."""
     try:
-        check_environment(dict(os.environ))
+        from lilith_authority_host import inputs as HI
+        try:
+            deployment_environment, _profile = HI.read_deployment()
+        except ValueError as exc:
+            raise ServerError(str(exc)) from exc
+        check_environment(dict(os.environ), deployment_environment=deployment_environment)
         uid, gid, groups = _process_identity()
         check_identity(uid, gid, groups, user_lookup=_user, group_lookup=_group)
     except ServerError as exc:
@@ -247,7 +259,8 @@ def main() -> int:
         print("lilith-authority-dev: CREDENTIAL_INVALID", file=sys.stderr)
         return EXIT_CREDENTIAL_INVALID
     try:
-        serve_forever(build_core(credential, credentials_directory=os.environ.get("CREDENTIALS_DIRECTORY")))
+        serve_forever(build_core(credential, credentials_directory=os.environ.get("CREDENTIALS_DIRECTORY"),
+                                 environment=deployment_environment))
     except ServerError as exc:
         print(f"lilith-authority-dev: STARTUP_REFUSED {exc}", file=sys.stderr)
         return EXIT_STARTUP_REFUSED

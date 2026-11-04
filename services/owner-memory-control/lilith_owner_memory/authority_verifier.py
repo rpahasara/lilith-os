@@ -162,7 +162,8 @@ def _check_context(context: Any) -> A.AuthorityVerificationContextV1:
         context.validate()
     except (OwnerProofError, TypeError, ValueError, AttributeError) as exc:
         raise _Reject("MALFORMED_CONTEXT") from exc
-    _require(context.registry_root.test_only, "REGISTRY_ROOT_NOT_TEST_ONLY")
+    _require(context.registry_root.admissible_for(context.environment),
+             "ENVIRONMENT_MISMATCH" if context.environment == "prod" else "REGISTRY_ROOT_NOT_TEST_ONLY")
     return context
 
 

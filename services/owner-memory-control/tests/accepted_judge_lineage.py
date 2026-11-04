@@ -32,6 +32,16 @@ def closure_delta_is_the_accepted_judge(testcase, source_commit: str, changed_pa
     import hashlib
 
     changed = {line.strip() for line in changed_paths.splitlines() if line.strip()}
+    # OWNER_PROD (P2): its reviewed source change may also show, but only for paths whose bytes at main 75ca0db (the
+    # last commit before P2) are still exactly the ceremony's own.
+    import e23_installed as H
+    for path in sorted(changed & H.OWNER_PROD_SOURCES):
+        before = subprocess.run(["git", "-C", str(ROOT), "show", f"{H.P2_BASE}:{path}"], capture_output=True,
+                                check=True).stdout
+        at = subprocess.run(["git", "-C", str(ROOT), "show", f"{source_commit}:{path}"], capture_output=True,
+                            check=True).stdout
+        testcase.assertEqual(before, at, path)
+    changed -= H.OWNER_PROD_SOURCES
     testcase.assertEqual(changed - {JUDGE}, set())                     # every other pinned path is unchanged
     testcase.assertEqual(changed, {JUDGE})                             # and the judge did move (E-19, E-22)
     at_source = subprocess.run(["git", "-C", str(ROOT), "show", f"{source_commit}:{JUDGE}"], capture_output=True,
