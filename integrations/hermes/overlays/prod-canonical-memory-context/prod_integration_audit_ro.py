@@ -86,9 +86,14 @@ ABSENT = ("etc/lilith-authority-dev", "opt/lilith-authority-dev", "opt/lilith-fi
           HERMES + "/lilith_router/canonical_memory.py", HERMES + "/lilith_router/canonical_memory.json")
 PRINCIPALS = ("lilith-authority", "lilith-witness", "lilith-broker", "lilith-forget")
 IDS = (985, 995)
-UNITS = ("hermes-gateway.service", "lilith-os-api.service", "lilith-morning-brief-watcher.timer",
-         "lilith-career-watcher.timer", "lilith-meeting-prep-watcher.timer", "lilith-gmail-watcher.timer",
-         "unattended-upgrades.service")
+# Timer names from the repository's preserved PROD units (integrations/hermes/history/prod/systemd/*.timer); audit
+# run 2 showed that the two earlier guesses (`lilith-morning-brief-watcher`, `lilith-meeting-prep-watcher`) do not exist.
+UNITS = ("hermes-gateway.service", "lilith-os-api.service", "lilith-agenda-snapshot.timer",
+         "lilith-career-watcher.timer", "lilith-gmail-watcher.timer", "lilith-meeting-prep.timer",
+         "lilith-morning-brief.timer", "unattended-upgrades.service")
+# The pre-window compatibility gate (R3d; replaces prod_compat_ro.sh, which opened SQLite): judged only on a COMPLETE
+# run, from the run's own observations. Services that must be running before any canonical-memory window:
+GATE_RUNNING = ("hermes-gateway.service", "lilith-os-api.service")
 # Per unit type: systemd prints only the properties a unit type has (a timer has no MainPID / NRestarts). LoadState
 # makes a missing unit (`not-found`, otherwise shown as inactive) visible.
 UNIT_PROPS = {
@@ -108,6 +113,7 @@ class Audit:
                  euid: int, out: Callable[[str], None] = print):
         self.root, self.run, self.hostname, self.euid, self.out = root, run, hostname, euid, out
         self.errors: list[str] = []
+        self.values: dict[tuple[str, str], str] = {}
         self.count = 0
 
     # ------------------------------------------------------------------ reads ---
@@ -158,6 +164,7 @@ class Audit:
             if value is None or value == "" or value == []:
                 raise ValueError("EMPTY")
             self.emit("A", section, name, value)
+            self.values[(section, name)] = str(value)
         except Exception as exc:  # noqa: BLE001 - every failure is recorded, never swallowed
             self.errors.append(f"{section}/{name}")
             self.out(f"ERR {section} {name} {type(exc).__name__}")
@@ -315,6 +322,27 @@ class Audit:
         yield "unit", "failed", self.failed_units
         yield "channels", "telegram_allowlist_keys", self.allowlist_count
 
+    def compat_failures(self) -> list[str]:
+        """Why PROD is not in the state a canonical-memory window may start from (empty = PASS). A gate, not an error:
+        the audit stays COMPLETE either way."""
+        failures = []
+        for name in PINS:
+            if not self.values.get(("pin", name), "").startswith("MATCH:"):
+                failures.append("pin:" + name)
+        for relative in ABSENT:
+            if self.values.get(("absent", "/" + relative)) != "absent":
+                failures.append("present:/" + relative)
+        for name in PRINCIPALS:
+            if self.values.get(("principal", name)) != "user=no,group=no":
+                failures.append("principal:" + name)
+        for name in UNITS:
+            if not self.values.get(("unit", name), "").startswith("LoadState=loaded|"):
+                failures.append("unit_not_loaded:" + name)
+        for name in GATE_RUNNING:
+            if "|ActiveState=active|SubState=running|" not in self.values.get(("unit", name), ""):
+                failures.append("not_running:" + name)
+        return failures
+
     def expected(self) -> int:
         return len(PINS) + sum(1 for _ in self.observations())
 
@@ -334,6 +362,8 @@ class Audit:
             self.out(f"PROD_INTEGRATION_AUDIT_INCOMPLETE errors={len(self.errors)} observed={self.count} "
                      f"expected={expected}")
             return 3
+        failures = self.compat_failures()
+        self.out("PROD_COMPAT_PASS" if not failures else "PROD_COMPAT_FAIL " + ",".join(failures))
         self.out(f"PROD_INTEGRATION_AUDIT_COMPLETE observed={self.count}")
         return 0
 

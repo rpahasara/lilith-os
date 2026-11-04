@@ -160,7 +160,7 @@ class AuditRunTests(unittest.TestCase):
         self.assertIn("A channels telegram_allowlist_keys 1", lines)
         for line in lines:
             kind, *rest = line.split(" ")
-            self.assertIn(kind, ("A", "AUDIT", "PROD_INTEGRATION_AUDIT_COMPLETE"))
+            self.assertIn(kind, ("A", "AUDIT", "PROD_COMPAT_PASS", "PROD_COMPAT_FAIL", "PROD_INTEGRATION_AUDIT_COMPLETE"))
             self.assertLessEqual(len(rest), 3, line)
 
     def test_negative_control_the_no_mutation_check_detects_an_atime_change(self):
@@ -223,19 +223,22 @@ class AuditRunTests(unittest.TestCase):
             return fields["ID"]
 
         service = AUD.UNIT_PROPS["service"][1:]                            # run 1: no LoadState, no per-type schema
-        with mock.patch.object(AUD.Audit, "os_release", old_os_release), \
+        run1_units = ("hermes-gateway.service", "lilith-os-api.service", "lilith-morning-brief-watcher.timer",
+                      "lilith-career-watcher.timer", "lilith-meeting-prep-watcher.timer", "lilith-gmail-watcher.timer",
+                      "unattended-upgrades.service")
+        with mock.patch.object(AUD.Audit, "os_release", old_os_release), mock.patch.object(AUD, "UNITS", run1_units), \
                 mock.patch.dict(AUD.UNIT_PROPS, {"service": service, "timer": service}):
             _a, code, lines = self.audit()
         errors = sorted(l for l in lines if l.startswith("ERR "))
         self.assertEqual(code, 3)
         self.assertEqual(errors, sorted(["ERR host os OSError"] + [
-            f"ERR unit {t} ValueError" for t in AUD.UNITS if t.endswith(".timer")]))
+            f"ERR unit {t} ValueError" for t in run1_units if t.endswith(".timer")]))
         self.assertEqual(len(errors), 5)
         _a, code, lines = self.audit()
         self.assertEqual(code, 0, [l for l in lines if l.startswith("ERR")])
         self.assertIn("A host os ubuntu-24.04", lines)
         timers = [l for l in lines if l.startswith("A unit ") and ".timer " in l]
-        self.assertEqual(len(timers), 4)
+        self.assertEqual(len(timers), 5)
         for line in timers:
             self.assertIn("LoadState=loaded|ActiveState=active|SubState=waiting|UnitFileState=enabled|Result=success",
                           line)
@@ -303,6 +306,58 @@ class AuditRunTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("A unit lilith-gmail-watcher.timer LoadState=not-found|ActiveState=inactive|SubState=dead|"
                       "UnitFileState=-|Result=success", lines)
+
+    def matching_pins(self) -> dict:
+        return {name: hashlib.sha256((self.root / AUD.HERMES / name).read_bytes()).hexdigest() for name in AUD.PINS}
+
+    def compat_line(self, lines):
+        found = [l for l in lines if l.startswith("PROD_COMPAT_")]
+        self.assertEqual(len(found), 1, lines[-3:])
+        self.assertEqual(lines.index(found[0]), len(lines) - 2)            # just before the COMPLETE line
+        return found[0]
+
+    def test_compat_gate_passes_only_for_the_untouched_pre_window_state(self):
+        with mock.patch.dict(AUD.PINS, self.matching_pins()):
+            _a, code, lines = self.audit()
+        self.assertEqual(code, 0)
+        self.assertEqual(self.compat_line(lines), "PROD_COMPAT_PASS")
+        _a, code, lines = self.audit()                                     # the fixture's own (drifted) pins
+        self.assertEqual(code, 0)
+        self.assertTrue(self.compat_line(lines).startswith("PROD_COMPAT_FAIL pin:SOUL.md,"))
+
+    def test_compat_gate_fails_on_each_disqualifying_observation(self):
+        canonical = self.root / "home/lilith/.hermes/lilith-os/canonical"
+
+        def gateway_stopped(argv):
+            if argv[1] == "show" and argv[2] == "hermes-gateway.service":
+                return done(0, b"LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nNRestarts=0\n"
+                               b"UnitFileState=enabled\n")
+            return systemctl_ok(argv)
+
+        def timer_missing(argv):
+            if argv[1] == "show" and argv[2] == "lilith-morning-brief.timer":
+                return done(0, b"LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\n"
+                               b"Result=success\n")
+            return systemctl_ok(argv)
+
+        cases = (("present:/home/lilith/.hermes/lilith-os/canonical", lambda: canonical.mkdir(parents=True), systemctl_ok),
+                 ("not_running:hermes-gateway.service", lambda: None, gateway_stopped),
+                 ("unit_not_loaded:lilith-morning-brief.timer", lambda: None, timer_missing))
+        for reason, prepare, run in cases:
+            with self.subTest(reason):
+                prepare()
+                with mock.patch.dict(AUD.PINS, self.matching_pins()):
+                    _a, code, lines = self.audit(run=run)
+                self.assertEqual(code, 0)                                 # a gate verdict, never an audit error
+                self.assertIn(reason, self.compat_line(lines))
+                if canonical.exists():
+                    canonical.rmdir()
+
+    def test_no_compat_verdict_on_an_incomplete_run(self):
+        (self.root / AUD.HERMES / "SOUL.md").unlink()
+        _a, code, lines = self.audit()
+        self.assertEqual(code, 3)
+        self.assertFalse(any(l.startswith("PROD_COMPAT_") for l in lines))
 
     def test_live_wal_and_shm_files_are_only_lstat_ed(self):
         data = self.root / AUD.DATA
@@ -435,6 +490,13 @@ class StaticTests(unittest.TestCase):
         self.assertIn("os.readlink(self.p(OS_RELEASE))", body)
         self.assertIn('OS_RELEASE, OS_RELEASE_CANONICAL = "etc/os-release", "usr/lib/os-release"', self.code)
         self.assertNotIn("realpath(self.p(OS_RELEASE", self.code)
+
+    def test_timer_names_are_the_preserved_prod_units(self):
+        preserved = sorted(p.name for p in (ROOT / "integrations/hermes/history/prod/systemd").glob("*.timer"))
+        self.assertEqual(sorted(u for u in AUD.UNITS if u.endswith(".timer")), preserved)
+        self.assertNotIn("lilith-morning-brief-watcher.timer", AUD.UNITS)
+        self.assertNotIn("lilith-meeting-prep-watcher.timer", AUD.UNITS)
+        self.assertFalse((HERE.parent / "prod_compat_ro.sh").exists())  # superseded by the helper's gate (no SQLite)
 
     def test_unit_schemas_cover_every_audited_unit_type(self):
         self.assertEqual({u.rsplit(".", 1)[1] for u in AUD.UNITS}, set(AUD.UNIT_PROPS))
