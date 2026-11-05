@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -42,6 +43,19 @@ def done(code=0):
 
 def tree(root: Path) -> dict:
     return TF.tree(root)
+
+
+def other_gid(path: Path):
+    """A group the test may legitimately give a file it owns (any gid as root, else a supplementary group), or None."""
+    current = os.lstat(path).st_gid
+    if os.geteuid() == 0:
+        return 54321
+    return next((g for g in os.getgroups() if g != current), None)
+
+
+def edit_journal(journal: Path, edit) -> None:
+    lines = [json.loads(line) for line in journal.read_text(encoding="ascii").splitlines() if line.strip()]
+    journal.write_text("".join(json.dumps(e, sort_keys=True) + "\n" for e in edit(lines)), encoding="ascii")
 
 
 @unittest.skipUnless(LINUX, "O_NOATIME, modes and symlinks need Linux")
@@ -385,6 +399,128 @@ class StagesTests(unittest.TestCase):
 
         s = self.stages(run=edit_during)
         self.stop("LIVE_FILES_CHANGED", lambda: s.install("release", s.approval("release"), self.inputs("release")))
+
+
+    # ------------------------------------------------------------------ H-1 / H-2 ---
+    def journal_items(self, stage):
+        return {path: kind for kind, path, _d in self.stages().journal(stage)[0]["items"]}
+
+    def returned_up_to(self, stage):
+        """All stages installed, every stage after `stage` returned: `stage` is next to return."""
+        for each in ST.STAGES:
+            self.install(each)
+        s = self.stages()
+        for later in reversed(ST.STAGES[ST.STAGES.index(stage) + 1:]):
+            s.return_(later, s.approval(later))
+        return s
+
+    def test_h1_a_changed_mode_or_owner_of_any_item_kind_stops_the_return(self):
+        dropin_dir = f"{ST.UNIT_DIR}/lilith-authority-dev.service.d"
+        cases = {
+            "file mode (unit drop-in)": ("units", lambda: os.chmod(self.root / dropin_dir / ST.DROPIN_NAME, 0o600),
+                                         "ITEM_CHANGED:" + dropin_dir + "/" + ST.DROPIN_NAME),
+            "directory mode (drop-in dir)": ("units", lambda: os.chmod(self.root / dropin_dir, 0o700),
+                                             "ITEM_CHANGED:" + dropin_dir),
+            "directory mode (host tree)": ("hosttree", lambda: os.chmod(self.root / ST.HOST_TREE_CURRENT, 0o777),
+                                           "ITEM_CHANGED:" + ST.HOST_TREE_CURRENT),
+            "file mode (release manifest)": ("release", lambda: os.chmod(self.root / ST.RELEASE_DIR / ST.I.MANIFEST, 0o600),
+                                             "ITEM_CHANGED:" + ST.RELEASE_DIR + "/" + ST.I.MANIFEST),
+        }
+        gid = other_gid(self.root / "etc/machine-id")
+        if gid is not None:
+            cases["file group (context service)"] = ("context", lambda: os.chown(self.root / ST.CONTEXT_SERVICE, -1, gid),
+                                                     "ITEM_CHANGED:" + ST.CONTEXT_SERVICE)
+            cases["link owner (current)"] = ("release", lambda: os.chown(self.root / ST.CURRENT, -1, gid,
+                                                                          follow_symlinks=False), "ITEM_CHANGED:" + ST.CURRENT)
+        for label, (stage, tamper, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                s = self.returned_up_to(stage)
+                tamper()
+                before = tree(self.root)
+                self.stop(reason, lambda: s.return_(stage, s.approval(stage)))
+                self.assertEqual(tree(self.root), before)
+
+    def test_h1_a_legacy_or_incomplete_stage_journal_is_refused(self):
+        cases = {
+            "no schema": (lambda lines: [dict(lines[0], schema=1)] + lines[1:], "JOURNAL_LEGACY"),
+            "a done item without its meta": (lambda lines: [{k: v for k, v in e.items() if k != "meta"}
+                                                            if e.get("path") == ST.CONTEXT_SERVICE else e for e in lines],
+                                             "JOURNAL_INCOMPLETE:" + ST.CONTEXT_SERVICE),
+        }
+        for label, (edit, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                s = self.returned_up_to("context")
+                edit_journal(s.journal_path("context"), edit)
+                before = tree(self.root)
+                self.stop(reason, lambda: s.return_("context", s.approval("context")))
+                self.assertEqual(tree(self.root), before)
+
+    def test_h2_an_interrupted_item_that_exists_needs_owner_adjudication(self):
+        s = self.returned_up_to("context")
+        edit_journal(s.journal_path("context"), lambda lines: [
+            e for e in lines if not (e.get("phase") == "done" and e.get("path") == ST.CONTEXT_SERVICE)
+            and e.get("result") != "INSTALLED"])
+        before = tree(self.root)
+        self.stop("ITEM_INTERRUPTED:" + ST.CONTEXT_SERVICE, lambda: s.return_("context", s.approval("context")))
+        self.assertEqual(tree(self.root), before)
+
+    def test_h2_a_change_after_verification_stops_that_removal_and_is_never_resumed(self):
+        rel = lambda *p: "/".join((ST.RELEASE_DIR,) + p)  # noqa: E731
+        manifest = rel(ST.I.MANIFEST)
+        venv_cfg = rel("venv", "pyvenv.cfg")
+        site = rel("venv", "lib", "python3.12", "site-packages", "cryptography")
+        decoy = lambda: self.tmp / "decoy"  # noqa: E731
+
+        def swap_venv_parent(path):
+            if path == rel("venv", "lib", "python3.12", "site-packages", "cryptography", "hazmat.so"):
+                d = decoy()
+                d.mkdir()
+                (d / "hazmat.so").write_bytes(b"\x7fELF wheel payload")
+                os.rename(self.root / site, self.tmp / "moved")
+                os.symlink(str(d), self.root / site)
+
+        cases = {
+            "the current link retargeted": (lambda p: p == ST.CURRENT and (
+                (self.root / ST.CURRENT).unlink(), os.symlink("releases/elsewhere", self.root / ST.CURRENT)),
+                "CHANGED_DURING_RETURN:" + ST.CURRENT),
+            "a venv file rewritten": (lambda p: p == venv_cfg and (self.root / venv_cfg).write_bytes(b"home = /evil\n"),
+                                      "CHANGED_DURING_RETURN:" + venv_cfg),
+            "a venv directory swapped for a link": (swap_venv_parent, "PATH_NOT_A_REAL_DIRECTORY"),
+            "the manifest file rewritten": (lambda p: p == manifest and (self.root / manifest).write_bytes(
+                (self.root / manifest).read_bytes()), "CHANGED_DURING_RETURN:" + manifest),
+            "a file appears in a release directory": (
+                lambda p: p == rel("lilith_authority_dev") and (self.root / rel("lilith_authority_dev", "late.py"))
+                .write_bytes(b"x"), "REMOVE_REFUSED:" + rel("lilith_authority_dev")),
+        }
+        for label, (hook, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                s = self.returned_up_to("release")
+                s.before_remove = hook
+                self.stop(reason, lambda: s.return_("release", s.approval("release")))
+                journal = s.journal("release")
+                started = [e["path"] for e in journal if e.get("step") == "remove" and e["phase"] == "intent"]
+                finished = [e["path"] for e in journal if e.get("step") == "remove" and e["phase"] == "done"]
+                self.assertEqual(len(started), len(finished) + 1)        # the stopped removal is journaled as begun
+                if decoy().exists():
+                    self.assertEqual((decoy() / "hazmat.so").read_bytes(), b"\x7fELF wheel payload")   # never followed
+                s.before_remove = None
+                before = tree(self.root)
+                self.stop("RETURN_PARTIAL", lambda: s.return_("release", s.approval("release")))
+                self.assertEqual(tree(self.root), before)
+
+    def test_h2_the_host_lock_is_shared_by_every_stage_install_and_return(self):
+        self.install("release")
+        s = self.stages()
+        with ST.SF.HostLock(self.root, ST.STATE):
+            before = tree(self.root)
+            self.stop("LOCKED_BY_ANOTHER_PROCESS", lambda: s.return_("release", s.approval("release")))
+            self.stop("LOCKED_BY_ANOTHER_PROCESS", lambda: self.install("units"))
+            self.stop("LOCKED_BY_ANOTHER_PROCESS", lambda: self.f1.return_(self.f1.approval()))
+            self.assertEqual(tree(self.root), before)
+        self.assertEqual(self.install("units")["result"], "STAGE_UNITS_INSTALLED")     # free again afterwards
 
 
 class PinTests(unittest.TestCase):

@@ -8,6 +8,7 @@ Record: docs/architecture/canonical-memory-prod-integration-plan.md R3b, R3g. Th
 from __future__ import annotations
 
 import hashlib
+import json
 import importlib.util
 import os
 import stat
@@ -88,6 +89,19 @@ def tree(root: Path) -> dict:
     return out
 
 
+def other_gid(path: Path):
+    """A group the test may legitimately give a file it owns (any gid as root, else a supplementary group), or None."""
+    current = os.lstat(path).st_gid
+    if os.geteuid() == 0:
+        return 54321
+    return next((g for g in os.getgroups() if g != current), None)
+
+
+def edit_journal(journal: Path, edit) -> None:
+    lines = [json.loads(line) for line in journal.read_text(encoding="ascii").splitlines() if line.strip()]
+    journal.write_text("".join(json.dumps(e, sort_keys=True) + "\n" for e in edit(lines)), encoding="ascii")
+
+
 @unittest.skipUnless(LINUX, "O_NOATIME needs Linux")
 class FoundationTests(unittest.TestCase):
     def setUp(self):
@@ -132,7 +146,8 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(HI.read_deployment(root=self.root, owner_uid=os.getuid()), HI.PROD_DEPLOYMENT)
         after_tree = tree(self.root)
         self.assertEqual(set(after_tree) - set(before_tree),
-                         {INST.CANONICAL, INST.AUTHORITY_CONFIG, INST.DEPLOYMENT, INST.STATE, INST.JOURNAL})
+                         {INST.CANONICAL, INST.AUTHORITY_CONFIG, INST.DEPLOYMENT, INST.STATE, INST.JOURNAL,
+                          INST.STATE + "/lock"})
         changed = {k for k in before_tree if after_tree.get(k) != before_tree[k]}
         # only the parents that gained exactly one of those entries changed their listing
         self.assertEqual(changed, {"etc", "var/lib", "home/lilith/.hermes/lilith-os"})
@@ -210,7 +225,7 @@ class FoundationTests(unittest.TestCase):
         kept = lambda k: not k.startswith(INST.STATE) and k != "var/lib"     # the returned journal stays as evidence
         self.assertEqual({k: v for k, v in after.items() if kept(k)}, {k: v for k, v in before.items() if kept(k)})
         self.assertEqual(after["var/lib"][2], ["lilith-owner-prod-install"])
-        self.assertEqual(sorted(os.listdir(self.root / INST.STATE)), ["foundation.journal.returned"])
+        self.assertEqual(sorted(os.listdir(self.root / INST.STATE)), ["foundation.journal.returned", "lock"])
         self.assertEqual(self.accounts.users, accounts)
 
     def test_a_refused_return_changes_nothing(self):
@@ -236,6 +251,152 @@ class FoundationTests(unittest.TestCase):
                 self.assertEqual(tree(self.root), before)
                 self.assertEqual(self.accounts.users, accounts)
                 self.assertEqual(len(self.run.calls), calls)                    # no userdel ran
+
+
+    # ------------------------------------------------------------------ H-1 / H-2 ---
+    def refused(self, f, reason, prefix=False):
+        before, accounts, calls = tree(self.root), dict(self.accounts.users), len(self.run.calls)
+        with self.assertRaises(INST.Stop) as caught:
+            f.return_(f.approval())
+        got = caught.exception.reason
+        self.assertTrue(got.startswith(reason) if prefix else got == reason, got)
+        return before, accounts, calls
+
+    def test_h1_a_changed_mode_owner_or_type_stops_the_return_before_anything_is_removed(self):
+        decoy = Path(self.tmp.name + "-decoy")
+        self.addCleanup(lambda: [p.unlink() for p in decoy.glob("*")] and None or (decoy.rmdir() if decoy.exists() else None))
+
+        def config_dir_becomes_a_link():
+            decoy.mkdir()
+            (decoy / "deployment.json").write_bytes(INST.DEPLOYMENT_BYTES)
+            (self.root / INST.DEPLOYMENT).unlink()
+            (self.root / INST.AUTHORITY_CONFIG).rmdir()
+            os.symlink(str(decoy), self.root / INST.AUTHORITY_CONFIG)
+
+        def deployment_becomes_a_link():
+            decoy.mkdir()
+            (decoy / "deployment.json").write_bytes(INST.DEPLOYMENT_BYTES)
+            (self.root / INST.DEPLOYMENT).unlink()
+            os.symlink(str(decoy / "deployment.json"), self.root / INST.DEPLOYMENT)
+
+        cases = {
+            "deployment mode": (lambda: os.chmod(self.root / INST.DEPLOYMENT, 0o666), "ITEM_CHANGED:file:deployment"),
+            "canonical mode": (lambda: os.chmod(self.root / INST.CANONICAL, 0o755), "ITEM_CHANGED:dir:canonical"),
+            "authority-config mode": (lambda: os.chmod(self.root / INST.AUTHORITY_CONFIG, 0o700),
+                                      "ITEM_CHANGED:dir:authority-config"),
+            "deployment replaced by a link": (deployment_becomes_a_link, "DEPLOYMENT_CHANGED"),
+            "config directory replaced by a link": (config_dir_becomes_a_link, "PATH_NOT_A_REAL_DIRECTORY"),
+        }
+        gid = other_gid(self.root / "etc/machine-id")
+        if gid is not None:
+            cases["deployment group"] = (lambda: os.chown(self.root / INST.DEPLOYMENT, -1, gid),
+                                         "ITEM_CHANGED:file:deployment")
+        for label, (tamper, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                decoy = Path(self.tmp.name + "-decoy")
+                f = self.f()
+                f.install(f.approval())
+                tamper()
+                before, accounts, calls = self.refused(f, reason, prefix=True)
+                self.assertEqual(tree(self.root), before)
+                self.assertEqual((self.accounts.users, len(self.run.calls)), (accounts, calls))   # no userdel
+                if decoy.exists():
+                    self.assertEqual((decoy / "deployment.json").read_bytes(), INST.DEPLOYMENT_BYTES)
+
+    def test_h1_a_legacy_or_incomplete_journal_is_refused(self):
+        cases = {
+            "no schema (a pre-H-1 journal)": (lambda lines: [dict(lines[0], schema=None)] + lines[1:], "JOURNAL_LEGACY"),
+            "a done item without its meta": (lambda lines: [{k: v for k, v in e.items() if not (
+                e.get("step") == "file:deployment" and k == "meta")} for e in lines],
+                "JOURNAL_INCOMPLETE:file:deployment"),
+            "a malformed meta": (lambda lines: [dict(e, meta=["file", "644", 0, 0, ""]) if e.get("step") == "dir:canonical"
+                                                and e.get("phase") == "done" else e for e in lines],
+                                 "JOURNAL_INCOMPLETE:dir:canonical"),
+        }
+        for label, (edit, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                f = self.f()
+                f.install(f.approval())
+                edit_journal(self.root / INST.JOURNAL, edit)
+                before, accounts, calls = self.refused(f, reason)
+                self.assertEqual(tree(self.root), before)
+                self.assertEqual(len(self.run.calls), calls)
+
+    def test_h2_an_interrupted_item_that_exists_needs_owner_adjudication(self):
+        f = self.f()
+        f.install(f.approval())                    # then pretend the process died before journaling "done"
+        edit_journal(self.root / INST.JOURNAL, lambda lines: [
+            e for e in lines if not (e.get("step") == "file:deployment" and e.get("phase") == "done")
+            and e.get("step") != "end"])
+        before, _accounts, calls = self.refused(f, "ITEM_INTERRUPTED:file:deployment")
+        self.assertEqual(tree(self.root), before)
+        self.assertEqual(len(self.run.calls), calls)
+
+    def test_h2_a_change_after_verification_stops_that_removal_and_the_return_is_never_resumed(self):
+        decoy = Path(self.tmp.name + "-decoy")
+
+        def swap_parent_for_link(label):
+            if label == "file:deployment":
+                decoy.mkdir()
+                (decoy / "deployment.json").write_bytes(INST.DEPLOYMENT_BYTES)
+                os.rename(self.root / INST.AUTHORITY_CONFIG, Path(self.tmp.name + "-moved"))
+                os.symlink(str(decoy), self.root / INST.AUTHORITY_CONFIG)
+
+        cases = {
+            "deployment rewritten (same bytes)": (
+                lambda label: label == "file:deployment" and (self.root / INST.DEPLOYMENT).write_bytes(INST.DEPLOYMENT_BYTES),
+                "CHANGED_DURING_RETURN:" + INST.DEPLOYMENT, []),
+            "canonical mode changed": (lambda label: label == "dir:canonical" and os.chmod(self.root / INST.CANONICAL, 0o750),
+                                       "CHANGED_DURING_RETURN:" + INST.CANONICAL, ["file:deployment", "dir:authority-config"]),
+            "a file appears in the store": (
+                lambda label: label == "dir:canonical" and (self.root / INST.CANONICAL / "late.db").write_bytes(b"x"),
+                "REMOVE_REFUSED:" + INST.CANONICAL, ["file:deployment", "dir:authority-config"]),
+            "parent replaced by a link": (swap_parent_for_link, "PATH_NOT_A_REAL_DIRECTORY", []),
+        }
+        for label, (hook, reason, removed_first) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                decoy = Path(self.tmp.name + "-decoy")
+                f = self.f()
+                f.install(f.approval())
+                f.before_remove = hook
+                with self.assertRaises(INST.Stop) as caught:
+                    f.return_(f.approval())
+                self.assertTrue(caught.exception.reason.startswith(reason), caught.exception.reason)
+                journal = f.journal()
+                self.assertEqual([e["item"] for e in journal if e["step"] == "remove" and e["phase"] == "done"],
+                                 removed_first)                       # exactly the verified removals before the stop
+                self.assertIn("lilith-authority-dev", self.accounts.users)  # nothing after the stop ran
+                if decoy.exists():
+                    self.assertEqual((decoy / "deployment.json").read_bytes(), INST.DEPLOYMENT_BYTES)
+                if (self.root / INST.CANONICAL / "late.db").exists():
+                    self.assertEqual((self.root / INST.CANONICAL / "late.db").read_bytes(), b"x")
+                f.before_remove = None
+                before = tree(self.root)
+                self.refused(f, "RETURN_PARTIAL")                        # never resumed automatically
+                self.assertEqual(tree(self.root), before)
+
+    def test_h2_the_host_lock_refuses_a_second_process(self):
+        f = self.f()
+        f.install(f.approval())
+        with INST.SF.HostLock(self.root, INST.STATE):
+            before = tree(self.root)
+            self.refused(f, "LOCKED_BY_ANOTHER_PROCESS")
+            self.assertEqual(tree(self.root), before)
+        # and while an install holds it: a return attempted from inside the install's own window is refused
+        self.setUp()
+        g = self.f()
+        seen = []
+
+        def during():
+            with self.assertRaises(INST.Stop) as caught:
+                self.f().return_(g.approval())
+            seen.append(caught.exception.reason)
+        self.run.during = during
+        g.install(g.approval())
+        self.assertEqual(set(seen), {"LOCKED_BY_ANOTHER_PROCESS"})
 
 
 class StaticTests(unittest.TestCase):
