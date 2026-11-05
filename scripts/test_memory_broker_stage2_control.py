@@ -810,6 +810,25 @@ class Stage2ControlContracts(unittest.TestCase):
                             stage2.probe_equivalent_sandbox.__code__.co_consts
                             if isinstance(value, str)))
 
+    @staticmethod
+    def _transient_diagnostics(runner, unit: str) -> str:
+        """Evidence for a failed transient start: systemd-run's own output and exit status, the unit's state and
+        journal, and the systemd and OS versions (read-only; the CI runner only)."""
+        try:
+            out, err = runner.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out, err = "", "systemd-run still running"
+        lines = [f"systemd-run rc={runner.returncode} stdout={out!r} stderr={err!r}"]
+        for argv in (["sudo", "-n", "/usr/bin/systemctl", "status", unit, "--no-pager", "--full"],
+                     ["sudo", "-n", "/usr/bin/journalctl", "-u", unit, "-n", "40", "--no-pager", "-o", "cat"],
+                     ["/usr/bin/systemctl", "--version"], ["cat", "/etc/os-release"]):
+            try:
+                done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+                lines.append(f"$ {' '.join(argv)} (rc={done.returncode})\n{done.stdout.strip()}\n{done.stderr.strip()}")
+            except (OSError, subprocess.SubprocessError) as exc:
+                lines.append(f"$ {' '.join(argv)}: {type(exc).__name__}")
+        return "\n".join(lines)
+
     @unittest.skipUnless(os.name == "posix", "Linux transient-unit integration")
     def test_linux_transient_probe_lifecycle_on_ci_only(self):
         if not Path("/run/systemd/system").is_dir():
@@ -833,11 +852,11 @@ class Stage2ControlContracts(unittest.TestCase):
                 )
                 if "ActiveState=active" in result.stdout and "SubState=exited" in result.stdout:
                     break
-                self.assertIn(runner.poll(), (None, 0),
-                              "transient unit failed to start")
+                if runner.poll() not in (None, 0):
+                    self.fail("transient unit failed to start\n" + self._transient_diagnostics(runner, unit))
                 time.sleep(0.1)
             else:
-                self.fail("transient unit did not reach active/exited")
+                self.fail("transient unit did not reach active/exited\n" + self._transient_diagnostics(runner, unit))
         finally:
             subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "stop", unit],
                            capture_output=True, timeout=10)
