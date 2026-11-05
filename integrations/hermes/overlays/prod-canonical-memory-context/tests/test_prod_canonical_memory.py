@@ -5,6 +5,7 @@ import importlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -163,7 +164,9 @@ class SeamTests(unittest.TestCase):
 
 class PatchTests(unittest.TestCase):
     def test_the_router_patch_is_small_and_on_the_deployed_prod_file(self):
-        self.assertTrue(sha(O / "base/gateway_integration.py").startswith("99fe90649e316ef9"))
+        # R3c: rebased onto the router PROD runs since the T4 wording fix (audit run 2, 2026-11-05: pin MATCH).
+        self.assertEqual(sha(O / "base/gateway_integration.py"),
+                         "4db8bb58da3fbdef80fb550c74709bb3ea62c605afadec56aa96b28d2568ca8b")
         patch = (O / "gateway_integration.patch").read_text(encoding="utf-8")
         self.assertEqual(patch.count("\n@@ "), 4)   # import, wrapper (2), lean
         new = (O / "gateway_integration.py").read_text(encoding="utf-8")
@@ -172,6 +175,35 @@ class PatchTests(unittest.TestCase):
         compile(new, "gateway_integration.py", "exec")
         for name in ("canonical_memory.py", "lilith_memory_context.py"):
             compile((O / name).read_text(encoding="utf-8"), name, "exec")
+
+    def test_the_patch_applies_to_the_t4_base_and_keeps_every_route(self):
+        patch_bin = shutil.which("patch")
+        if patch_bin is not None:
+            work = Path(tempfile.mkdtemp())
+            shutil.copy(O / "base/gateway_integration.py", work / "g.py")
+            with open(O / "gateway_integration.patch", "rb") as f:
+                done = subprocess.run([patch_bin, "-s", "-p0", str(work / "g.py")], stdin=f, capture_output=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual((work / "g.py").read_bytes(), (O / "gateway_integration.py").read_bytes())
+            shutil.rmtree(work)
+        text = (O / "gateway_integration.py").read_text(encoding="utf-8")
+        base = (O / "base/gateway_integration.py").read_text(encoding="utf-8")
+        for kept in ("_SELF_STATUS_RE = re.compile(", "def _self_status_route(", "SELF_STATUS_NOTE = ",
+                     '"native_self_status"', '"native_recall"', "_social_lean", "_world_context."):
+            self.assertEqual(text.count(kept), base.count(kept), kept)         # T4 fixes and every route preserved
+        self.assertGreater(base.count('"native_self_status"'), 0)
+
+    def test_the_self_status_route_keeps_its_note_and_gains_canonical_memory_only_when_on(self):
+        _tmp, cm = load_package()
+        m = cm.merge
+        result = {"turn_route": {"model": "gpt-5.6-sol"}, "combined_ephemeral": "BASE\n\nSELF_STATUS_NOTE TEXT",
+                  "force_rebuild": True, "mode": "social"}
+        self.assertIs(m(result, note=None, combined_ephemeral="BASE", session_key="ss-off", cached_agent=None), result)
+        on = m(result, note="NOTE-A", combined_ephemeral="BASE", session_key="ss-on", cached_agent=None)
+        self.assertTrue(on["combined_ephemeral"].startswith("BASE\n\nSELF_STATUS_NOTE TEXT"))
+        self.assertIn("NOTE-A", on["combined_ephemeral"])
+        self.assertTrue(on["force_rebuild"])
+        self.assertEqual(on["mode"], "social")
 
     def test_one_copy_of_the_renderer(self):
         self.assertEqual((O / "lilith_memory_context.py").read_bytes(),

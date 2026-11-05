@@ -8,7 +8,7 @@
  from . import world_context as _world_context
  from .classifier import SOCIAL, WORK, classify
  from .state import STATE
-@@ -397,8 +398,20 @@
+@@ -450,8 +451,20 @@
      reasoning_config=None,
      cached_agent=None,
  ):
@@ -30,7 +30,7 @@
              runner=runner,
              ctx=ctx,
              model=model,
-@@ -411,7 +424,15 @@
+@@ -464,7 +477,15 @@
      except Exception:
          # Absolute guarantee: the router can never break a turn.
          logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
@@ -47,7 +47,7 @@
  
  
  def _route_turn_impl(
-@@ -757,7 +778,9 @@
+@@ -814,7 +835,9 @@
              if not why:
                  text, why = _social_lean.reply(
                      runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
