@@ -535,3 +535,41 @@ routine DEV deploy):
 - one read-only audit (or the stage-1 preflight in the install session) for the corrected timer and principal names;
 - the R5 key ceremony;
 - the R6 inert install windows (stages 1–5, one approval each), each starting with a fresh snapshot.
+
+## 13. R3 merges and outstanding return hardening (2026-11-05)
+
+**Merged to main, one owner approval each.** Every merge was followed by a successful Repository validation, a
+successful DEV deploy gate (`DEPLOY_REQUIRED`, ubuntu-24.04, `FEDERATION_BOUNDARY=PASS`,
+`AUTHORITY_BOUNDARY_PROOF=PASS`) and a read-only DEV invariant read. In each read the only change was the Core API
+release and its process; signer, witness, broker, canonical stores, Privacy and FORGET were unchanged. None of
+these merges deployed PROD.
+
+| PR | Content | Main after merge |
+| --- | --- | --- |
+| #320 | overlay rebase (R3c) | `210ae94` |
+| #321 | D-9 digest pin, unset (R3e) | `c547d18` |
+| #318 | isolated store paths (R3a) | `cd77846` |
+| #319 | inert installer stages 1–5 (R3b) | `32009ea` |
+| #324 | R3b correction: venv return integrity | `eb81eb6` |
+
+**#324 (owner review finding).** The stage `release` return did not verify the generated venv before removing
+it, and recursively deleted an interrupted venv. Its recursive walk also followed a symlinked venv root, deleting
+the link target's contents. The install now journals a complete venv manifest (type, mode, owner, file SHA-256 or
+link target; links never followed). The return removes the venv only when it matches that manifest exactly, entry
+by entry, and never recursively. An interrupted venv (no manifest) is `VENV_UNVERIFIED`: a STOP for owner
+adjudication.
+
+**Outstanding before any real PROD return is authorized** (owner-recorded hardening; not built; no return has run
+on a real host):
+
+- **H-1. Non-venv mode verification.** For non-venv items, the return checks file content, link targets and
+  unexpected directory entries, but not the mode or owner of files and directories. Verify each item's recorded
+  mode (and owner) before removal, as the venv manifest already does.
+- **H-2. Verification-to-deletion race.** The return verifies everything and then removes it. A concurrent
+  filesystem change between those two steps could change what `unlink` or `rmdir` act on. Candidate approach:
+  - descriptor-relative removal (`openat`/`O_NOFOLLOW`, `unlinkat` against verified parent directory descriptors);
+  - a fresh `lstat` of each entry, matched to its verified inode, immediately before removing it;
+  - an exclusive host lock and a maintenance window for the return.
+
+Both must be built, tested with negative controls and reviewed before the owner authorizes a real PROD return.
+They do not block the inert installs themselves, which create only what they journal.
