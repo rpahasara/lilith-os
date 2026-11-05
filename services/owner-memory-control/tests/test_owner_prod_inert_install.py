@@ -78,6 +78,8 @@ def tree(root: Path) -> dict:
                 if e.is_dir(follow_symlinks=False):
                     out[key] = ("dir", st.st_mode, sorted(os.listdir(e.path)))
                     stack.append(Path(e.path))
+                elif e.is_symlink():
+                    out[key] = ("link", st.st_mode, os.readlink(e.path))
                 else:
                     out[key] = (st.st_mode, st.st_size, st.st_mtime_ns, hashlib.sha256(Path(e.path).read_bytes()).hexdigest())
     return out

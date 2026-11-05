@@ -52,6 +52,7 @@ DEPLOYMENT_BYTES = json.dumps({"environment": "prod", "profile": "OWNER_PROD", "
                               sort_keys=True, separators=(",", ":")).encode("ascii")
 STATE = "var/lib/lilith-owner-prod-install"
 JOURNAL = STATE + "/foundation.journal"
+LATER_STAGES = ("release", "units", "hosttree", "context")
 HERMES = "home/lilith/.hermes"
 LIVE = tuple(f"{HERMES}/{p}" for p in (
     "SOUL.md", "memories/USER.md", "memories/MEMORY.md", "config.yaml", "lilith_router/router.yaml",
@@ -220,6 +221,8 @@ class Foundation:
         return changes nothing. Owner-approved, never automatic."""
         _need(approval == self.approval(), "APPROVAL_NOT_THIS_PLAN")
         self.host_guard()
+        for stage in LATER_STAGES:                         # stages 2-5 return first (owner_prod_inert_stages)
+            _need(not os.path.lexists(self.p(f"{STATE}/{stage}.journal")), "LATER_STAGE_PRESENT:" + stage)
         entries = self.journal()
         _need(bool(entries) and entries[0]["step"] == "begin", "NO_JOURNAL")
         intents = {e["step"] for e in entries if e.get("phase") == "intent"}
