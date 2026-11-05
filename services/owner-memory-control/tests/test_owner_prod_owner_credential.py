@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -89,8 +90,8 @@ class ProdOwnerCredentialTests(unittest.TestCase):
         self.assertEqual(out["recordId"], credential["recordId"])
         self.assertNotIn("BEGIN", (self.dir / "cred.public.json").read_text())         # public material only
         self.assertEqual(OP.OwnerCredentialV1.from_dict(credential).to_dict(), credential)
-        with self.assertRaises(FileExistsError):                                       # O_EXCL: never overwritten
-            self.tool.create(key, self.dir / "other.json")
+        self.refused("OUTPUT_EXISTS:key", lambda: self.tool.create(key, self.dir / "other.json"))   # never overwritten
+        self.assertFalse((self.dir / "other.json").exists())
 
     def test_the_registration_is_exactly_what_the_prod_host_parses(self):
         _key, public, _out = self.make()
@@ -237,6 +238,138 @@ class ProdOwnerCredentialTests(unittest.TestCase):
         wrong_key.write_bytes(ec.generate_private_key(ec.SECP384R1()).private_bytes(
             serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         self.refused("KEY_INVALID", lambda: self.tool.assertion(wrong_key, public, b"\x00" * 32))
+
+    # ------------------------------------------------------------------------------- output-file safety ---
+    def snapshot(self, *extra):
+        """Every entry under the test directory (and any extra path), never following a link: kind, content, mode."""
+        out = {}
+        for path in sorted([*self.dir.rglob("*"), *map(Path, extra)]):
+            if os.path.islink(path):
+                out[str(path)] = ("link", os.readlink(path))
+            elif path.is_file():
+                out[str(path)] = ("file", path.read_bytes(), stat.S_IMODE(os.lstat(path).st_mode))
+            elif path.is_dir():
+                out[str(path)] = ("dir",)
+        return out
+
+    def test_an_existing_output_file_is_never_overwritten_and_nothing_is_created(self):
+        key, public = self.dir / "o.key", self.dir / "o.public.json"
+        for existing, reason in ((public, "OUTPUT_EXISTS:public"), (key, "OUTPUT_EXISTS:key")):
+            with self.subTest(existing=existing.name):
+                for p in (key, public):
+                    if p.exists():
+                        p.unlink()
+                existing.write_bytes(b"precious owner data")
+                before = self.snapshot()
+                self.refused(reason, lambda: self.tool.create(key, public))
+                self.assertEqual(self.snapshot(), before)                    # untouched, and no other file created
+        cli_public = self.dir / "cli.public.json"                         # the CLI refuses the same way
+        cli_public.write_bytes(b"precious owner data")
+        self.assertEqual(PC.main(["create", RP, ORIGIN, PRINCIPAL, str(self.dir / "new.key"), str(cli_public)]), 2)
+        self.assertFalse((self.dir / "new.key").exists())
+        self.assertEqual(cli_public.read_bytes(), b"precious owner data")
+
+    def test_an_output_path_that_is_a_link_is_refused_and_its_target_never_touched(self):
+        outside = Path(self.tmp.name + "-outside")
+        outside.mkdir()
+        self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
+        target = outside / "victim.json"
+        target.write_bytes(b"someone else's file")
+        for which in ("public", "key"):
+            with self.subTest(which=which):
+                key, public = self.dir / f"{which}.key", self.dir / f"{which}.public.json"
+                link = public if which == "public" else key
+                os.symlink(str(target), link)
+                before = self.snapshot(target)
+                self.refused("OUTPUT_EXISTS:" + which, lambda: self.tool.create(key, public))
+                self.assertEqual(self.snapshot(target), before)
+                self.assertEqual(target.read_bytes(), b"someone else's file")
+        dangling = self.dir / "dangling.public.json"
+        os.symlink(str(outside / "not-there.json"), dangling)                  # a dangling link is not "absent"
+        self.refused("OUTPUT_EXISTS:public", lambda: self.tool.create(self.dir / "d.key", dangling))
+        self.assertFalse((outside / "not-there.json").exists())
+
+    def test_identical_or_aliased_output_paths_are_refused_before_anything_is_written(self):
+        sub = self.dir / "sub"
+        sub.mkdir()
+        os.symlink(str(sub), self.dir / "alias")
+        same = sub / "cred.out"
+        cases = {
+            "the same path": (same, same),
+            "the same path spelled differently": (same, self.dir / "sub" / "." / "cred.out"),
+            "through a dotdot": (same, self.dir / "sub" / ".." / "sub" / "cred.out"),
+            "through a symlinked directory": (same, self.dir / "alias" / "cred.out"),
+        }
+        for label, (key, public) in cases.items():
+            with self.subTest(label):
+                before = self.snapshot()
+                self.refused("OUTPUT_PATHS_IDENTICAL", lambda: self.tool.create(key, public))
+                self.assertEqual(self.snapshot(), before)
+
+    def test_a_missing_or_unsafe_output_directory_is_refused(self):
+        not_a_dir = self.dir / "plain"
+        not_a_dir.write_bytes(b"x")
+        for key, public, reason in (
+                (self.dir / "nope" / "k.key", self.dir / "p.json", "OUTPUT_DIRECTORY_INVALID:key"),
+                (self.dir / "k.key", not_a_dir / "p.json", "OUTPUT_DIRECTORY_INVALID:public")):
+            with self.subTest(reason=reason):
+                before = self.snapshot()
+                self.refused(reason, lambda: self.tool.create(key, public))
+                self.assertEqual(self.snapshot(), before)
+
+    def test_a_file_or_link_appearing_after_the_checks_is_refused_by_the_exclusive_open_itself(self):
+        """The race the pre-checks cannot close: O_CREAT|O_EXCL|O_NOFOLLOW refuses a file or link that appears between
+        the checks and the open. Nothing existing is overwritten or followed; what was already created is reported."""
+        outside = Path(self.tmp.name + "-race")
+        outside.mkdir()
+        self.addCleanup(lambda: [p.unlink() for p in outside.iterdir()] and None or outside.rmdir())
+        victim = outside / "victim.json"
+        victim.write_bytes(b"someone else's file")
+        for label, appear in (("a file", lambda p: p.write_bytes(b"appeared")),
+                              ("a link", lambda p: os.symlink(str(victim), p))):
+            with self.subTest(label):
+                key, public = self.dir / f"r-{label[2:]}.key", self.dir / f"r-{label[2:]}.public.json"
+                real_check = PC.check_outputs
+
+                def check_then_race(k, p, real_check=real_check, appear=appear):
+                    real_check(k, p)
+                    appear(p)
+                with mock.patch.object(PC, "check_outputs", check_then_race):
+                    self.refused("PARTIAL_OUTPUT:key;OUTPUT_EXISTS:public", lambda: self.tool.create(key, public))
+                self.assertEqual(victim.read_bytes(), b"someone else's file")         # never followed
+                if not os.path.islink(public):
+                    self.assertEqual(public.read_bytes(), b"appeared")                 # never overwritten
+                self.assertTrue(key.exists())                                          # reported, not deleted
+
+    def test_an_interrupted_write_stops_safely_and_leaves_its_files_for_the_owner(self):
+        """A failure after the exclusive creations is PARTIAL_OUTPUT: nothing is deleted automatically, and a retry
+        with the same paths is refused instead of overwriting what is there."""
+        key, public = self.dir / "i.key", self.dir / "i.public.json"
+        real_write = os.write
+        calls = []
+
+        def failing_write(fd, data):
+            calls.append(len(data))
+            if len(calls) == 2:                                        # the second file's write dies
+                raise OSError(28, "No space left on device")
+            return real_write(fd, data)
+
+        with mock.patch.object(PC.os, "write", failing_write):
+            self.refused("PARTIAL_OUTPUT", lambda: self.tool.create(key, public), prefix=True)
+        self.assertTrue(key.exists() and public.exists())               # left in place for owner adjudication
+        self.assertEqual(stat.S_IMODE(os.lstat(key).st_mode), 0o600)
+        before = self.snapshot()
+        self.refused("OUTPUT_EXISTS:public", lambda: self.tool.create(key, public))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_both_outputs_are_complete_after_short_writes(self):
+        key, public = self.dir / "s.key", self.dir / "s.public.json"
+        real_write = os.write
+        with mock.patch.object(PC.os, "write", lambda fd, data: real_write(fd, data[:7])):      # 7 bytes per call
+            self.tool.create(key, public)
+        self.tool.verify_possession(json.loads(public.read_bytes()))
+        self.assertTrue(key.read_bytes().rstrip().endswith(b"-----END PRIVATE KEY-----"))
+        self.assertEqual(stat.S_IMODE(os.lstat(public).st_mode), 0o644)
 
     def test_the_cli_refuses_usage_and_identity_errors_without_writing(self):
         key = self.dir / "cli.key"

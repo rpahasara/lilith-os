@@ -76,6 +76,75 @@ def require_owner_prod(rp_id: str, origin: str, principal: str) -> None:
         raise Refused("IDENTITY_NOT_OWNER_PROD") from exc
 
 
+_O_CREATE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) \
+    | getattr(os, "O_BINARY", 0)
+
+
+def check_outputs(key_out: Path, public_out: Path) -> None:
+    """Refuse before anything is written: each parent must be an existing directory, each path must be absent (a
+    dangling link is not absent), and the two must not name the same directory entry by any spelling or alias."""
+    entries = []
+    for name, path in (("public", public_out), ("key", key_out)):
+        parent = path.parent
+        if not os.path.isdir(parent):
+            raise Refused("OUTPUT_DIRECTORY_INVALID:" + name)
+        if os.path.lexists(path):
+            raise Refused("OUTPUT_EXISTS:" + name)
+        st = os.stat(parent)
+        entries.append((st.st_dev, st.st_ino, path.name))
+    if entries[0] == entries[1]:
+        raise Refused("OUTPUT_PATHS_IDENTICAL")
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError("short write")
+        view = view[written:]
+
+
+def write_outputs(outputs) -> None:
+    """Create every output exclusively (no link followed), then write and fsync each in order. Any failure after the
+    first creation is PARTIAL_OUTPUT: created files stay where they are for the owner (never deleted here), and a
+    retry with the same paths is refused by `check_outputs` instead of overwriting them."""
+    fds: list[int] = []
+    created: list[str] = []
+    try:
+        for path, _data, mode, name in outputs:
+            try:
+                fds.append(os.open(path, _O_CREATE, mode))
+            except FileExistsError as exc:                    # a race after check_outputs: never overwritten
+                raise Refused(("PARTIAL_OUTPUT:" + ",".join(created) + ";" if created else "")
+                              + "OUTPUT_EXISTS:" + name) from exc
+            except OSError as exc:
+                raise Refused(("PARTIAL_OUTPUT:" + ",".join(created) + ";" if created else "")
+                              + "OUTPUT_OPEN_FAILED:" + name) from exc
+            created.append(name)
+        for fd, (_path, data, mode, name) in zip(fds, outputs):
+            try:
+                os.fchmod(fd, mode)
+                _write_all(fd, data)
+                os.fsync(fd)
+            except OSError as exc:
+                raise Refused("PARTIAL_OUTPUT:" + ",".join(created) + ";WRITE_FAILED:" + name) from exc
+    finally:
+        for fd in fds:
+            os.close(fd)
+    for parent in {str(Path(p).parent) for p, *_ in outputs}:
+        try:
+            dfd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        except OSError:
+            continue
+        try:
+            os.fsync(dfd)
+        except OSError:
+            pass
+        finally:
+            os.close(dfd)
+
+
 class ProdCredentialTool:
     """One OWNER_PROD identity over a private instance of the DEV credential module."""
 
@@ -96,7 +165,12 @@ class ProdCredentialTool:
             raise Refused(exc.reason) from exc
 
     def create(self, key_out: Path, public_out: Path, *, now: datetime | None = None) -> dict[str, Any]:
-        """A new P-256 owner credential for this identity. The private key goes only to `key_out` (0600, O_EXCL)."""
+        """A new P-256 owner credential for this identity. Both outputs are created exclusively and without following
+        a link (`O_CREAT | O_EXCL | O_NOFOLLOW`): the private key only to `key_out` (0600), the public record to
+        `public_out` (0644). Nothing existing is ever overwritten; a failure after creation is PARTIAL_OUTPUT and leaves
+        what was created for the owner to adjudicate (no automatic cleanup)."""
+        key_out, public_out = Path(key_out), Path(public_out)
+        check_outputs(key_out, public_out)                    # before any key material exists
         M = self.module
         private = M.ec.generate_private_key(M.ec.SECP256R1())
         credential_id = secrets.token_bytes(32)
@@ -112,10 +186,7 @@ class ProdCredentialTool:
         self.verify_possession(public)                       # what is written is exactly what PROD will accept
         pem = private.private_bytes(M.serialization.Encoding.PEM, M.serialization.PrivateFormat.PKCS8,
                                     M.serialization.NoEncryption())
-        fd = os.open(key_out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(pem)
-        Path(public_out).write_bytes(M.rfc8785.dumps(public))     # public material only
+        write_outputs(((key_out, pem, 0o600, "key"), (public_out, M.rfc8785.dumps(public), 0o644, "public")))
         return {"recordId": credential["recordId"], "publicKeyCoseSha256": hashlib.sha256(
             credential["publicKeyCose"].encode("ascii")).hexdigest()}
 
