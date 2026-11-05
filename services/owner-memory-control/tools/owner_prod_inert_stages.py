@@ -21,6 +21,13 @@ Strict separation from DEV_SYNTHETIC: the host guard (lilith-01, not the DEV mac
 `deployment.json` byte-exact, the P3 release and manifest pins, and no DEV path or DEV key is ever named.
 LILITH's live files (identity, router, stores, the 15B2a keys) are digested before and after every stage and return.
 
+The generated venv is the one item whose bytes are not known before it is created: once `venv` and `pip` both
+succeed, its complete manifest (every entry's type, mode, owner, file SHA-256 or link target; links never followed)
+is journaled before the item is marked done. A return removes the venv only when that manifest is intact and the
+venv matches it exactly, entry by entry (unlink / rmdir; never a recursive delete). A venv without a recorded
+manifest (an interrupted `venv` or `pip`) or one that differs is a STOP before anything is removed: owner
+adjudication, never an automatic deletion.
+
     python owner_prod_inert_stages.py plan <stage>
     python owner_prod_inert_stages.py install <stage> <approval> [inputs...]
     python owner_prod_inert_stages.py return <stage> <approval>
@@ -92,6 +99,58 @@ def _need(condition: bool, reason: str) -> None:
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii")
+
+
+def _regular_file_sha(path: str, expected: os.stat_result) -> str:
+    """SHA-256 of a regular file opened without following a link, refused if it is not the inode lstat saw."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NOATIME", 0))
+    try:
+        st = os.fstat(fd)
+        _need(stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) == (expected.st_dev, expected.st_ino),
+              "VENV_ENTRY_RACED:" + path)
+        digest = hashlib.sha256()
+        while chunk := os.read(fd, 1 << 20):
+            digest.update(chunk)
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def venv_manifest(root: Path) -> dict[str, list]:
+    """Every entry under a venv: relative path ("." = the venv itself) -> [kind, mode, uid, gid, sha256 | link target].
+    Links are recorded, never followed; anything but a directory, regular file or link is a STOP."""
+    st = os.lstat(root)
+    _need(stat.S_ISDIR(st.st_mode), "VENV_ROOT_NOT_A_DIRECTORY")
+    out: dict[str, list] = {".": ["dir", stat.S_IMODE(st.st_mode), st.st_uid, st.st_gid, ""]}
+    pending = [""]
+    while pending:
+        relative = pending.pop()
+        with os.scandir(root / relative if relative else root) as entries:
+            for entry in entries:
+                name = f"{relative}/{entry.name}" if relative else entry.name
+                st = os.lstat(entry.path)
+                mode = stat.S_IMODE(st.st_mode)
+                if stat.S_ISLNK(st.st_mode):
+                    out[name] = ["link", 0, st.st_uid, st.st_gid, os.readlink(entry.path)]
+                elif stat.S_ISDIR(st.st_mode):
+                    out[name] = ["dir", mode, st.st_uid, st.st_gid, ""]
+                    pending.append(name)
+                elif stat.S_ISREG(st.st_mode):
+                    out[name] = ["file", mode, st.st_uid, st.st_gid, _regular_file_sha(entry.path, st)]
+                else:
+                    raise Stop("VENV_ENTRY_TYPE:" + name)
+    return dict(sorted(out.items()))
+
+
+def _first_difference(recorded: dict[str, list], current: dict[str, list]) -> str:
+    for name in sorted(set(recorded) | set(current)):
+        if recorded.get(name) != current.get(name):
+            return name
+    return ""
 
 
 @dataclass(frozen=True)
@@ -255,6 +314,10 @@ class Stages:
         for item in items:
             self._append(stage, {"step": "item", "phase": "intent", "path": item.path})
             self._create(item)
+            if item.kind == "venv":                            # its only description: recorded before it is done
+                manifest = venv_manifest(self.p(item.path))
+                self._append(stage, {"step": "venv", "path": item.path, "manifest": manifest,
+                                     "sha256": sha(_canonical(manifest))})
             self._append(stage, {"step": "item", "phase": "done", "path": item.path})
         for item in items:
             _need(self._matches(item), "ITEM_NOT_AS_INSTALLED:" + item.path)
@@ -304,8 +367,23 @@ class Stages:
         if item.kind == "link":
             return stat.S_ISLNK(st.st_mode) and os.readlink(path) == item.data.decode("ascii")
         if item.kind == "venv":
-            return stat.S_ISDIR(st.st_mode) and not os.path.islink(path)
+            record = self._venv_record(self.journal(self._stage_of(item.path)), item.path)
+            return (stat.S_ISDIR(st.st_mode) and record is not None
+                    and venv_manifest(path) == record["manifest"])
         return False
+
+    def _stage_of(self, path: str) -> str:
+        for stage in STAGES:
+            entries = self.journal(stage)
+            if entries and any(path == p for _kind, p, _digest in entries[0]["items"]):
+                return stage
+        raise Stop("ITEM_NOT_JOURNALED:" + path)
+
+    @staticmethod
+    def _venv_record(entries: list[dict[str, Any]], path: str) -> Optional[dict[str, Any]]:
+        records = [e for e in entries if e.get("step") == "venv" and e.get("path") == path]
+        _need(len(records) <= 1, "VENV_MANIFEST_INVALID:" + path)
+        return records[0] if records else None
 
     # ------------------------------------------------------------------ return ---
     def return_(self, stage: str, approval: str) -> dict[str, Any]:
@@ -324,6 +402,7 @@ class Stages:
             e["path"] in done_paths or (kinds[e["path"]] == "venv" and os.path.lexists(self.p(e["path"]))))]
         digests = {path: digest for _kind, path, digest in entries[0]["items"]}
         planned = set(kinds)
+        verified_venvs: dict[str, dict[str, list]] = {}
         for path in created:                                    # verify everything first
             full = self.p(path)
             _need(os.path.lexists(full), "ITEM_MISSING:" + path)
@@ -338,13 +417,26 @@ class Stages:
                 _need(stat.S_ISDIR(st.st_mode) and not os.path.islink(full), "ITEM_CHANGED:" + path)
                 extra = [c for c in os.listdir(full) if f"{path}/{c}" not in planned]
                 _need(not extra, "UNEXPECTED_ENTRY:" + path + "/" + (extra[0] if extra else ""))
+            elif kind == "venv":
+                _need(stat.S_ISDIR(st.st_mode) and not os.path.islink(full), "ITEM_CHANGED:" + path)
+                record = self._venv_record(entries, path)
+                # no recorded manifest = an interrupted venv or pip: its contents are unknown, owner adjudication
+                _need(record is not None and path in done_paths, "VENV_UNVERIFIED:" + path)
+                _need(isinstance(record.get("manifest"), dict) and sha(_canonical(record["manifest"])) == record.get("sha256")
+                      and record["manifest"].get(".", [None])[0] == "dir", "VENV_MANIFEST_INVALID:" + path)
+                current = venv_manifest(full)
+                _need(current == record["manifest"],
+                      "VENV_CHANGED:" + path + ":" + _first_difference(record["manifest"], current))
+                verified_venvs[path] = record["manifest"]
+            else:
+                raise Stop("ITEM_KIND:" + path)
         _need(self.f1.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
         removed = 0
         for path in reversed(created):                         # then remove, newest first
             full = self.p(path)
             kind = kinds[path]
             if kind == "venv":
-                self._rmtree(full)
+                self._remove_verified_venv(full, verified_venvs[path])
             elif kind == "dir":
                 full.rmdir()
             else:
@@ -355,13 +447,15 @@ class Stages:
         return {"result": f"STAGE_{stage.upper()}_RETURNED", "removed": removed}
 
     @staticmethod
-    def _rmtree(path: Path) -> None:
-        for top, dirs, files in os.walk(path, topdown=False, followlinks=False):
-            for name in files:
-                os.unlink(os.path.join(top, name))
-            for name in dirs:
-                full = os.path.join(top, name)
-                os.unlink(full) if os.path.islink(full) else os.rmdir(full)
+    def _remove_verified_venv(path: Path, manifest: dict[str, list]) -> None:
+        """Remove exactly the verified manifest entries, deepest first: unlink files and links (a link is never
+        followed), rmdir directories (which fails on anything unexpected). Never a recursive delete."""
+        for name in sorted((n for n in manifest if n != "."), key=lambda n: (-n.count("/"), n)):
+            full = path / name
+            if manifest[name][0] == "dir":
+                os.rmdir(full)
+            else:
+                os.unlink(full)
         os.rmdir(path)
 
 
