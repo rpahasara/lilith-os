@@ -559,8 +559,8 @@ link target; links never followed). The return removes the venv only when it mat
 by entry, and never recursively. An interrupted venv (no manifest) is `VENV_UNVERIFIED`: a STOP for owner
 adjudication.
 
-**Outstanding before any real PROD return is authorized** (owner-recorded hardening; not built; no return has run
-on a real host):
+**Outstanding before the first real PROD installation** (owner-recorded hardening; not built; no install or return
+has run on a real host):
 
 - **H-1. Non-venv mode verification.** For non-venv items, the return checks file content, link targets and
   unexpected directory entries, but not the mode or owner of files and directories. Verify each item's recorded
@@ -571,5 +571,6 @@ on a real host):
   - a fresh `lstat` of each entry, matched to its verified inode, immediately before removing it;
   - an exclusive host lock and a maintenance window for the return.
 
-Both must be built, tested with negative controls and reviewed before the owner authorizes a real PROD return.
-They do not block the inert installs themselves, which create only what they journal.
+**Owner rule (2026-11-05):** H-1 and H-2 must be implemented, tested with negative controls and reviewed
+**before the first real PROD installation** (R6 stage 1), so that every install window has a ready, verified
+recovery path. No PROD install window may be proposed until both are merged.
