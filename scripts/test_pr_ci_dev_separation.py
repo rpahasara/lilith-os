@@ -257,5 +257,109 @@ class PrCiDevSeparationTests(unittest.TestCase):
         self.assertIn("if: always() && github.event_name == 'workflow_run'", post)
 
 
+# The DEV deploy gate's job header, byte-exact: event guard, the one approved runner (owner-approved addendum 1,
+# 2026-11-05), permissions and the fixed DEV identities. Any substitution or widening fails.
+DEPLOY_JOB_HEAD = (
+    "  deploy:\n"
+    "    name: Evaluate validated protected main for DEV\n"
+    "    if: >-\n"
+    "      github.event.workflow_run.conclusion == 'success' &&\n"
+    "      github.event.workflow_run.event == 'push' &&\n"
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&\n"
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&\n"
+    "      github.event.workflow_run.head_sha != ''\n"
+    "    runs-on: ubuntu-24.04\n"
+    "    # GitHub-hosted, pinned to the DEV/PROD host OS (Ubuntu 24.04, systemd 255): this job re-runs the broker\n"
+    "    # stage-2 transient lifecycle test, which the floating latest image (Ubuntu 26.04, systemd 259) rejects.\n"
+    "    # Owner-approved addendum 1 (2026-11-05) to docs/architecture/ci-contracts-runner-amendment-20261105.md.\n"
+    "    timeout-minutes: 20\n"
+    "    permissions:\n"
+    "      contents: read\n"
+    "      id-token: write\n"
+    "      pull-requests: read\n"
+    "      statuses: write\n"
+    "    env:\n"
+    "      GCP_PROJECT_ID: lilith-agent-260823-27389\n"
+    "      GCP_ZONE: asia-southeast1-b\n"
+    "      GCP_INSTANCE: lilith-dev-01\n"
+    "      GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github\n"
+    "      # 15B2b-B1c: DEV-only non-admin OS Login identity, federated only for this\n"
+    "      # exact workflow file on protected main. It has no PROD binding and no root.\n"
+    "      GCP_DEPLOY_SA: github-lilith-dev-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com\n"
+    "      GCP_LEGACY_PRIVILEGED_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com\n"
+    "      HEALTH_URL: http://127.0.0.1:8765/health\n"
+    "    outputs:\n")
+DEPLOY_HEADER = ("on:\n  workflow_run:\n    workflows:\n      - Repository validation\n    types:\n      - completed\n"
+                 "    branches:\n      - main\n  workflow_dispatch:\n")
+
+# Every write permission in the workflow, in order: the deploy job's OIDC token and commit status, and the broker
+# postflight's commit status. Nothing else may write.
+WRITE_LINES = ["      id-token: write", "      statuses: write", "      statuses: write"]
+
+
+def deploy_runner_violations(text: str) -> list[str]:
+    out = []
+    if text.count(DEPLOY_JOB_HEAD) != 1:
+        out.append("DEPLOY_JOB_HEAD_NOT_EXACT")
+    deploy = text.split("\n  deploy:\n", 1)[-1].split("\n  premerge_gate:\n", 1)[0]
+    if re.findall(r"(?m)^ *runs-on:(.*)$", deploy) != [" ubuntu-24.04"]:
+        out.append("DEPLOY_RUNNER_NOT_EXACTLY_UBUNTU_24_04")
+    for token in ("self-hosted", "container:", "services:", "environment:", "pull_request_target"):
+        if token in text:
+            out.append("DEPLOY_FORBIDDEN:" + token)
+    if not text.startswith("name: Deploy LILITH Core API to DEV\n\n" + DEPLOY_HEADER):
+        out.append("DEPLOY_TRIGGERS_CHANGED")
+    if re.findall(r"(?m)^ *[a-z-]+: write$", text) != WRITE_LINES:
+        out.append("DEPLOY_WRITE_PERMISSIONS_CHANGED")
+    return out
+
+
+class DeployGateRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.text = DEPLOY
+        self.runs_on = "    runs-on: ubuntu-24.04\n    # GitHub-hosted"
+
+    def test_the_deploy_gate_runs_exactly_on_the_approved_hosted_runner(self):
+        self.assertEqual(deploy_runner_violations(self.text), [])
+        self.assertEqual(self.text.count("runs-on: ubuntu-24.04"), 1)
+        record = (Path(__file__).resolve().parents[1]
+                  / "docs/architecture/ci-contracts-runner-amendment-20261105.md").read_text(encoding="utf-8")
+        self.assertIn("## Addendum 1", record)
+        self.assertIn("DEPLOY_GATE_RUNNER = ubuntu-24.04 (GitHub-hosted; deploy-dev.yml job deploy)", record)
+
+    def test_every_substitution_or_widening_fails(self):
+        swap = lambda new: self.text.replace(self.runs_on, new + "\n    # GitHub-hosted")  # noqa: E731
+        cases = {
+            "floating latest": swap("    runs-on: ubuntu-latest"),
+            "self-hosted": swap("    runs-on: self-hosted"),
+            "self-hosted list": swap("    runs-on: [self-hosted, ubuntu-24.04]"),
+            "self-hosted block": swap("    runs-on:\n      - self-hosted"),
+            "runner group": swap("    runs-on:\n      group: lilith"),
+            "expression": swap("    runs-on: ${{ vars.RUNNER }}"),
+            "other image": swap("    runs-on: ubuntu-26.04"),
+            "larger runner": swap("    runs-on: ubuntu-24.04-8core"),
+            "second runs-on": swap("    runs-on: ubuntu-24.04\n    runs-on: self-hosted"),
+            "container": self.text.replace("    timeout-minutes: 20\n", "    timeout-minutes: 20\n    container: x\n", 1),
+            "environment": self.text.replace("    timeout-minutes: 20\n", "    timeout-minutes: 20\n    environment: dev\n", 1),
+            "wider permission": self.text.replace("      pull-requests: read\n      statuses: write\n",
+                                                  "      pull-requests: write\n      statuses: write\n", 1),
+            "actions write": self.text.replace("      contents: read\n      id-token: write\n",
+                                               "      contents: read\n      actions: write\n      id-token: write\n", 1),
+            "other identity": self.text.replace("GCP_DEPLOY_SA: github-lilith-dev-deployer@",
+                                                "GCP_DEPLOY_SA: github-lilith-deployer@", 1),
+            "other instance": self.text.replace("GCP_INSTANCE: lilith-dev-01", "GCP_INSTANCE: lilith-01", 1),
+            "trigger widened": self.text.replace("    branches:\n      - main\n", "    branches:\n      - '**'\n", 1),
+            "event guard dropped": self.text.replace("      github.event.workflow_run.event == 'push' &&\n", "", 1),
+        }
+        for label, mutated in cases.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, self.text, label)
+                self.assertNotEqual(deploy_runner_violations(mutated), [], label)
+
+    def test_only_the_deploy_job_changed_runner(self):
+        for name in ("premerge_gate", "broker_candidate", "broker_postflight"):
+            self.assertEqual(re.findall(r"(?m)^ *runs-on:(.*)$", job(DEPLOY, name)), [" ubuntu-latest"], name)
+
+
 if __name__ == "__main__":
     unittest.main()
