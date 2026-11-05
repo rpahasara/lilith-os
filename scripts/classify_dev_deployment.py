@@ -100,6 +100,12 @@ CONTROL_ONLY_PATHS = frozenset(
         "services/owner-memory-control/tests/test_owner_prod_signer_upgrade.py",
         "services/owner-memory-control/tests/test_owner_prod_p3_transition.py",
         "docs/architecture/canonical-memory-p3-dev-transition.md",
+        # CI Repository-contracts runner amendment (owner-approved 2026-11-05): the M-B11 workflow-guard tests that pin
+        # the approved runner label, and the amendment record. Tests and a record only (never in the Core API bundle);
+        # admitted only at the exact reviewed revision pinned below, any other revision takes full deployment.
+        "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py",
+        "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py",
+        "docs/architecture/ci-contracts-runner-amendment-20261105.md",
         # 2026-10 source consolidation record (ADR-0016). Documentation only, admitted at the exact reviewed
         # revision pinned below (the two engineering records at their PROD-recovery revision of 2026-10-27);
         # any other revision takes full deployment.
@@ -115,14 +121,17 @@ CONTROL_ONLY_PATHS = frozenset(
 # symlink or mode change under the prefix takes full deployment, as does any path outside it.
 PRESERVED_SOURCE_ADDITION_PREFIX = "integrations/hermes/"
 
-# The installer is admitted only at the exact reviewed Stage-II revision, and the source consolidation record
-# only at its exact reviewed revision. Any other revision of these paths takes full deployment.
+# The installer is admitted only at the exact reviewed Stage-II revision, the source consolidation record
+# and the 2026-11-05 runner amendment files only at their exact reviewed revision. Any other revision of these paths takes full deployment.
 PINNED_CANDIDATE_BLOBS = {
     "scripts/memory_broker_os_installer.py": "353ad6b75fcae5faa53929f5a591f7a75841bcbc",
     "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "74d279bf81fd0988d735600f582c998b27e06377",
     "docs/adr/README.md": "68adc83f384492e3010d2859068a8802f4a224d4",
     "docs/engineering/source-consolidation-2026-10.md": "2600bb2a8344c98c4635367d5f1e1676bccd1dbb",
     "docs/engineering/vm-only-source-gaps.md": "23c71977cd7a8a1879cd257cbc7af4f419d5691b",
+    "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py": "bd4891da82f25842676f382043f4c9336b8d0425",
+    "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py": "1061fca0074268d147796e1aaec712edebe25280",
+    "docs/architecture/ci-contracts-runner-amendment-20261105.md": "0169fb517c469f38469fdec056dceb3c75829bca",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,
