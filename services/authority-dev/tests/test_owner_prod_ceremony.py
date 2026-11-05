@@ -213,9 +213,10 @@ class MachineDigestPinTests(KeygenTests):
                 module, run = self.kpan(host, **call_kw)
                 with self.assertRaises(module.Refused) as caught:
                     run()
-                # a wrong hostname is refused by the DEV K-PAN tool's own host check, whose code is NOT_DEV_HOST
-                self.assertIn(caught.exception.reason, ("NOT_PROD_HOST", "NOT_DEV_HOST") if label == "wrong host"
-                              else ("NOT_PROD_HOST",))
+                # a wrong hostname passes the digest gate and is refused later: by the deployment file's root-ownership
+                # check when not run as root (CI), else by the DEV K-PAN tool's own host check (NOT_DEV_HOST)
+                self.assertIn(caught.exception.reason, ("NOT_PROD_HOST", "NOT_DEV_HOST", "DEPLOYMENT_INVALID")
+                              if label == "wrong host" else ("NOT_PROD_HOST",))
         for label, content in (("no newline", PROD_MID.encode()), ("two lines", (PROD_MID + "\n\n").encode()),
                                ("trailing space", (PROD_MID + " \n").encode())):
             with self.subTest(label), tempfile.TemporaryDirectory() as d:
