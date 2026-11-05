@@ -351,6 +351,59 @@ _RECALL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Questions about the user's own goals, priorities, progress, plans or projects. The lean reply has none of
+# that context and once answered "what am I working toward right now?" with LILITH's own mission (owner
+# acceptance test 4, 2026-11-03). They take the native recall route plus the user's tracked goals, read-only.
+# Statements ("my only goal this weekend is relaxing") and leisure plans ("what's my plan for dinner?") never match.
+_SELF_STATUS_RE = re.compile(
+    r"\bwhat (am i|i'?m) (currently |really |actually )?(working|aiming|heading|striving|building|pushing) (toward|towards|for|on)\b|"
+    r"\bwhat (am i|i'?m) (currently )?(focus(ed|ing) on|prioriti[sz]ing)\b|"
+    r"\bwhat('?s| is| are) my (current |main |top |biggest |long[- ]term |career )?(goals?|priorit(y|ies)|focus|ambitions?|projects?)\b|"
+    r"\bwhat('?s| is| are) my (current |main |big |long[- ]term |career )?plans?\s*(right now|now|at the moment|these days)?\s*[?.!]*$|"
+    r"\bhow('?s| is| are) my (goals?|projects?|progress)\b|"
+    r"\bhow am i (doing|progressing|tracking) (on|with|toward|towards) (my )?(goals?|projects?|plans?|career|priorities)\b|"
+    r"\bwhere am i (at )?(with|on) (my )?(goals?|projects?|plans?|career|priorities)\b|"
+    r"\bwhat projects (am i|i'?m) (working on|doing)\b",
+    re.IGNORECASE,
+)
+SELF_STATUS_NOTE = """[LILITH turn note - the user's own goals]
+The user is asking about THEIR OWN goals, priorities, progress, plans or projects, not about you.
+Keep two kinds of things apart:
+- Ongoing: their goals, career direction and ambitions, certifications and active projects (from their
+  profile, your memory, earlier conversations and their tracked goals below, if any).
+- Short-term: plans for today, tonight or this weekend, and casual or leisure talk from recent chat.
+For what they are working toward, their goals, priorities, progress or direction, answer with the ongoing
+ones first and with specifics; a short-term plan from recent chat gets at most one brief line, only if
+relevant. If they explicitly ask about today, tonight, this weekend or a recent conversation, answer that
+directly. Answer in the second person. Never answer with your own role, mission or development. If you
+do not know something, say so; never invent goals."""
+
+
+def _self_status_route(runner, cfg, platform, chat_id, session_key, turn_route, combined_ephemeral,
+                       cached_agent, mode):
+    """The native model with full recall, plus the user's tracked goals read through the Goals lane's own
+    read path (no write: no goal_create, do_write False). Fail-open to the note alone."""
+    _note_social_route(cfg, platform, chat_id, "native_self_status")
+    parts = [SELF_STATUS_NOTE]
+    if cfg.goals_is_live(platform, str(chat_id)):
+        try:
+            suffix, _unused = _world_context.build_goal_grounding(
+                message="", session_key=session_key, do_write=False,
+                gintent={"any": True, "goal_query": True, "goal_create": False, "app_id": None, "subtype": "general"})
+            lines = [l for l in (suffix or "").splitlines() if l.startswith(("- GOAL ", "CURRENT FOCUS"))]
+        except Exception:
+            lines = []
+            logger.debug("lilith_router: self-status goal read failed (fail-open)", exc_info=True)
+        if lines:
+            parts.append("THE USER'S TRACKED GOALS (durable, read-only):\n" + "\n".join(lines))
+    suffix = "\n\n".join(parts)
+    base = (combined_ephemeral or "").strip()
+    STATE.set_native_social_agent(session_key, False)
+    if getattr(cached_agent, "model", None) == cfg.groq_model:
+        _evict(runner, session_key)
+    return {"turn_route": turn_route, "combined_ephemeral": (base + "\n\n" + suffix) if base else suffix,
+            "force_rebuild": True, "mode": mode}
+
 
 def _groq_runtime(runner, cfg):
     """Return ``(runtime, "")`` for a usable Groq runtime, else ``(None, reason)``."""
@@ -740,6 +793,10 @@ def _route_turn_impl(
     # Shadow (or channel not live-enabled): observe only, never switch.
     if not live:
         return None
+
+    if _SELF_STATUS_RE.search(message):
+        return _self_status_route(runner, cfg, platform, chat_id, session_key, turn_route, combined_ephemeral,
+                                  cached_agent, decision.mode)
 
     cached_model = getattr(cached_agent, "model", None)
     groq_model = cfg.groq_model
