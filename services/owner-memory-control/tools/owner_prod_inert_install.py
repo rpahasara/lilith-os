@@ -21,6 +21,12 @@ Every step is appended to a journal BEFORE its effect; a failure stops at once (
 journal naming exactly what exists. `return` removes exactly the journal's items, in reverse, each re-verified first
 (a principal whose ids changed, a non-empty store directory or a changed `deployment.json` stops the return).
 
+H-1/H-2 (plan §13, `owner_prod_safe_fs`): the journal (schema 2) records each created path's observed mode, owner
+and integrity; the return refuses a legacy or incomplete journal, an interrupted item that exists, or any item whose
+mode, owner, content or type differs. It removes each entry through descriptors (never following a link), only if
+its inode is unchanged since verification, journals every removal, and refuses to resume a partial return. Install
+and return hold the installer's exclusive host lock.
+
     python owner_prod_inert_install.py plan              the exact text; its SHA-256 prefix is the approval
     python owner_prod_inert_install.py install <approval>
     python owner_prod_inert_install.py return  <approval>
@@ -38,6 +44,12 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import owner_prod_safe_fs as SF  # noqa: E402  (H-1/H-2: descriptor-relative verify-then-remove, the host lock)
 
 PROD_HOST = "lilith-01"
 DEV_MACHINE_ID_SHA256 = hashlib.sha256(b"ae929170e6fa4c8ab9cc7b9547238d9d\n").hexdigest()
@@ -61,17 +73,12 @@ LIVE = tuple(f"{HERMES}/{p}" for p in (
     "lilith-os/data/privacy_authority.key"))
 STEPS = ("principal:lilith-authority-dev", "principal:lilith-recovery-witness", "dir:canonical", "dir:authority-config",
          "file:deployment")
+JOURNAL_SCHEMA = 2
+FS_STEPS = {"dir:canonical": (CANONICAL, "dir", 0o700), "dir:authority-config": (AUTHORITY_CONFIG, "dir", 0o755),
+            "file:deployment": (DEPLOYMENT, "file", 0o644)}
 
-
-class Stop(Exception):
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
-
-
-def _need(condition: bool, reason: str) -> None:
-    if not condition:
-        raise Stop(reason)
+Stop = SF.Stop
+_need = SF.need
 
 
 def _sha_stream(path: Path) -> str:
@@ -110,6 +117,7 @@ class Foundation:
     def __init__(self, root: Path, *, run: Callable[[Sequence[str]], subprocess.CompletedProcess], hostname: str,
                  euid: int, accounts: Accounts, chown: bool = True):
         self.root, self.run, self.hostname, self.euid, self.accounts, self.chown = root, run, hostname, euid, accounts, chown
+        self.before_remove: Optional[Callable[[str], None]] = None     # TEST seam: runs after verification, per removal
 
     def p(self, relative: str) -> Path:
         return self.root / relative
@@ -170,10 +178,17 @@ class Foundation:
         _need(approval == self.approval(), "APPROVAL_NOT_THIS_PLAN")
         facts = self.preflight()
         state = self.p(STATE)
-        state.mkdir(mode=0o700, parents=True)
+        try:
+            state.mkdir(mode=0o700, parents=True)
+        except FileExistsError as exc:                          # another process got here between preflight and now
+            raise Stop("LOCKED_BY_ANOTHER_PROCESS") from exc
+        with SF.HostLock(self.root, STATE):
+            return self._install_locked(facts)
+
+    def _install_locked(self, facts: dict[str, Any]) -> dict[str, Any]:
         fd = os.open(self.p(JOURNAL), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)    # one install, ever
         os.close(fd)
-        self._journal({"step": "begin", "live": facts["live"]})
+        self._journal({"step": "begin", "live": facts["live"], "schema": JOURNAL_SCHEMA})
         for name in PRINCIPALS:
             self._journal({"step": "principal:" + name, "phase": "intent"})
             done = self.run([*USERADD, name])
@@ -185,23 +200,28 @@ class Foundation:
         self._journal({"step": "dir:canonical", "phase": "intent"})
         canonical = self.p(CANONICAL)
         canonical.mkdir(mode=0o700)
+        os.chmod(canonical, 0o700)
         self._own(canonical)
-        self._journal({"step": "dir:canonical", "phase": "done"})
+        self._journal({"step": "dir:canonical", "phase": "done", "meta": self._created_meta("dir:canonical")})
         self._journal({"step": "dir:authority-config", "phase": "intent", "existed": facts["authorityConfigExists"]})
+        done: dict[str, Any] = {"step": "dir:authority-config", "phase": "done", "existed": facts["authorityConfigExists"]}
         if not facts["authorityConfigExists"]:
             self.p(AUTHORITY_CONFIG).mkdir(mode=0o755)
+            os.chmod(self.p(AUTHORITY_CONFIG), 0o755)
             self._own(self.p(AUTHORITY_CONFIG))
-        self._journal({"step": "dir:authority-config", "phase": "done", "existed": facts["authorityConfigExists"]})
+            done["meta"] = self._created_meta("dir:authority-config")
+        self._journal(done)
         self._journal({"step": "file:deployment", "phase": "intent"})
-        fd = os.open(self.p(DEPLOYMENT), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        fd = os.open(self.p(DEPLOYMENT), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
         try:
             os.write(fd, DEPLOYMENT_BYTES)
             os.fsync(fd)
         finally:
             os.close(fd)
+        os.chmod(self.p(DEPLOYMENT), 0o644)
         self._own(self.p(DEPLOYMENT))
         self._journal({"step": "file:deployment", "phase": "done",
-                       "sha256": hashlib.sha256(DEPLOYMENT_BYTES).hexdigest()})
+                       "sha256": hashlib.sha256(DEPLOYMENT_BYTES).hexdigest(), "meta": self._created_meta("file:deployment")})
         after = self.live_digests()
         _need(after == facts["live"], "LIVE_FILES_CHANGED")
         self._journal({"step": "end", "result": "FOUNDATION_INSTALLED"})
@@ -210,6 +230,15 @@ class Foundation:
     def _own(self, path: Path) -> None:
         if self.chown:
             os.lchown(path, 0, 0)
+
+    def _created_meta(self, step: str) -> list:
+        """H-1: the Meta just created, checked against what this stage means to create, then journaled."""
+        relative, kind, mode = FS_STEPS[step]
+        meta, _identity = SF.observe(self.root, relative)
+        integrity = hashlib.sha256(DEPLOYMENT_BYTES).hexdigest() if kind == "file" else ""
+        _need(meta.kind == kind and meta.mode == mode and meta.integrity == integrity
+              and (not self.chown or (meta.uid, meta.gid) == (0, 0)), "ITEM_NOT_AS_INSTALLED:" + step)
+        return meta.as_list()
 
     def recorded_principals(self) -> dict[str, tuple[int, int]]:
         return {e["step"].split(":", 1)[1]: (e["uid"], e["gid"]) for e in self.journal()
@@ -221,26 +250,45 @@ class Foundation:
         return changes nothing. Owner-approved, never automatic."""
         _need(approval == self.approval(), "APPROVAL_NOT_THIS_PLAN")
         self.host_guard()
+        _need(os.path.isdir(self.p(STATE)) and not os.path.islink(self.p(STATE)), "NO_JOURNAL")
+        with SF.HostLock(self.root, STATE):
+            return self._return_locked()
+
+    def _return_locked(self) -> dict[str, Any]:
         for stage in LATER_STAGES:                         # stages 2-5 return first (owner_prod_inert_stages)
             _need(not os.path.lexists(self.p(f"{STATE}/{stage}.journal")), "LATER_STAGE_PRESENT:" + stage)
         entries = self.journal()
         _need(bool(entries) and entries[0]["step"] == "begin", "NO_JOURNAL")
+        _need(entries[0].get("schema") == JOURNAL_SCHEMA, "JOURNAL_LEGACY")
+        _need(not any(e["step"] == "remove" for e in entries), "RETURN_PARTIAL")       # never resumed automatically
         intents = {e["step"] for e in entries if e.get("phase") == "intent"}
+        done = {e["step"]: e for e in entries if e.get("phase") == "done"}
         recorded = self.recorded_principals()
         actions: list[tuple[str, Callable[[], None]]] = []
-        # 1. verify everything
-        if "file:deployment" in intents and os.path.lexists(self.p(DEPLOYMENT)):
-            st = os.lstat(self.p(DEPLOYMENT))
-            _need(stat.S_ISREG(st.st_mode) and self.p(DEPLOYMENT).read_bytes() == DEPLOYMENT_BYTES, "DEPLOYMENT_CHANGED")
-            actions.append(("file:deployment", self.p(DEPLOYMENT).unlink))
-        existed = next((e.get("existed") for e in entries if e["step"] == "dir:authority-config"), True)
-        if "dir:authority-config" in intents and not existed and os.path.lexists(self.p(AUTHORITY_CONFIG)):
-            _need(set(os.listdir(self.p(AUTHORITY_CONFIG))) <= {"deployment.json"}, "AUTHORITY_CONFIG_NOT_EMPTY")
-            actions.append(("dir:authority-config", self.p(AUTHORITY_CONFIG).rmdir))
-        if "dir:canonical" in intents and os.path.lexists(self.p(CANONICAL)):
-            _need(os.path.isdir(self.p(CANONICAL)) and not os.path.islink(self.p(CANONICAL))
-                  and not os.listdir(self.p(CANONICAL)), "CANONICAL_NOT_EMPTY")
-            actions.append(("dir:canonical", self.p(CANONICAL).rmdir))
+        # 1. verify everything (H-1: kind, mode, owner and integrity of every created path)
+        verified: dict[str, tuple] = {}
+        for step in ("file:deployment", "dir:authority-config", "dir:canonical"):
+            relative, kind, _mode = FS_STEPS[step]
+            if step not in intents:
+                continue
+            if step == "dir:authority-config" and done.get(step, {}).get("existed", True):
+                continue                                   # it was there before stage 1: not ours to remove
+            if step not in done:                           # interrupted: what exists is unverified, owner adjudication
+                _need(not os.path.lexists(self.p(relative)), "ITEM_INTERRUPTED:" + step)
+                continue
+            expected = SF.Meta.from_journal(done[step].get("meta"), step)
+            if kind == "dir":
+                listing = SF.list_dir(self.root, relative)
+                allowed = {"deployment.json"} if step == "dir:authority-config" else set()
+                _need(set(listing) <= allowed, "CANONICAL_NOT_EMPTY" if step == "dir:canonical"
+                      else "AUTHORITY_CONFIG_NOT_EMPTY")
+            meta, ident = SF.observe(self.root, relative)
+            if step == "file:deployment":
+                _need(meta.kind == "file" and meta.integrity == hashlib.sha256(DEPLOYMENT_BYTES).hexdigest(),
+                      "DEPLOYMENT_CHANGED")
+            _need(meta == expected, "ITEM_CHANGED:" + step)
+            verified[step] = ident
+            actions.append((step, lambda r=relative, i=ident, k=kind: SF.remove_verified(self.root, r, i, k)))
         for name in reversed(PRINCIPALS):
             if "principal:" + name not in intents:
                 continue
@@ -255,10 +303,14 @@ class Foundation:
                       and self.accounts.group(name) is None, "USERDEL_FAILED:" + name)
             actions.append(("principal:" + name, delete))
         _need(self.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
-        # 2. then act, in the verified order
+        # 2. then act, in the verified order; every removal journaled before and after (H-2)
         removed = []
         for label, act in actions:
+            if self.before_remove is not None:
+                self.before_remove(label)
+            self._journal({"step": "remove", "phase": "intent", "item": label})
             act()
+            self._journal({"step": "remove", "phase": "done", "item": label})
             removed.append(label)
         _need(self.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
         self.p(JOURNAL).rename(self.p(STATE + "/foundation.journal.returned"))

@@ -28,6 +28,12 @@ venv matches it exactly, entry by entry (unlink / rmdir; never a recursive delet
 manifest (an interrupted `venv` or `pip`) or one that differs is a STOP before anything is removed: owner
 adjudication, never an automatic deletion.
 
+H-1/H-2 (plan §13, `owner_prod_safe_fs`): every created file, directory and link is journaled (schema 2) with its
+observed mode, owner and integrity; a return refuses a legacy or incomplete journal, an interrupted item that exists,
+or any difference. Removal goes through descriptors (never following a link), only for an inode unchanged since
+verification, every removal journaled; a partly returned stage is never resumed automatically. Install and return
+hold the installer's exclusive host lock, shared with stage 1.
+
     python owner_prod_inert_stages.py plan <stage>
     python owner_prod_inert_stages.py install <stage> <approval> [inputs...]
     python owner_prod_inert_stages.py return <stage> <approval>
@@ -41,7 +47,6 @@ import hashlib
 import io
 import json
 import os
-import stat
 import subprocess
 import sys
 import tarfile
@@ -55,6 +60,7 @@ for _p in (HERE, HERE.parents[1] / "authority-dev/ceremony"):
         sys.path.insert(0, str(_p))
 
 import owner_prod_inert_install as F1  # noqa: E402  (stage 1: host guard, live digests, deployment bytes)
+import owner_prod_safe_fs as SF  # noqa: E402  (H-1/H-2: descriptor-relative verify-then-remove, the host lock)
 import owner_prod_signer_upgrade as P3  # noqa: E402  (the release, manifest and delta pins)
 import e23_privacy_anchor_upgrade as E23  # noqa: E402  (the E-23 NEW witness unit bytes)
 import install_authority_dev as I  # noqa: E402  (unit targets; the accepted installer V1, unchanged)
@@ -86,15 +92,11 @@ CONTEXT_UNITS = ("lilith-first-memory-context.socket", "lilith-first-memory-cont
 STATE = F1.STATE
 STAGES = ("release", "units", "hosttree", "context")
 NEVER = (GRANT, ROUTER_SETTINGS)                    # no stage may ever create these
+JOURNAL_SCHEMA = 2
 
 
-class Stop(F1.Stop):
-    pass
-
-
-def _need(condition: bool, reason: str) -> None:
-    if not condition:
-        raise Stop(reason)
+Stop = F1.Stop
+_need = F1._need
 
 
 def sha(data: bytes) -> str:
@@ -105,45 +107,20 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("ascii")
 
 
-def _regular_file_sha(path: str, expected: os.stat_result) -> str:
-    """SHA-256 of a regular file opened without following a link, refused if it is not the inode lstat saw."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NOATIME", 0))
+def venv_walk(host_root: Path, relative: str) -> dict[str, tuple]:
+    """Every entry under the venv at host_root/relative ("." = the venv itself) -> (Meta, inode identity), through
+    descriptors; links recorded, never followed; anything but a directory, regular file or link is a STOP."""
     try:
-        st = os.fstat(fd)
-        _need(stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) == (expected.st_dev, expected.st_ino),
-              "VENV_ENTRY_RACED:" + path)
-        digest = hashlib.sha256()
-        while chunk := os.read(fd, 1 << 20):
-            digest.update(chunk)
-        return digest.hexdigest()
-    finally:
-        os.close(fd)
+        return SF.walk(host_root, relative)
+    except SF.Stop as exc:
+        if exc.reason.startswith("ENTRY_TYPE:"):
+            raise Stop("VENV_ENTRY_TYPE:" + exc.reason.split(":", 1)[1]) from exc
+        raise
 
 
-def venv_manifest(root: Path) -> dict[str, list]:
-    """Every entry under a venv: relative path ("." = the venv itself) -> [kind, mode, uid, gid, sha256 | link target].
-    Links are recorded, never followed; anything but a directory, regular file or link is a STOP."""
-    st = os.lstat(root)
-    _need(stat.S_ISDIR(st.st_mode), "VENV_ROOT_NOT_A_DIRECTORY")
-    out: dict[str, list] = {".": ["dir", stat.S_IMODE(st.st_mode), st.st_uid, st.st_gid, ""]}
-    pending = [""]
-    while pending:
-        relative = pending.pop()
-        with os.scandir(root / relative if relative else root) as entries:
-            for entry in entries:
-                name = f"{relative}/{entry.name}" if relative else entry.name
-                st = os.lstat(entry.path)
-                mode = stat.S_IMODE(st.st_mode)
-                if stat.S_ISLNK(st.st_mode):
-                    out[name] = ["link", 0, st.st_uid, st.st_gid, os.readlink(entry.path)]
-                elif stat.S_ISDIR(st.st_mode):
-                    out[name] = ["dir", mode, st.st_uid, st.st_gid, ""]
-                    pending.append(name)
-                elif stat.S_ISREG(st.st_mode):
-                    out[name] = ["file", mode, st.st_uid, st.st_gid, _regular_file_sha(entry.path, st)]
-                else:
-                    raise Stop("VENV_ENTRY_TYPE:" + name)
-    return dict(sorted(out.items()))
+def venv_manifest(host_root: Path, relative: str) -> dict[str, list]:
+    """The journaled form: relative path -> [kind, mode, uid, gid, sha256 | link target]."""
+    return {name: meta.as_list() for name, (meta, _identity) in venv_walk(host_root, relative).items()}
 
 
 def _first_difference(recorded: dict[str, list], current: dict[str, list]) -> str:
@@ -166,6 +143,7 @@ class Stages:
                  euid: int, chown: bool = True):
         self.root, self.run, self.hostname, self.euid, self.chown = root, run, hostname, euid, chown
         self.f1 = F1.Foundation(root, run=run, hostname=hostname, euid=euid, accounts=F1.Accounts(), chown=chown)
+        self.before_remove: Optional[Callable[[str], None]] = None     # TEST seam: runs after verification, per removal
 
     def p(self, relative: str) -> Path:
         return self.root / relative
@@ -295,6 +273,12 @@ class Stages:
     # ----------------------------------------------------------------- install ---
     def install(self, stage: str, approval: str, inputs: Sequence[Path] = ()) -> dict[str, Any]:
         _need(approval == self.approval(stage), "APPROVAL_NOT_THIS_PLAN")
+        self.f1.host_guard()
+        _need(os.path.isdir(self.p(STATE)) and not os.path.islink(self.p(STATE)), "FOUNDATION_NOT_INSTALLED")
+        with SF.HostLock(self.root, STATE):
+            return self._install_locked(stage, inputs)
+
+    def _install_locked(self, stage: str, inputs: Sequence[Path]) -> dict[str, Any]:
         live = self.guard(stage)
         try:
             items = self.items(stage, inputs)
@@ -310,15 +294,19 @@ class Stages:
                   "PARENT_MISSING:/" + parent)
         fd = os.open(self.journal_path(stage), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)      # single use
         os.close(fd)
-        self._append(stage, {"step": "begin", "live": live, "items": [[i.kind, i.path, sha(i.data)] for i in items]})
+        self._append(stage, {"step": "begin", "live": live, "items": [[i.kind, i.path, sha(i.data)] for i in items],
+                             "schema": JOURNAL_SCHEMA})
         for item in items:
             self._append(stage, {"step": "item", "phase": "intent", "path": item.path})
             self._create(item)
+            done: dict[str, Any] = {"step": "item", "phase": "done", "path": item.path}
             if item.kind == "venv":                            # its only description: recorded before it is done
-                manifest = venv_manifest(self.p(item.path))
+                manifest = venv_manifest(self.root, item.path)
                 self._append(stage, {"step": "venv", "path": item.path, "manifest": manifest,
                                      "sha256": sha(_canonical(manifest))})
-            self._append(stage, {"step": "item", "phase": "done", "path": item.path})
+            else:
+                done["meta"] = self._created_meta(item)
+            self._append(stage, done)
         for item in items:
             _need(self._matches(item), "ITEM_NOT_AS_INSTALLED:" + item.path)
         _need(self.f1.live_digests() == live, "LIVE_FILES_CHANGED")
@@ -355,22 +343,30 @@ class Stages:
         if self.chown and item.kind != "venv":
             os.lchown(path, 0, 0)
 
-    def _matches(self, item: Item) -> bool:
-        path = self.p(item.path)
-        if not os.path.lexists(path):
-            return False
-        st = os.lstat(path)
-        if item.kind == "dir":
-            return stat.S_ISDIR(st.st_mode) and stat.S_IMODE(st.st_mode) == item.mode
+    @staticmethod
+    def _intended(item: Item) -> tuple[str, int, str]:
+        """The kind, mode and integrity an item is created with (H-1)."""
         if item.kind == "file":
-            return stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode) == item.mode and path.read_bytes() == item.data
+            return "file", item.mode, sha(item.data)
         if item.kind == "link":
-            return stat.S_ISLNK(st.st_mode) and os.readlink(path) == item.data.decode("ascii")
-        if item.kind == "venv":
-            record = self._venv_record(self.journal(self._stage_of(item.path)), item.path)
-            return (stat.S_ISDIR(st.st_mode) and record is not None
-                    and venv_manifest(path) == record["manifest"])
-        return False
+            return "link", 0, item.data.decode("ascii")
+        return "dir", item.mode, ""
+
+    def _created_meta(self, item: Item) -> list:
+        meta, _identity = SF.observe(self.root, item.path)
+        _need((meta.kind, meta.mode, meta.integrity) == self._intended(item)
+              and (not self.chown or (meta.uid, meta.gid) == (0, 0)), "ITEM_NOT_AS_INSTALLED:" + item.path)
+        return meta.as_list()
+
+    def _matches(self, item: Item) -> bool:
+        try:
+            if item.kind == "venv":
+                record = self._venv_record(self.journal(self._stage_of(item.path)), item.path)
+                return record is not None and venv_manifest(self.root, item.path) == record["manifest"]
+            meta, _identity = SF.observe(self.root, item.path)
+        except SF.Stop:
+            return False
+        return (meta.kind, meta.mode, meta.integrity) == self._intended(item)
 
     def _stage_of(self, path: str) -> str:
         for stage in STAGES:
@@ -391,72 +387,78 @@ class Stages:
         stage is already returned): a refused return changes nothing."""
         _need(approval == self.approval(stage), "APPROVAL_NOT_THIS_PLAN")
         self.f1.host_guard()
+        _need(os.path.isdir(self.p(STATE)) and not os.path.islink(self.p(STATE)), "NO_JOURNAL")
+        with SF.HostLock(self.root, STATE):
+            return self._return_locked(stage)
+
+    def _return_locked(self, stage: str) -> dict[str, Any]:
         for later in STAGES[STAGES.index(stage) + 1:]:
             _need(not self.journal(later) or not os.path.lexists(self.journal_path(later)), "LATER_STAGE_PRESENT:" + later)
         entries = self.journal(stage)
         _need(bool(entries) and entries[0]["step"] == "begin", "NO_JOURNAL")
+        _need(entries[0].get("schema") == JOURNAL_SCHEMA, "JOURNAL_LEGACY")
+        _need(not any(e.get("step") == "remove" for e in entries), "RETURN_PARTIAL")    # never resumed automatically
         kinds = {path: kind for kind, path, _digest in entries[0]["items"]}
-        done_paths = {e["path"] for e in entries if e.get("phase") == "done"}
-        # created = every done item, plus an interrupted venv (its intent journaled, its directory possibly half-made)
-        created = [e["path"] for e in entries if e.get("phase") == "intent" and (
-            e["path"] in done_paths or (kinds[e["path"]] == "venv" and os.path.lexists(self.p(e["path"]))))]
+        done = {e["path"]: e for e in entries if e.get("phase") == "done"}
+        intents = [e["path"] for e in entries if e.get("phase") == "intent"]
+        for path in intents:                                    # interrupted: what exists is unverified
+            if path not in done and os.path.lexists(self.p(path)):
+                _need(kinds[path] != "venv", "VENV_UNVERIFIED:" + path)
+                raise Stop("ITEM_INTERRUPTED:" + path)
+        created = [path for path in intents if path in done]
         digests = {path: digest for _kind, path, digest in entries[0]["items"]}
         planned = set(kinds)
-        verified_venvs: dict[str, dict[str, list]] = {}
-        for path in created:                                    # verify everything first
-            full = self.p(path)
-            _need(os.path.lexists(full), "ITEM_MISSING:" + path)
-            st = os.lstat(full)
-            kind = kinds[path]
-            if kind == "file":
-                _need(stat.S_ISREG(st.st_mode) and sha(full.read_bytes()) == digests[path], "ITEM_CHANGED:" + path)
-            elif kind == "link":
-                _need(stat.S_ISLNK(st.st_mode) and sha(os.readlink(full).encode("ascii")) == digests[path],
-                      "ITEM_CHANGED:" + path)
-            elif kind == "dir":
-                _need(stat.S_ISDIR(st.st_mode) and not os.path.islink(full), "ITEM_CHANGED:" + path)
-                extra = [c for c in os.listdir(full) if f"{path}/{c}" not in planned]
-                _need(not extra, "UNEXPECTED_ENTRY:" + path + "/" + (extra[0] if extra else ""))
-            elif kind == "venv":
-                _need(stat.S_ISDIR(st.st_mode) and not os.path.islink(full), "ITEM_CHANGED:" + path)
-                record = self._venv_record(entries, path)
-                # no recorded manifest = an interrupted venv or pip: its contents are unknown, owner adjudication
-                _need(record is not None and path in done_paths, "VENV_UNVERIFIED:" + path)
-                _need(isinstance(record.get("manifest"), dict) and sha(_canonical(record["manifest"])) == record.get("sha256")
-                      and record["manifest"].get(".", [None])[0] == "dir", "VENV_MANIFEST_INVALID:" + path)
-                current = venv_manifest(full)
-                _need(current == record["manifest"],
-                      "VENV_CHANGED:" + path + ":" + _first_difference(record["manifest"], current))
-                verified_venvs[path] = record["manifest"]
-            else:
-                raise Stop("ITEM_KIND:" + path)
-        _need(self.f1.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
-        removed = 0
-        for path in reversed(created):                         # then remove, newest first
-            full = self.p(path)
+        verified: dict[str, Any] = {}
+        for path in created:                                    # verify everything first (H-1)
             kind = kinds[path]
             if kind == "venv":
-                self._remove_verified_venv(full, verified_venvs[path])
-            elif kind == "dir":
-                full.rmdir()
+                record = self._venv_record(entries, path)
+                # no recorded manifest = an interrupted venv or pip: its contents are unknown, owner adjudication
+                _need(record is not None, "VENV_UNVERIFIED:" + path)
+                _need(isinstance(record.get("manifest"), dict) and sha(_canonical(record["manifest"])) == record.get("sha256")
+                      and record["manifest"].get(".", [None])[0] == "dir", "VENV_MANIFEST_INVALID:" + path)
+                walked = venv_walk(self.root, path)
+                current = {name: meta.as_list() for name, (meta, _identity) in walked.items()}
+                _need(current == record["manifest"],
+                      "VENV_CHANGED:" + path + ":" + _first_difference(record["manifest"], current))
+                verified[path] = walked
+                continue
+            expected = SF.Meta.from_journal(done[path].get("meta"), path)
+            if kind == "dir":
+                extra = [c for c in SF.list_dir(self.root, path) if f"{path}/{c}" not in planned]
+                _need(not extra, "UNEXPECTED_ENTRY:" + path + "/" + (extra[0] if extra else ""))
+            meta, ident = SF.observe(self.root, path)
+            journaled = digests[path]
+            integrity_ok = (meta.integrity == journaled if kind == "file"
+                            else sha(meta.integrity.encode("ascii")) == journaled if kind == "link" else True)
+            _need(meta.kind == kind and integrity_ok and meta == expected, "ITEM_CHANGED:" + path)
+            verified[path] = ident
+        _need(self.f1.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
+        removed = 0
+        for path in reversed(created):                         # then remove, newest first (H-2)
+            if self.before_remove is not None:
+                self.before_remove(path)
+            self._append(stage, {"step": "remove", "phase": "intent", "path": path})
+            if kinds[path] == "venv":
+                self._remove_verified_venv(path, verified[path])
             else:
-                full.unlink()
+                SF.remove_verified(self.root, path, verified[path], kinds[path])
+            self._append(stage, {"step": "remove", "phase": "done", "path": path})
             removed += 1
         _need(self.f1.live_digests() == entries[0]["live"], "LIVE_FILES_CHANGED")
         self.journal_path(stage).rename(self.p(f"{STATE}/{stage}.journal.returned"))
         return {"result": f"STAGE_{stage.upper()}_RETURNED", "removed": removed}
 
-    @staticmethod
-    def _remove_verified_venv(path: Path, manifest: dict[str, list]) -> None:
-        """Remove exactly the verified manifest entries, deepest first: unlink files and links (a link is never
-        followed), rmdir directories (which fails on anything unexpected). Never a recursive delete."""
-        for name in sorted((n for n in manifest if n != "."), key=lambda n: (-n.count("/"), n)):
-            full = path / name
-            if manifest[name][0] == "dir":
-                os.rmdir(full)
-            else:
-                os.unlink(full)
-        os.rmdir(path)
+    def _remove_verified_venv(self, path: str, walked: dict[str, tuple]) -> None:
+        """Remove exactly the verified venv entries, deepest first, each only if its inode is unchanged since
+        verification: unlink files and links (a link is never followed), rmdir directories (only when empty).
+        Never a recursive delete."""
+        for name in sorted((n for n in walked if n != "."), key=lambda n: (-n.count("/"), n)):
+            meta, ident = walked[name]
+            if self.before_remove is not None:
+                self.before_remove(f"{path}/{name}")
+            SF.remove_verified(self.root, f"{path}/{name}", ident, meta.kind)
+        SF.remove_verified(self.root, path, walked["."][1], "dir")
 
 
 def main(argv: list[str]) -> int:
