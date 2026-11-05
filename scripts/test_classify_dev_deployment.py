@@ -306,6 +306,31 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*entries[:1], extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
 
+    def test_runner_amendment_is_control_only_at_its_reviewed_revision_only(self):
+        pinned = (
+            "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py",
+            "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py",
+            "docs/architecture/ci-contracts-runner-amendment-20261105.md",
+        )
+        reviewed = {path: gate.PINNED_CANDIDATE_BLOBS[path] for path in pinned}
+        entries = [changed(pinned[0]), changed(pinned[1]), changed(pinned[2], "A", "000000"),
+                   changed(".github/workflows/ci.yml"), changed("scripts/test_memory_broker_stage2_control.py"),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py")]
+        self.assertEqual(self.classify(*entries, blobs=reviewed), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(*entries), gate.DEPLOY_REQUIRED)                  # revision unknown
+        for path in pinned:
+            with self.subTest(other_revision=path):
+                self.assertEqual(self.classify(*entries, blobs={**reviewed, path: "f" * 40}), gate.DEPLOY_REQUIRED)
+        for extra in (
+            changed("services/owner-memory-control/tests/test_b1b3e_mb11_operator.py"),
+            changed("services/owner-memory-control/tools/mb11_operator.py"),
+            changed("docs/architecture/slice-15b2b-b1b3e-mb11-signer-start-design.md"),
+            changed("services/core-api/app.py"),
+            changed(pinned[2], "D", "100644", "000000"),
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*entries, extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
+
     def test_new_preserved_hermes_source_is_control_only_and_nothing_else_is(self):
         additions = [
             changed("integrations/hermes/README.md", "A", "000000"),
