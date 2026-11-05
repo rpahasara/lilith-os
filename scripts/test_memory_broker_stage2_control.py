@@ -810,6 +810,16 @@ class Stage2ControlContracts(unittest.TestCase):
                             stage2.probe_equivalent_sandbox.__code__.co_consts
                             if isinstance(value, str)))
 
+    def test_the_transient_lifecycle_runs_on_the_host_systemd_generation(self):
+        """The lifecycle test below must run where the probe runs: the contracts job is pinned to the DEV/PROD host OS
+        (Ubuntu 24.04, systemd 255), never a floating image whose systemd may reject the probe's flags."""
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  repository-contracts:\n", 1)[1].split("\n  ", 1)[0] + \
+            workflow.split("\n  repository-contracts:\n", 1)[1].split("\n    steps:", 1)[0]
+        self.assertIn("runs-on: ubuntu-24.04", job)
+        self.assertNotIn("runs-on: ubuntu-latest", workflow.split("\n  repository-contracts:\n", 1)[1].split("\n    steps:", 1)[0])
+        self.assertIn("python -m unittest scripts/test_memory_broker_stage2_control.py", workflow)
+
     @staticmethod
     def _transient_diagnostics(runner, unit: str) -> str:
         """Evidence for a failed transient start: systemd-run's own output and exit status, the unit's state and

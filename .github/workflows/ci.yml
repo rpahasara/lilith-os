@@ -17,7 +17,12 @@ concurrency:
 jobs:
   repository-contracts:
     name: Repository contracts
-    runs-on: ubuntu-latest
+    # Pinned to the DEV/PROD host OS (Ubuntu 24.04, systemd 255; PROD audit run 2, 2026-11-05). This job runs the
+    # broker Stage-II transient-unit lifecycle test, which exercises the same systemd-run flags the accepted stage-2
+    # probe uses on DEV (--pipe with --remain-after-exit). ubuntu-latest moved to 26.04 (systemd 259), which rejects
+    # that combination ("--pty/--pty-late/--pipe is not compatible with --remain-after-exit"). Moving this job to a
+    # newer image is a host-OS decision: it needs the probe ported first.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
