@@ -13,6 +13,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -810,6 +811,47 @@ class Stage2ControlContracts(unittest.TestCase):
                             stage2.probe_equivalent_sandbox.__code__.co_consts
                             if isinstance(value, str)))
 
+    def test_the_transient_lifecycle_runs_on_the_host_systemd_generation(self):
+        """The lifecycle test below must run where the probe runs: the contracts job is pinned to the DEV/PROD host OS
+        (GitHub-hosted Ubuntu 24.04, systemd 255), never a floating image whose systemd may reject the probe's flags."""
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        head = workflow.split("\n  repository-contracts:\n", 1)[1].split("\n    steps:", 1)[0]
+        self.assertEqual(re.findall(r"(?m)^ *runs-on:(.*)$", head), [" ubuntu-24.04"])
+        self.assertIn("python -m unittest scripts/test_memory_broker_stage2_control.py", workflow)
+
+    def test_every_job_that_runs_the_transient_lifecycle_is_on_the_host_systemd_generation(self):
+        """Any workflow job that runs this harness (CI contracts and the DEV deploy gate's control-only validation)
+        must run on GitHub-hosted Ubuntu 24.04 (systemd 255), never a floating or self-hosted runner."""
+        found = {}
+        for path in sorted((Path(__file__).resolve().parents[1] / ".github/workflows").glob("*.yml")):
+            body = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[-1]
+            heads = list(re.finditer(r"(?m)^  ([A-Za-z0-9_-]+):\n", body))
+            for i, m in enumerate(heads):
+                job = body[m.start():heads[i + 1].start() if i + 1 < len(heads) else len(body)]
+                if "scripts/test_memory_broker_stage2_control.py" in job:
+                    found[(path.name, m.group(1))] = re.findall(r"(?m)^ *runs-on:(.*)$", job)
+        self.assertEqual(found, {("ci.yml", "repository-contracts"): [" ubuntu-24.04"],
+                                 ("deploy-dev.yml", "deploy"): [" ubuntu-24.04"]})
+
+    @staticmethod
+    def _transient_diagnostics(runner, unit: str) -> str:
+        """Evidence for a failed transient start: systemd-run's own output and exit status, the unit's state and
+        journal, and the systemd and OS versions (read-only; the CI runner only)."""
+        try:
+            out, err = runner.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out, err = "", "systemd-run still running"
+        lines = [f"systemd-run rc={runner.returncode} stdout={out!r} stderr={err!r}"]
+        for argv in (["sudo", "-n", "/usr/bin/systemctl", "status", unit, "--no-pager", "--full"],
+                     ["sudo", "-n", "/usr/bin/journalctl", "-u", unit, "-n", "40", "--no-pager", "-o", "cat"],
+                     ["/usr/bin/systemctl", "--version"], ["cat", "/etc/os-release"]):
+            try:
+                done = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+                lines.append(f"$ {' '.join(argv)} (rc={done.returncode})\n{done.stdout.strip()}\n{done.stderr.strip()}")
+            except (OSError, subprocess.SubprocessError) as exc:
+                lines.append(f"$ {' '.join(argv)}: {type(exc).__name__}")
+        return "\n".join(lines)
+
     @unittest.skipUnless(os.name == "posix", "Linux transient-unit integration")
     def test_linux_transient_probe_lifecycle_on_ci_only(self):
         if not Path("/run/systemd/system").is_dir():
@@ -833,11 +875,11 @@ class Stage2ControlContracts(unittest.TestCase):
                 )
                 if "ActiveState=active" in result.stdout and "SubState=exited" in result.stdout:
                     break
-                self.assertIn(runner.poll(), (None, 0),
-                              "transient unit failed to start")
+                if runner.poll() not in (None, 0):
+                    self.fail("transient unit failed to start\n" + self._transient_diagnostics(runner, unit))
                 time.sleep(0.1)
             else:
-                self.fail("transient unit did not reach active/exited")
+                self.fail("transient unit did not reach active/exited\n" + self._transient_diagnostics(runner, unit))
         finally:
             subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "stop", unit],
                            capture_output=True, timeout=10)
