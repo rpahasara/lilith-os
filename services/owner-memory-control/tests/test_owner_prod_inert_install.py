@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,6 +81,8 @@ def tree(root: Path) -> dict:
                     stack.append(Path(e.path))
                 elif e.is_symlink():
                     out[key] = ("link", st.st_mode, os.readlink(e.path))
+                elif not stat.S_ISREG(st.st_mode):
+                    out[key] = ("special", st.st_mode)
                 else:
                     out[key] = (st.st_mode, st.st_size, st.st_mtime_ns, hashlib.sha256(Path(e.path).read_bytes()).hexdigest())
     return out
