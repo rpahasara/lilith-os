@@ -186,7 +186,7 @@ class MachineDigestPinTests(KeygenTests):
             host = self.host(d)
             machine_id = self.actor(host)
             self.assertEqual(machine_id, PROD_MID)
-            self.assertEqual(PK.publication(F.raw_public("current"), b"TEST_ONLY c", machine_id)
+            self.assertEqual(PK.publication(F.raw_public("second-current"), b"TEST_ONLY c", machine_id)
                              ["custodyEvidence"]["machineId"], PROD_MID)          # evidence semantics unchanged
             module, run = self.kpan(host)
             self.assertEqual(run()[0], PROD_MID)
@@ -208,7 +208,9 @@ class MachineDigestPinTests(KeygenTests):
                 module, run = self.kpan(host, **call_kw)
                 with self.assertRaises(module.Refused) as caught:
                     run()
-                self.assertEqual(caught.exception.reason, "NOT_PROD_HOST")
+                # a wrong hostname is refused by the DEV K-PAN tool's own host check, whose code is NOT_DEV_HOST
+                self.assertIn(caught.exception.reason, ("NOT_PROD_HOST", "NOT_DEV_HOST") if label == "wrong host"
+                              else ("NOT_PROD_HOST",))
         for label, content in (("no newline", PROD_MID.encode()), ("two lines", (PROD_MID + "\n\n").encode()),
                                ("trailing space", (PROD_MID + " \n").encode())):
             with self.subTest(label), tempfile.TemporaryDirectory() as d:
