@@ -131,7 +131,7 @@ PINNED_CANDIDATE_BLOBS = {
     "docs/engineering/vm-only-source-gaps.md": "23c71977cd7a8a1879cd257cbc7af4f419d5691b",
     "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py": "bd4891da82f25842676f382043f4c9336b8d0425",
     "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py": "1061fca0074268d147796e1aaec712edebe25280",
-    "docs/architecture/ci-contracts-runner-amendment-20261105.md": "0169fb517c469f38469fdec056dceb3c75829bca",
+    "docs/architecture/ci-contracts-runner-amendment-20261105.md": "aa5322142f043c25d63cb97c4ce453011a107e66",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,

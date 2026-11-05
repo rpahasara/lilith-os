@@ -819,6 +819,20 @@ class Stage2ControlContracts(unittest.TestCase):
         self.assertEqual(re.findall(r"(?m)^ *runs-on:(.*)$", head), [" ubuntu-24.04"])
         self.assertIn("python -m unittest scripts/test_memory_broker_stage2_control.py", workflow)
 
+    def test_every_job_that_runs_the_transient_lifecycle_is_on_the_host_systemd_generation(self):
+        """Any workflow job that runs this harness (CI contracts and the DEV deploy gate's control-only validation)
+        must run on GitHub-hosted Ubuntu 24.04 (systemd 255), never a floating or self-hosted runner."""
+        found = {}
+        for path in sorted((Path(__file__).resolve().parents[1] / ".github/workflows").glob("*.yml")):
+            body = path.read_text(encoding="utf-8").split("\njobs:\n", 1)[-1]
+            heads = list(re.finditer(r"(?m)^  ([A-Za-z0-9_-]+):\n", body))
+            for i, m in enumerate(heads):
+                job = body[m.start():heads[i + 1].start() if i + 1 < len(heads) else len(body)]
+                if "scripts/test_memory_broker_stage2_control.py" in job:
+                    found[(path.name, m.group(1))] = re.findall(r"(?m)^ *runs-on:(.*)$", job)
+        self.assertEqual(found, {("ci.yml", "repository-contracts"): [" ubuntu-24.04"],
+                                 ("deploy-dev.yml", "deploy"): [" ubuntu-24.04"]})
+
     @staticmethod
     def _transient_diagnostics(runner, unit: str) -> str:
         """Evidence for a failed transient start: systemd-run's own output and exit status, the unit's state and

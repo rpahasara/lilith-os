@@ -35,7 +35,10 @@ jobs:
       github.event.workflow_run.head_branch == github.event.repository.default_branch &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.head_sha != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # GitHub-hosted, pinned to the DEV/PROD host OS (Ubuntu 24.04, systemd 255): this job re-runs the broker
+    # stage-2 transient lifecycle test, which the floating latest image (Ubuntu 26.04, systemd 259) rejects.
+    # Owner-approved addendum 1 (2026-11-05) to docs/architecture/ci-contracts-runner-amendment-20261105.md.
     timeout-minutes: 20
     permissions:
       contents: read

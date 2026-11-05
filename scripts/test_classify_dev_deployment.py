@@ -331,6 +331,21 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*entries, extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
 
+    def test_deploy_gate_runner_addendum_is_control_only_at_the_reviewed_record_only(self):
+        record = "docs/architecture/ci-contracts-runner-amendment-20261105.md"
+        entries = [changed(".github/workflows/deploy-dev.yml"), changed(record),
+                   changed("scripts/test_pr_ci_dev_separation.py"), changed("scripts/test_memory_broker_stage2_control.py"),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py")]
+        reviewed = {record: gate.PINNED_CANDIDATE_BLOBS[record]}
+        self.assertEqual(self.classify(*entries, blobs=reviewed), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(*entries, blobs={record: "0169fb517c469f38469fdec056dceb3c75829bca"}),
+                         gate.DEPLOY_REQUIRED)                                    # the #322 revision is superseded
+        self.assertEqual(self.classify(*entries), gate.DEPLOY_REQUIRED)
+        for extra in (changed(".github/workflows/deploy.yml"), changed("scripts/dev_deployer/lilith-dev-deploy"),
+                      changed("services/core-api/app.py")):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*entries, extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
+
     def test_new_preserved_hermes_source_is_control_only_and_nothing_else_is(self):
         additions = [
             changed("integrations/hermes/README.md", "A", "000000"),
