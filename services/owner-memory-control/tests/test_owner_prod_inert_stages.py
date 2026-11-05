@@ -101,6 +101,7 @@ class StagesTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(ST, name, value))
         self.calls: list[list[str]] = []
         self.venv_fail = False
+        self.pip_fail = False
 
     def run_cmd(self, argv):
         argv = list(argv)
@@ -109,10 +110,20 @@ class StagesTests(unittest.TestCase):
         if argv[1:3] == ["-m", "venv"]:
             venv = Path(argv[3])
             (venv / "bin").mkdir(parents=True)
-            (venv / "bin/python").write_bytes(b"#!venv")
+            (venv / "pyvenv.cfg").write_bytes(b"home = /usr/bin\ninclude-system-site-packages = false\n")
+            os.symlink("/usr/bin/python3", venv / "bin/python")            # absolute, outside the host root
+            os.symlink("python", venv / "bin/python3")
+            (venv / "lib/python3.12/site-packages").mkdir(parents=True)
+            os.symlink("lib", venv / "lib64")
             return done(1 if self.venv_fail else 0)
         if argv[1:4] == ["-m", "pip", "install"]:
-            (Path(argv[0]).parents[1] / "lib").mkdir()
+            pkg = Path(argv[0]).parents[1] / "lib/python3.12/site-packages/cryptography"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_bytes(b"# wheel payload\n")
+            if self.pip_fail:                                              # pip died half-way through the install
+                return done(1)
+            (pkg / "hazmat.so").write_bytes(b"\x7fELF wheel payload")
+            os.chmod(pkg / "hazmat.so", 0o755)
             return done(0)
         raise AssertionError(argv)
 
@@ -226,14 +237,102 @@ class StagesTests(unittest.TestCase):
         self.stop("HOST_TREE_TAR_NOT_PINNED", lambda: s.install("hosttree", s.approval("hosttree"), [other]))
 
     # ----------------------------------------------------------------- returns ---
-    def test_an_interrupted_release_install_returns_cleanly(self):
-        self.venv_fail = True
-        self.stop("VENV_FAILED", lambda: self.install("release"))
-        self.assertTrue((self.root / ST.RELEASE_DIR / "venv").exists())             # half-made
+    def test_an_interrupted_venv_is_never_deleted_unverified(self):
+        """A venv whose creation or pip install did not complete has no recorded manifest: its contents are unknown,
+        so the return STOPS before removing anything (owner adjudication), instead of deleting it recursively."""
+        for flag, reason in (("venv_fail", "VENV_FAILED"), ("pip_fail", "PIP_FAILED")):
+            with self.subTest(flag):
+                self.setUp()
+                setattr(self, flag, True)
+                self.stop(reason, lambda: self.install("release"))
+                self.assertTrue((self.root / ST.RELEASE_DIR / "venv").exists())             # half-made
+                s = self.stages()
+                before = tree(self.root)
+                self.stop("VENV_UNVERIFIED:" + ST.RELEASE_DIR + "/venv", lambda: s.return_("release", s.approval("release")))
+                self.assertEqual(tree(self.root), before)                                   # nothing removed
+
+    def test_an_interrupted_release_before_the_venv_exists_returns_cleanly(self):
+        """An interruption before the venv directory exists leaves nothing unverified: the return removes exactly
+        the verified items created so far."""
+        real = self.run_cmd
+
+        def die_before_venv(argv):
+            if argv[1:3] == ["-m", "venv"]:
+                raise OSError("power lost")
+            return real(argv)
+
+        s = self.stages(run=die_before_venv)
+        with self.assertRaises(OSError):
+            s.install("release", s.approval("release"), self.inputs("release"))
+        self.assertFalse(os.path.lexists(self.root / ST.RELEASE_DIR / "venv"))
         s = self.stages()
-        result = s.return_("release", s.approval("release"))
-        self.assertEqual(result["result"], "STAGE_RELEASE_RETURNED")
+        self.assertEqual(s.return_("release", s.approval("release"))["result"], "STAGE_RELEASE_RETURNED")
         self.assertFalse(os.path.lexists(self.root / ST.OPT))
+
+    def test_a_correct_venv_returns_cleanly_without_following_its_links(self):
+        outside = self.root / "usr/bin"
+        outside.mkdir(parents=True)
+        (outside / "python3").write_bytes(b"the system interpreter")                       # the link's real target
+        self.install("release")
+        s = self.stages()
+        self.assertEqual(s.return_("release", s.approval("release"))["result"], "STAGE_RELEASE_RETURNED")
+        self.assertFalse(os.path.lexists(self.root / ST.OPT))
+        self.assertEqual((outside / "python3").read_bytes(), b"the system interpreter")    # never followed
+
+    def test_a_changed_venv_stops_the_return_before_anything_is_removed(self):
+        venv = lambda *p: self.root / ST.RELEASE_DIR / "venv" / Path(*p)  # noqa: E731
+        site = ("lib", "python3.12", "site-packages", "cryptography")
+        def swap_dir_for_link():
+            elsewhere = self.elsewhere
+            elsewhere.mkdir()
+            (elsewhere / "keep.txt").write_bytes(b"not part of the venv")
+            target = venv(*site)
+            for child in target.iterdir():
+                child.unlink()
+            target.rmdir()
+            os.symlink(str(elsewhere), target)
+
+        cases = {
+            "file content": (lambda: venv(*site, "__init__.py").write_bytes(b"# tampered\n"), "VENV_CHANGED"),
+            "file mode": (lambda: os.chmod(venv(*site, "hazmat.so"), 0o777), "VENV_CHANGED"),
+            "unexpected file": (lambda: venv(*site, "backdoor.py").write_bytes(b"x"), "VENV_CHANGED"),
+            "unexpected dir": (lambda: venv("include").mkdir(), "VENV_CHANGED"),
+            "missing file": (lambda: venv("pyvenv.cfg").unlink(), "VENV_CHANGED"),
+            "link retargeted": (lambda: (venv("bin/python").unlink(), os.symlink("/tmp/evil", venv("bin/python"))),
+                                "VENV_CHANGED"),
+            "unexpected link": (lambda: os.symlink("/etc", venv("etc")), "VENV_CHANGED"),
+            "dir replaced by a link": (swap_dir_for_link, "VENV_CHANGED"),
+            "file replaced by a fifo": (lambda: (venv("pyvenv.cfg").unlink(), os.mkfifo(venv("pyvenv.cfg"))),
+                                        "VENV_ENTRY_TYPE"),
+            "venv root replaced by a link": (lambda: (self._move_venv_away(self.elsewhere),
+                                                      os.symlink(str(self.elsewhere), venv())), "ITEM_CHANGED"),
+        }
+        for label, (tamper, reason) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                self.elsewhere = self.tmp / "elsewhere"
+                self.install("release")
+                tamper()
+                s = self.stages()
+                before = tree(self.root)
+                self.stop(reason, lambda: s.return_("release", s.approval("release")))
+                self.assertEqual(tree(self.root), before)                                   # nothing removed
+                if self.elsewhere.exists():
+                    self.assertTrue(any(self.elsewhere.iterdir()))                          # never followed
+
+    def _move_venv_away(self, elsewhere):
+        os.rename(self.root / ST.RELEASE_DIR / "venv", elsewhere)
+
+    def test_a_tampered_venv_manifest_in_the_journal_stops_the_return(self):
+        self.install("release")
+        journal = self.root / ST.STATE / "release.journal"
+        text = journal.read_text(encoding="ascii")
+        self.assertIn('"step": "venv"', text)
+        journal.write_text(text.replace("pyvenv.cfg", "pyvenv.cfX"), encoding="ascii")
+        s = self.stages()
+        before = tree(self.root)
+        self.stop("VENV_MANIFEST_INVALID", lambda: s.return_("release", s.approval("release")))
+        self.assertEqual(tree(self.root), before)
 
     def test_each_stage_returns_newest_first_and_everything_returns_to_the_start(self):
         for stage in ST.STAGES:
