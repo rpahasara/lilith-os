@@ -2,7 +2,7 @@
 
 The three production tools (`owner-memory-control/tools/owner_prod_{keygen,owner_tool,kpan_keygen}.py`) are separate
 from the DEV tools, which stay byte-identical. Proven here:
-1. the committed source refuses every PROD form (PROD_MACHINE_ID unpinned); with a pin, they run only on a PROD-shaped
+1. the committed source refuses every PROD form (PROD_MACHINE_ID_SHA256 unpinned); with a pin, they run only on a PROD-shaped
    host with the OWNER_PROD deployment, and never on the DEV machine;
 2. K-ACT + K-WIT publications chain through the PROD owner tool into a `prod` registry, anchor and genesis that the
    runtime verifies under a `prod` context, and that a DEV context refuses;
@@ -12,6 +12,7 @@ from the DEV tools, which stay byte-identical. Proven here:
 from __future__ import annotations
 
 import copy
+import re
 import dataclasses
 import hashlib
 import os
@@ -65,7 +66,7 @@ class SeparationTests(unittest.TestCase):
         self.assertEqual(PKP.ENVIRONMENT, WC.PROD_PRIVACY_ANCHOR_ENVIRONMENT)
         self.assertTrue(PO.ROOT_KEY_ID.startswith(A.PROD_ROOT_PREFIX))
         self.assertEqual(PO.POLICY_VERSION, SP.PROD_POLICY_VERSION)
-        self.assertEqual((PK.PROD_MACHINE_ID, PKP.PROD_MACHINE_ID), (None, None))      # unpinned, and kept equal
+        self.assertEqual((PK.PROD_MACHINE_ID_SHA256, PKP.PROD_MACHINE_ID_SHA256), (None, None))   # unpinned, kept equal
         self.assertEqual((PK.HOSTNAME, PK.DEPLOYMENT), (PKP.HOSTNAME, PKP.DEPLOYMENT))
         import lilith_authority_owner_dev as DEV_OWNER        # the imported DEV module keeps its DEV identity
         self.assertEqual((DEV_OWNER.ENVIRONMENT, DEV_OWNER.ROOT_KEY_ID),
@@ -163,6 +164,89 @@ class KeygenTests(unittest.TestCase):
         import trackb_kpan_keygen as KP                          # the DEV tool's own module is untouched
         self.assertEqual((KP.ENVIRONMENT, KP.KEY_ID, KP.DEV_HOSTNAME),
                          ("DEV_SYNTHETIC", "kpan.dev-synthetic.01", "lilith-dev-01"))
+
+
+@unittest.skipUnless(X.POSIX, "owner and mode semantics are POSIX")
+class MachineDigestPinTests(KeygenTests):
+    """D-9: both PROD keygens pin lilith-01 by the SHA-256 of its exact /etc/machine-id bytes (what the COMPLETE audit
+    run 2 recorded), never by a committed raw ID. The raw ID read on the host still goes into the custody evidence."""
+
+    DIGEST = hashlib.sha256((PROD_MID + "\n").encode("ascii")).hexdigest()
+
+    def actor(self, host, *, hostname="lilith-01", digest=None):
+        return PK.actor_preflight(host.keygen_host(), euid=0, isolated=True, hostname=hostname,
+                                  machine_digest=self.DIGEST if digest is None else digest)
+
+    def kpan(self, host, *, hostname="lilith-01", digest=None):
+        module = PKP.instance(machine_digest=self.DIGEST if digest is None else digest)
+        return module, lambda: module.preflight(module.Host(host.root), euid=0, isolated=True, hostname=hostname)
+
+    def test_the_pinned_host_passes_both_keygens_and_custody_keeps_the_raw_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            host = self.host(d)
+            machine_id = self.actor(host)
+            self.assertEqual(machine_id, PROD_MID)
+            self.assertEqual(PK.publication(F.raw_public("second-current"), b"TEST_ONLY c", machine_id)
+                             ["custodyEvidence"]["machineId"], PROD_MID)          # evidence semantics unchanged
+            module, run = self.kpan(host)
+            try:                                  # past the identity gate the DEV tool needs K-WIT (not in this fixture)
+                run()
+            except module.Refused as exc:
+                self.assertNotIn(exc.reason, ("NOT_PROD_HOST", "NOT_DEV_HOST", "PROD_MACHINE_ID_NOT_PINNED"))
+            except OSError:
+                pass
+            self.assertEqual(module.DEV_MACHINE_ID, PROD_MID)                   # the digest-proven host, at run time
+
+    def test_wrong_machine_wrong_host_dev_machine_and_malformed_ids_refuse(self):
+        other = hashlib.sha256(b"fedcba9876543210fedcba9876543210\n").hexdigest()
+        dev = hashlib.sha256((G.DEV_MACHINE_ID + "\n").encode("ascii")).hexdigest()
+        cases = (
+            ("wrong machine", {}, {"digest": other}),
+            ("wrong host", {}, {"hostname": "lilith-dev-01"}),
+            ("dev machine, even if pinned to it", {"machine_id": G.DEV_MACHINE_ID}, {"digest": dev}),
+            ("uppercase", {"machine_id": PROD_MID.upper()}, {"digest": hashlib.sha256((PROD_MID.upper() + "\n").encode()).hexdigest()}),
+        )
+        for label, host_kw, call_kw in cases:
+            with self.subTest(label), tempfile.TemporaryDirectory() as d:
+                host = self.host(d, **host_kw)
+                self.refused(lambda: self.actor(host, **call_kw), "NOT_PROD_HOST")
+                module, run = self.kpan(host, **call_kw)
+                with self.assertRaises(module.Refused) as caught:
+                    run()
+                # a wrong hostname passes the digest gate and is refused later: by the deployment file's root-ownership
+                # check when not run as root (CI), else by the DEV K-PAN tool's own host check (NOT_DEV_HOST)
+                self.assertIn(caught.exception.reason, ("NOT_PROD_HOST", "NOT_DEV_HOST", "DEPLOYMENT_INVALID")
+                              if label == "wrong host" else ("NOT_PROD_HOST",))
+        for label, content in (("no newline", PROD_MID.encode()), ("two lines", (PROD_MID + "\n\n").encode()),
+                               ("trailing space", (PROD_MID + " \n").encode())):
+            with self.subTest(label), tempfile.TemporaryDirectory() as d:
+                host = self.host(d)
+                (host.root / "etc/machine-id").write_bytes(content)
+                digest = hashlib.sha256(content).hexdigest()                     # even its own exact digest
+                self.refused(lambda: self.actor(host, digest=digest), "NOT_PROD_HOST")
+                module, run = self.kpan(host, digest=digest)
+                with self.assertRaises(module.Refused):
+                    run()
+
+    def test_unpinned_source_refuses_and_no_raw_id_is_committed(self):
+        with tempfile.TemporaryDirectory() as d:
+            host = self.host(d)
+            self.refused(lambda: PK.actor_preflight(host.keygen_host(), euid=0, isolated=True, hostname="lilith-01"),
+                         "PROD_MACHINE_ID_NOT_PINNED")
+            unpinned = PKP.instance()
+            with self.assertRaises(unpinned.Refused) as caught:
+                unpinned.preflight(unpinned.Host(host.root), euid=0, isolated=True, hostname="lilith-01")
+            self.assertEqual(caught.exception.reason, "PROD_MACHINE_ID_NOT_PINNED")
+        for name in ("owner_prod_keygen.py", "owner_prod_kpan_keygen.py"):
+            source = (ROOT / "services/owner-memory-control/tools" / name).read_text(encoding="utf-8")
+            self.assertNotIn("PROD_MACHINE_ID:", source)                       # the raw constant is gone
+            self.assertEqual([h for h in re.findall(r"\b[0-9a-f]{32}\b", source) if h != G.DEV_MACHINE_ID], [], name)
+
+    def test_the_raw_pin_seam_and_the_digest_agree(self):
+        self.assertEqual(PK.machine_digest_pin(machine_pin=PROD_MID), self.DIGEST)
+        with tempfile.TemporaryDirectory() as d:
+            host = self.host(d)
+            self.assertEqual(self.preflight(host), self.actor(host))           # the legacy test seam = the digest path
 
 
 @unittest.skipUnless(X.POSIX, "file modes are POSIX")
