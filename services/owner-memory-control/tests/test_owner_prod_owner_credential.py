@@ -386,5 +386,64 @@ class ProdOwnerCredentialTests(unittest.TestCase):
         self.assertNotIn("example.org", source)                    # no identity baked in: D-8 arrives on every call
 
 
+@unittest.skipUnless(HAVE_CRYPTO, "fido2 and rfc8785 are needed (CI and WSL have them)")
+class StandaloneCliTests(unittest.TestCase):
+    """The tool as the owner runs it: a fresh interpreter, launched outside the repository, with no repository
+    directory on PYTHONPATH (only third-party dependency paths survive, e.g. WSL's vendored /root/l1deps). It must find
+    every import it needs by itself. The outputs are then checked in-process against the PROD host parser and the
+    owner-memory verifier."""
+
+    TOOL = ROOT / "services/owner-memory-control/tools/owner_prod_owner_credential.py"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        root = os.path.realpath(ROOT)
+        kept = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+                if p and not os.path.realpath(p).startswith(root)]
+        self.env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        if kept:
+            self.env["PYTHONPATH"] = os.pathsep.join(kept)
+        self.assertFalse(any(os.path.realpath(p).startswith(root) for p in kept))       # no repository path leaks in
+
+    def cli(self, *args):
+        return subprocess.run([sys.executable, "-B", str(self.TOOL), *map(str, args)], cwd=self.dir, env=self.env,
+                              capture_output=True, timeout=120)
+
+    def test_create_assert_and_registration_run_standalone_and_verify_on_the_prod_path(self):
+        key, public = self.dir / "s.key", self.dir / "s.public.json"
+        created = self.cli("create", RP, ORIGIN, PRINCIPAL, key, public)
+        self.assertEqual(created.returncode, 0, created.stderr.decode())
+        summary = json.loads(created.stdout)
+        self.assertTrue(summary["recordId"].startswith("ocred.owner-prod."))
+        self.assertEqual(stat.S_IMODE(os.stat(key).st_mode), 0o600)
+
+        challenge = secrets.token_bytes(32)
+        asserted = self.cli("assert", RP, ORIGIN, PRINCIPAL, key, public, challenge.hex())
+        self.assertEqual(asserted.returncode, 0, asserted.stderr.decode())
+        record = json.loads(public.read_bytes())["credential"]
+        V._verify_webauthn(_Challenge(challenge), OP.OwnerAssertionV1.from_dict(json.loads(asserted.stdout)),
+                           OP.OwnerCredentialV1.from_dict(record), rp_id=RP, origin=ORIGIN)            # no raise
+
+        registered = self.cli("registration", RP, ORIGIN, PRINCIPAL, RELEASE, public)
+        self.assertEqual(registered.returncode, 0, registered.stderr.decode())
+        parsed = HI.parse_owner_registration(json.loads(registered.stdout), environment="prod")
+        self.assertEqual((parsed.owner_principal, parsed.rp_id, parsed.origin), (PRINCIPAL, RP, ORIGIN))
+
+    def test_standalone_refusals_are_clean_and_write_nothing(self):
+        dev = self.cli("create", DEV.RP_ID, DEV.ORIGIN, DEV.OWNER_PRINCIPAL, self.dir / "d.key", self.dir / "d.json")
+        self.assertEqual(dev.returncode, 2)
+        self.assertIn(b"REFUSED IDENTITY_NOT_OWNER_PROD", dev.stderr)
+        self.assertNotIn(b"Traceback", dev.stderr)
+        existing = self.dir / "existing.public.json"
+        existing.write_bytes(b"precious")
+        taken = self.cli("create", RP, ORIGIN, PRINCIPAL, self.dir / "e.key", existing)
+        self.assertEqual(taken.returncode, 2)
+        self.assertIn(b"REFUSED OUTPUT_EXISTS:public", taken.stderr)
+        self.assertEqual(existing.read_bytes(), b"precious")
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["existing.public.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

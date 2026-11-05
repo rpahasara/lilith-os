@@ -46,7 +46,9 @@ from typing import Any, Mapping
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-for _p in (ROOT / "services/authority-dev", ROOT / "services/core-api"):
+# The PROD host rules (`lilith_authority_host.inputs`) import `lilith_owner_memory`, and the owner-proof contracts
+# live in the Core API: all three must be importable when the tool runs standalone.
+for _p in (ROOT / "services/authority-dev", ROOT / "services/core-api", ROOT / "services/owner-memory-control"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
