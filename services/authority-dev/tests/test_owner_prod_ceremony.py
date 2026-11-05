@@ -2,7 +2,8 @@
 
 The three production tools (`owner-memory-control/tools/owner_prod_{keygen,owner_tool,kpan_keygen}.py`) are separate
 from the DEV tools, which stay byte-identical. Proven here:
-1. the committed source refuses every PROD form (PROD_MACHINE_ID_SHA256 unpinned); with a pin, they run only on a PROD-shaped
+1. the committed source is pinned to lilith-01's machine-ID digest (D-9, owner-approved 2026-11-05) and refuses every
+   other host; an unpinned source refuses every PROD form; with a pin, they run only on a PROD-shaped
    host with the OWNER_PROD deployment, and never on the DEV machine;
 2. K-ACT + K-WIT publications chain through the PROD owner tool into a `prod` registry, anchor and genesis that the
    runtime verifies under a `prod` context, and that a DEV context refuses;
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -46,6 +48,8 @@ if X.POSIX:
     from lilith_recovery_witness import credential as WC  # noqa: E402
 
 PROD_MID = "0123456789abcdef0123456789abcdef"
+# D-9 (owner-approved 2026-11-05): SHA-256 of lilith-01's exact /etc/machine-id bytes, sealed audit run 2
+D9_PIN = "1b1d67880b40565fda61c2944d20c9e9d90c650846e10cac3eb900e6a9ac1001"
 PASS = b"TEST_ONLY passphrase 123"
 DEPLOYMENT = b'{"environment":"prod","profile":"OWNER_PROD","schemaVersion":1}\n'
 BASE = "75ca0db084ef43f39462e3fe77b2f3fce8f5a0e2"
@@ -66,7 +70,7 @@ class SeparationTests(unittest.TestCase):
         self.assertEqual(PKP.ENVIRONMENT, WC.PROD_PRIVACY_ANCHOR_ENVIRONMENT)
         self.assertTrue(PO.ROOT_KEY_ID.startswith(A.PROD_ROOT_PREFIX))
         self.assertEqual(PO.POLICY_VERSION, SP.PROD_POLICY_VERSION)
-        self.assertEqual((PK.PROD_MACHINE_ID_SHA256, PKP.PROD_MACHINE_ID_SHA256), (None, None))   # unpinned, kept equal
+        self.assertEqual((PK.PROD_MACHINE_ID_SHA256, PKP.PROD_MACHINE_ID_SHA256), (D9_PIN, D9_PIN))   # pinned, kept equal
         self.assertEqual((PK.HOSTNAME, PK.DEPLOYMENT), (PKP.HOSTNAME, PKP.DEPLOYMENT))
         import lilith_authority_owner_dev as DEV_OWNER        # the imported DEV module keeps its DEV identity
         self.assertEqual((DEV_OWNER.ENVIRONMENT, DEV_OWNER.ROOT_KEY_ID),
@@ -99,10 +103,15 @@ class KeygenTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, reason)
 
     def test_the_committed_source_refuses(self):
+        """The committed pin is lilith-01's: any other machine, here a synthetic PROD-shaped one, is NOT_PROD_HOST."""
         with tempfile.TemporaryDirectory() as d:
             host = self.host(d)
             self.refused(lambda: PK.actor_preflight(host.keygen_host(), euid=0, isolated=True, hostname="lilith-01"),
-                         "PROD_MACHINE_ID_NOT_PINNED")
+                         "NOT_PROD_HOST")
+            committed = PKP.instance()
+            with self.assertRaises(committed.Refused) as caught:
+                committed.preflight(committed.Host(host.root), euid=0, isolated=True, hostname="lilith-01")
+            self.assertEqual(caught.exception.reason, "NOT_PROD_HOST")
         self.assertEqual(PK.main(["successor", "2"]), G.EXIT_REFUSED)
         self.assertEqual(PK.main(["actor", "--dev"]), G.EXIT_REFUSED)
 
@@ -151,10 +160,15 @@ class KeygenTests(unittest.TestCase):
     def test_the_kpan_twin(self):
         with tempfile.TemporaryDirectory() as d:
             host = self.host(d)
-            unpinned = PKP.instance()
+            with mock.patch.object(PKP, "PROD_MACHINE_ID_SHA256", None):
+                unpinned = PKP.instance()
             with self.assertRaises(unpinned.Refused) as caught:
                 unpinned.preflight(unpinned.Host(host.root), euid=0, isolated=True, hostname="lilith-01")
             self.assertEqual(caught.exception.reason, "PROD_MACHINE_ID_NOT_PINNED")
+            committed = PKP.instance()                          # pinned to lilith-01: a synthetic host is not it
+            with self.assertRaises(committed.Refused) as caught:
+                committed.preflight(committed.Host(host.root), euid=0, isolated=True, hostname="lilith-01")
+            self.assertEqual(caught.exception.reason, "NOT_PROD_HOST")
             dev_pinned = PKP.instance(machine_pin=G.DEV_MACHINE_ID)
             with self.assertRaises(dev_pinned.Refused) as caught:
                 dev_pinned.preflight(dev_pinned.Host(host.root), euid=0, isolated=True, hostname="lilith-01")
@@ -229,7 +243,8 @@ class MachineDigestPinTests(KeygenTests):
                     run()
 
     def test_unpinned_source_refuses_and_no_raw_id_is_committed(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(PK, "PROD_MACHINE_ID_SHA256", None), \
+                mock.patch.object(PKP, "PROD_MACHINE_ID_SHA256", None):
             host = self.host(d)
             self.refused(lambda: PK.actor_preflight(host.keygen_host(), euid=0, isolated=True, hostname="lilith-01"),
                          "PROD_MACHINE_ID_NOT_PINNED")
@@ -241,6 +256,16 @@ class MachineDigestPinTests(KeygenTests):
             source = (ROOT / "services/owner-memory-control/tools" / name).read_text(encoding="utf-8")
             self.assertNotIn("PROD_MACHINE_ID:", source)                       # the raw constant is gone
             self.assertEqual([h for h in re.findall(r"\b[0-9a-f]{32}\b", source) if h != G.DEV_MACHINE_ID], [], name)
+
+    def test_the_pin_is_the_owner_approved_digest_of_the_reviewed_record(self):
+        """D-9: one 64-hex lowercase SHA-256 (never a raw 32-hex ID), equal in both keygens, and exactly the value
+        the reviewed decision sheet names from the sealed audit run 2."""
+        self.assertRegex(D9_PIN, r"\A[0-9a-f]{64}\Z")
+        self.assertNotEqual(D9_PIN, hashlib.sha256((G.DEV_MACHINE_ID + "\n").encode("ascii")).hexdigest())
+        sheet = (ROOT / "docs/architecture/canonical-memory-prod-owner-decisions.md").read_text(encoding="utf-8")
+        d9 = sheet.split("### D-9.", 1)[1].split("### D-10.", 1)[0]
+        self.assertIn(f"`PROD_MACHINE_ID_SHA256 = {D9_PIN}`", d9)
+        self.assertIn("sealed", d9)
 
     def test_the_raw_pin_seam_and_the_digest_agree(self):
         self.assertEqual(PK.machine_digest_pin(machine_pin=PROD_MID), self.DIGEST)

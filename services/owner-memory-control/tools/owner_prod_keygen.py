@@ -46,8 +46,8 @@ HOSTNAME = "lilith-01"
 # D-9 (digest pin): SHA-256 of the exact bytes of lilith-01's /etc/machine-id (32 lowercase hex + "\n"), as the
 # COMPLETE read-only audit run 2 (2026-11-05) recorded it. The raw ID is never a committed constant: the host's own
 # file is read at run time, must hash to this pin, and then (as before) goes into the custody evidence the keygen
-# prints on the host. None = NOT PINNED: every PROD form refuses until a reviewed commit pins it.
-PROD_MACHINE_ID_SHA256: str | None = None
+# prints on the host. Pinned by the owner's D-9 approval (2026-11-05); value from the sealed run-2 audit evidence.
+PROD_MACHINE_ID_SHA256: str | None = "1b1d67880b40565fda61c2944d20c9e9d90c650846e10cac3eb900e6a9ac1001"
 _MACHINE_ID_BYTES = re.compile(rb"[0-9a-f]{32}\n\Z")
 DEPLOYMENT_PATH = "/etc/lilith-authority-dev/deployment.json"
 DEPLOYMENT = b'{"environment":"prod","profile":"OWNER_PROD","schemaVersion":1}'
