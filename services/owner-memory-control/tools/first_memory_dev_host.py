@@ -108,13 +108,31 @@ class HostPathsV1:
 
 DEV_PATHS = HostPathsV1()
 
-# OWNER_PROD (2026-11): PROD's existing Core API data directory (`lilith-01`), its own 15B2a keys (D-6), the same
-# canonical-config path (naming debt). The stale path is one PROD never has; the binding refuses if it ever appears.
-PROD_DATA = Path("/home/lilith/.hermes/lilith-os/data")
+# OWNER_PROD (D-7, owner decision 2026-11-05: isolated canonical store). The canonical store, its Privacy DB and its
+# two NEW secrets live in a directory of their own on `lilith-01`, created empty by the inert install (R3b). LILITH's
+# live Core API stores and her two 15B2a keys in `PROD_LIVE_DATA` are never opened, migrated or reused; the host
+# refuses (PROD_PATH_IN_LIVE_DATA) if any PROD store path is inside that directory. The canonical-config path is the
+# DEV one (naming debt). The stale path is one PROD never has; the binding refuses if it ever appears.
+PROD_CANONICAL = Path("/home/lilith/.hermes/lilith-os/canonical")
+PROD_LIVE_DATA = Path("/home/lilith/.hermes/lilith-os/data")
 PROD_PATHS = HostPathsV1(
-    privacy_db=PROD_DATA / "privacy_governance.db", authoritative_privacy_db=PROD_DATA / "privacy_governance.db",
-    stale_privacy_db=PROD_DATA / "privacy_governance.dev.db", cognitive_db=PROD_DATA / "cognitive_memory.db",
-    actor_secret=PROD_DATA / "actor_authority.key", privacy_secret=PROD_DATA / "privacy_authority.key")
+    privacy_db=PROD_CANONICAL / "privacy_governance.db",
+    authoritative_privacy_db=PROD_CANONICAL / "privacy_governance.db",
+    stale_privacy_db=PROD_CANONICAL / "privacy_governance.stale.db", cognitive_db=PROD_CANONICAL / "cognitive_memory.db",
+    actor_secret=PROD_CANONICAL / "actor_authority.key", privacy_secret=PROD_CANONICAL / "privacy_authority.key")
+STORE_FIELDS = ("privacy_db", "authoritative_privacy_db", "stale_privacy_db", "cognitive_db", "actor_secret",
+                "privacy_secret")
+
+
+def prod_live_data_reason(paths: HostPathsV1) -> str | None:
+    """None, or PROD_PATH_IN_LIVE_DATA when any store path of an OWNER_PROD host lies in LILITH's live data directory
+    (under `host_root`, so a TEST root is judged the same way)."""
+    live = Path(os.path.normpath(Path(paths.host_root) / PROD_LIVE_DATA.relative_to("/")))
+    for field in STORE_FIELDS:
+        path = Path(os.path.normpath(getattr(paths, field)))
+        if path == live or live in path.parents:
+            return "PROD_PATH_IN_LIVE_DATA"
+    return None
 PRIVACY_ENVIRONMENT = {"dev": "DEV_SYNTHETIC", "prod": "OWNER_PROD"}
 
 
@@ -290,6 +308,9 @@ class FirstMemoryDevHostV1:
                  freshness: Optional[F.PrivacyFreshnessGate] = None,
                  now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc), environment: str = ENVIRONMENT):
         _need(environment in PRIVACY_ENVIRONMENT, "DEPLOYMENT_INVALID")
+        if environment == "prod":
+            reason = prod_live_data_reason(paths)
+            _need(reason is None, reason or "")
         self._transport, self._paths, self._freshness, self._now = transport, paths, freshness, now_fn
         self._env = environment
         self._signer = SIGNER_PROFILE.runtime_profile(environment)
