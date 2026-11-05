@@ -8,7 +8,7 @@ the router covers every platform.
 |---|---|
 | `canonical_memory.py` | new `lilith_router` module: owner-channel decision, one context-service request per turn, note merge, agent rebuild when the note changes |
 | `lilith_memory_context.py` | byte-identical copy of `services/owner-memory-control/lilith_owner_memory/hermes_memory_context.py` (the renderer) |
-| `base/gateway_integration.py` | the deployed PROD router (`99fe9064…`, Cutover 2), the patch base |
+| `base/gateway_integration.py` | the deployed PROD router (`4db8bb58…`: Cutover 2 + the two Test 4 fixes; audit run 2 pin MATCH 2026-11-05), the patch base (R3c rebase from `99fe9064…`) |
 | `gateway_integration.py`, `gateway_integration.patch` | that file plus 4 hunks: import, `route_turn` wrapper (note before routing, merge after), lean social reply gets the note |
 | `tests/test_prod_canonical_memory.py` | channel isolation, settings, merge/rebuild, patch integrity |
 
@@ -38,7 +38,7 @@ the router covers every platform.
 
 ## Before enabling on PROD (P2/P7/P8 of the release plan)
 
-1. Re-read PROD read-only. The router must still be `99fe9064…`; if it drifted, rebase the 4 hunks.
+1. Re-read PROD read-only. The router must still be `4db8bb58…`; if it drifted, rebase the 4 hunks.
 2. Run the Cutover 2 corpus harness (`c2_corpus.py`) on the patched tree with the feature **off**. Every turn must
    be byte-identical to today.
 3. Run one owner console check after the grant (P7), and one owner Telegram DM check plus one Discord check (P8).
