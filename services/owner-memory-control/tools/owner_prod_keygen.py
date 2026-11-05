@@ -8,9 +8,9 @@ The production twin of `lilith-authority-keygen-dev` (`actor` and `witness` form
 tool, so the DEV keygen stays byte-identical. It reuses that tool's validated mechanics (in-memory generation, the
 systemd-creds pipe, exclusive `O_EXCL` writes, the CURRENT-unchanged proof) and changes exactly three things:
 
-- the host: `lilith-01` with `PROD_MACHINE_ID`, and the root-installed `deployment.json` naming OWNER_PROD. The DEV
-  machine ID is refused even if both were equal. `PROD_MACHINE_ID` is unpinned (None) in source: a reviewed commit pins
-  it from a read-only PROD observation, so until then both forms refuse with PROD_MACHINE_ID_NOT_PINNED;
+- the host: `lilith-01` whose machine ID hashes to `PROD_MACHINE_ID_SHA256`, and the root-installed `deployment.json` naming OWNER_PROD. The DEV
+  machine ID is refused even if both were equal. `PROD_MACHINE_ID_SHA256` is unpinned (None) in source: a reviewed commit pins
+  the digest from a read-only PROD observation, so until then both forms refuse with PROD_MACHINE_ID_NOT_PINNED;
 - the key IDs: `prod.owner-prod.actor.1` (K-ACT) and `prod.witness.owner-prod.1` (K-WIT), matching the runtime
   OWNER_PROD profiles; a test pins them;
 - the publications: profile `OWNER_PROD`, environment `prod`.
@@ -22,6 +22,7 @@ inside a separately approved PROD ceremony step. It prints one canonical public 
 from __future__ import annotations
 
 import hashlib
+import re
 import os
 import sys
 from pathlib import Path
@@ -42,7 +43,12 @@ ENVIRONMENT = "prod"
 KEY_ID = "prod.owner-prod.actor.1"
 WITNESS_KEY_ID = "prod.witness.owner-prod.1"
 HOSTNAME = "lilith-01"
-PROD_MACHINE_ID: str | None = None          # NOT PINNED (see the module docstring)
+# D-9 (digest pin): SHA-256 of the exact bytes of lilith-01's /etc/machine-id (32 lowercase hex + "\n"), as the
+# COMPLETE read-only audit run 2 (2026-11-05) recorded it. The raw ID is never a committed constant: the host's own
+# file is read at run time, must hash to this pin, and then (as before) goes into the custody evidence the keygen
+# prints on the host. None = NOT PINNED: every PROD form refuses until a reviewed commit pins it.
+PROD_MACHINE_ID_SHA256: str | None = None
+_MACHINE_ID_BYTES = re.compile(rb"[0-9a-f]{32}\n\Z")
 DEPLOYMENT_PATH = "/etc/lilith-authority-dev/deployment.json"
 DEPLOYMENT = b'{"environment":"prod","profile":"OWNER_PROD","schemaVersion":1}'
 ACTOR, WITNESS = "actor", "witness"
@@ -64,20 +70,42 @@ def deployment_is_prod(host: Host) -> bool:
     return True
 
 
-def host_preflight(host: Host, *, euid: int, isolated: bool, hostname: str, machine_pin: str | None = None) -> str:
+def machine_digest_pin(machine_pin: str | None = None, machine_digest: str | None = None) -> str | None:
+    """The pinned digest: the committed `PROD_MACHINE_ID_SHA256`, or a TEST seam (a digest, or a raw test ID hashed
+    exactly as the host file is: ID + "\n")."""
+    if machine_digest is not None:
+        return machine_digest
+    if machine_pin is not None:
+        return hashlib.sha256((machine_pin + "\n").encode("ascii")).hexdigest()
+    return PROD_MACHINE_ID_SHA256
+
+
+def read_prod_machine_id(host: Host, pin_sha256: str) -> str:
+    """The host's raw machine ID, only if its file is exactly one ID line hashing to the pin and is not the DEV ID."""
+    try:
+        raw = host.path("/etc/machine-id").read_bytes()
+    except OSError as exc:
+        raise Refused("NOT_PROD_HOST") from exc
+    if not _MACHINE_ID_BYTES.fullmatch(raw) or hashlib.sha256(raw).hexdigest() != pin_sha256:
+        raise Refused("NOT_PROD_HOST")
+    machine_id = raw.decode("ascii").strip()
+    if machine_id == G.DEV_MACHINE_ID:
+        raise Refused("NOT_PROD_HOST")
+    return machine_id
+
+
+def host_preflight(host: Host, *, euid: int, isolated: bool, hostname: str, machine_pin: str | None = None,
+                   machine_digest: str | None = None) -> str:
     """The PROD host checks, then the DEV keygen's own custody checks. Returns the machine ID."""
-    pin = PROD_MACHINE_ID if machine_pin is None else machine_pin
+    pin = machine_digest_pin(machine_pin, machine_digest)
     if euid != 0:
         raise Refused("NOT_ROOT")
     if not isolated:
         raise Refused("INTERPRETER_NOT_ISOLATED")
     if pin is None:
         raise Refused("PROD_MACHINE_ID_NOT_PINNED")
-    try:
-        machine_id = host.path("/etc/machine-id").read_text(encoding="ascii").strip()
-    except OSError as exc:
-        raise Refused("NOT_PROD_HOST") from exc
-    if machine_id != pin or machine_id == G.DEV_MACHINE_ID or hostname.split(".", 1)[0] != HOSTNAME:
+    machine_id = read_prod_machine_id(host, pin)
+    if hostname.split(".", 1)[0] != HOSTNAME:
         raise Refused("NOT_PROD_HOST")
     if not deployment_is_prod(host):
         raise Refused("DEPLOYMENT_NOT_OWNER_PROD")
