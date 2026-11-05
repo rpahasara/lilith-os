@@ -280,7 +280,8 @@ class CiWiringTests(unittest.TestCase):
         job = CI.split("  repository-contracts:\n", 1)[1].split("\n  frontend-quality:\n", 1)[0]
         self.assertIn("scripts/probe_signer_restart_boundary.py run --disposable-runner", job)
         self.assertIn("sudo -n /usr/bin/python3 -I -B scripts/probe_signer_restart_boundary.py", job)
-        self.assertIn("runs-on: ubuntu-latest", job)
+        # GitHub-hosted, fixed image (owner-approved runner amendment 2026-11-05; ci-contracts-runner-amendment)
+        self.assertEqual(re.findall(r"(?m)^ *runs-on:(.*)$", job), [" ubuntu-24.04"])
         for forbidden in ("secrets.", "id-token", "google-github-actions", "gcloud", "systemctl restart"):
             self.assertNotIn(forbidden, CI)
         blocks = re.findall(r"^( *)permissions:\n((?:\1  .*\n)+)", CI, re.MULTILINE)
