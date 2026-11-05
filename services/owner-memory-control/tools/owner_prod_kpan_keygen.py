@@ -7,8 +7,9 @@ The production twin of `trackb_kpan_keygen.py`, which stays byte-identical. This
 module and sets, on that instance only, the OWNER_PROD identity (`kpan.owner-prod.01`, Privacy environment
 `OWNER_PROD`) and the PROD host identity (`lilith-01`, a machine ID hashing to `PROD_MACHINE_ID_SHA256`). The DEV tool's own preflight, generation,
 systemd-creds encryption, exclusive write and K-WIT-unchanged proof then run unchanged. Before them it refuses unless
-`PROD_MACHINE_ID_SHA256` is pinned (it is None in source until a reviewed commit pins the digest from a read-only PROD observation),
-the machine is not the DEV machine, and the root-installed `deployment.json` names OWNER_PROD.
+the host's machine-ID bytes hash to `PROD_MACHINE_ID_SHA256` (pinned by the owner's D-9 approval, 2026-11-05, from
+the sealed read-only audit run 2), the machine is not the DEV machine, and the root-installed `deployment.json`
+names OWNER_PROD.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ DEV_TOOL = HERE / "trackb_kpan_keygen.py"
 ENVIRONMENT = "OWNER_PROD"
 KEY_ID = "kpan.owner-prod.01"
 HOSTNAME = "lilith-01"
-PROD_MACHINE_ID_SHA256: str | None = None   # NOT PINNED: must equal owner_prod_keygen.PROD_MACHINE_ID_SHA256 (a test checks)
+PROD_MACHINE_ID_SHA256: str | None = "1b1d67880b40565fda61c2944d20c9e9d90c650846e10cac3eb900e6a9ac1001"   # D-9; must equal owner_prod_keygen (a test checks)
 DEPLOYMENT_PATH = "/etc/lilith-authority-dev/deployment.json"
 DEPLOYMENT = b'{"environment":"prod","profile":"OWNER_PROD","schemaVersion":1}'
 
