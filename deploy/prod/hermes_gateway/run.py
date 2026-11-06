@@ -5854,16 +5854,19 @@ class TurnRunner:
                 agent._user_profile_enabled = False
             except Exception:
                 pass
-            # session_search reads every stored conversation (no owner filter): a non-owner turn gets no recall
-            # database and is not offered the recall/memory tools. Its own chat history still loads as usual.
+            # A non-owner turn must not reach the owner's private data by any route: no recall database
+            # (session_search reads every stored conversation), and only tools that cannot read this host. The
+            # file, terminal, code, process and delegation tools can open state.db, logs and memory files directly
+            # (Discord test 2026-11-06: search_files found a Telegram-only marker). Allow-list, so a new tool
+            # stays off until it is added here. Its own chat history still loads as usual.
             try:
                 agent._get_session_db_for_recall = lambda: None
-                _lr_hidden = {"session_search", "memory"}
+                _lr_safe = {"web_search", "web_extract", "vision_analyze", "text_to_speech", "clarify", "todo"}
                 agent.tools = [t for t in (agent.tools or [])
-                               if ((t or {}).get("function") or {}).get("name") not in _lr_hidden]
-                agent.valid_tool_names = {n for n in (agent.valid_tool_names or set()) if n not in _lr_hidden}
+                               if ((t or {}).get("function") or {}).get("name") in _lr_safe]
+                agent.valid_tool_names = {n for n in (agent.valid_tool_names or set()) if n in _lr_safe}
             except Exception:
-                pass
+                agent.tools, agent.valid_tool_names = [], set()
         # ── end LILITH owner-only memory ──
 
         # Per-message state — callbacks and reasoning config change every
