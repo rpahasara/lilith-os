@@ -5,6 +5,8 @@
 #   lilith-deploy router   <bundle.tar> <main-sha40>    deploy/prod/lilith_router/{*.py,router.yaml}
 #                                                        -> ~/.hermes/lilith_router/
 #   lilith-deploy hermes-gateway <bundle.tar> <sha40>    deploy/prod/hermes_gateway/run.py -> hermes-agent/gateway/
+#   lilith-deploy hermes-approval <bundle.tar> <sha40>   deploy/prod/hermes_cli/write_approval_commands.py
+#                                                        -> hermes-agent/hermes_cli/ (LILITH-OS-first approvals)
 #   lilith-deploy status                                 the last deploys (read-only)
 #
 # Fixed components and target paths only; the bundle may hold only those file names (flat, regular files). Every
@@ -35,7 +37,7 @@ if [ "${1:-}" = status ]; then
   tail -n 20 "$LOG" 2>/dev/null || echo "no deploys yet"
   exit 0
 fi
-[ $# -eq 3 ] || die "usage: lilith-deploy <core-api|router|hermes-gateway> <bundle.tar> <main-sha40>"
+[ $# -eq 3 ] || die "usage: lilith-deploy <core-api|router|hermes-gateway|hermes-approval> <bundle.tar> <main-sha40>"
 COMP=$1; BUNDLE=$2; SHA=$3
 [[ $SHA =~ ^[0-9a-f]{40}$ ]] || die "sha"
 case $COMP in
@@ -44,6 +46,8 @@ case $COMP in
   router)   DEST=$H/lilith_router; ALLOW='^([a-z_][a-z0-9_]*\.py|router\.yaml)$'; SVC=hermes-gateway.service
             PY=$H/hermes-agent/venv/bin/python ;;
   hermes-gateway) DEST=$H/hermes-agent/gateway; ALLOW='^run\.py$'; SVC=hermes-gateway.service
+            PY=$H/hermes-agent/venv/bin/python ;;
+  hermes-approval) DEST=$H/hermes-agent/hermes_cli; ALLOW='^write_approval_commands\.py$'; SVC=hermes-gateway.service
             PY=$H/hermes-agent/venv/bin/python ;;
   *) die "component" ;;
 esac
