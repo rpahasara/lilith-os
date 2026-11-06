@@ -3,8 +3,13 @@
 
 Prints the owner's own conversations of the last REVIEW_HOURS: the console (lilith_os) and the owner's private
 Telegram DM (fast Groq turns included: they are stored in state.db like every other turn), plus what is already
-remembered and what is already waiting for approval, so the review never proposes the same thing twice.
-Nothing from any other chat is read. Prints NO_NEW_OWNER_CONVERSATION when there is nothing to review.
+remembered, what is already waiting for approval and what the owner already rejected, so the review never proposes
+the same thing twice. Nothing from any other chat is read. Prints NO_NEW_OWNER_CONVERSATION when there is nothing new.
+
+Rejections leave no trace in Hermes (/memory reject deletes the pending file), so `snapshot()` (run every few minutes
+by the silent no-agent cron job owner_memory_snapshot.py) records every pending proposal in SEEN; a recorded proposal
+that is no longer pending and whose text is not in USER.md / MEMORY.md was rejected. The read is also a snapshot, so
+it is the one place that writes (only SEEN, under ~/.hermes/memory-review/).
 """
 import glob
 import json
@@ -18,6 +23,7 @@ HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 REVIEW_HOURS = 26
 PER_MESSAGE = 700
 TOTAL = 14000
+SEEN = "memory-review/seen.jsonl"
 
 
 def owner_ids(home: Path) -> set:
@@ -64,14 +70,70 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float) -> list:
     return lines
 
 
-def pending(home: Path) -> list:
+def _pending_records(home: Path) -> list:
     out = []
     for path in sorted(glob.glob(str(home / "pending" / "memory" / "*.json"))):
         try:
             rec = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        out.append(f"- {rec.get('id', Path(path).stem)}: {str(rec.get('summary', ''))[:200]}")
+        rec.setdefault("id", Path(path).stem)
+        out.append(rec)
+    return out
+
+
+def pending(home: Path) -> list:
+    return [f"- {r['id']}: {str(r.get('summary', ''))[:200]}" for r in _pending_records(home)]
+
+
+def _contents(rec: dict) -> list:
+    """The texts a proposal would add (single write or batch)."""
+    payload = rec.get("payload") or {}
+    ops = payload.get("operations") if payload.get("action") == "batch" else [payload]
+    return [str(o.get("content")) for o in ops or [] if isinstance(o, dict) and o.get("content")]
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split()).lower()
+
+
+def _read_seen(home: Path) -> list:
+    try:
+        lines = (home / SEEN).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
+    return out
+
+
+def snapshot(home: Path = HOME) -> int:
+    """Record every pending proposal once (id + texts). Silent; returns how many were new."""
+    seen = {r.get("id") for r in _read_seen(home)}
+    new = [r for r in _pending_records(home) if r["id"] not in seen]
+    if new:
+        path = home / SEEN
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            for r in new:
+                f.write(json.dumps({"id": r["id"], "summary": str(r.get("summary", ""))[:300],
+                                    "contents": _contents(r)}, ensure_ascii=False) + "\n")
+    return len(new)
+
+
+def rejected(home: Path) -> list:
+    """Texts of seen proposals that are gone from pending and never reached memory."""
+    live = {r["id"] for r in _pending_records(home)}
+    memory = _norm(remembered(home))
+    out = []
+    for rec in _read_seen(home):
+        if rec.get("id") in live:
+            continue
+        out += [f"- {t[:200]}" for t in rec.get("contents") or [] if _norm(t) not in memory]
     return out
 
 
@@ -88,6 +150,10 @@ def remembered(home: Path) -> str:
 
 def main(home: Path = HOME, now: float = None) -> str:
     now = time.time() if now is None else now
+    try:
+        snapshot(home)
+    except OSError:
+        pass
     try:
         con = sqlite3.connect(f"file:{home / 'state.db'}?mode=ro", uri=True, timeout=10)
     except sqlite3.Error:
@@ -108,6 +174,7 @@ def main(home: Path = HOME, now: float = None) -> str:
     return "\n".join([
         "=== ALREADY REMEMBERED (do not propose again) ===", remembered(home), "",
         "=== ALREADY WAITING FOR APPROVAL (do not propose again) ===", "\n".join(pending(home)) or "(none)", "",
+        "=== REJECTED BY THE OWNER (never propose these again) ===", "\n".join(rejected(home)) or "(none)", "",
         "=== ALSO STORED ELSEWHERE (never propose) ===",
         "- the project codename and the relationship-origin statement (canonical memory)", "",
         f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM) ===", *body,

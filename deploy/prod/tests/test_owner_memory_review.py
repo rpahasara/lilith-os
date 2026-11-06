@@ -66,6 +66,48 @@ class ReviewContextTests(unittest.TestCase):
             json.dumps({"id": "abc123", "summary": "add to user profile: plays violin"}), encoding="utf-8")
         self.assertIn("- abc123: add to user profile: plays violin", OMR.main(self.home, now=NOW))
 
+    def stage(self, pid, payload, summary="s"):
+        d = self.home / "pending" / "memory"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{pid}.json").write_text(json.dumps({"id": pid, "summary": summary, "payload": payload}), encoding="utf-8")
+
+    def test_rejected_proposals_are_never_proposed_again(self):
+        self.stage("rej1", {"action": "add", "target": "user", "content": "User plays the violin."})
+        self.stage("ok1", {"action": "add", "target": "user", "content": "User likes green tea."})
+        self.stage("bat1", {"action": "batch", "target": "user", "operations": [
+            {"action": "replace", "old_text": "x", "content": "User lives in Colombo."},
+            {"action": "add", "content": "User calls Sundays Quiet Days."}]})
+        self.assertEqual(OMR.snapshot(self.home), 3)
+        self.assertEqual(OMR.snapshot(self.home), 0)                                   # recorded once
+        for pid in ("rej1", "ok1", "bat1"):                                            # all decided
+            (self.home / "pending" / "memory" / f"{pid}.json").unlink()
+        (self.home / "memories" / "USER.md").write_text("Prefers tea.\n§\nUser likes  green tea.", encoding="utf-8")
+        out = OMR.main(self.home, now=NOW)
+        block = out.split("=== REJECTED BY THE OWNER (never propose these again) ===")[1].split("===")[0]
+        self.assertIn("- User plays the violin.", block)                              # rejected
+        self.assertIn("- User lives in Colombo.", block)                              # rejected batch op
+        self.assertIn("- User calls Sundays Quiet Days.", block)
+        self.assertNotIn("green tea", block)                                           # approved: in memory
+
+    def test_still_pending_is_not_rejected(self):
+        self.stage("p1", {"action": "add", "target": "memory", "content": "Weekly planning on Mondays."})
+        out = OMR.main(self.home, now=NOW)
+        block = out.split("=== REJECTED BY THE OWNER (never propose these again) ===")[1].split("===")[0]
+        self.assertIn("(none)", block)
+        self.assertIn("- p1:", out)
+
+    def test_snapshot_job_wrapper(self):
+        import os
+        import runpy
+        self.stage("w1", {"action": "add", "target": "user", "content": "User owns a bike."})
+        old = os.environ.get("HERMES_HOME")
+        os.environ["HERMES_HOME"] = str(self.home)
+        try:
+            runpy.run_path(str(ROOT / "deploy/prod/hermes_scripts/owner_memory_snapshot.py"))
+        finally:
+            os.environ.pop("HERMES_HOME") if old is None else os.environ.__setitem__("HERMES_HOME", old)
+        self.assertIn('"w1"', (self.home / "memory-review" / "seen.jsonl").read_text(encoding="utf-8"))
+
     def test_nothing_new_is_silent(self):
         self.assertEqual(OMR.main(self.home, now=NOW + 30 * 3600), "NO_NEW_OWNER_CONVERSATION")
 
