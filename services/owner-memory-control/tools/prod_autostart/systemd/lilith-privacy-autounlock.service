@@ -1,0 +1,17 @@
+# LILITH Privacy: automatic unlock for this boot (owner decision 2026-11-06). See /usr/local/sbin/lilith-privacy-autounlock.
+[Unit]
+Description=LILITH Privacy automatic unlock for this boot
+Requires=lilith-recovery-witness.service
+After=lilith-recovery-witness.service
+StartLimitIntervalSec=900
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lilith-privacy-autounlock
+LoadCredentialEncrypted=kpck-key:/etc/credstore.encrypted/lilith-privacy-kpck.cred
+RuntimeDirectory=lilith-privacy-autounlock
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=30s

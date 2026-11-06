@@ -217,6 +217,27 @@ class GrantTests(unittest.TestCase):
         self.write(channel="lilith_os")                                       # a v2 grant never covers Telegram
         self.assertIsNone(self.basis(channel="telegram_owner_dm"))
 
+    def test_a_v3_grant_until_revoked(self):
+        # owner decision 2026-11-06: owner channels without weekly renewal; revocation = remove the grant/channel
+        self.v3(expiresAt=None)
+        far = NOW + timedelta(days=3650)
+        self.assertEqual(self.basis(channel="lilith_os", now=far), S.V2)
+        self.assertEqual(self.basis(channel="telegram_owner_dm", session="agent:main:telegram:dm:42", now=far), S.V2)
+        for channel in ("public", "telegram", "discord", "telegram_group"):
+            self.assertIsNone(self.basis(channel=channel, now=far))
+        self.assertIsNone(self.basis(now=NOW - timedelta(days=1)))            # still not valid before grantedAt
+        self.v3(expiresAt=None, channels=["lilith_os"])                       # revoking Telegram = drop the label
+        self.assertIsNone(self.basis(channel="telegram_owner_dm", now=far))
+        for fields in ({"grantedAt": None}, {"grantedAt": "yesterday"}, {"forgetScope": "ALL"},
+                       {"channels": ["public"]}):
+            with self.subTest(fields=fields):
+                self.v3(expiresAt=None, **fields)
+                self.assertIsNone(self.basis(channel="lilith_os"))
+        self.path.unlink()                                                    # revoked: no file, no grant
+        self.assertIsNone(self.basis(channel="lilith_os"))
+        self.write(expiresAt=None)                                            # v2 keeps its 7-day limit
+        self.assertIsNone(self.basis())
+
     def test_a_v1_grant_keeps_the_release_meaning(self):
         v1 = {"schemaVersion": 1, "channel": "lilith_os", "sessionId": "sess.owner",
               "grantedAt": stamp(NOW - timedelta(hours=1)), "expiresAt": stamp(NOW + timedelta(days=1))}

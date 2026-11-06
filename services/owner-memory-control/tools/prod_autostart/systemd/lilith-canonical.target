@@ -1,0 +1,10 @@
+# LILITH canonical memory at boot (owner decision 2026-11-06): witness, signer, context socket, Privacy unlock.
+# The member units stay unchanged (static); this target is the one enabled unit that pulls them in.
+[Unit]
+Description=LILITH canonical memory (witness, signer, context, Privacy unlock)
+Wants=lilith-recovery-witness-owner.socket lilith-recovery-witness-signer.socket lilith-recovery-witness.service
+Wants=lilith-authority-dev.socket lilith-authority-dev.service
+Wants=lilith-first-memory-context.socket lilith-privacy-autounlock.service
+
+[Install]
+WantedBy=multi-user.target

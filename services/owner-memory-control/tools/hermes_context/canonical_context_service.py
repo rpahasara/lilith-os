@@ -25,7 +25,10 @@ and owner-personal memory reaches a label only while the owner's grant lists it:
 
     {"schemaVersion": 3, "channels": ["lilith_os", "telegram_owner_dm"] (non-empty, no duplicates, well-formed labels),
      "sessionScope": "ALL_OWNER_CHANNEL_SESSIONS" | "<exact session id>", "forgetScope": "CANONICAL_RECORDS_ONLY",
-     "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>"}
+     "grantedAt": "<UTC Z>", "expiresAt": "<UTC Z, at most 7 days later>" | null}
+
+A v3 grant with `"expiresAt": null` (owner decision 2026-11-06) lasts until the owner revokes it: delete the grant
+file, or drop a channel from it (and/or the owner's Telegram id from the router settings). v1/v2 keep their limits.
 
 `public` (Discord, groups, any other chat) can never be granted.
 
@@ -104,13 +107,18 @@ def grant_basis(cli: Any, channel: str, session: str, *, path: str = GRANT_PATH,
     scope = grant["sessionScope"]
     if not (isinstance(scope, str) and (scope == everyone or cli._SESSION.match(scope))):
         return None
-    if not all(isinstance(grant[k], str) and cli._INSTANT.match(grant[k]) for k in ("grantedAt", "expiresAt")):
+    until_revoked = grant["schemaVersion"] == 3 and grant["expiresAt"] is None     # owner decision 2026-11-06
+    stamps = ("grantedAt",) if until_revoked else ("grantedAt", "expiresAt")
+    if not all(isinstance(grant[k], str) and cli._INSTANT.match(grant[k]) for k in stamps):
         return None
-    granted, expires = (datetime.strptime(grant[k], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-                        for k in ("grantedAt", "expiresAt"))
+    granted = datetime.strptime(grant["grantedAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     current = (now or (lambda: datetime.now(timezone.utc)))()
-    if not granted <= current < expires or (expires - granted).total_seconds() > GRANT_MAX_SECONDS:
+    if not granted <= current:
         return None
+    if not until_revoked:
+        expires = datetime.strptime(grant["expiresAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        if not current < expires or (expires - granted).total_seconds() > GRANT_MAX_SECONDS:
+            return None
     return V2 if scope in (everyone, session) else None
 
 
