@@ -52,6 +52,13 @@ _ACTION_RE = re.compile(
     r"file|attach|download|upload|install|timer|alarm|buy|order|translate)\b",
     re.IGNORECASE,
 )
+# Durable preferences and facts about the owner go to the full (tool-capable) path, where LILITH can stage a memory
+# proposal in the conversation; the lean reply has no tools and must never imply it saved anything (2026-11-06).
+_MEMORY_STATEMENT_RE = re.compile(
+    r"\b(from now on|going forward|in (the )?future|i'?d (rather|prefer)|i prefer|i'?d like you to|"
+    r"my (real |actual |full |legal )?name is|i always|i never|i usually|keep in mind)\b",
+    re.IGNORECASE,
+)
 _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.IGNORECASE | re.DOTALL)
 _MAX_MESSAGE_CHARS = 1500
 _MAX_TURN_CHARS = 1500
@@ -72,6 +79,8 @@ def skip_reason(message: str) -> str:
         return "long_message"
     if _ACTION_RE.search(text):
         return "action_intent"
+    if _MEMORY_STATEMENT_RE.search(text):
+        return "memory_statement"
     return ""
 
 

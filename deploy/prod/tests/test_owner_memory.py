@@ -139,6 +139,31 @@ class LeanPathTests(unittest.TestCase):
         self.assertEqual(text.count("_social_lean.reply("), 1)
 
 
+class LeanSkipTests(unittest.TestCase):
+    """Durable statements take the tool-capable path so LILITH can stage a proposal in the conversation."""
+
+    def setUp(self):
+        self.tmp, self.gi = load_router()
+        self.skip = self.gi._social_lean.skip_reason
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_preferences_and_facts_leave_the_lean_path(self):
+        for msg in ("Hey Lilith, from now on, when we review our progress I'd prefer three short sections haha",
+                    "Going forward please keep answers short", "I prefer tea over coffee",
+                    "Just so you know, my real name is Ravindu", "I always work out on Mondays",
+                    "Keep in mind I'm vegetarian"):
+            with self.subTest(msg=msg):
+                self.assertIn(self.skip(msg), ("memory_statement", "action_intent"))
+
+    def test_casual_chat_stays_lean(self):
+        for msg in ("hey cutie how was your day", "lol that's so funny", "good night Lilith",
+                    "I'm tired today", "what are you up to?"):
+            with self.subTest(msg=msg):
+                self.assertEqual(self.skip(msg), "")
+
+
 class FullAgentPathTests(unittest.TestCase):
     """The hook in gateway/run.py, executed exactly as written against fake agents."""
 
