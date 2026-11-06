@@ -12,7 +12,9 @@
 #   lilith-privacy-autounlock            unlock unless this boot already has a marker
 #   lilith-privacy-autounlock --force    unlock even if a marker exists (republishes it for the same boot)
 set -euo pipefail
-umask 077
+# umask 022: the host step creates /run/lilith-privacy-fresh after a reboot with mkdir(0o755); a stricter umask
+# makes it 0700 and the context host (uid lilith) then cannot read the marker. Private files below get explicit modes.
+umask 022
 HT=/opt/lilith-first-memory-dev/current
 PY=/opt/lilith-authority-dev/current/venv/bin/python
 CONF=/etc/lilith-privacy-autounlock
