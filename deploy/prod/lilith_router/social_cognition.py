@@ -76,7 +76,8 @@ _RECIPIENT_PATTERNS = (
 )
 _FORMAL_RE = re.compile(
     r"\b(?:(?:reply|write|word|say|make\s+it|keep\s+it|sound)\s+"
-    r"(?:this\s+)?(?:formally|professionally)|formal\s+(?:reply|response|message|tone))\b",
+    r"(?:this\s+)?(?:formally|professionally)|formal\s+(?:reply|response|message|tone)|"
+    r"(?:keep|make)\s+it\s+(?:formal|professional))\b",
     re.IGNORECASE,
 )
 _CASUAL_RE = re.compile(
@@ -96,7 +97,8 @@ _PLAYFUL_LEXICAL_RE = re.compile(
 _LAUGHTER_RE = re.compile(r"(?:😂|🤣|\blol\b|\blmao\b)", re.IGNORECASE)
 _SUPPORT_RE = re.compile(
     r"\b(?:(?:can|could|would)\s+you\s+(?:please\s+)?"
-    r"(?:reassure|support|comfort)\s+me|i\s+need\s+(?:reassurance|support))\b",
+    r"(?:reassure|support|comfort|cheer\s+up)\s+me|i\s+need\s+(?:reassurance|support|comfort|a\s+hug)|"
+    r"cheer\s+me\s+up)\b",
     re.IGNORECASE,
 )
 _DIFFICULTY_RE = re.compile(
@@ -105,6 +107,27 @@ _DIFFICULTY_RE = re.compile(
     re.IGNORECASE,
 )
 _CORRECTION_RE = re.compile(r"^\s*(?:no|actually|correction)\b", re.IGNORECASE)
+
+# 2026-11-06 owner review: the explicit-only detectors above found 0 cues in 150 real owner messages. These are
+# contextual CLUES (laughter, emoji, plain mood words, everyday corrections), never an emotional classification: a
+# turn can carry several (e.g. frustration told with a joke), and the reply stays LILITH's own.
+_LAUGH_CUE_RE = re.compile(
+    r"(?:\b(?:ha(?:ha)+h?|he(?:he)+|lo+l|lmao|lmfao|rofl)\b|[😂🤣😆😹😜😝😛😏😋🙃😅])", re.IGNORECASE)
+_WARM_CUE_RE = re.compile(r"[❤💕💖💗💞🥰😘😍🤗🌸✨]")
+_MOOD_DIFFICULTY_RE = re.compile(
+    r"\b(?:(?:i\s+am|i['’]?m|im|i\s+feel|feeling)\s+(?:so\s+|really\s+|pretty\s+|kinda\s+|a\s+bit\s+|super\s+)?"
+    r"(?:tired|exhausted|drained|stressed|sad|down|low|lonely|anxious|burn(?:t|ed)\s+out|fed\s+up|done)|"
+    r"(?:rough|long|bad|hard|awful|terrible|horrible|shit|crap)\s+(?:day|night|week)|"
+    r"ugh+|fml|this\s+is\s+killing\s+me|i\s+hate\s+(?:this|it|my\s+life))\b",
+    re.IGNORECASE,
+)
+_GENERAL_CORRECTION_RE = re.compile(
+    r"(?:^\s*(?:no|nope|nah|wrong|actually)\b(?!\s+(?:worries|problem|prob|probs|rush|way|thanks|biggie))"
+    r"(?!,?\s+(?:it['’]?s|it\s+is|i['’]?m|i\s+am)\s+(?:fine|good|ok|okay|alright))|"
+    r"\b(?:that['’]?s|that\s+is|you['’]?re|you\s+are)\s+(?:not\s+(?:right|correct|what\s+i)|wrong)\b|"
+    r"\bnot\s+what\s+i\s+(?:meant|asked|said)\b|\bi\s+meant\b|\byou\s+(?:misunderstood|got\s+it\s+wrong)\b)",
+    re.IGNORECASE,
+)
 
 _INTERACTION_MAP = {
     E_FORMAL: ("FORMALITY", "PROFESSIONAL"),
@@ -214,6 +237,15 @@ def build_social_turn_evidence(message: str, correlation_id: str) -> Dict[str, A
             "sourceRange": {"start": start, "endExclusive": end},
             "_sort": (start, E_PLAYFUL),
         })
+    else:
+        clue = _LAUGH_CUE_RE.search(text) or _WARM_CUE_RE.search(text)
+        if clue:                                  # one playful/warm clue per turn is enough
+            raw.append(_raw_item(E_PLAYFUL, clue))
+
+    if not any(item["evidenceType"] == E_DIFFICULTY for item in raw):
+        mood = _MOOD_DIFFICULTY_RE.search(text)
+        if mood:
+            raw.append(_raw_item(E_DIFFICULTY, mood))
 
     correction = _CORRECTION_RE.search(text)
     asserted_roles = [i for i in role_entries if i["assertionStatus"] == "ASSERTED"]
@@ -222,6 +254,10 @@ def build_social_turn_evidence(message: str, correlation_id: str) -> Dict[str, A
         raw.append(_raw_item(
             E_CORRECTION, correction, _correction_roles=asserted_roles + negated_roles,
         ))
+    else:
+        general = _GENERAL_CORRECTION_RE.search(text)
+        if general:                               # an everyday correction of LILITH's last answer (no role swap)
+            raw.append(_raw_item(E_CORRECTION, general, _general_correction=True))
 
     unique: List[Dict[str, Any]] = []
     seen = set()
@@ -249,7 +285,7 @@ def build_social_turn_evidence(message: str, correlation_id: str) -> Dict[str, A
             if not role_ref:
                 continue
             item["relatedSourceRefs"] = [role_ref]
-        elif item["evidenceType"] == E_CORRECTION:
+        elif item["evidenceType"] == E_CORRECTION and not item.get("_general_correction"):
             refs = [
                 role_ref_by_key.get(role_item.get("_role_key"))
                 for role_item in item.get("_correction_roles", [])
@@ -404,7 +440,7 @@ def build_social_context(social_input: Dict[str, Any]) -> Dict[str, Any]:
         })
 
     for cue in cues:
-        if cue["cueType"] == C_CORRECTION:
+        if cue["cueType"] == C_CORRECTION and len(cue["sourceRefs"]) >= 3:   # a role swap (2 roles + the cue)
             conflicts.append({
                 "conflictType": "CURRENT_TURN_ROLE_CORRECTION",
                 "sourceRefs": cue["sourceRefs"],
