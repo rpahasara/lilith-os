@@ -5854,6 +5854,16 @@ class TurnRunner:
                 agent._user_profile_enabled = False
             except Exception:
                 pass
+            # session_search reads every stored conversation (no owner filter): a non-owner turn gets no recall
+            # database and is not offered the recall/memory tools. Its own chat history still loads as usual.
+            try:
+                agent._get_session_db_for_recall = lambda: None
+                _lr_hidden = {"session_search", "memory"}
+                agent.tools = [t for t in (agent.tools or [])
+                               if ((t or {}).get("function") or {}).get("name") not in _lr_hidden]
+                agent.valid_tool_names = {n for n in (agent.valid_tool_names or set()) if n not in _lr_hidden}
+            except Exception:
+                pass
         # ── end LILITH owner-only memory ──
 
         # Per-message state — callbacks and reasoning config change every

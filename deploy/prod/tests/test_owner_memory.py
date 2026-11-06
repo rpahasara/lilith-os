@@ -151,7 +151,10 @@ class FullAgentPathTests(unittest.TestCase):
         return "\n".join(l[8:] for l in text[start:end].splitlines())
 
     def run_hook(self, lr_res):
-        agent = types.SimpleNamespace(_memory_store=object(), _memory_enabled=True, _user_profile_enabled=True)
+        tools = [{"function": {"name": n}} for n in ("session_search", "memory", "terminal", "web_search")]
+        agent = types.SimpleNamespace(_memory_store=object(), _memory_enabled=True, _user_profile_enabled=True,
+                                      tools=tools, valid_tool_names={"session_search", "memory", "terminal", "web_search"},
+                                      _get_session_db_for_recall=lambda: "STATE_DB")
         exec(compile(self.hook(), "hook", "exec"), {}, {"agent": agent, "_lr_res": lr_res})
         return agent
 
@@ -159,6 +162,8 @@ class FullAgentPathTests(unittest.TestCase):
         a = self.run_hook({"owner_memory": True, "turn_route": {}})
         self.assertIsNotNone(a._memory_store)
         self.assertTrue(a._memory_enabled and a._user_profile_enabled)
+        self.assertEqual(a._get_session_db_for_recall(), "STATE_DB")                       # owner keeps recall
+        self.assertEqual(a.valid_tool_names, {"session_search", "memory", "terminal", "web_search"})
 
     def test_everything_else_drops_memory(self):
         for lr in ({"owner_memory": False}, {}, None, {"owner_memory": "yes"}, {"owner_memory": 1}, "x"):
@@ -166,6 +171,9 @@ class FullAgentPathTests(unittest.TestCase):
                 a = self.run_hook(lr)
                 self.assertIsNone(a._memory_store)
                 self.assertFalse(a._memory_enabled or a._user_profile_enabled)
+                self.assertIsNone(a._get_session_db_for_recall())                         # no cross-chat search
+                self.assertEqual(a.valid_tool_names, {"terminal", "web_search"})          # ordinary tools kept
+                self.assertEqual([t["function"]["name"] for t in a.tools], ["terminal", "web_search"])
 
     def test_hook_is_present_once(self):
         self.assertEqual(RUN_PY.read_text(encoding="utf-8").count("LILITH owner-only Hermes memory"), 1)
