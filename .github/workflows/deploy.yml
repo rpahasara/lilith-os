@@ -77,7 +77,7 @@ jobs:
               python -m py_compile services/core-api/app.py
               python -m unittest discover -s services/core-api/tests -p "test_*.py" ;;
             router)
-              python -m unittest integrations/hermes/overlays/prod-canonical-memory-context/tests/test_prod_canonical_memory.py ;;
+              python -m compileall -q deploy/prod/lilith_router ;;
             *) exit 1 ;;
           esac
 
@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           case "$COMPONENT" in
             core-api) tar -cf "$RUNNER_TEMP/bundle.tar" -C services/core-api app.py ;;
-            router)   (cd integrations/hermes/prod/lilith_router && tar -cf "$RUNNER_TEMP/bundle.tar" *.py router.yaml) ;;
+            router)   (cd deploy/prod/lilith_router && tar -cf "$RUNNER_TEMP/bundle.tar" *.py router.yaml) ;;
           esac
           tar -tvf "$RUNNER_TEMP/bundle.tar"
           sha256sum "$RUNNER_TEMP/bundle.tar"

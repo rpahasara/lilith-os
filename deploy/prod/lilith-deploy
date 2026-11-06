@@ -2,7 +2,7 @@
 # LILITH PROD deploy (root, /usr/local/sbin/lilith-deploy). The GitHub deployer may run ONLY this, via one sudoers line.
 #
 #   lilith-deploy core-api <bundle.tar> <main-sha40>    services/core-api/app.py      -> lilith-os/api/app.py
-#   lilith-deploy router   <bundle.tar> <main-sha40>    integrations/hermes/prod/lilith_router/{*.py,router.yaml}
+#   lilith-deploy router   <bundle.tar> <main-sha40>    deploy/prod/lilith_router/{*.py,router.yaml}
 #                                                        -> ~/.hermes/lilith_router/
 #   lilith-deploy status                                 the last deploys (read-only)
 #

@@ -5,14 +5,14 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-MIRROR = ROOT / "integrations/hermes/prod/lilith_router"
+MIRROR = ROOT / "deploy/prod/lilith_router"
 OVERLAY = ROOT / "integrations/hermes/overlays/prod-canonical-memory-context"
 ALLOWED = __import__("re").compile(r"^([a-z_][a-z0-9_]*\.py|router\.yaml)$")
 
 
 class MirrorTests(unittest.TestCase):
     def test_names_are_deployable(self):
-        names = sorted(p.name for p in MIRROR.iterdir())
+        names = sorted(p.name for p in MIRROR.iterdir() if p.name != ".gitattributes")
         self.assertIn("router.yaml", names)
         self.assertGreaterEqual(len(names), 30)
         for name in names:
@@ -36,6 +36,8 @@ class MirrorTests(unittest.TestCase):
 
     def test_no_line_endings_or_settings_files(self):
         for path in MIRROR.iterdir():
+            if path.name == ".gitattributes":
+                continue
             self.assertNotIn(b"\r\n", path.read_bytes(), path.name)
         self.assertFalse((MIRROR / "canonical_memory.json").exists())   # root-owned settings stay on the host
 
