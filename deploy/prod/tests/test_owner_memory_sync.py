@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+os.environ["LILITH_OS_API_URL"] = "http://127.0.0.1:9"     # never reach a real Core API (a local tunnel may be PROD)
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services/core-api"))
@@ -60,6 +61,7 @@ class SyncTest(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(db) and os.unlink(db))
         app.DB = Path(db)
         app._world_schema_ready = False
+        app._l18_schema_ready = False
         patch = mock.patch.dict(os.environ, {"LILITH_OS_WRITE_AUTH": "open-acknowledged"})
         patch.start()
         self.addCleanup(patch.stop)

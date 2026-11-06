@@ -10,6 +10,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest import mock
+os.environ["LILITH_OS_API_URL"] = "http://127.0.0.1:9"     # never reach a real Core API (a local tunnel may be PROD)
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "services/core-api"))
@@ -62,6 +63,7 @@ class LilithFirstApprovalTest(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(db) and os.unlink(db))
         app.DB = Path(db)
         app._world_schema_ready = False
+        app._l18_schema_ready = False
         env = mock.patch.dict(os.environ, {"LILITH_OS_WRITE_AUTH": "open-acknowledged", "HERMES_HOME": str(self.tmp)})
         env.start()
         self.addCleanup(env.stop)
@@ -159,6 +161,31 @@ class LilithFirstApprovalTest(unittest.TestCase):
         self.approve("p9")
         cur = self.export()
         self.assertEqual((cur["User owns a bike."]["store"], cur["Weekly planning on Mondays."]["store"]), ("user", "memory"))
+
+    def test_reject_and_proposals_are_l18_events_in_lilith_os(self):
+        def to_app(body):
+            return app.post_learning_events(body, x_lilith_os_write=None)
+        api_calls = []
+
+        def omr_api(method, path, body=None):
+            api_calls.append((method, path))
+            if method == "POST":
+                return to_app(body)
+            return app.get_learning_events(kind="REJECTED")
+        with mock.patch.object(WAC, "_lilith_event_post", to_app), mock.patch.object(OMR, "_api", omr_api):
+            (self.tmp / "pending" / "memory").mkdir(parents=True, exist_ok=True)
+            (self.tmp / "pending" / "memory" / "r2.json").write_text(json.dumps({"id": "r2", "payload": {
+                "action": "add", "target": "user", "content": "User calls Fridays Pizza Night."}}), encoding="utf-8")
+            OMR.snapshot(self.tmp)                                                  # PROPOSED
+            self.stage("r2", {"action": "add", "target": "user", "content": "User calls Fridays Pizza Night."})
+            WAC._reject("memory", ["r2"])                                           # REJECTED
+            (self.tmp / "memory-review" / "rejected.jsonl").unlink()                # Hermes-side log gone
+            self.assertIn("- User calls Fridays Pizza Night.", OMR.rejected(self.tmp))   # still known: from L18
+        kinds = [(e["kind"], e["proposal_id"]) for e in app.get_learning_events()["events"]]
+        self.assertEqual(kinds, [("PROPOSED", "r2"), ("REJECTED", "r2")])
+        self.stage("p10", {"action": "add", "target": "user", "content": "User owns a kayak."})
+        self.approve("p10")
+        self.assertIn(("APPROVED", "p10"), [(e["kind"], e["proposal_id"]) for e in app.get_learning_events()["events"]])
 
     def test_reject_is_logged_and_never_proposed_again(self):
         self.stage("r1", {"action": "add", "target": "user", "content": "User calls Sundays Quiet Days."})

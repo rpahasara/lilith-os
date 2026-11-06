@@ -1,10 +1,12 @@
 """The nightly review's context script: only the owner's console + private Telegram DM, fast Groq turns included."""
 import importlib.util
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+os.environ["LILITH_OS_API_URL"] = "http://127.0.0.1:9"     # never reach a real Core API (a local tunnel may be PROD)
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("omr", ROOT / "deploy/prod/hermes_scripts/owner_memory_review.py")

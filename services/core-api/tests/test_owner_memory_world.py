@@ -28,6 +28,7 @@ class OwnerMemoryWorldTest(unittest.TestCase):
         self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
         app.DB = Path(path)
         app._world_schema_ready = False
+        app._l18_schema_ready = False
         patch = mock.patch.dict(os.environ, {"LILITH_OS_WRITE_AUTH": "enforced", "LILITH_OS_WRITE_TOKEN": TOKEN})
         patch.start()
         self.addCleanup(patch.stop)
