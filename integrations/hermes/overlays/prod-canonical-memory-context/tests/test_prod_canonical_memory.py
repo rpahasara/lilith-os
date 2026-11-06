@@ -82,6 +82,29 @@ class SeamTests(unittest.TestCase):
                 self.assertEqual(ch(platform, s, [OWNER]), "public")
         self.assertEqual(ch("telegram", src(user_id=OWNER, chat_id=OWNER, chat_type="private"), []), "public")
 
+    def test_non_owner_turns_get_no_canonical_memory_even_project_facts(self):
+        # Regression (PROD Gate 7.2, 2026-11-06): the codename is PROJECT_FACT, not OWNER_PERSONAL, so the service
+        # returns it to `public`. Owner decision: canonical memory reaches owner channels only, so a public turn
+        # must not even ask the service, and must never carry a note.
+        request, calls = service()
+        cases = [
+            ("telegram", src(user_id=OWNER, chat_id="-1001", chat_type="group"), "agent:main:telegram:group:-1001"),
+            ("telegram", src(user_id=OWNER, chat_id="-1001", chat_type="supergroup"), "agent:main:telegram:group:-1001"),
+            ("telegram", src(user_id="42", chat_id="42", chat_type="dm"), "agent:main:telegram:dm:42"),
+            ("telegram", src(user_id=OWNER, chat_id="42", chat_type="dm"), "agent:main:telegram:dm:42"),
+            ("discord", src(user_id=OWNER, chat_id=OWNER, chat_type="dm"), "agent:main:discord:dm:" + OWNER),
+            ("whatsapp", src(user_id=OWNER, chat_id=OWNER, chat_type="dm"), "agent:main:whatsapp:dm:" + OWNER),
+        ]
+        for platform, s, key in cases:
+            with self.subTest(platform=platform, source=vars(s)):
+                self.assertIsNone(self.cm.turn_note(self.settings, platform, s, key, request=request))
+                self.assertIsNone(self.cm.current_note())
+        self.assertEqual(calls, [])
+        owner = self.cm.turn_note(self.settings, "telegram", src(user_id=OWNER, chat_id=OWNER, chat_type="dm"),
+                                  "agent:main:telegram:dm:" + OWNER, request=request)
+        self.assertIn("SYNTH-ORCHID", owner)                 # the owner DM still gets the project memory
+        self.assertEqual(calls, ["telegram_owner_dm"])
+
     def test_personal_memory_reaches_only_owner_channels(self):
         request, calls = service()
         owner_dm = self.cm.turn_note(self.settings, "telegram", src(user_id=OWNER, chat_id=OWNER, chat_type="private"),
@@ -89,13 +112,12 @@ class SeamTests(unittest.TestCase):
         self.assertIn("TEST_ONLY origin.", owner_dm)
         discord = self.cm.turn_note(self.settings, "discord", src(user_id=OWNER, chat_id="55", chat_type="group"),
                                     "agent:main:discord:group:55", request=request)
-        self.assertNotIn("TEST_ONLY origin.", discord)
-        self.assertIn("SYNTH-ORCHID", discord)
-        self.assertEqual(calls, ["telegram_owner_dm", "public"])
+        self.assertIsNone(discord)                        # owner-only: public gets no canonical memory at all
+        self.assertEqual(calls, ["telegram_owner_dm"])    # and the service is not even asked
 
         def lying(_s, *, channel, session, timeout):      # even a service bug saying ownerChannel on public
             return {**request(_s, channel="lilith_os", session=session, timeout=timeout)}
-        self.assertNotIn("TEST_ONLY origin.", self.cm.turn_note(self.settings, "discord", src(), "d:1", request=lying))
+        self.assertIsNone(self.cm.turn_note(self.settings, "discord", src(), "d:1", request=lying))
 
     def test_off_unavailable_or_broken_means_no_note(self):
         request, calls = service()

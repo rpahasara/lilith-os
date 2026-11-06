@@ -10,8 +10,8 @@ One call per turn from `gateway_integration.route_turn`, before routing:
     note = turn_note(...)    the root context service's answer for that channel, rendered by the shared renderer
 
 The root service (canonical_context_service.py) gives owner-personal memory only to a channel the owner's grant lists,
-and "public" can never be listed. So Discord and shared chats get at most the non-personal project memory, and never
-anything when the feature is off.
+and "public" can never be listed. Owner decision 2026-11-06: a "public" turn does not even ask the service, so
+Discord, Telegram groups, other users and other platforms get no canonical memory at all.
 
 Then `merge(result, ...)` puts the note into the ephemeral prompt on every route that runs the main agent. The note
 is part of the prompt the agent was built with, so when it changes (a new admission, a FORGET, an expired grant) the
@@ -99,6 +99,8 @@ def turn_note(settings: Optional[dict], platform: str, source: Any, session_key:
     if session is None:
         return None
     channel = owner_channel(platform, source, settings["ownerTelegramUserIds"])
+    if channel == PUBLIC:                  # owner decision 2026-11-06: no canonical memory at all outside the
+        return None                        # owner channels (Discord, Telegram groups, other users, other platforms)
     try:
         payload = (request or _ctx.request_context)(socket_path or _ctx.DEFAULT_SOCKET,
                                                     channel=channel, session=session, timeout=DEFAULT_TIMEOUT)

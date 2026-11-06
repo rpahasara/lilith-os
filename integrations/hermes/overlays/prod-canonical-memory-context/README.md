@@ -18,7 +18,7 @@ the router covers every platform.
 |---|---|---|
 | Command Center (`lilith_os`) | `lilith_os` | yes, if the grant lists it |
 | Telegram private chat, user id in `ownerTelegramUserIds` and equal to the chat id | `telegram_owner_dm` | yes, if the grant lists it |
-| Telegram group or channel, another user, any Discord chat or DM, anything else | `public` | **never** (the service cannot grant `public`; the router also refuses to render personal memory for `public`) |
+| Telegram group or channel, another user, any Discord chat or DM, anything else | `public` (not sent: the router never asks the service) | **no canonical memory at all**, not even non-personal project facts (owner decision 2026-11-06) |
 
 - **Off by default.** Nothing happens until root installs `lilith_router/canonical_memory.json`
   (`{"schemaVersion":1,"enabled":true,"ownerTelegramUserIds":["…"]}`, root-owned, not writable by others) and the
