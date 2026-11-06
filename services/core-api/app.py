@@ -2700,6 +2700,8 @@ def os_world(entity_type: str = None, entity_id: str = None,
             q += " AND lifecycle_state != 'SUPERSEDED'"
         if entity_type:
             q += " AND entity_type=?"; args.append(entity_type)
+        else:   # owner-approved memories are owner context: only on an explicit entity_type request
+            q += " AND entity_type != 'owner'"
         if entity_id:
             q += " AND entity_id=?"; args.append(str(entity_id))
         q += " ORDER BY entity_type, entity_id, predicate LIMIT ?"; args.append(int(limit))
@@ -3598,4 +3600,173 @@ def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None),
 
 # ============================================================================
 # END SLICE 8 — GOAL / EXECUTIVE SYSTEM V1
+# ============================================================================
+
+
+# ============================================================================
+# BEGIN OWNER MEMORY — World Model record of owner-approved memories  [additive; append-only]
+# Owner decision 2026-11-06: LILITH OS (not Hermes) holds every memory the owner approved, so a new agent runtime,
+# model or VM can recover them. Compatibility batch 1: Hermes' USER.md / MEMORY.md entries are mirrored here with
+# honest provenance. Each memory is its own World Model belief (entity owner/owner, predicate memory.<store>.<id>),
+# so different memories never overwrite each other; conflicts stay visible. A belief only stops being current through
+# an explicit owner-approved replace or removal (lifecycle SUPERSEDED, with evidence and trace), never because a file
+# entry went missing. Reuses _world_reconcile / _world_trace; owner beliefs are left out of the default /os/world
+# overview (see os_world), so they reach no lane prompt unless asked for by entity_type.
+# ============================================================================
+
+OWNER_MEMORY_ENTITY = "owner"
+OWNER_MEMORY_STORES = ("user", "memory")
+OWNER_MEMORY_KINDS = ("HERMES_PREEXISTING_IMPORT", "OWNER_APPROVED_PROPOSAL")
+OWNER_MEMORY_SOURCE_CLASS = "OWNER_MEMORY"
+_OWNER_MEMORY_PROPOSAL = re.compile(r"[A-Za-z0-9._:-]{1,64}\Z")
+_OWNER_MEMORY_ID = re.compile(r"om_[0-9a-f]{20}\Z")
+_OWNER_MEMORY_MAX_TEXT = 2000
+
+
+def owner_memory_id(store: str, text: str) -> str:
+    """Stable identifier: the same store + text (whitespace-normalised) is always the same memory."""
+    norm = " ".join(str(text).split())
+    return "om_" + _hashlib.sha256((store + "\n" + norm).encode("utf-8")).hexdigest()[:20]
+
+
+def _owner_memory_key(store: str, entry_id: str) -> str:
+    return _world_key(OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY, "memory.%s.%s" % (store, entry_id))
+
+
+def _owner_memory_provenance(prov):
+    if not isinstance(prov, dict):
+        raise HTTPException(status_code=400, detail="provenance must be an object")
+    kind = prov.get("kind")
+    if kind not in OWNER_MEMORY_KINDS:
+        raise HTTPException(status_code=400, detail="provenance.kind must be one of %s" % (OWNER_MEMORY_KINDS,))
+    pid = prov.get("proposal_id")
+    if kind == "OWNER_APPROVED_PROPOSAL" and not (isinstance(pid, str) and _OWNER_MEMORY_PROPOSAL.match(pid)):
+        raise HTTPException(status_code=400, detail="an approved memory needs its proposal_id")
+    if kind == "HERMES_PREEXISTING_IMPORT" and pid is not None:
+        raise HTTPException(status_code=400, detail="a pre-existing import has no proposal")
+    approved_at = prov.get("approved_at")
+    if approved_at is not None:
+        if kind != "OWNER_APPROVED_PROPOSAL" or not isinstance(approved_at, str):
+            raise HTTPException(status_code=400, detail="approved_at only for an approved memory")
+        try:
+            datetime.fromisoformat(approved_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="approved_at must be ISO 8601")
+    channel, note = prov.get("channel"), prov.get("note")
+    for name, v in (("channel", channel), ("note", note)):
+        if v is not None and not (isinstance(v, str) and len(v) <= 300):
+            raise HTTPException(status_code=400, detail="%s must be a short string" % name)
+    origin = "%s:%s" % (kind, pid or "import")
+    return kind, pid, approved_at, channel, note, origin
+
+
+def _owner_memory_supersede(conn, key, reason, origin, pid, note):
+    row = conn.execute("SELECT * FROM world_belief WHERE key=?", (key,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=409, detail="unknown owner memory: %s" % key.rsplit(".", 1)[-1])
+    if row["lifecycle_state"] == "SUPERSEDED":
+        return False
+    now = _wm_now()
+    conn.execute(
+        "INSERT INTO world_belief_evidence (belief_key, source_class, source_id, source_type, correlation_id,"
+        " value_json, epistemic_state, confidence, observed_at, ingested_at, origin_ref, note, superseded)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+        (key, OWNER_MEMORY_SOURCE_CLASS, pid, "OWNER_APPROVED_PROPOSAL", origin, row["value_json"],
+         row["epistemic_state"], row["confidence"], None, now, origin, reason + (": " + note if note else "")))
+    conn.execute("UPDATE world_belief SET lifecycle_state='SUPERSEDED', updated_at=? WHERE key=?", (now, key))
+    _world_trace(conn, origin, key, now, row["lifecycle_state"], "SUPERSEDED", row["epistemic_state"],
+                 row["epistemic_state"], row["confidence"], row["confidence_basis"], OWNER_MEMORY_SOURCE_CLASS, reason)
+    return True
+
+
+@app.post("/os/owner-memory")
+def post_owner_memory(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    """Record one owner-approved memory (assert) or an owner-approved removal (retract). Idempotent per provenance."""
+    _require_write_auth(x_lilith_os_write)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    action = payload.get("action", "assert")
+    store = payload.get("store")
+    if store not in OWNER_MEMORY_STORES:
+        raise HTTPException(status_code=400, detail="store must be user or memory")
+    kind, pid, approved_at, channel, note, origin = _owner_memory_provenance(payload.get("provenance"))
+    _world_ensure_once()
+    conn = db()
+    try:
+        _ensure_world_schema(conn)
+        if action == "retract":
+            if kind != "OWNER_APPROVED_PROPOSAL":
+                raise HTTPException(status_code=400, detail="only an owner-approved removal retracts")
+            entry_id = payload.get("entry_id")
+            if not (isinstance(entry_id, str) and _OWNER_MEMORY_ID.match(entry_id)):
+                raise HTTPException(status_code=400, detail="entry_id required")
+            changed = _owner_memory_supersede(conn, _owner_memory_key(store, entry_id), "owner_approved_removal",
+                                              origin, pid, note)
+            conn.commit()
+            return {"entry_id": entry_id, "action": "retracted" if changed else "noop"}
+        if action != "assert":
+            raise HTTPException(status_code=400, detail="action must be assert or retract")
+        text = payload.get("text")
+        if not (isinstance(text, str) and text.strip() and len(text) <= _OWNER_MEMORY_MAX_TEXT):
+            raise HTTPException(status_code=400, detail="text must be 1..%d characters" % _OWNER_MEMORY_MAX_TEXT)
+        text = text.strip()
+        supersedes = payload.get("supersedes") or []
+        if not (isinstance(supersedes, list) and all(isinstance(s, str) and _OWNER_MEMORY_ID.match(s) for s in supersedes)):
+            raise HTTPException(status_code=400, detail="supersedes must be a list of entry ids")
+        if supersedes and kind != "OWNER_APPROVED_PROPOSAL":
+            raise HTTPException(status_code=400, detail="only an owner-approved change supersedes")
+        entry_id = owner_memory_id(store, text)
+        if entry_id in supersedes:
+            raise HTTPException(status_code=400, detail="a memory cannot supersede itself")
+        key = _owner_memory_key(store, entry_id)
+        for old in supersedes:                       # validate every target before writing anything
+            if conn.execute("SELECT 1 FROM world_belief WHERE key=?", (_owner_memory_key(store, old),)).fetchone() is None:
+                raise HTTPException(status_code=409, detail="unknown owner memory: %s" % old)
+        seen = conn.execute("SELECT 1 FROM world_belief_evidence WHERE belief_key=? AND origin_ref=? LIMIT 1",
+                            (key, origin)).fetchone()
+        if seen:
+            result = {"key": key, "action": "noop", "reason": "already_recorded"}
+        else:
+            result = _world_reconcile(
+                conn, OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY, "memory.%s.%s" % (store, entry_id),
+                {"entry_id": entry_id, "store": store, "text": text}, "USER_ASSERTED",
+                OWNER_MEMORY_SOURCE_CLASS, source_id=pid, source_type=kind, correlation_id=origin,
+                observed_at=approved_at, origin_ref=origin, note=" | ".join(x for x in (channel, note) if x) or None)
+        superseded = [old for old in supersedes
+                      if _owner_memory_supersede(conn, _owner_memory_key(store, old), "owner_approved_replace",
+                                                 origin, pid, "superseded by %s" % entry_id)]
+        conn.commit()
+        return {"entry_id": entry_id, "action": result.get("action"), "superseded": superseded}
+    finally:
+        conn.close()
+
+
+@app.get("/os/owner-memory")
+def get_owner_memory(include_superseded: int = 0):
+    """Export: every owner-approved memory LILITH OS holds, with its provenance. Needs no Hermes file."""
+    _world_ensure_once()
+    conn = _world_ro_conn()
+    try:
+        q = "SELECT * FROM world_belief WHERE entity_type=? AND entity_id=? AND predicate LIKE 'memory.%'"
+        if not include_superseded:
+            q += " AND lifecycle_state != 'SUPERSEDED'"
+        rows = conn.execute(q + " ORDER BY created_at, key", (OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY)).fetchall()
+        entries = []
+        for r in rows:
+            value = json.loads(r["value_json"])
+            ev = conn.execute("SELECT source_type, source_id, origin_ref, observed_at, ingested_at, note FROM"
+                              " world_belief_evidence WHERE belief_key=? ORDER BY id", (r["key"],)).fetchall()
+            entries.append({
+                "entry_id": value.get("entry_id"), "store": value.get("store"), "text": value.get("text"),
+                "lifecycle_state": r["lifecycle_state"], "epistemic_state": r["epistemic_state"],
+                "created_at": r["created_at"], "updated_at": r["updated_at"],
+                "provenance": [{"kind": e["source_type"], "proposal_id": e["source_id"], "origin_ref": e["origin_ref"],
+                                "approved_at": e["observed_at"], "recorded_at": e["ingested_at"], "note": e["note"]}
+                               for e in ev]})
+        return {"entries": entries, "count": len(entries)}
+    finally:
+        conn.close()
+
+# ============================================================================
+# END OWNER MEMORY
 # ============================================================================
