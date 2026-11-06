@@ -143,7 +143,14 @@ def rejected(home: Path) -> list:
         if rec.get("id") in live:
             continue
         out += [f"- {t[:200]}" for t in rec.get("contents") or [] if _norm(t) not in memory]
-    return out
+    try:                                               # logged by /memory reject itself (no snapshot gap)
+        logged = [json.loads(l) for l in (home / "memory-review" / "rejected.jsonl").read_text(
+            encoding="utf-8").splitlines() if l.strip()]
+    except (OSError, ValueError):
+        logged = []
+    for rec in logged:
+        out += [f"- {t[:200]}" for t in rec.get("contents") or [] if t and _norm(t) not in memory]
+    return list(dict.fromkeys(out))
 
 
 def remembered(home: Path) -> str:

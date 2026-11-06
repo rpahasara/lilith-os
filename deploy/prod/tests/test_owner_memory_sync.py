@@ -24,6 +24,33 @@ PRE = ["Style: casual, concise.", "Autonomy: draft first.", "DevOps/Cloud Engine
        "User enjoys PlayStation.", "User's Google Calendar timezone is Asia/Colombo."]
 
 
+class FakeStore:
+    """Hermes MemoryStore stand-in: add / remove whole entries in USER.md / MEMORY.md."""
+
+    def __init__(self, home):
+        self.home = home
+
+    def _path(self, target):
+        return self.home / "memories" / ("USER.md" if target == "user" else "MEMORY.md")
+
+    def _read(self, target):
+        try:
+            return [e for e in self._path(target).read_text(encoding="utf-8").split("\n§\n") if e]
+        except OSError:
+            return []
+
+    def add(self, target, content):
+        items = self._read(target) + [content]
+        self._path(target).parent.mkdir(parents=True, exist_ok=True)
+        self._path(target).write_text("\n§\n".join(items), encoding="utf-8")
+        return {"success": True}
+
+    def remove(self, target, old_text):
+        items = [e for e in self._read(target) if e != old_text]
+        self._path(target).write_text("\n§\n".join(items), encoding="utf-8")
+        return {"success": True}
+
+
 class SyncTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -55,7 +82,13 @@ class SyncTest(unittest.TestCase):
                 f.write(json.dumps(r) + "\n")
 
     def sync(self):
-        return OMS.sync(self.home, poster=self.poster, now=1_800_000_000)
+        return OMS.sync(self.home, poster=self.poster, now=1_800_000_000, getter=self.getter, repairer=FakeStore)
+
+    def getter(self, include_superseded=True):
+        return app.get_owner_memory(include_superseded=1 if include_superseded else 0)["entries"]
+
+    def user_entries(self):
+        return [e for e in (self.home / "memories" / "USER.md").read_text(encoding="utf-8").split("\n§\n") if e]
 
     def export(self, include_superseded=0):
         return {e["text"]: e for e in app.get_owner_memory(include_superseded=include_superseded)["entries"]}
@@ -109,7 +142,9 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(hist[PRE[3]]["lifecycle_state"], "SUPERSEDED")             # owner-approved removal
         self.assertEqual(report["retracted"], 1)
         self.assertEqual(cur[NAME]["lifecycle_state"], "ACTIVE")                   # missing file entry: never retracted
-        self.assertEqual(report["missing_in_hermes"], 1)
+        self.assertEqual(report["repaired_added"], 1)                              # ...and the projection is restored
+        self.assertIn(NAME, self.user_entries())
+        self.assertEqual(report["missing_in_hermes"], 0)
 
     def test_knowledge_is_recoverable_without_hermes_files(self):
         self.sync()
@@ -118,6 +153,11 @@ class SyncTest(unittest.TestCase):
         self.assertIn(NAME, cur)
         self.assertIn(PREF, cur)
         self.assertEqual(len(cur), 7)
+        report = self.sync()                                                       # a fresh runtime: rebuilt from LILITH OS
+        self.assertEqual(report["repaired_added"], 7)
+        self.assertEqual(sorted(self.user_entries()), sorted(cur))
+        self.assertNotIn(OLD_SARA, self.user_entries())                            # history is not projected
+        self.assertEqual(self.sync()["repaired_added"], 0)                         # restart: nothing twice
 
 
 if __name__ == "__main__":

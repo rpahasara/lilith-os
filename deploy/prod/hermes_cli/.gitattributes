@@ -1,0 +1,3 @@
+# Byte-exact copy of the live PROD Hermes hermes_cli/write_approval_commands.py plus LILITH patches (deploy source); whitespace is content.
+* -text -whitespace
+.gitattributes text

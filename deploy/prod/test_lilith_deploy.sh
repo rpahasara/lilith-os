@@ -93,7 +93,15 @@ bundle run.py 'A = 2'; run hermes-gateway $T/bundle.tar $SHA
 [ "$(rc)" = 0 ] && grep -q 'A = 2' $R/home/lilith/.hermes/hermes-agent/gateway/run.py &&   [ "$(stat -c %a $R/home/lilith/.hermes/hermes-agent/gateway/run.py)" = 664 ] && ok "hermes-gateway deploy" || { bad "hermes-gateway deploy"; cat $T/out; }
 bundle run.py 'A = 3' session.py 'B = 1'; run hermes-gateway $T/bundle.tar $SHA
 [ "$(rc)" = 2 ] && grep -q 'not allowed: session.py' $T/out && ok "hermes-gateway allow-list" || bad "hermes-gateway allow-list"
-# 12 status
+# 12 hermes-approval: only write_approval_commands.py
+setup; mkdir -p $R/home/lilith/.hermes/hermes-agent/hermes_cli; echo 'C = 1' > $R/home/lilith/.hermes/hermes-agent/hermes_cli/write_approval_commands.py
+chmod 664 $R/home/lilith/.hermes/hermes-agent/hermes_cli/write_approval_commands.py
+bundle write_approval_commands.py 'C = 2'; run hermes-approval $T/bundle.tar $SHA
+[ "$(rc)" = 0 ] && grep -q 'C = 2' $R/home/lilith/.hermes/hermes-agent/hermes_cli/write_approval_commands.py && \
+  [ "$(stat -c %a $R/home/lilith/.hermes/hermes-agent/hermes_cli/write_approval_commands.py)" = 664 ] && ok "hermes-approval deploy" || { bad "hermes-approval deploy"; cat $T/out; }
+bundle config.py 'D = 1'; run hermes-approval $T/bundle.tar $SHA
+[ "$(rc)" = 2 ] && grep -q 'not allowed: config.py' $T/out && ok "hermes-approval allow-list" || bad "hermes-approval allow-list"
+# 13 status
 run status; [ "$(rc)" = 0 ] && ok "status" || bad "status"
 
 echo "passed $pass failed $fail"; [ $fail = 0 ]

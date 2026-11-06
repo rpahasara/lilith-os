@@ -17,6 +17,7 @@ on:
           - core-api
           - router
           - hermes-gateway
+          - hermes-approval
 
 permissions:
   contents: read
@@ -82,6 +83,10 @@ jobs:
               python -m compileall -q deploy/prod/lilith_router ;;
             hermes-gateway)
               python -m py_compile deploy/prod/hermes_gateway/run.py ;;
+            hermes-approval)
+              python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
+              python -m py_compile deploy/prod/hermes_cli/write_approval_commands.py
+              python -m unittest deploy/prod/tests/test_lilith_first_approval.py ;;
             *) exit 1 ;;
           esac
 
@@ -93,6 +98,7 @@ jobs:
             core-api) tar -cf "$RUNNER_TEMP/bundle.tar" -C services/core-api app.py ;;
             router)   (cd deploy/prod/lilith_router && tar -cf "$RUNNER_TEMP/bundle.tar" *.py router.yaml) ;;
             hermes-gateway) tar -cf "$RUNNER_TEMP/bundle.tar" -C deploy/prod/hermes_gateway run.py ;;
+            hermes-approval) tar -cf "$RUNNER_TEMP/bundle.tar" -C deploy/prod/hermes_cli write_approval_commands.py ;;
           esac
           tar -tvf "$RUNNER_TEMP/bundle.tar"
           sha256sum "$RUNNER_TEMP/bundle.tar"

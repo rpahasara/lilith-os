@@ -106,7 +106,56 @@ def _ops(rec: dict) -> list:
     return [{"action": "add", "content": c} for c in rec.get("contents") or []]       # older snapshots
 
 
-def sync(home: Path = HOME, poster=post, now: float = None) -> dict:
+def get(include_superseded: bool = True) -> list:
+    url = API + "/os/owner-memory" + ("?include_superseded=1" if include_superseded else "")
+    with urllib.request.urlopen(url, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))["entries"]
+
+
+def hermes_repairer(home: Path):
+    """Hermes' own MemoryStore (its lock, limits and file format) for repairing the projection; None if unavailable."""
+    try:
+        sys.path.insert(0, str(home / "hermes-agent"))
+        from tools.memory_tool import MemoryStore, get_builtin_memory_config
+        from hermes_cli.config import load_config_readonly
+        cfg = get_builtin_memory_config(load_config_readonly())
+        store = MemoryStore(memory_char_limit=cfg.get("memory_char_limit", 2200),
+                            user_char_limit=cfg.get("user_char_limit", 1375),
+                            memory_enabled=True, user_profile_enabled=True)
+        store.load_from_disk()
+        return store
+    except Exception:
+        return None
+
+
+def repair(home: Path, lilith: list, repairer) -> dict:
+    """Make the Hermes files show what LILITH OS holds: add current memories that are missing; drop entries LILITH OS
+    superseded on an owner-approved change. Entries LILITH OS does not know are left alone."""
+    out = {"repaired_added": 0, "repaired_removed": 0, "repair_failed": 0}
+    present = {(s, norm(t)): t for s, t in entries(home)}
+    active = {(e["store"], norm(e["text"])) for e in lilith if e["lifecycle_state"] != "SUPERSEDED"}
+    todo_add = [e for e in lilith if e["lifecycle_state"] != "SUPERSEDED" and (e["store"], norm(e["text"])) not in present]
+    todo_rm = [present[(e["store"], norm(e["text"]))] for e in lilith
+               if e["lifecycle_state"] == "SUPERSEDED" and (e["store"], norm(e["text"])) in present
+               and (e["store"], norm(e["text"])) not in active]
+    if not (todo_add or todo_rm):
+        return out
+    store = repairer(home) if callable(repairer) else repairer
+    if store is None:
+        out["repair_failed"] = len(todo_add) + len(todo_rm)
+        return out
+    for e in todo_add:
+        ok = (store.add(e["store"], e["text"]) or {}).get("success")
+        out["repaired_added" if ok else "repair_failed"] += 1
+    for e in lilith:
+        key = (e["store"], norm(e["text"]))
+        if e["lifecycle_state"] == "SUPERSEDED" and key in present and key not in active:
+            ok = (store.remove(e["store"], present[key]) or {}).get("success")
+            out["repaired_removed" if ok else "repair_failed"] += 1
+    return out
+
+
+def sync(home: Path = HOME, poster=post, now: float = None, getter=get, repairer=hermes_repairer) -> dict:
     now = time.time() if now is None else now
     state = _load_state(home)
     synced = state.setdefault("synced", {})            # norm(text) -> entry_id
@@ -135,6 +184,13 @@ def sync(home: Path = HOME, poster=post, now: float = None) -> dict:
                                       "note": "Hermes %s entry present at first sync (2026-11-06)" % store.upper()})
         state["bootstrapped"] = True
 
+    # LILITH OS is the primary record: what it already holds (approvals written directly by /memory approve, earlier
+    # syncs) is known, so it is never treated as unattributed or posted twice.
+    for e in getter(True):
+        synced.setdefault(norm(e["text"]), e["entry_id"])
+        if e["lifecycle_state"] == "SUPERSEDED":
+            inactive.add(e["entry_id"])
+
     live = pending_ids(home)
     decided = [r for r in read_seen(home) if r.get("id") not in live and r.get("id") not in state.get("handled", [])]
     handled = state.setdefault("handled", [])
@@ -160,6 +216,8 @@ def sync(home: Path = HOME, poster=post, now: float = None) -> dict:
     for store, text in current:                          # anything else in the files is unattributed: not synced
         if norm(text) not in synced:
             report["skipped_unattributed"] += 1
+    report.update(repair(home, getter(True), repairer))
+    present = {(s, norm(t)) for s, t in entries(home)}
     names = {n for _, n in present}
     report["missing_in_hermes"] = sum(1 for t, eid in synced.items() if eid not in inactive and t not in names)
     state["inactive"] = sorted(inactive)
