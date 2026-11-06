@@ -151,9 +151,10 @@ class FullAgentPathTests(unittest.TestCase):
         return "\n".join(l[8:] for l in text[start:end].splitlines())
 
     def run_hook(self, lr_res):
-        tools = [{"function": {"name": n}} for n in ("session_search", "memory", "terminal", "web_search")]
+        names = ("clarify", "delegate_task", "execute_code", "memory", "patch", "process", "read_file", "search_files", "session_search", "skill_manage", "skill_view", "skills_list", "terminal", "text_to_speech", "todo", "vision_analyze", "web_extract", "web_search", "write_file")                                     # PROD Discord/Telegram tools, 2026-11-06
+        tools = [{"function": {"name": n}} for n in names]
         agent = types.SimpleNamespace(_memory_store=object(), _memory_enabled=True, _user_profile_enabled=True,
-                                      tools=tools, valid_tool_names={"session_search", "memory", "terminal", "web_search"},
+                                      tools=tools, valid_tool_names=set(names),
                                       _get_session_db_for_recall=lambda: "STATE_DB")
         exec(compile(self.hook(), "hook", "exec"), {}, {"agent": agent, "_lr_res": lr_res})
         return agent
@@ -163,7 +164,7 @@ class FullAgentPathTests(unittest.TestCase):
         self.assertIsNotNone(a._memory_store)
         self.assertTrue(a._memory_enabled and a._user_profile_enabled)
         self.assertEqual(a._get_session_db_for_recall(), "STATE_DB")                       # owner keeps recall
-        self.assertEqual(a.valid_tool_names, {"session_search", "memory", "terminal", "web_search"})
+        self.assertEqual(a.valid_tool_names, set(("clarify", "delegate_task", "execute_code", "memory", "patch", "process", "read_file", "search_files", "session_search", "skill_manage", "skill_view", "skills_list", "terminal", "text_to_speech", "todo", "vision_analyze", "web_extract", "web_search", "write_file")))                     # owner keeps every tool
 
     def test_everything_else_drops_memory(self):
         for lr in ({"owner_memory": False}, {}, None, {"owner_memory": "yes"}, {"owner_memory": 1}, "x"):
@@ -172,8 +173,12 @@ class FullAgentPathTests(unittest.TestCase):
                 self.assertIsNone(a._memory_store)
                 self.assertFalse(a._memory_enabled or a._user_profile_enabled)
                 self.assertIsNone(a._get_session_db_for_recall())                         # no cross-chat search
-                self.assertEqual(a.valid_tool_names, {"terminal", "web_search"})          # ordinary tools kept
-                self.assertEqual([t["function"]["name"] for t in a.tools], ["terminal", "web_search"])
+                safe = {"clarify", "text_to_speech", "todo", "vision_analyze", "web_extract", "web_search"}
+                self.assertEqual(a.valid_tool_names, safe)                                 # conversation tools only
+                self.assertEqual({t["function"]["name"] for t in a.tools}, safe)
+                for local in ("read_file", "search_files", "terminal", "execute_code", "process", "patch",
+                              "write_file", "delegate_task", "skill_view", "skills_list", "skill_manage"):
+                    self.assertNotIn(local, a.valid_tool_names)                            # nothing reads this host
 
     def test_hook_is_present_once(self):
         self.assertEqual(RUN_PY.read_text(encoding="utf-8").count("LILITH owner-only Hermes memory"), 1)
