@@ -86,7 +86,14 @@ setup; bundle router.yaml $'a: [\n'; run router $T/bundle.tar $SHA
 setup; bundle app.py 'x=1'; run core-api $T/bundle.tar notasha; [ "$(rc)" = 2 ] && ok "sha refused" || bad "sha refused"
 run hermes $T/bundle.tar $SHA; [ "$(rc)" = 2 ] && ok "component refused" || bad "component refused"
 SUDO_USER=x run core-api $T/bundle.tar $SHA; [ "$(rc)" = 2 ] && grep -q 'test mode under sudo' $T/out && ok "test mode refused under sudo" || bad "test mode under sudo"
-# 11 status
+# 11 hermes-gateway: only run.py, keeps mode 664, gateway smoke check
+setup; mkdir -p $R/home/lilith/.hermes/hermes-agent/gateway; echo 'A = 1' > $R/home/lilith/.hermes/hermes-agent/gateway/run.py
+chmod 664 $R/home/lilith/.hermes/hermes-agent/gateway/run.py
+bundle run.py 'A = 2'; run hermes-gateway $T/bundle.tar $SHA
+[ "$(rc)" = 0 ] && grep -q 'A = 2' $R/home/lilith/.hermes/hermes-agent/gateway/run.py &&   [ "$(stat -c %a $R/home/lilith/.hermes/hermes-agent/gateway/run.py)" = 664 ] && ok "hermes-gateway deploy" || { bad "hermes-gateway deploy"; cat $T/out; }
+bundle run.py 'A = 3' session.py 'B = 1'; run hermes-gateway $T/bundle.tar $SHA
+[ "$(rc)" = 2 ] && grep -q 'not allowed: session.py' $T/out && ok "hermes-gateway allow-list" || bad "hermes-gateway allow-list"
+# 12 status
 run status; [ "$(rc)" = 0 ] && ok "status" || bad "status"
 
 echo "passed $pass failed $fail"; [ $fail = 0 ]

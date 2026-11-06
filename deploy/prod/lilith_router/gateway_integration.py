@@ -453,16 +453,22 @@ def route_turn(
 ):
     # Canonical memory (read-only; off unless lilith_router/canonical_memory.json enables it): the note for this
     # turn's channel. Personal memory only for an owner channel the owner's grant lists; never Discord or groups.
-    note, session_key = None, None
+    # Hermes' personal memory (USER.md / MEMORY.md) follows the same owner rule: `owner_memory` in the result tells
+    # gateway/run.py whether this turn's agent may keep its memory store; the lean path reads owner_turn().
+    note, session_key, owner = None, None, False
+    _canonical_memory.set_owner_turn(False)
     try:
         source = getattr(ctx, "source", None)
         if source is not None:
             platform = _platform_name(source)
             session_key = getattr(ctx, "session_key", None) or f"{platform}:{getattr(source, 'chat_id', '') or ''}"
-            note = _canonical_memory.turn_note(_canonical_memory.load_settings(_config._hermes_home()),
-                                               platform, source, session_key)
+            settings = _canonical_memory.load_settings(_config._hermes_home())
+            owner = _canonical_memory.is_owner_turn(settings, platform, source)
+            _canonical_memory.set_owner_turn(owner)
+            note = _canonical_memory.turn_note(settings, platform, source, session_key)
     except Exception:
-        note = None
+        note, owner = None, False
+        _canonical_memory.set_owner_turn(False)
     try:
         result = _route_turn_impl(
             runner=runner,
@@ -479,13 +485,21 @@ def route_turn(
         logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
         result = None
     if session_key is None:
-        return result
+        return _with_owner_memory(result, False)
     try:
-        return _canonical_memory.merge(result, note=note, combined_ephemeral=combined_ephemeral,
-                                       session_key=session_key, cached_agent=cached_agent)
+        merged = _canonical_memory.merge(result, note=note, combined_ephemeral=combined_ephemeral,
+                                         session_key=session_key, cached_agent=cached_agent)
     except Exception:
         logger.debug("lilith_router: canonical memory merge failed (no note)", exc_info=True)
-        return result
+        merged = result
+    return _with_owner_memory(merged, owner)
+
+
+def _with_owner_memory(result, owner: bool):
+    """Always a dict carrying `owner_memory` (run.py drops the agent's memory store unless it is True)."""
+    out = dict(result) if isinstance(result, dict) else {}
+    out["owner_memory"] = owner is True
+    return out
 
 
 def _route_turn_impl(
@@ -835,7 +849,7 @@ def _route_turn_impl(
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
-                    message=message, runtime=groq_runtime,
+                    message=message, runtime=groq_runtime, include_profile=_canonical_memory.owner_turn(),
                     policy=_policy.SOCIAL_POLICY + ("\n\n" + _canonical_memory.current_note()
                                                     if _canonical_memory.current_note() else ""))
                 if text:

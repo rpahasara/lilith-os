@@ -16,6 +16,7 @@ on:
         options:
           - core-api
           - router
+          - hermes-gateway
 
 permissions:
   contents: read
@@ -70,7 +71,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check pyyaml
           bash deploy/prod/test_lilith_deploy.sh
-          python -m unittest deploy/prod/tests/test_prod_deploy_source.py
+          python -m unittest deploy/prod/tests/test_prod_deploy_source.py deploy/prod/tests/test_owner_memory.py deploy/prod/tests/test_owner_memory_review.py
           case "$COMPONENT" in
             core-api)
               python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
@@ -78,6 +79,8 @@ jobs:
               python -m unittest discover -s services/core-api/tests -p "test_*.py" ;;
             router)
               python -m compileall -q deploy/prod/lilith_router ;;
+            hermes-gateway)
+              python -m py_compile deploy/prod/hermes_gateway/run.py ;;
             *) exit 1 ;;
           esac
 
@@ -88,6 +91,7 @@ jobs:
           case "$COMPONENT" in
             core-api) tar -cf "$RUNNER_TEMP/bundle.tar" -C services/core-api app.py ;;
             router)   (cd deploy/prod/lilith_router && tar -cf "$RUNNER_TEMP/bundle.tar" *.py router.yaml) ;;
+            hermes-gateway) tar -cf "$RUNNER_TEMP/bundle.tar" -C deploy/prod/hermes_gateway run.py ;;
           esac
           tar -tvf "$RUNNER_TEMP/bundle.tar"
           sha256sum "$RUNNER_TEMP/bundle.tar"
