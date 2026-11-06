@@ -230,7 +230,7 @@ def _default_client(runtime: dict, timeout: float):
 
 
 def reply(*, runner, cfg, home: Path, session_key: str, message: str, policy: str, runtime: dict,
-          client_factory=None, now: Optional[float] = None) -> Tuple[Optional[str], str]:
+          client_factory=None, now: Optional[float] = None, include_profile: bool = False) -> Tuple[Optional[str], str]:
     """One lean Groq reply, or (None, reason). Never raises."""
     try:
         core = soul_core(home / "SOUL.md")
@@ -238,7 +238,8 @@ def reply(*, runner, cfg, home: Path, session_key: str, message: str, policy: st
             return None, "soul_core_missing"
         if not runtime or not runtime.get("api_key") or not runtime.get("base_url"):
             return None, "no_api_key"
-        msgs = build_messages(core, policy, profile(home),
+        # USER.md / MEMORY.md only on an owner channel (owner decision 2026-11-06); default: none
+        msgs = build_messages(core, policy, profile(home) if include_profile is True else "",
                               recent_turns(runner, session_key, cfg.social_lean_history_turns), message)
         need = sum(estimate_tokens(m["content"]) for m in msgs) + cfg.social_lean_max_output_tokens
         if not BUDGET.allow(need, cfg.social_lean_tpm_budget, cfg.social_lean_tpd_budget, now):

@@ -50,6 +50,9 @@ _TELEGRAM_ID = re.compile(r"[0-9]{1,20}\Z")
 _SESSION = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z")
 
 _note: contextvars.ContextVar = contextvars.ContextVar("lilith_canonical_note", default=None)
+# Owner decision 2026-11-06 (Option B): Hermes' personal memory (USER.md / MEMORY.md) reaches owner channels only.
+# Set once per turn by route_turn; anything that fails leaves it False (no personal memory).
+_owner: contextvars.ContextVar = contextvars.ContextVar("lilith_owner_turn", default=False)
 _built_with: dict = {}            # session key -> digest of the note the cached agent was built with
 
 
@@ -65,6 +68,20 @@ def owner_channel(platform: str, source: Any, owner_telegram_ids: Iterable[str])
     if owners and user in owners and chat == user and kind in ("dm", "private"):
         return OWNER_TELEGRAM
     return PUBLIC
+
+
+def is_owner_turn(settings: Optional[dict], platform: str, source: Any) -> bool:
+    """The owner console or the owner's own Telegram DM (the same rule as canonical memory); nothing else."""
+    ids = settings["ownerTelegramUserIds"] if settings else []
+    return owner_channel(platform, source, ids) != PUBLIC
+
+
+def set_owner_turn(value: bool) -> None:
+    _owner.set(value is True)
+
+
+def owner_turn() -> bool:
+    return _owner.get() is True
 
 
 def load_settings(home: Any, *, owner_uid: int = 0) -> Optional[dict]:

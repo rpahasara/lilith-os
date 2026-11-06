@@ -1,0 +1,3 @@
+# Byte-exact copy of the live PROD Hermes gateway/run.py plus LILITH patches (deploy source); whitespace is content.
+* -text -whitespace
+.gitattributes text
