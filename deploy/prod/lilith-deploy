@@ -1,0 +1,126 @@
+#!/bin/bash
+# LILITH PROD deploy (root, /usr/local/sbin/lilith-deploy). The GitHub deployer may run ONLY this, via one sudoers line.
+#
+#   lilith-deploy core-api <bundle.tar> <main-sha40>    services/core-api/app.py      -> lilith-os/api/app.py
+#   lilith-deploy router   <bundle.tar> <main-sha40>    integrations/hermes/prod/lilith_router/{*.py,router.yaml}
+#                                                        -> ~/.hermes/lilith_router/
+#   lilith-deploy status                                 the last deploys (read-only)
+#
+# Fixed components and target paths only; the bundle may hold only those file names (flat, regular files). Every
+# Python file is compiled with the target's own interpreter before anything changes. Only changed files are installed,
+# each keeps its current owner and mode; the previous versions go to /var/backups/lilith-deploy/<component>/. After the
+# service restart a smoke check runs (core-api: /health; router: gateway active, no traceback, no restart loop); any
+# failure restores the backup and restarts again. Nothing else on the host is touched: no keys, no data, no units.
+set -Eeuo pipefail
+umask 022
+
+ROOT=${LILITH_DEPLOY_TEST_ROOT:-}                 # tests only; sudo's env_reset never passes it through
+if [ -n "$ROOT" ]; then
+  [ -z "${SUDO_USER:-}" ] || { echo "REFUSED test mode under sudo" >&2; exit 2; }
+  SYSTEMCTL=${TEST_SYSTEMCTL:?}; CURL=${TEST_CURL:?}; JOURNALCTL=${TEST_JOURNALCTL:?}; ASLILITH=""; WAIT=0
+else
+  [ "$(id -u)" = 0 ] || { echo "REFUSED not root" >&2; exit 2; }
+  SYSTEMCTL=systemctl; CURL=curl; JOURNALCTL=journalctl; ASLILITH="runuser -u lilith --"; WAIT=1
+fi
+H=$ROOT/home/lilith/.hermes
+LOG=$ROOT/var/log/lilith-deploy.log
+BACKUPS=$ROOT/var/backups/lilith-deploy
+KEEP=10
+
+die() { echo "DEPLOY REFUSED: $*" >&2; exit 2; }
+ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+if [ "${1:-}" = status ]; then
+  tail -n 20 "$LOG" 2>/dev/null || echo "no deploys yet"
+  exit 0
+fi
+[ $# -eq 3 ] || die "usage: lilith-deploy <core-api|router> <bundle.tar> <main-sha40>"
+COMP=$1; BUNDLE=$2; SHA=$3
+[[ $SHA =~ ^[0-9a-f]{40}$ ]] || die "sha"
+case $COMP in
+  core-api) DEST=$H/lilith-os/api; ALLOW='^app\.py$'; SVC=lilith-os-api.service
+            PY=$H/lilith-os/api-venv/bin/python ;;
+  router)   DEST=$H/lilith_router; ALLOW='^([a-z_][a-z0-9_]*\.py|router\.yaml)$'; SVC=hermes-gateway.service
+            PY=$H/hermes-agent/venv/bin/python ;;
+  *) die "component" ;;
+esac
+[ -f "$BUNDLE" ] && [ ! -L "$BUNDLE" ] || die "bundle missing"
+[ "$(stat -c %s "$BUNDLE")" -le 5242880 ] || die "bundle too large"
+[ -d "$DEST" ] || die "target missing"
+
+STAGE=$(mktemp -d); trap 'rm -rf -- "$STAGE"' EXIT
+# flat, regular files with allowed names only
+while IFS= read -r line; do
+  type=${line:0:1}; name=${line##* }
+  [ "$type" = "-" ] || die "non-regular entry $name"
+  [[ $name =~ $ALLOW ]] || die "name not allowed: $name"
+done < <(tar -tvf "$BUNDLE")
+names=$(tar -tf "$BUNDLE")
+[ -n "$names" ] || die "empty bundle"
+tar -xf "$BUNDLE" -C "$STAGE" --no-same-owner --no-same-permissions
+chmod 0755 "$STAGE"; chmod 0644 "$STAGE"/*
+
+# compile with the target interpreter before anything changes
+for f in $names; do
+  case $f in
+    *.py) $ASLILITH "$PY" -I -B -c 'import sys; compile(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1], "exec")' "$STAGE/$f" \
+            || die "compile failed: $f" ;;
+    router.yaml) $ASLILITH "$PY" -I -B -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); assert isinstance(d, dict)' "$STAGE/$f" \
+            || die "router.yaml does not parse" ;;
+  esac
+done
+
+changed=()
+for f in $names; do
+  if [ ! -e "$DEST/$f" ] || ! cmp -s "$STAGE/$f" "$DEST/$f"; then changed+=("$f"); fi
+done
+if [ ${#changed[@]} -eq 0 ]; then
+  echo "$(ts) $COMP $SHA NOCHANGE" >> "$LOG"; echo "DEPLOY NOCHANGE ($COMP already at $SHA content)"; exit 0
+fi
+
+BK=$BACKUPS/$COMP/$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:12}
+mkdir -p "$BK"; chmod 0700 "$BACKUPS" "$BACKUPS/$COMP" "$BK"
+for f in "${changed[@]}"; do
+  if [ -e "$DEST/$f" ]; then cp -p "$DEST/$f" "$BK/$f"; else echo "$f" >> "$BK/.added"; fi
+done
+
+install_one() {   # keep the current owner and mode; a new file gets the directory's owner and 0600
+  local src=$1 dst=$2 own mode
+  if [ -e "$dst" ]; then own=$(stat -c %u:%g "$dst"); mode=$(stat -c %a "$dst")
+  else own=$(stat -c %u:%g "$(dirname "$dst")"); mode=600; fi
+  install -o "${own%:*}" -g "${own#*:}" -m "$mode" "$src" "$dst.deploy-new"
+  mv -f "$dst.deploy-new" "$dst"
+}
+rollback() {
+  echo "--- ROLLBACK ($1)"
+  for f in "${changed[@]}"; do
+    if [ -e "$BK/$f" ]; then install_one "$BK/$f" "$DEST/$f"; fi
+  done
+  if [ -f "$BK/.added" ]; then while IFS= read -r f; do rm -f -- "$DEST/$f"; done < "$BK/.added"; fi
+  find "$DEST" -maxdepth 2 -name '__pycache__' -type d -exec rm -rf -- {} + 2>/dev/null || true
+  $SYSTEMCTL restart "$SVC" || true
+  echo "$(ts) $COMP $SHA ROLLED_BACK $1 [${changed[*]}]" >> "$LOG"
+  echo "DEPLOY ROLLED_BACK: $1"; exit 1
+}
+
+for f in "${changed[@]}"; do install_one "$STAGE/$f" "$DEST/$f"; echo "installed $f $(sha256sum "$DEST/$f" | cut -c1-12)"; done
+find "$DEST" -maxdepth 2 -name '__pycache__' -type d -exec rm -rf -- {} + 2>/dev/null || true
+
+since=$(date -u '+%Y-%m-%d %H:%M:%S')
+$SYSTEMCTL restart "$SVC" || rollback "restart failed"
+pid=$($SYSTEMCTL show -p MainPID --value "$SVC" 2>/dev/null || echo 0)
+if [ "$COMP" = core-api ]; then
+  ok=0
+  for _ in $(seq 1 15); do $CURL -fsS http://127.0.0.1:8765/health >/dev/null 2>&1 && { ok=1; break; }; sleep "$WAIT"; done
+  [ $ok = 1 ] || rollback "health check failed"
+else
+  for _ in $(seq 1 25); do sleep "$WAIT"; done
+  [ "$($SYSTEMCTL is-active "$SVC")" = active ] || rollback "gateway not active"
+  [ "$($SYSTEMCTL show -p MainPID --value "$SVC" 2>/dev/null || echo 0)" = "$pid" ] && [ "$pid" != 0 ] \
+    || rollback "gateway restarted by itself"
+  [ "$($JOURNALCTL -u "$SVC" --since "$since" --no-pager -o cat 2>/dev/null | grep -c Traceback)" = 0 ] || rollback "traceback after restart"
+fi
+
+echo "$(ts) $COMP $SHA DEPLOYED [${changed[*]}] backup=$BK" >> "$LOG"
+ls -1d "$BACKUPS/$COMP"/*/ 2>/dev/null | sort | head -n -"$KEEP" | xargs -r rm -rf --
+echo "DEPLOY OK $COMP $SHA (${#changed[@]} file(s)); backup $BK"
