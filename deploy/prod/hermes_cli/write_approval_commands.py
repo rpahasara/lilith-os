@@ -130,11 +130,28 @@ def lilith_record_approval(rec: dict, post=None, now=None) -> None:
             raise _LilithNotSaved("unknown memory action %r" % action)
 
 
+def _lilith_event_post(body: dict) -> None:
+    req = _urlrequest.Request(_LILITH_API + "/os/learning-events", data=json.dumps(body).encode("utf-8"),
+                              method="POST", headers={"Content-Type": "application/json"})
+    with _urlrequest.urlopen(req, timeout=10) as resp:
+        resp.read()
+
+
 def lilith_log_rejection(rec: dict) -> None:
-    """Remember a rejected proposal (memory-review/rejected.jsonl) so it is never proposed again."""
+    """Remember a rejected proposal so it is never proposed again: an L18 REJECTED event in LILITH OS, plus a local
+    log (memory-review/rejected.jsonl) as the fallback when LILITH OS is unreachable."""
+    payload = rec.get("payload") or {}
+    target = payload.get("target", "memory")
+    ops = payload.get("operations") if payload.get("action") == "batch" else [payload]
+    items = [{"store": o.get("target") or target, "action": o.get("action"),
+              "text": o.get("content") or o.get("old_text")} for o in ops or []
+             if isinstance(o, dict) and (o.get("content") or o.get("old_text"))]
     try:
-        payload = rec.get("payload") or {}
-        ops = payload.get("operations") if payload.get("action") == "batch" else [payload]
+        if items:
+            _lilith_event_post({"kind": "REJECTED", "proposal_id": str(rec.get("id")), "items": items, "source": "hermes"})
+    except Exception:
+        pass
+    try:
         path = _lilith_home() / "memory-review" / "rejected.jsonl"
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:

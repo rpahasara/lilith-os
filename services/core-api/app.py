@@ -3702,6 +3702,8 @@ def post_owner_memory(payload: dict = _Body(default=None), x_lilith_os_write: st
                 raise HTTPException(status_code=400, detail="entry_id required")
             changed = _owner_memory_supersede(conn, _owner_memory_key(store, entry_id), "owner_approved_removal",
                                               origin, pid, note)
+            _ensure_l18_schema(conn)
+            _l18_event(conn, "RETRACTED", proposal_id=pid, store=store, entry_id=entry_id, source=channel)
             conn.commit()
             return {"entry_id": entry_id, "action": "retracted" if changed else "noop"}
         if action != "assert":
@@ -3735,6 +3737,11 @@ def post_owner_memory(payload: dict = _Body(default=None), x_lilith_os_write: st
         superseded = [old for old in supersedes
                       if _owner_memory_supersede(conn, _owner_memory_key(store, old), "owner_approved_replace",
                                                  origin, pid, "superseded by %s" % entry_id)]
+        _ensure_l18_schema(conn)          # L18: the learning event for this write (replays restore a missing one)
+        _l18_event(conn, "APPROVED" if kind == "OWNER_APPROVED_PROPOSAL" else "IMPORTED", proposal_id=pid,
+                   store=store, entry_id=entry_id, text=text, source=channel, at=approved_at)
+        for old in supersedes:
+            _l18_event(conn, "SUPERSEDED", proposal_id=pid, store=store, entry_id=old, detail="superseded by " + entry_id)
         conn.commit()
         return {"entry_id": entry_id, "action": result.get("action"), "superseded": superseded}
     finally:
@@ -3769,4 +3776,105 @@ def get_owner_memory(include_superseded: int = 0):
 
 # ============================================================================
 # END OWNER MEMORY
+# ============================================================================
+
+
+# ============================================================================
+# BEGIN L18 LEARNING EVENTS — owner-memory learning stream  [additive; append-only]
+# Owner decision 2026-11-06: L18 owns learning events and provenance; the World Model owns the resulting beliefs.
+# Every owner-memory write records its event in the SAME transaction (APPROVED / IMPORTED / SUPERSEDED / RETRACTED);
+# PROPOSED and REJECTED come from the runtime (snapshot job, /memory reject) through POST /os/learning-events.
+# Events are idempotent (stable event_id). Separate from the closed Slice 15A career ledger (learning_store.py).
+# ============================================================================
+
+L18_EVENT_KINDS = ("PROPOSED", "REJECTED", "APPROVED", "IMPORTED", "SUPERSEDED", "RETRACTED")
+L18_RUNTIME_KINDS = ("PROPOSED", "REJECTED")
+_l18_schema_ready = False
+
+
+def _ensure_l18_schema(conn):
+    global _l18_schema_ready
+    if _l18_schema_ready:
+        return
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS l18_learning_event ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,"
+        " proposal_id TEXT, store TEXT, entry_id TEXT, text TEXT, source TEXT, at TEXT NOT NULL, detail TEXT);"
+        "CREATE INDEX IF NOT EXISTS ix_l18_event_kind ON l18_learning_event(kind, at);"
+        "CREATE INDEX IF NOT EXISTS ix_l18_event_proposal ON l18_learning_event(proposal_id);")
+    conn.commit()
+    _l18_schema_ready = True
+
+
+def _l18_event(conn, kind, *, proposal_id=None, store=None, entry_id=None, text=None, source=None, detail=None, at=None):
+    """Insert one learning event unless the same one exists. Does not commit (the caller's transaction does)."""
+    norm = " ".join(str(text).split()) if text else ""
+    event_id = "l18_" + _hashlib.sha256("|".join((kind, proposal_id or "", store or "", entry_id or "", norm))
+                                         .encode("utf-8")).hexdigest()[:24]
+    conn.execute(
+        "INSERT OR IGNORE INTO l18_learning_event (event_id, kind, proposal_id, store, entry_id, text, source, at, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
+        (event_id, kind, proposal_id, store, entry_id, text, source, at or _wm_now(), detail))
+    return event_id
+
+
+@app.post("/os/learning-events")
+def post_learning_events(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    """Runtime learning events: a proposal was staged (PROPOSED) or the owner rejected it (REJECTED)."""
+    _require_write_auth(x_lilith_os_write)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    kind, pid = payload.get("kind"), payload.get("proposal_id")
+    if kind not in L18_RUNTIME_KINDS:
+        raise HTTPException(status_code=400, detail="kind must be PROPOSED or REJECTED")
+    if not (isinstance(pid, str) and _OWNER_MEMORY_PROPOSAL.match(pid)):
+        raise HTTPException(status_code=400, detail="proposal_id required")
+    items = payload.get("items")
+    if not (isinstance(items, list) and 0 < len(items) <= 20):
+        raise HTTPException(status_code=400, detail="items must list 1..20 writes")
+    clean = []
+    for it in items:
+        if not isinstance(it, dict) or it.get("store") not in OWNER_MEMORY_STORES:
+            raise HTTPException(status_code=400, detail="each item needs store user or memory")
+        action, text = it.get("action"), it.get("text")
+        if action not in ("add", "replace", "remove"):
+            raise HTTPException(status_code=400, detail="item action must be add, replace or remove")
+        if not (isinstance(text, str) and text.strip() and len(text) <= _OWNER_MEMORY_MAX_TEXT):
+            raise HTTPException(status_code=400, detail="item text must be 1..%d characters" % _OWNER_MEMORY_MAX_TEXT)
+        clean.append((it["store"], action, text.strip()))
+    source = payload.get("source")
+    if source is not None and not (isinstance(source, str) and len(source) <= 100):
+        raise HTTPException(status_code=400, detail="source must be a short string")
+    conn = db()
+    try:
+        _ensure_l18_schema(conn)
+        ids = [_l18_event(conn, kind, proposal_id=pid, store=s, text=t, source=source, detail=a) for s, a, t in clean]
+        conn.commit()
+        return {"recorded": ids}
+    finally:
+        conn.close()
+
+
+@app.get("/os/learning-events")
+def get_learning_events(kind: str = None, limit: int = 500):
+    """Export the learning stream (oldest first). Needs no Hermes file. A read never writes (no schema creation)."""
+    conn = _world_ro_conn()
+    try:
+        q, args = "SELECT * FROM l18_learning_event", []
+        if kind:
+            q += " WHERE kind=?"; args.append(kind)
+        q += " ORDER BY id LIMIT ?"; args.append(max(1, min(int(limit), 5000)))
+        try:
+            rows = conn.execute(q, args).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            rows = []
+        return {"events": [{k: r[k] for k in ("event_id", "kind", "proposal_id", "store", "entry_id", "text", "source",
+                                              "at", "detail")} for r in rows], "count": len(rows)}
+    finally:
+        conn.close()
+
+# ============================================================================
+# END L18 LEARNING EVENTS
 # ============================================================================

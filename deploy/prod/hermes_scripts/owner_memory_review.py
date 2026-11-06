@@ -24,6 +24,7 @@ REVIEW_HOURS = 26
 PER_MESSAGE = 700
 TOTAL = 14000
 SEEN = "memory-review/seen.jsonl"
+API = os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765")
 
 
 def owner_ids(home: Path) -> set:
@@ -131,7 +132,33 @@ def snapshot(home: Path = HOME) -> int:
             for r in new:
                 f.write(json.dumps({"id": r["id"], "summary": str(r.get("summary", ""))[:300],
                                     "contents": _contents(r), "ops": _operations(r)}, ensure_ascii=False) + "\n")
+        for r in new:                                  # L18: the proposal as a learning event (best effort)
+            items = [{"store": o.get("target") or "user", "action": o.get("action"),
+                      "text": o.get("content") or o.get("old_text")} for o in _operations(r)
+                     if o.get("action") in ("add", "replace", "remove") and (o.get("content") or o.get("old_text"))]
+            if items:
+                try:
+                    _api("POST", "/os/learning-events", {"kind": "PROPOSED", "proposal_id": str(r["id"]),
+                                                         "items": items, "source": str(r.get("origin") or "hermes")})
+                except Exception:
+                    pass
     return len(new)
+
+
+def _api(method: str, path: str, body=None):
+    import urllib.request
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(API + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def l18_rejected() -> list:
+    """Texts the owner rejected, from LILITH OS's L18 learning events (runtime independent); [] when unreachable."""
+    try:
+        return [e["text"] for e in _api("GET", "/os/learning-events?kind=REJECTED")["events"] if e.get("text")]
+    except Exception:
+        return []
 
 
 def rejected(home: Path) -> list:
@@ -150,6 +177,7 @@ def rejected(home: Path) -> list:
         logged = []
     for rec in logged:
         out += [f"- {t[:200]}" for t in rec.get("contents") or [] if t and _norm(t) not in memory]
+    out += [f"- {t[:200]}" for t in l18_rejected() if _norm(t) not in memory]
     return list(dict.fromkeys(out))
 
 
