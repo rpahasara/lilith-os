@@ -76,7 +76,8 @@ jobs:
             core-api)
               python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
               python -m py_compile services/core-api/app.py
-              python -m unittest discover -s services/core-api/tests -p "test_*.py" ;;
+              python -m unittest discover -s services/core-api/tests -p "test_*.py"
+              python -m unittest deploy/prod/tests/test_owner_memory_sync.py ;;
             router)
               python -m compileall -q deploy/prod/lilith_router ;;
             hermes-gateway)

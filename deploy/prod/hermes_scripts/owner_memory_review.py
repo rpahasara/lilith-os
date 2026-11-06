@@ -93,6 +93,15 @@ def _contents(rec: dict) -> list:
     return [str(o.get("content")) for o in ops or [] if isinstance(o, dict) and o.get("content")]
 
 
+def _operations(rec: dict) -> list:
+    """Each write a proposal would make: action, target store, old text, new text (for the World Model sync)."""
+    payload = rec.get("payload") or {}
+    target = payload.get("target")
+    ops = payload.get("operations") if payload.get("action") == "batch" else [payload]
+    return [{"action": o.get("action"), "target": o.get("target") or target, "old_text": o.get("old_text"),
+             "content": o.get("content")} for o in ops or [] if isinstance(o, dict)]
+
+
 def _norm(text: str) -> str:
     return " ".join(text.split()).lower()
 
@@ -121,7 +130,7 @@ def snapshot(home: Path = HOME) -> int:
         with open(path, "a", encoding="utf-8") as f:
             for r in new:
                 f.write(json.dumps({"id": r["id"], "summary": str(r.get("summary", ""))[:300],
-                                    "contents": _contents(r)}, ensure_ascii=False) + "\n")
+                                    "contents": _contents(r), "ops": _operations(r)}, ensure_ascii=False) + "\n")
     return len(new)
 
 

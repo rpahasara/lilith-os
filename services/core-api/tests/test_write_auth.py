@@ -25,6 +25,7 @@ WRITES = {
     "/os/tasks/{task_id}": lambda c: app.update_task("t.x", {}, x_lilith_os_write=c),
     "/os/drafts": lambda c: app.create_draft({}, x_lilith_os_write=c),
     "/os/drafts/{draft_id}": lambda c: app.discard_draft("d.x", x_lilith_os_write=c),
+    "/os/owner-memory": lambda c: app.post_owner_memory({}, x_lilith_os_write=c),
 }
 OTHER_AUTH = {"/os/conversation", "/os/conversation/evidence"}          # fail-closed through _require_capture_auth
 
