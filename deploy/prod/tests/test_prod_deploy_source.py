@@ -12,7 +12,8 @@ ALLOWED = __import__("re").compile(r"^([a-z_][a-z0-9_]*\.py|router\.yaml)$")
 
 class MirrorTests(unittest.TestCase):
     def test_names_are_deployable(self):
-        names = sorted(p.name for p in MIRROR.iterdir() if p.name != ".gitattributes")
+        # tracked source files only: a test run may leave __pycache__ (the bundle only packs *.py + router.yaml)
+        names = sorted(p.name for p in MIRROR.iterdir() if p.is_file() and p.name != ".gitattributes")
         self.assertIn("router.yaml", names)
         self.assertGreaterEqual(len(names), 30)
         for name in names:
@@ -36,7 +37,7 @@ class MirrorTests(unittest.TestCase):
 
     def test_no_line_endings_or_settings_files(self):
         for path in MIRROR.iterdir():
-            if path.name == ".gitattributes":
+            if path.name == ".gitattributes" or not path.is_file():
                 continue
             self.assertNotIn(b"\r\n", path.read_bytes(), path.name)
         self.assertFalse((MIRROR / "canonical_memory.json").exists())   # root-owned settings stay on the host
