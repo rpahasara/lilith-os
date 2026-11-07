@@ -64,7 +64,7 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 | Note helped | Joking about a laptop freeze (laughed *and* cared); teasing banter (cheekier) |
 | No difference | Sarcastic rejection (the detector misread it as playful; the model handled it anyway); a date correction |
 | Note slightly hurt | Casual Git question (worst reply was a long assistant-style list); tired; a joke about force-pushing to main on Friday (the "play along" line softened her disagreement in one sample) |
-| Not measured | Laughing about no sleep; laughing off a repeated rejection; affectionate greeting; cheer-me-up request (provider quota) |
+| Not measured | Laughing about no sleep; laughing off a repeated rejection; affectionate greeting; cheer-me-up request (provider quota; measured after the fix, below) |
 
 Conclusions: the model already reads social context well from the conversation; almost every misfire was the *playful* line firing on any laugh token; an extra social-reasoning inference call is **not** justified by this evidence.
 
@@ -76,8 +76,19 @@ Conclusions: the model already reads social context well from the conversation; 
 
 **Tests:** 10 new context-gate tests; deploy/prod suite 70/70; historical classifier cases 18/18. **Deploy:** router via the standard pipeline at `27253c8`, smoke check OK, backup taken; an on-host self-check of the deployed code (no model call) reported the expected selections; gateway active, no new errors. **Rollback:** redeploy the previous router mirror, or set `social_cognition_mode: shadow` to stop all tone notes.
 
+**Follow-up blind A/B, 2026-11-08** (`OPERATOR-REPORTED`; same method, with the note chosen by the deployed context-aware code; 12 calls, ~33K tokens, 40 s between calls):
+
+| Scenario | Deployed selection | Result |
+| --- | --- | --- |
+| Laughing about no sleep | *mixed* | **Note helped**: both replies laughed with the user and told them to rest; without the note, one reply was harsh ("stop lying to me") and one was flippant |
+| Laughing off a repeated rejection | none | Same prompt as baseline after the fix (no playful nudge) |
+| Affectionate greeting | *playful* | No clear difference: one warm and one extra-cheeky reply with the note, one warm and one flat without it |
+| Cheer-me-up request | *support* | No clear difference: good replies both ways; one reply with the note ran long |
+
+No code change is needed. All 14 scenarios have now been measured.
+
 **Remaining limitations:**
-- Four scenarios are still unmeasured. Re-run them only when the provider's daily quota has headroom. The fast-path model has a rolling **200K tokens/day** limit, and on 2026-11-07 the evaluation (~90K tokens) plus normal chat used it up, pushing live chat onto the full-agent fallback for a while. Future evaluations should use at most ~50K tokens/day.
+- Evaluation quota: the fast-path model has a rolling **200K tokens/day** limit. On 2026-11-07 the evaluation (~90K tokens) plus normal chat used it up, pushing live chat onto the full-agent fallback for a while. Future evaluations should use at most ~50K tokens/day.
 - The selection is still deterministic. Deeper contextual social reasoning, persistent uncertain social preferences (owner-memory beliefs with L18 events) and appraisal-driven affect remain **deferred** (see §6).
 - The owner-only full-agent path receives the note as an API-only prefix on the current message; that path was not A/B-measured (cost).
 
@@ -90,7 +101,7 @@ Conclusions: the model already reads social context well from the conversation; 
 | World Model owner memory + exports | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Prove actual replacement runtime/VM can rebuild and use the same identity knowledge |
 | L18 owner learning-event ledger | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Do not mistake event tracking for full consolidation |
 | L18 long-term memory consolidation | `SHADOW / PARTIAL` | Review existing candidate workers; measured promotion/deduplication/reconciliation is future engineering |
-| Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) | Finish the 4 unmeasured offline scenarios when quota allows; deeper contextual reasoning and appraisal **deferred research** |
+| Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) Offline A/B complete (14/14 scenarios); deeper contextual reasoning and appraisal **deferred research** |
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
 | Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` | Re-consent affected accounts, confirm scheduler jobs and functional reads |
 | Primary full-agent provider fallback | `OPERATOR-REPORTED MISSING` | Add/test a genuine fallback to avoid total non-social outage |
