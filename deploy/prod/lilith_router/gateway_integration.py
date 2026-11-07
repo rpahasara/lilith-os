@@ -491,14 +491,32 @@ def route_turn(
         logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
         result = None
     if session_key is None:
-        return _with_owner_memory(result, False)
+        return _with_fallback_chain(_with_owner_memory(result, False))
     try:
         merged = _canonical_memory.merge(result, note=note, combined_ephemeral=combined_ephemeral,
                                          session_key=session_key, cached_agent=cached_agent)
     except Exception:
         logger.debug("lilith_router: canonical memory merge failed (no note)", exc_info=True)
         merged = result
-    return _with_social_note(_with_owner_memory(merged, owner))
+    return _with_fallback_chain(_with_social_note(_with_owner_memory(merged, owner)))
+
+
+def _with_fallback_chain(out: dict) -> dict:
+    """Full-agent provider fallback: router.yaml `full_agent_fallback` rides on every routed turn as Hermes'
+    `fallback_model` chain, after the social route's own fallback (run.py also applies it to a cached agent).
+    A ready reply needs none; a bad config leaves the turn exactly as before."""
+    try:
+        cfg = _config.load()
+        chain = list(cfg.full_agent_fallback) if cfg.enabled else []
+        if not chain or "final_response" in out:
+            return out
+        merged = [dict(e) for e in (out.get("fallback_model") or []) if isinstance(e, dict)]
+        seen = {(e.get("provider"), e.get("model")) for e in merged}
+        merged += [dict(e) for e in chain if (e["provider"], e["model"]) not in seen]
+        out["fallback_model"] = merged
+    except Exception:
+        logger.debug("lilith_router: fallback chain not applied", exc_info=True)
+    return out
 
 
 def _with_social_note(out: dict) -> dict:
