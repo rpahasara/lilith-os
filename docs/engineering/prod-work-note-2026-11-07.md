@@ -4,7 +4,7 @@
 >
 > **Evidence discipline:** `SOURCE-VERIFIED` = PR/code on GitHub; `OPERATOR-REPORTED` = Claude's live-host run reports and owner's Telegram tests, not independently re-run by this document; `PENDING` = not confirmed complete. This note is a **handoff/work log**, not a replacement for acceptance records, audits or live probes.
 >
-> **Source baseline:** `main` at `d7fdb9fcdcd4d8b47657998d1a4ebe919f43bb4e` (PR #344 merge). Keep this note updated after later merges.
+> **Source baseline:** `main` at `27253c8e2bbdeaed864d69f42b0d8118d30bcd03` (PR #346 merge; previously `d7fdb9f`, PR #344). Keep this note updated after later merges.
 >
 > **Public-safe:** This repository was publicly accessible at the time of writing. This document deliberately excludes private memory text, identities/IDs, credentials, secrets, custody values, internal access endpoints and detailed snapshot locations.
 
@@ -15,7 +15,7 @@
 - **Privacy and recovery:** `OPERATOR-REPORTED` initial hold RELEASED, Privacy READY, service auto-start and auto-unlock working after the marker-permission repair. Host-bound credentials require re-sealing during a VM move; do not assume a restored credential decrypts on a different host.
 - **Routine PROD deploys:** `OPERATOR-REPORTED` constrained GitHub Actions deployment path works for Core API, router, Hermes gateway and later narrowly-scoped components, with backup/health checks/rollback. No unrestricted deployer root login.
 - **Learning:** `SOURCE-VERIFIED` World Model owner-memory API, LILITH OS-first approved writes, Hermes compatibility projection, L18 owner-learning events. `OPERATOR-REPORTED` fresh-session owner Telegram learning tests passed, including exact-once durable records.
-- **Social Cognition:** `SOURCE-VERIFIED` deterministic cue detection and live, optional tone guidance on owner channels (PRs #342/#344). Shared/public channels remain in shadow. `OPERATOR-REPORTED` one two-turn Telegram test showed suitable humor-with-frustration response followed by focused technical advice. **This does not prove a causal improvement over the same model without tone notes.**
+- **Social Cognition:** `SOURCE-VERIFIED` deterministic cue detection and live, optional tone guidance on owner channels (PRs #342/#344). Shared/public channels remain in shadow. `OPERATOR-REPORTED` one two-turn Telegram test showed suitable humor-with-frustration response followed by focused technical advice. A small blind offline A/B then found the playful line caused most misfires; line selection was made context-aware in #346 (see §3a). **Causal benefit is still only partially measured** (8 of 12 scenarios).
 - **What is NOT complete:** L18 *active consolidation* is still shadow/partial; full contextual social reasoning and event-appraisal/functional affect are research targets, not shipped features. Full runtime replacement and restored-VM continuity remain unproven.
 
 ## 2. Git change ledger — merged work since the canonical PROD cutover
@@ -40,6 +40,7 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 | [#342](https://github.com/rpahasara/lilith-os/pull/342) | Expand Social Cognition everyday cue detectors | 13/150 relevant messages detected vs 0/150 previously (operator measurement), still shadow at that step |
 | [#343](https://github.com/rpahasara/lilith-os/pull/343) | Fix deployment mirror tests for generated Python caches | Router pipeline redeploy passed |
 | [#344](https://github.com/rpahasara/lilith-os/pull/344) | Live owner-only Social Cognition tone note, lean + full-agent | Deployed, healthy, one natural two-turn owner DM smoke test reported successful |
+| [#346](https://github.com/rpahasara/lilith-os/pull/346) | Context-aware tone-note line selection (playful gate); `git`/`force push` technical terms | Router deploy OK (3 files, backup taken); deployed selection self-check and gateway health reported OK |
 
 **Pre-PR context:** Gate 6.3b/6.4 reported initial hold released, isolated canonical store established, anchor/checkpoint/unlock ready. Gate 7.1 admitted the first PROD canonical memory; Gate 7.2/7.2r connected owner Telegram/console recall; post-boot test found and repaired the Privacy marker permissions. These gate procedures and their local evidence remain in owner-operated work folders, not reproduced here.
 
@@ -52,6 +53,34 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 5. **Social tone smoke:** user joking about a laptop setback → conversational acknowledgment; next technical Git question → actionable technical advice without intrusive mood scripting. This is usability evidence, **not** a measured A/B benefit.
 6. **Boot/recovery and deployment:** service recovery, Privacy repair, constrained NOCHANGE deploys and subsequent standard pipeline deployments reported healthy.
 
+## 3a. Social Cognition defect and fix (2026-11-07)
+
+**Observed issue** (`OPERATOR-REPORTED`, router decision logs, no message text): in the owner's two-turn Telegram test the second message — a casual Git how-to with laughter and an emoji — received the *playful* tone note. The classifier had no `git` term (`tech=0`), so the turn was treated as social and the technical-focus rule never applied. The reply was still good, but the note was not helping.
+
+**Offline blind A/B** (`OPERATOR-REPORTED`): the lean Groq reply was replayed on the host exactly as the router builds it (same SOUL core, social policy and model; no owner profile; synthetic conversations; nothing written), with vs. without the note, two samples each, judged before un-blinding.
+
+| Result | Scenarios |
+| --- | --- |
+| Note helped | Joking about a laptop freeze (laughed *and* cared); teasing banter (cheekier) |
+| No difference | Sarcastic rejection (the detector misread it as playful; the model handled it anyway); a date correction |
+| Note slightly hurt | Casual Git question (worst reply was a long assistant-style list); tired; a joke about force-pushing to main on Friday (the "play along" line softened her disagreement in one sample) |
+| Not measured | Laughing about no sleep; laughing off a repeated rejection; affectionate greeting; cheer-me-up request (provider quota) |
+
+Conclusions: the model already reads social context well from the conversation; almost every misfire was the *playful* line firing on any laugh token; an extra social-reasoning inference call is **not** justified by this evidence.
+
+**Fix** (`SOURCE-VERIFIED` #346; same owner-approved wording, no new wording, no extra inference call, lane, store or learning subsystem):
+- Mood lines are dropped when the message names a technical subject or asks for help (help-request phrasing). Routing is unchanged except two narrow classifier terms: `git` (not "you git") and `force push`.
+- Sarcasm markers select the approved *mixed* line (joking about something annoying). The difficulty detector also recognises sleeplessness and being rejected (not "I rejected the offer").
+- A laugh that brushes off something hard from the user's previous turn gets no playful nudge. An earlier difficult subject alone never decides it; the current message must itself brush it off.
+- Explicit intent (correction, comfort, humour, formality) stays authoritative.
+
+**Tests:** 10 new context-gate tests; deploy/prod suite 70/70; historical classifier cases 18/18. **Deploy:** router via the standard pipeline at `27253c8`, smoke check OK, backup taken; an on-host self-check of the deployed code (no model call) reported the expected selections; gateway active, no new errors. **Rollback:** redeploy the previous router mirror, or set `social_cognition_mode: shadow` to stop all tone notes.
+
+**Remaining limitations:**
+- Four scenarios are still unmeasured. Re-run them only when the provider's daily quota has headroom. The fast-path model has a rolling **200K tokens/day** limit, and on 2026-11-07 the evaluation (~90K tokens) plus normal chat used it up, pushing live chat onto the full-agent fallback for a while. Future evaluations should use at most ~50K tokens/day.
+- The selection is still deterministic. Deeper contextual social reasoning, persistent uncertain social preferences (owner-memory beliefs with L18 events) and appraisal-driven affect remain **deferred** (see §6).
+- The owner-only full-agent path receives the note as an API-only prefix on the current message; that path was not A/B-measured (cost).
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
@@ -61,7 +90,7 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 | World Model owner memory + exports | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Prove actual replacement runtime/VM can rebuild and use the same identity knowledge |
 | L18 owner learning-event ledger | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Do not mistake event tracking for full consolidation |
 | L18 long-term memory consolidation | `SHADOW / PARTIAL` | Review existing candidate workers; measured promotion/deduplication/reconciliation is future engineering |
-| Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` | Evaluate benefit vs shadow; deeper contextual reasoning and appraisal **deferred research** |
+| Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) | Finish the 4 unmeasured offline scenarios when quota allows; deeper contextual reasoning and appraisal **deferred research** |
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
 | Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` | Re-consent affected accounts, confirm scheduler jobs and functional reads |
 | Primary full-agent provider fallback | `OPERATOR-REPORTED MISSING` | Add/test a genuine fallback to avoid total non-social outage |
