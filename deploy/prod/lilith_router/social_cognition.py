@@ -724,3 +724,53 @@ def build_trace(
         "timestamp": round(time.time(), 3),
     }
 
+
+# -- Live tone note (owner-approved wording, 2026-11-07) --
+# A light, optional hint for the reply model on OWNER channels only. Clues are weak signals (an emoji is not a mood),
+# so every line is phrased as an invitation and the header tells her to stay herself and ignore it when it doesn't fit.
+TONE_HEADER = ("[A light read of this message \u2014 a hint, not a script. Stay completely yourself; ignore it if the "
+               "conversation clearly needs something else.]")
+TONE_LINES = {
+    "playful": "They sound playful or warm \u2014 play along in your own way if you feel like it.",
+    "difficulty": "They mention something that's weighing on them \u2014 notice it with warmth; keep any teasing gentle.",
+    "mixed": ("They're joking about something genuinely annoying \u2014 you can laugh with them and still take the "
+              "annoying part seriously."),
+    "correction": "They're correcting you \u2014 take it on board plainly and fix it; no grovelling.",
+    "support": "They're asking for comfort \u2014 lead with care, in your own words.",
+    "humor": "They asked for humour \u2014 go for it.",
+    "formal": "They want this one formal.",
+}
+
+
+def tone_note_keys(snapshot: Dict[str, Any], *, focused: bool = False) -> List[str]:
+    """Which approved lines apply. `focused` (a technical / work turn) drops the mood lines so the answer stays on task;
+    explicit requests (correction, comfort, humour, formality) still count. An explicit request beats a clue."""
+    found = {c["cueType"] for c in snapshot.get("socialCues", [])}
+    formal = any(c.get("dimension") and c.get("value") == PROFESSIONAL
+                 for c in snapshot.get("explicitInteractionConstraints", []))
+    keys: List[str] = []
+    if E_CORRECTION in found:
+        keys.append("correction")
+    if E_SUPPORT in found:
+        keys.append("support")
+    if not focused and not formal:
+        playful, hard = E_PLAYFUL in found, E_DIFFICULTY in found and E_SUPPORT not in found
+        if playful and hard:
+            keys.append("mixed")
+        elif playful:
+            keys.append("playful")
+        elif hard:
+            keys.append("difficulty")
+    if E_HUMOR in found and not formal:
+        keys.append("humor")
+    if formal:
+        keys.append("formal")
+    return keys
+
+
+def tone_note(snapshot: Dict[str, Any], *, focused: bool = False) -> Optional[str]:
+    """The tone note for a validated snapshot, or None when there is nothing worth saying."""
+    keys = tone_note_keys(snapshot, focused=focused)
+    if not keys:
+        return None
+    return TONE_HEADER + "\n" + "\n".join("- " + TONE_LINES[k] for k in keys)

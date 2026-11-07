@@ -84,10 +84,12 @@ ethics_max_concerns: 4
 ethics_max_tensions: 3
 
 # -- Slice 14: Social Cognition observer (reuses cognitive_channels) --
-# V1 is TURN-only and shadow-only: compute + validate + safe trace, then discard.
-# It never changes prompts, routes, replies, Social Guard, or Presence rendering.
+# TURN-only: compute + validate + safe trace. mode live (owner-approved 2026-11-07) adds a light,
+# optional tone note to the reply model on OWNER turns only (console + owner Telegram DM); every other
+# channel stays shadow. It never changes routes, Social Guard, or Presence rendering. Back to shadow: set
+# social_cognition_mode: shadow.
 social_cognition_enabled: true
-social_cognition_mode: shadow
+social_cognition_mode: live
 
 # -- Slice 15A: Learning / Consolidation foundation --
 # One-shot, deterministic, bounded, and shadow-only. This does not create
