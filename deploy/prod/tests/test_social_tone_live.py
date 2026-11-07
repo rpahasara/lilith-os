@@ -189,5 +189,68 @@ class RunPyTests(unittest.TestCase):
                       "                _conversation_kwargs[\"persist_user_message\"] = ctx.message", text)
 
 
+class ContextGateTests(unittest.TestCase):
+    """2026-11-07 offline review: the playful line was nearly every misfire. Same approved wording, chosen with context."""
+
+    def keys(self, message, recent=()):
+        from lilith_router import classifier as cl
+        d = cl.classify(message, list(recent), "social" if recent else None)
+        snap = sc.build_social_context(sc.build_social_input(message, "sc.g", "telegram"))
+        focused = d.mode != "social" or bool(d.signals["tech"])
+        return sc.tone_note_keys(snap, focused=focused, context=sc.tone_context(message, list(recent)))
+
+    def test_casual_technical_questions_stay_focused(self):
+        self.assertEqual(self.keys("lol okay, how do I make git keep my uncommitted changes safe? \U0001f605",
+                                   ["ugh my laptop froze right before I saved, this is killing me lol"]), [])
+        self.assertEqual(self.keys("hey can you help me write a regex for emails? ty \u2764\ufe0f"), [])
+        self.assertEqual(self.keys("lol why does my docker container keep exiting with code 137"), [])
+
+    def test_a_bad_idea_gets_no_play_along_nudge(self):
+        self.assertEqual(self.keys("haha I'm just gonna force push to main on friday night, what could go wrong \U0001f602"), [])
+
+    def test_sarcasm_is_joking_about_something_annoying(self):
+        self.assertEqual(self.keys("great, another rejection email. love that for me \U0001f643"), ["mixed"])
+
+    def test_laughing_about_no_sleep_is_mixed(self):
+        self.assertEqual(self.keys("lol I haven't slept in two days but I'm fine haha \U0001f602"), ["mixed"])
+
+    def test_brushing_off_something_hard_from_the_previous_turn(self):
+        hard = ["they rejected me after the final round. third time this month."]
+        self.assertEqual(self.keys("haha whatever, it's fine \U0001f602 what's new with you?", hard), [])
+
+    def test_an_earlier_hard_subject_alone_does_not_decide(self):
+        msg = "haha whatever, it's fine \U0001f602 what's new with you?"
+        self.assertEqual(self.keys(msg, ["had pizza for lunch"]), ["playful"])
+        self.assertEqual(self.keys("hehe you're such a nerd \U0001f60f", ["ugh rough week"]), ["playful"])  # no brush-off
+        self.assertEqual(self.keys("haha that was a rough week but this weekend was amazing \U0001f602",
+                                   ["ugh rough week"]), ["mixed"])
+
+    def test_playful_and_explicit_intent_still_work(self):
+        self.assertEqual(self.keys("hehe you're such a nerd for noticing \U0001f60f"), ["playful"])
+        self.assertEqual(self.keys("good morning \u2764\ufe0f missed you"), ["playful"])
+        self.assertEqual(self.keys("haha make it funny please"), ["playful", "humor"])
+        self.assertEqual(self.keys("no, it's tuesday not monday lol", ["my interview is on tuesday"]),
+                         ["correction", "playful"])
+        self.assertEqual(self.keys("can you cheer me up? the interview went badly"), ["support"])
+        self.assertIn("formal", self.keys("haha my manager wants a status email, keep it formal"))
+
+    def test_rejection_wording_is_narrow(self):
+        self.assertEqual(self.keys("I rejected the offer haha \U0001f60f"), ["playful"])
+        self.assertEqual(self.keys("lol you git \U0001f602"), ["playful"])
+
+    def test_git_terms_route_only_real_git_talk(self):
+        from lilith_router import classifier as cl
+        self.assertEqual(cl.classify("how do I make git keep my uncommitted changes safe?", [], None).mode, "technical")
+        for msg in ("that's legit hilarious", "lol you git", "good morning, I digit-ally miss you",
+                    "haha I'm so tired today", "what's up babe"):
+            with self.subTest(msg=msg):
+                self.assertEqual(cl.classify(msg, [], None).signals["tech"], 0)
+
+    def test_router_logs_the_choice_without_text(self):
+        text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
+        self.assertIn('focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))', text)
+        self.assertIn("tctx = _sc.tone_context(message, recent)", text)
+
+
 if __name__ == "__main__":
     unittest.main()

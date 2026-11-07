@@ -550,12 +550,16 @@ def _route_turn_impl(
             and cfg.social_cognition_is_live(platform, str(chat_id)):
         try:
             from . import social_cognition as _sc
-            focused = decision.mode != SOCIAL
-            keys = _sc.tone_note_keys(_social_snapshot, focused=focused)
+            # focused: a technical / work route, or a technical subject inside a social turn (routing unchanged)
+            focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))
+            tctx = _sc.tone_context(message, recent)
+            keys = _sc.tone_note_keys(_social_snapshot, focused=focused, context=tctx)
             if keys:
-                _social_note.set(_sc.tone_note(_social_snapshot, focused=focused))
-                _log_social_cognition(cfg, {"lane": "social_cognition_live", "mode": decision.mode,
-                                            "tone_note_keys": keys, "timestamp": round(time.time(), 3)})
+                _social_note.set(_sc.tone_note(_social_snapshot, focused=focused, context=tctx))
+            _log_social_cognition(cfg, {"lane": "social_cognition_live", "mode": decision.mode,
+                                        "tone_note_keys": keys, "focused": focused,
+                                        "context": sorted(k for k, v in tctx.items() if v),
+                                        "timestamp": round(time.time(), 3)})
         except Exception:
             _social_note.set(None)
             logger.debug("lilith_router: social tone note failed (no note)", exc_info=True)

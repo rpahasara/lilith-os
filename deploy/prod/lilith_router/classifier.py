@@ -45,7 +45,7 @@ _TECH_TERMS = (
     r"firewall", r"\bdns\b", r"\bssl\b", r"\btls\b", r"\bvpn\b", r"subnet",
     r"kernel", r"regex", r"compiler", r"runtime", r"webhook", r"oauth",
     r"latency", r"throughput", r"schema", r"migration", r"repo",
-    r"pull request", r"\bpr\b", r"merge conflict", r"rebase",
+    r"pull request", r"\bpr\b", r"merge conflict", r"rebase", r"(?<!you )\bgit\b", r"force[- ]?push",
     r"cluster", r"node", r"ingress", r"load ?balancer", r"proxy",
 )
 
