@@ -4,7 +4,7 @@
 >
 > **Evidence discipline:** `SOURCE-VERIFIED` = PR/code on GitHub; `OPERATOR-REPORTED` = Claude's live-host run reports and owner's Telegram tests, not independently re-run by this document; `PENDING` = not confirmed complete. This note is a **handoff/work log**, not a replacement for acceptance records, audits or live probes.
 >
-> **Source baseline:** `main` at `27253c8e2bbdeaed864d69f42b0d8118d30bcd03` (PR #346 merge; previously `d7fdb9f`, PR #344). Keep this note updated after later merges.
+> **Source baseline:** `main` at `6cfc3be1d4ba70e6801735a30d03dde0268d3ce9` (PR #349 merge; previously `27253c8`, PR #346). Keep this note updated after later merges.
 >
 > **Public-safe:** This repository was publicly accessible at the time of writing. This document deliberately excludes private memory text, identities/IDs, credentials, secrets, custody values, internal access endpoints and detailed snapshot locations.
 
@@ -41,6 +41,7 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 | [#343](https://github.com/rpahasara/lilith-os/pull/343) | Fix deployment mirror tests for generated Python caches | Router pipeline redeploy passed |
 | [#344](https://github.com/rpahasara/lilith-os/pull/344) | Live owner-only Social Cognition tone note, lean + full-agent | Deployed, healthy, one natural two-turn owner DM smoke test reported successful |
 | [#346](https://github.com/rpahasara/lilith-os/pull/346) | Context-aware tone-note line selection (playful gate); `git`/`force push` technical terms | Router deploy OK (3 files, backup taken); deployed selection self-check and gateway health reported OK |
+| [#349](https://github.com/rpahasara/lilith-os/pull/349) | Full-agent provider fallback (Copilot Free `gpt-4.1`) via Hermes' native chain; cached agents get the router chain | Router + hermes-gateway deploys OK (backups taken); host e2e fallback for 429/401/503 with the tool run exactly once |
 
 **Pre-PR context:** Gate 6.3b/6.4 reported initial hold released, isolated canonical store established, anchor/checkpoint/unlock ready. Gate 7.1 admitted the first PROD canonical memory; Gate 7.2/7.2r connected owner Telegram/console recall; post-boot test found and repaired the Privacy marker permissions. These gate procedures and their local evidence remain in owner-operated work folders, not reproduced here.
 
@@ -92,6 +93,29 @@ No code change is needed. All 14 scenarios have now been measured.
 - The selection is still deterministic. Deeper contextual social reasoning, persistent uncertain social preferences (owner-memory beliefs with L18 events) and appraisal-driven affect remain **deferred** (see §6).
 - The owner-only full-agent path receives the note as an API-only prefix on the current message; that path was not A/B-measured (cost).
 
+## 3b. Full-agent provider fallback (2026-11-08)
+
+**Issue** (`SOURCE-VERIFIED`): the full agent (`openai-codex` / gpt-5.6-sol) had no fallback. PROD `config.yaml` has no `fallback_providers`, and a reused cached agent took only that empty chain, so a codex auth failure, outage or rate limit meant a total non-social outage. The Groq social route's own codex fallback was also lost on cached agents.
+
+**Choice** (`OPERATOR-REPORTED` probes): Hermes' credential pool already holds `copilot`. Its plan is **GitHub Copilot Free**: 200 chat requests a month (resets on the 1st), no premium requests, overage not permitted, so it is never billed. gpt-5.6-sol and the other premium models return `model_not_supported` there. `gpt-4.1` (128K context) is free and handled a tool call correctly. Groq is unsuitable for full-agent turns: its 8K tokens-per-minute limit is below a full tool prompt.
+
+**Fix** (`SOURCE-VERIFIED` #349; no new provider, subscription, infrastructure or lane):
+- `router.yaml` `full_agent_fallback: [{provider: copilot, model: gpt-4.1}]` is sent as Hermes' `fallback_model` chain on every routed turn, after the social route's own codex fallback (social: codex, then Copilot; native: Copilot).
+- `run.py` applies the router chain to a reused cached agent as well (after Hermes' own config refresh).
+- Hermes decides when to switch: auth, billing, rate-limit, overload, timeout and missing-model errors. It retries only the failed model call, keeping tool results already in the history, and restores the primary on the next turn.
+
+**Tests:** 9 new (`test_full_agent_fallback.py`, added to the deploy workflow); deploy/prod suite 79/79. **Host e2e** (`OPERATOR-REPORTED`; throwaway process, no session DB): a fake local primary issued a `todo` tool call, then failed with 429, 401 or 503. In each case Hermes switched to Copilot `gpt-4.1`, finished the reply, and **the tool ran exactly once**. About 11 of the 200 monthly Copilot requests were used for probes.
+
+**Deploy:** router (3 files) and hermes-gateway (`run.py`) via the standard pipeline at `6cfc3be`, smoke checks OK, backups taken. Gateway and Core API active, no errors after restart; the deployed router returns the expected chains.
+
+**Rollback:** `full_agent_fallback: []` (router component), or redeploy the previous mirror/run.py backups.
+
+**Remaining limitations:**
+- The fallback is a different, weaker model than gpt-5.6-sol. Personality comes from SOUL.md and memory, not the model, but replies on fallback may be plainer.
+- Capacity is 200 model calls a month. A tool-heavy turn uses several, so this covers outages, not sustained use. A same-model second provider would need a paid plan (owner approval).
+- The Copilot token exchange reports `degraded to RAW token`; free models work in that mode.
+- A cached agent that is mid-cooldown on a fallback keeps it until the cooldown ends (Hermes behavior).
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
@@ -104,7 +128,7 @@ No code change is needed. All 14 scenarios have now been measured.
 | Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) Offline A/B complete (14/14 scenarios); deeper contextual reasoning and appraisal **deferred research** |
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
 | Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` | Re-consent affected accounts, confirm scheduler jobs and functional reads |
-| Primary full-agent provider fallback | `OPERATOR-REPORTED MISSING` | Add/test a genuine fallback to avoid total non-social outage |
+| Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
 | E-T4 and D1 | `OPEN KNOWN DEFECTS` | Reproduce and fix based on current code; don't invent their exact semantics |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
 | Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
@@ -116,7 +140,7 @@ No code change is needed. All 14 scenarios have now been measured.
 
 ## 5. Execution priority — finish existing work before speculative engineering
 
-1. **Finish already-known operational gaps:** Google OAuth and dependent jobs (requires owner re-consent), provider fallback, and reproducible E-T4/D1 fixes. Preserve working Telegram and Core API behavior.
+1. **Finish already-known operational gaps:** Google OAuth and dependent jobs (requires owner re-consent) and reproducible E-T4/D1 fixes (provider fallback done, §3b). Preserve working Telegram and Core API behavior.
 2. **Close existing optional/incomplete integrations according to actual usage:** WhatsApp, owner-private Discord DM, canonical FORGET (DEV-derived), UI if needed. Do not conflate these with incomplete DEV→PROD cutover.
 3. **Keep recovery viable:** validate destination-VM key re-sealing, protected memory/World Model/L18 backup and restore, and old snapshot retention. Plan migration separately before the owner's expected cloud-trial expiry.
 4. **After existing work:** pursue measured L18 consolidation, advanced Social Cognition, other lane improvements, memory expression, optional low-risk automatic learning and under-budget alternative model research.
