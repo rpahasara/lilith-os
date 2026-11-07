@@ -11,7 +11,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,11 @@ class RouterConfig:
     # turns keep their native (unchanged) fallback behavior.
     hermes_model: str = "gpt-5.6-sol"
     hermes_provider: str = "openai-codex"
+    # Full-agent provider fallback (2026-11-08): Hermes' own fallback chain for EVERY routed turn, appended after the
+    # social fallback above. Hermes switches on auth / billing / rate-limit / overload / timeout / missing-model errors
+    # and retries only the failed model call (tools already run stay in the history), then restores the primary on the
+    # next turn. Empty = no fallback (previous behavior).
+    full_agent_fallback: List[Dict[str, str]] = field(default_factory=list)
     recent_turns: int = 6
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -252,6 +257,28 @@ class RouterConfig:
         return _hermes_home() / "lilith_router" / "decisions.log"
 
 
+def parse_fallback_chain(raw) -> List[Dict[str, str]]:
+    """[{provider, model[, api_mode]}], at most 3 entries; anything malformed is dropped (never raises)."""
+    out: List[Dict[str, str]] = []
+    if not isinstance(raw, (list, tuple)):
+        return out
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        provider, model = str(entry.get("provider") or "").strip(), str(entry.get("model") or "").strip()
+        if not provider or not model:
+            continue
+        item = {"provider": provider, "model": model}
+        mode = str(entry.get("api_mode") or "").strip()
+        if mode in ("chat_completions", "codex_responses"):
+            item["api_mode"] = mode
+        if item not in out:
+            out.append(item)
+        if len(out) == 3:
+            break
+    return out
+
+
 def load() -> RouterConfig:
     """Load config from disk. Never raises — returns defaults on any error."""
     try:
@@ -268,6 +295,7 @@ def load() -> RouterConfig:
         cfg.groq_provider = str(raw.get("groq_provider", cfg.groq_provider))
         cfg.hermes_model = str(raw.get("hermes_model", cfg.hermes_model))
         cfg.hermes_provider = str(raw.get("hermes_provider", cfg.hermes_provider))
+        cfg.full_agent_fallback = parse_fallback_chain(raw.get("full_agent_fallback"))
         cfg.recent_turns = int(raw.get("recent_turns", cfg.recent_turns))
         cfg.log_path = str(raw.get("log_path", cfg.log_path) or "")
         # Slice 7.2 cognitive lane (additive; safe defaults keep it OFF).

@@ -5797,6 +5797,9 @@ class TurnRunner:
                 _lilith_fallback_override = _lr_res.get("fallback_model")
             if _lr_res.get("force_rebuild") and agent is not None:
                 agent = None
+            if _lilith_fallback_override is not None and agent is not None:
+                # LILITH: a reused agent keeps the router's fallback chain too (not only a fresh one).
+                self._runner._apply_fallback_chain_to_agent(agent, _lilith_fallback_override)
         # Slice 9: a reasoning result carries a ready final_response; capture it
         # (None on every normal turn) so the run below can short-circuit.
         _reasoning_fr = _lr_res.get("final_response") if isinstance(_lr_res, dict) else None
