@@ -34,6 +34,7 @@ turns, and — like everything here — is fully fail-open. See ``world_context`
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
@@ -253,9 +254,13 @@ def _log_social_cognition(cfg, trace) -> None:
         logger.debug("lilith_router: social cognition trace write failed", exc_info=True)
 
 
+_social_note = contextvars.ContextVar("lilith_social_note", default=None)
+
+
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
-                              session_key: str, message: str) -> None:
-    """Run the TURN-only Slice-14 observer without influencing the turn."""
+                              session_key: str, message: str):
+    """Run the TURN-only Slice-14 observer. Returns the validated snapshot (or None); only the live owner tone note
+    built from it may influence the reply."""
     if not cfg.social_cognition_is_active(platform, str(chat_id)):
         return None
 
@@ -278,7 +283,7 @@ def _observe_social_cognition(cfg, platform: str, chat_id: str,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
         _log_social_cognition(cfg, trace)
-        del social_input, snapshot, presence_hint, trace
+        return snapshot
     except Exception as exc:
         _log_social_cognition(cfg, {
             "lane": "social_cognition",
@@ -457,6 +462,7 @@ def route_turn(
     # gateway/run.py whether this turn's agent may keep its memory store; the lean path reads owner_turn().
     note, session_key, owner = None, None, False
     _canonical_memory.set_owner_turn(False)
+    _social_note.set(None)
     try:
         source = getattr(ctx, "source", None)
         if source is not None:
@@ -492,7 +498,16 @@ def route_turn(
     except Exception:
         logger.debug("lilith_router: canonical memory merge failed (no note)", exc_info=True)
         merged = result
-    return _with_owner_memory(merged, owner)
+    return _with_social_note(_with_owner_memory(merged, owner))
+
+
+def _with_social_note(out: dict) -> dict:
+    """The owner tone note rides on the current user message, API-only (run.py `turn_hint`), so the cached agent and
+    its prompt stay as they are. A ready reply (lean, Reasoning, Planning, Ethics) gets none here."""
+    hint = _social_note.get()
+    if hint and _canonical_memory.owner_turn() and "final_response" not in out:
+        out["turn_hint"] = hint
+    return out
 
 
 def _with_owner_memory(result, owner: bool):
@@ -522,13 +537,28 @@ def _route_turn_impl(
     # Computes validated, ephemeral semantics and a renderer-independent
     # Presence contract, writes a safe trace, discards both, and continues.
     # It has no authority over models, prompts, routing, replies, or guards.
-    _observe_social_cognition(cfg, platform, str(chat_id), session_key, message)
+    _social_snapshot = _observe_social_cognition(cfg, platform, str(chat_id), session_key, message)
     # -- end Slice 14 social cognition observer --
 
     # Decide the mode from message + bounded recent turns + previous mode.
     recent = STATE.recent(session_key, cfg.recent_turns)
     previous_mode = STATE.previous_mode(session_key)
     decision = classify(message, recent, previous_mode)
+
+    # -- Slice 14 live tone note (owner turns only; a light hint, never a script) --
+    if _social_snapshot is not None and _canonical_memory.owner_turn() \
+            and cfg.social_cognition_is_live(platform, str(chat_id)):
+        try:
+            from . import social_cognition as _sc
+            focused = decision.mode != SOCIAL
+            keys = _sc.tone_note_keys(_social_snapshot, focused=focused)
+            if keys:
+                _social_note.set(_sc.tone_note(_social_snapshot, focused=focused))
+                _log_social_cognition(cfg, {"lane": "social_cognition_live", "mode": decision.mode,
+                                            "tone_note_keys": keys, "timestamp": round(time.time(), 3)})
+        except Exception:
+            _social_note.set(None)
+            logger.debug("lilith_router: social tone note failed (no note)", exc_info=True)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending
@@ -851,7 +881,8 @@ def _route_turn_impl(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
                     message=message, runtime=groq_runtime, include_profile=_canonical_memory.owner_turn(),
                     policy=_policy.SOCIAL_POLICY + ("\n\n" + _canonical_memory.current_note()
-                                                    if _canonical_memory.current_note() else ""))
+                                                    if _canonical_memory.current_note() else "")
+                    + ("\n\n" + _social_note.get() if _social_note.get() else ""))
                 if text:
                     _note_social_route(cfg, platform, chat_id, "groq_lean")
                     return {"final_response": text, "mode": SOCIAL}

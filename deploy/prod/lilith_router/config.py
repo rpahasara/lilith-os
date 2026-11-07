@@ -219,16 +219,21 @@ class RouterConfig:
         return self.ethics_is_active(platform, chat_id) and self.ethics_mode == "live"
 
     def social_cognition_is_active(self, platform: str, chat_id: str) -> bool:
-        """True only for the approved TURN-only shadow observer.
+        """The TURN-only Slice-14 observer runs for this channel (shadow or live).
 
-        Unknown modes, including ``live``, fail open by disabling Slice 14 for
-        the turn. Channel scope deliberately reuses ``cognitive_channels``.
+        Unknown modes fail open by disabling Slice 14 for the turn. Channel
+        scope deliberately reuses ``cognitive_channels``.
         """
         return (
             bool(self.social_cognition_enabled)
-            and self.social_cognition_mode == "shadow"
+            and self.social_cognition_mode in ("shadow", "live")
             and self._cognitive_channel_match(platform, str(chat_id))
         )
+
+    def social_cognition_is_live(self, platform: str, chat_id: str) -> bool:
+        """The tone note may reach the reply model. The router adds it ONLY on an owner turn
+        (canonical_memory.owner_turn()); every other channel stays shadow."""
+        return self.social_cognition_is_active(platform, chat_id) and self.social_cognition_mode == "live"
 
     def memory_consolidation_is_active(self) -> bool:
         """True only for the manually invoked Slice 15A shadow worker."""

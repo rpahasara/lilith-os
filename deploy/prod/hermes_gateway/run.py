@@ -1719,6 +1719,21 @@ def _wrap_current_message_with_observed_context(message: Any, observed_context: 
     return message
 
 
+def _wrap_current_message_with_turn_hint(message: Any, hint: str) -> Any:
+    """Put LILITH's API-only tone hint before the current user turn (text or multimodal)."""
+    prefix = hint.strip() + "\n\n"
+    if isinstance(message, str):
+        return prefix + message
+    if isinstance(message, list):
+        wrapped = [dict(part) if isinstance(part, dict) else part for part in message]
+        for part in wrapped:
+            if isinstance(part, dict) and part.get("type") == "text":
+                part["text"] = f"{prefix}{part.get('text', '')}"
+                return wrapped
+        return [{"type": "text", "text": hint.strip()}] + wrapped
+    return message
+
+
 def _last_transcript_timestamp(history: Optional[List[Dict[str, Any]]]) -> Any:
     """Return the ``timestamp`` of the last usable transcript row, if any.
 
@@ -6463,13 +6478,19 @@ class TurnRunner:
                 _run_message,
                 observed_group_context,
             )
+            # LILITH Social Cognition (owner turns only): a light tone hint for THIS call; never stored.
+            _lr_turn_hint = _lr_res.get("turn_hint") if isinstance(_lr_res, dict) else None
+            if isinstance(_lr_turn_hint, str) and _lr_turn_hint.strip():
+                _api_run_message = _wrap_current_message_with_turn_hint(_api_run_message, _lr_turn_hint)
+            else:
+                _lr_turn_hint = None
             _conversation_kwargs = {
                 "conversation_history": agent_history,
                 "task_id": ctx.session_id,
             }
             if _persist_user_message_override is not None:
                 _conversation_kwargs["persist_user_message"] = _persist_user_message_override
-            elif observed_group_context:
+            elif observed_group_context or _lr_turn_hint:
                 _conversation_kwargs["persist_user_message"] = ctx.message
             if ctx.persist_user_display_kind:
                 # Internal self-injected turn (#82888): type the persisted user
