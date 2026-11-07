@@ -118,7 +118,9 @@ _MOOD_DIFFICULTY_RE = re.compile(
     r"\b(?:(?:i\s+am|i['’]?m|im|i\s+feel|feeling)\s+(?:so\s+|really\s+|pretty\s+|kinda\s+|a\s+bit\s+|super\s+)?"
     r"(?:tired|exhausted|drained|stressed|sad|down|low|lonely|anxious|burn(?:t|ed)\s+out|fed\s+up|done)|"
     r"(?:rough|long|bad|hard|awful|terrible|horrible|shit|crap)\s+(?:day|night|week)|"
-    r"ugh+|fml|this\s+is\s+killing\s+me|i\s+hate\s+(?:this|it|my\s+life))\b",
+    r"ugh+|fml|this\s+is\s+killing\s+me|i\s+hate\s+(?:this|it|my\s+life)|"
+    r"(?:haven['’]?t|have\s+not|didn['’]?t|barely|can['’]?t)\s+(?:slept|sleep)|no\s+sleep|"
+    r"rejected\s+me|(?:got|been|was|were)\s+rejected|rejections?)\b",
     re.IGNORECASE,
 )
 _GENERAL_CORRECTION_RE = re.compile(
@@ -742,10 +744,53 @@ TONE_LINES = {
 }
 
 
-def tone_note_keys(snapshot: Dict[str, Any], *, focused: bool = False) -> List[str]:
-    """Which approved lines apply. `focused` (a technical / work turn) drops the mood lines so the answer stays on task;
-    explicit requests (correction, comfort, humour, formality) still count. An explicit request beats a clue."""
+# Context for choosing a line (2026-11-07 offline review: the playful line was nearly every misfire).
+# A help request keeps the turn focused; sarcasm is joking about something annoying (the approved mixed line);
+# a laugh that waves away something hard the user said in the previous turn gets no playful nudge -- but the
+# earlier subject alone never decides it: the current message must itself brush it off.
+_HELP_REQUEST_RE = re.compile(
+    r"\b(?:how\s+(?:do|can|should|would)\s+(?:i|we|you)|how\s+to|"
+    r"(?:can|could|would)\s+you\s+(?:help|show|explain|fix|write|check|debug|tell\s+me\s+how)|"
+    r"help\s+me\s+(?:with|fix|write|understand|figure)|what['’]?s\s+the\s+(?:best\s+)?way\s+to)\b",
+    re.IGNORECASE,
+)
+_SARCASM_RE = re.compile(
+    r"\blove\s+that\s+for\s+me\b|\bjust\s+(?:great|perfect|wonderful|fantastic|lovely)\b|"
+    r"^\s*(?:oh\s+)?(?:great|perfect|wonderful|fantastic|awesome|lovely)[,.!]+\s+(?:another|more|now|so|just)\b|"
+    r"\bthanks\s+a\s+lot\b|\bof\s+course\s+it\s+(?:did|does|would|had\s+to)\b|\bmy\s+favou?rite\s+thing\b",
+    re.IGNORECASE,
+)
+_BRUSH_OFF_RE = re.compile(
+    r"\b(?:whatever|it['’]?s\s+(?:fine|ok|okay|nothing)|it\s+is\s+(?:fine|ok|okay)|i['’]?m\s+(?:fine|ok|okay|good)|"
+    r"doesn['’]?t\s+matter|no\s+big\s+deal|it\s+is\s+what\s+it\s+is|anyway[s]?)\b",
+    re.IGNORECASE,
+)
+
+
+def tone_context(message: str, recent: Optional[List[str]] = None) -> Dict[str, bool]:
+    """Turn-level context for line selection. `recent` = the user's previous messages, oldest first."""
+    text = message or ""
+    previous = [m for m in (recent or [])[-2:] if m]
+    earlier_hard = any(_MOOD_DIFFICULTY_RE.search(m) or _DIFFICULTY_RE.search(m) for m in previous)
+    return {
+        "help_request": bool(_HELP_REQUEST_RE.search(text)),
+        "sarcasm": bool(_SARCASM_RE.search(text)),
+        "brushes_off_earlier": bool(earlier_hard and _BRUSH_OFF_RE.search(text)),
+    }
+
+
+def tone_note_keys(snapshot: Dict[str, Any], *, focused: bool = False,
+                   context: Optional[Dict[str, bool]] = None) -> List[str]:
+    """Which approved lines apply. `focused` (a technical / work turn, a technical subject, or a help request) drops
+    the mood lines so the answer stays on task; explicit requests (correction, comfort, humour, formality) still
+    count. An explicit request beats a clue. `context` comes from tone_context()."""
+    ctx = context or {}
+    focused = focused or bool(ctx.get("help_request"))
     found = {c["cueType"] for c in snapshot.get("socialCues", [])}
+    if ctx.get("sarcasm") and E_PLAYFUL in found:
+        found = found | {E_DIFFICULTY}            # sarcasm = joking about something annoying -> the mixed line
+    if ctx.get("brushes_off_earlier"):
+        found = found - {E_PLAYFUL}               # no "play along" nudge; she still sees the conversation herself
     formal = any(c.get("dimension") and c.get("value") == PROFESSIONAL
                  for c in snapshot.get("explicitInteractionConstraints", []))
     keys: List[str] = []
@@ -768,9 +813,10 @@ def tone_note_keys(snapshot: Dict[str, Any], *, focused: bool = False) -> List[s
     return keys
 
 
-def tone_note(snapshot: Dict[str, Any], *, focused: bool = False) -> Optional[str]:
+def tone_note(snapshot: Dict[str, Any], *, focused: bool = False,
+              context: Optional[Dict[str, bool]] = None) -> Optional[str]:
     """The tone note for a validated snapshot, or None when there is nothing worth saying."""
-    keys = tone_note_keys(snapshot, focused=focused)
+    keys = tone_note_keys(snapshot, focused=focused, context=context)
     if not keys:
         return None
     return TONE_HEADER + "\n" + "\n".join("- " + TONE_LINES[k] for k in keys)
