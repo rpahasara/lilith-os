@@ -83,8 +83,8 @@
    "id": "exam_fail",
    "kind": "applies",
    "forbid": [
-    "\blol\b",
-    "\bhaha",
+    "\\blol\\b",
+    "\\bhaha",
     "😂",
     "🤣"
    ],
