@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check pyyaml
           bash deploy/prod/test_lilith_deploy.sh
-          python -m unittest deploy/prod/tests/test_prod_deploy_source.py deploy/prod/tests/test_owner_memory.py deploy/prod/tests/test_owner_memory_review.py deploy/prod/tests/test_social_cues.py deploy/prod/tests/test_social_tone_live.py deploy/prod/tests/test_full_agent_fallback.py deploy/prod/tests/test_et4_d1.py
+          python -m unittest deploy/prod/tests/test_prod_deploy_source.py deploy/prod/tests/test_owner_memory.py deploy/prod/tests/test_owner_memory_review.py deploy/prod/tests/test_social_cues.py deploy/prod/tests/test_social_tone_live.py deploy/prod/tests/test_full_agent_fallback.py deploy/prod/tests/test_et4_d1.py deploy/prod/tests/test_discord_owner_dm.py
           case "$COMPONENT" in
             core-api)
               python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
