@@ -173,6 +173,20 @@ class P3EvalTests(unittest.TestCase):
             fired = replay.meta_note(s, spec["variants"]["B"], prof) is not None
             self.assertEqual(fired, s["kind"] == "applies", s["id"])
 
+    def test_appraisal_arm_reuses_the_deployed_mapping(self):
+        from lilith_router import classifier as cl
+        spec = json.loads((Path(__file__).parent / "scenarios/p3_e4_appraisal_v1.json").read_text(encoding="utf-8"))
+        changed = 0
+        for s in spec["scenarios"]:
+            for pat in s.get("expect", []) + s.get("forbid", []):
+                re.compile(pat)
+                self.assertFalse(re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", pat), s["id"])
+            f = replay._focused(cl, s)
+            a, b = replay.style_parts(s, spec["variants"]["A"], f), replay.style_parts(s, spec["variants"]["B"], f)
+            self.assertIsNone(a[1])                                       # the baseline arm never gets a goal line
+            changed += int(a != b)
+        self.assertGreaterEqual(changed, 6)
+
 
 if __name__ == "__main__":
     unittest.main()
