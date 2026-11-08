@@ -155,7 +155,7 @@ class RouterConfig:
         if "*" in self.live_channels:
             return True
         key = f"{platform}:{chat_id}"
-        return key in self.live_channels or platform in self.live_channels
+        return key in self.live_channels or platform in self.live_channels or _owner_label_in(self.live_channels)
 
     def _cognitive_channel_match(self, platform: str, chat_id: str) -> bool:
         if not self.cognitive_channels:
@@ -163,7 +163,8 @@ class RouterConfig:
         if "*" in self.cognitive_channels:
             return True
         key = f"{platform}:{chat_id}"
-        return key in self.cognitive_channels or platform in self.cognitive_channels
+        return key in self.cognitive_channels or platform in self.cognitive_channels \
+            or _owner_label_in(self.cognitive_channels)
 
     def cognitive_is_active(self, platform: str, chat_id: str) -> bool:
         """The cognitive lane is engaged for this channel (shadow or live)."""
@@ -255,6 +256,17 @@ class RouterConfig:
         if self.log_path:
             return Path(os.path.expanduser(self.log_path))
         return _hermes_home() / "lilith_router" / "decisions.log"
+
+
+def _owner_label_in(channels) -> bool:
+    """An owner-channel label in a channel list (e.g. "discord_owner_dm") matches only this turn's verified owner
+    channel, so the verified DM joins without its id in router.yaml. Never matches "public"."""
+    try:
+        from . import canonical_memory as _cm
+        label = _cm.current_channel()
+    except Exception:
+        return False
+    return label != "public" and label in channels
 
 
 def parse_fallback_chain(raw) -> List[Dict[str, str]]:
