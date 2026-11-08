@@ -50,6 +50,7 @@ from . import canonical_memory as _canonical_memory
 from . import owner_link as _owner_link
 from . import social_preferences as _social_prefs
 from . import turn_context as _tc
+from . import metacognition as _meta
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -360,6 +361,31 @@ def _apply_social_preferences(cfg, decision, message: str) -> None:
     except Exception:
         tctx.preferences, tctx.preferences_live, tctx.correction = (), False, False
         logger.debug("lilith_router: social preferences failed (none applied)", exc_info=True)
+
+
+def _apply_metacognition(cfg, message: str) -> None:
+    """P-3 L16 (owner turns only): the recall-gap signal and its control, as typed TurnContext.meta. Shadow logs only.
+    Grounding = what this turn already holds: the approved profile projection and the canonical note. A goals-status
+    question is grounded by its own route. Never raises; no text logged."""
+    tctx = _tc.current()
+    try:
+        mode = cfg.metacognition_mode
+        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()) or tctx.focused:
+            return
+        if _SELF_STATUS_RE.search(message or ""):
+            return
+        grounding = "\n".join(p for p in (_social_lean.profile(_config._hermes_home()),
+                                          _canonical_memory.current_note()) if p)
+        sig = _meta.recall_gap(message, grounding)
+        if sig is None:
+            return
+        control = cfg.metacognition_recall_control if sig["fired"] else None
+        tctx.meta = {"recall_gap": sig["fired"], "terms": sig["terms"], "control": control,
+                     "applied": bool(mode == "live" and control)}
+        _append_log(cfg, {"lane": "metacognition", "mode": mode, **tctx.meta})
+    except Exception:
+        tctx.meta = {}
+        logger.debug("lilith_router: metacognition failed (no control)", exc_info=True)
 
 
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
@@ -755,6 +781,7 @@ def _route_turn_impl(
             tctx.style = _tc.directive((), focused=tctx.focused)
             logger.debug("lilith_router: social tone note failed (no note)", exc_info=True)
     _apply_social_preferences(cfg, decision, message)
+    _apply_metacognition(cfg, message)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending
@@ -1074,6 +1101,8 @@ def _route_turn_impl(
             why = _social_lean.skip_reason(message)
             if not why and tctx.correction:
                 why = "durable_correction"           # P-2: the tool-capable agent may propose remembering it
+            if not why and tctx.meta.get("applied") and tctx.meta.get("control") == "escalate":
+                why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,

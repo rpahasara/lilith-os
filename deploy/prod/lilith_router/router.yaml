@@ -41,6 +41,11 @@ social_preferences_mode: shadow
 # durable corrections ("don't call me that", "stop doing X", "that was only a test") to the tool-capable agent with a
 # hint to PROPOSE a typed memory for owner approval (never to claim it is saved). Rollback: off.
 social_corrections_mode: live
+# P-3 L16 metacognition (owner turns only): off | shadow (log meta-signals) | live (apply their controls).
+# recall gap = a personal-fact question nothing in the profile or canonical note covers. Control: ask (a short
+# don't-guess note, same call) | escalate (fast-path turn -> tool-capable agent). Rollback: shadow or off.
+metacognition_mode: shadow
+metacognition_recall_control: ask
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

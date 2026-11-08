@@ -120,13 +120,21 @@ def correction_text(ctx: TurnContext) -> Optional[str]:
     return sp.CORRECTION_HINT
 
 
+def meta_text(ctx: TurnContext) -> Optional[str]:
+    """The L16 control note when a gate fired and its mode is live (P-3 batch 2)."""
+    if not (ctx.owner and ctx.meta.get("applied")):
+        return None
+    from . import metacognition as mc
+    return mc.note_for(ctx.meta.get("control"))
+
+
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
     """The API-only turn hint for the main agent (run.py `turn_hint`). A goals-status question carries its status hint
     instead of the tone and correction lines; approved preferences ride on either."""
     if not ctx.owner:
         return None
     parts: List[Optional[str]] = [status_hint] if status_hint else [correction_text(ctx), tone_text(ctx)]
-    parts.append(preference_text(ctx))
+    parts += [preference_text(ctx), meta_text(ctx)]
     return "\n\n".join(p for p in parts if p) or None
 
 
@@ -135,4 +143,4 @@ def lean_suffix(ctx: TurnContext) -> str:
     (A durable correction never reaches the lean path: it routes to the agent.)"""
     if not ctx.owner:
         return ""
-    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx)) if p)
+    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx)) if p)

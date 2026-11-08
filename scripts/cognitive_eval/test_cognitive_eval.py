@@ -155,5 +155,24 @@ class P2EvalTests(unittest.TestCase):
                 self.assertIn(s.get("kind"), ("applies", "unrelated", "explicit"))
 
 
+class P3EvalTests(unittest.TestCase):
+    """P-3 E-5: the meta arm reuses the deployed metacognition module; the spec's gate fires on gap scenarios only."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy/prod"))
+
+    def test_meta_arm_fires_on_gap_scenarios_only(self):
+        spec = json.loads((Path(__file__).parent / "scenarios/p3_e5_recall_gap_v1.json").read_text(encoding="utf-8"))
+        for s in spec["scenarios"]:
+            for pat in s.get("expect", []) + s.get("forbid", []):
+                re.compile(pat)
+                self.assertFalse(re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", pat), s["id"])
+            prof, _ = replay.preference_parts(s, spec["variants"]["B"], None, False)
+            self.assertIsNone(replay.meta_note(s, spec["variants"]["A"], prof))
+            fired = replay.meta_note(s, spec["variants"]["B"], prof) is not None
+            self.assertEqual(fired, s["kind"] == "applies", s["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

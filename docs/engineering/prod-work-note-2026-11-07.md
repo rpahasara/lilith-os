@@ -545,6 +545,20 @@ experiment justifies it; approved tone wording unchanged; per-mechanism rollback
 - The turn-end trace record gains `style_lines`, `style_confidence`, `style_focus`, `pref_refs`, `pref_applied`,
   `correction` (keys, ids, flags; no text).
 - **Cost:** 0 calls, 0 tokens. **Rollback:** redeploy the previous router (pure refactor; no flag needed).
+- Merged as #383.
+
+**Batch 2: L16 recall-gap signal with G-ASK / G-ESCALATE controls (shadow).**
+- New `lilith_router/metacognition.py`, deterministic. Signal `recall_gap`: an owner asks about their own personal
+  fact ("what's my sister's name?", "how did my interview go?") and nothing this turn holds (the approved profile
+  projection and the canonical note) mentions what is asked. Advice, opinion and how-to questions, technical turns,
+  goals-status questions and non-owner turns are never gated; a question the profile covers gets no control.
+- Controls (`metacognition_recall_control`): `ask` adds one short don't-guess note on the same call; `escalate` also
+  moves a fast-path turn to the tool-capable agent, which can search its own memory. The notes are new wording (not
+  tone lines), rendered by the TurnContext renderer on both paths.
+- `metacognition_mode: shadow` logs `lane: metacognition` (fired, term count, control, applied; no words) and applies
+  nothing. Rollback: `off`. 10 tests. E-5 replay arm `meta` and spec `p3_e5_recall_gap_v1.json` (8 synthetic
+  scenarios: 6 gaps, 2 grounded controls).
+- Cost: 0 calls; about 60 prompt tokens on gated turns only.
 
 ## 4. Feature readiness vs. remaining work
 
