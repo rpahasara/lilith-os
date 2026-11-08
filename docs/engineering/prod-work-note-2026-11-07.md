@@ -211,7 +211,10 @@ No code change is needed. All 14 scenarios have now been measured.
 - **Activation:** `p3tx/deployer/discord_owner_activate.py` (operator) copies the verified pair into `canonical_memory.json` and adds `discord_owner_dm` to the owner grant. It keeps backups and needs no restart; rollback is by timestamp.
 - **Tests:** 14 new; deploy/prod suite 103/103.
 - **Post-deploy check** (`OPERATOR-REPORTED`): existing settings load, Telegram is still the owner channel, an unverified Discord DM is `public`, and the grant lists only `lilith_os` and `telegram_owner_dm`.
-- **Status: `DEPLOYED, ACTIVATION PENDING`.** The owner runs the challenge; then one owner DM recall test and one server-channel isolation test.
+- **Status: `ACTIVE` (2026-11-08).** The owner completed the challenge in the Discord DM; the first attempt, in the #lilith-home server channel, was correctly ignored. Activation installed the verified pair and the grant label (backup `20261108T081312Z`, no restart).
+- **Host check** (`OPERATOR-REPORTED`, labels and counts only): the verified DM resolves to `discord_owner_dm`, and the same account in the server channel resolves to `public`. The context service grants the DM label (`ownerChannel` true, 2 canonical memories).
+- **Live tests** (owner-reported done; router log metadata): the DM recall turn was routed **live** (`groq_lean`). Live switching for that DM comes only from the `discord_owner_dm` label, so the turn ran as an owner turn. The server-channel isolation turns stayed on the server channel's own route, with no owner label. No tracebacks.
+  - Reply text was not read (privacy). Correctness of the recall is owner-reported.
 - **Limitation:** nightly learning review (`owner_memory_review.py`, not a pipeline component) still reads only the console and Telegram sessions.
 
 **Documentation cleanup:**
@@ -236,7 +239,7 @@ No code change is needed. All 14 scenarios have now been measured.
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
 | E-T4 and D1 | E-T4 `OWNER-CONFIRMED PASS` (2026-11-08); D1 `DEPLOYED` (#351) | None (D1 not live-reproducible; guard rewrites are rare) |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
-| Private owner Discord DM continuity | `DEPLOYED, ACTIVATION PENDING` (#355) | Owner runs the Telegram-linked challenge; operator activates; recall + isolation test (§3g) |
+| Private owner Discord DM continuity | `ACTIVE` (#355; activated 2026-11-08) | Optional: include Discord DM sessions in the nightly learning review (§3g) |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
 | PROD backup/snapshot retention | `PARTIALLY COMPLETE`; inventory 2026-11-08 (§3f) | Off-project portable backup + restore verification during migration; no snapshot deletion before then |
 | VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, backup + restore verification of all data, durable OAuth client + one-time authorization of both accounts, then switch |
