@@ -43,6 +43,7 @@ including several in the independent DeepSeek review.
 | 10 | [10-experiments.md](10-experiments.md) | Registered experiments: hypotheses, baselines, metrics, kill criteria |
 | 11 | [11-traceability.md](11-traceability.md) | Requirement and source mapping (contracts, Master RQs, repo RQs) |
 | 12 | [12-r0-citation-verification.md](12-r0-citation-verification.md) | R-0: the 13 external citations verified, with status, findings, limits and applicability |
+| 13 | [13-p1-implementation-tasks.md](13-p1-implementation-tasks.md) | P-1 prepared: log and tool inventory, tasks T-1..T-6 (turn id, turn-end record, summarizer, harness in Git, owner rating, retention) |
 
 ## Evidence labels
 

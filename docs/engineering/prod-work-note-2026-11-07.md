@@ -254,6 +254,22 @@ No code change is needed. All 14 scenarios have now been measured.
   - **(5)** `state.db`, for session history.
   The Discord user and DM channel ids don't change with the host, so no re-verification is needed. Re-run the counts-only check after the switch.
 
+## 3i. R-0 and P-1 preparation (2026-11-08, documentation only)
+
+- **R-0 complete** (#364): the DeepSeek review's 13 citations were checked against primary listings.
+  - 6 are verified as described, 4 are verified with a narrower scope, 3 are preprints, and none are missing.
+  - Results, corrections and applicability are in `docs/research/cognitive-rd-plan-2026-11/12-r0-citation-verification.md`.
+  - No design decision changed.
+- **P-1 prepared** (`13-p1-implementation-tasks.md`): tasks T-1..T-6, all after the migration.
+  - T-1 turn id on every decision-log record; T-2 one turn-end record (model, fallback, guard, latency, tokens);
+  - T-3 a read-only summarizer; T-4 the eval harness moved into Git with small focused scenario sets;
+  - T-5 an owner blind-rating scorer; T-6 log retention.
+  - No PROD change was made.
+- **Findings** (`OPERATOR-REPORTED`, metadata only):
+  - `decisions.log` has 433 records over 73 days, **no rotation**, and per-lane records that cannot be correlated.
+  - **247 legacy records hold a `preview` field of up to 60 characters of message text**, from both owner and public channels, the latest about 5 days old. That code was replaced at Cutover 2, and the current router writes no text.
+  - **Owner decision needed** (T-6b): drop the field during the migration rather than carry it into the off-project backup.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
