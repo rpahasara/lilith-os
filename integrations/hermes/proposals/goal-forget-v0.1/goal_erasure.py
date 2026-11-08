@@ -1,0 +1,237 @@
+"""Candidate FORGET and retention step for Core API goal rows (NOT WIRED, nothing calls this).
+
+Pure stdlib. Fail-closed: an unexpected table or a held lock refuses before any change. Implements section 2 of
+proposals/goals-privacy-v0.2/PLAN.md, pending owner decision P-2.
+"""
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
+ALLOWED_TABLES = {"goal", "goal_trace", "sqlite_sequence", "tasks", "drafts", "world_belief", "world_belief_conflict", "world_belief_evidence",
+                  "world_belief_trace", "world_ingest_cursor", "world_working_seed"}
+TERMINAL = ("COMPLETED", "CANCELLED", "FAILED")
+
+
+class Refused(Exception):
+    pass
+
+
+def _open(db):
+    conn = sqlite3.connect(db, timeout=0, isolation_level=None)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if tables - ALLOWED_TABLES or not {"goal", "goal_trace"} <= tables:
+        conn.close()
+        raise Refused("unexpected_schema")
+    conn.execute("PRAGMA secure_delete=ON")
+    return conn
+
+
+def _finish(conn):
+    conn.execute("COMMIT")
+    conn.execute("VACUUM")                 # freed pages can otherwise keep text; this file is not in WAL mode
+
+
+def erase_all_goals(db):
+    """Principal FORGET: every goal, every trace, and the counter that reveals past activity. Idempotent."""
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        conn.execute("DELETE FROM goal_trace")
+        conn.execute("DELETE FROM goal")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('goal', 'goal_trace')")
+        if conn.execute("SELECT (SELECT COUNT(*) FROM goal) + (SELECT COUNT(*) FROM goal_trace)").fetchone()[0]:
+            conn.execute("ROLLBACK")
+            raise Refused("not_empty")
+        _finish(conn)
+    finally:
+        conn.close()
+
+
+def prune_terminal_goals(db, days=30, now=None):
+    """Daily retention: terminal goals older than `days`, with their traces. Active, blocked and suspended goals never age out."""
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        marks = ",".join("?" * len(TERMINAL))
+        ids = [r[0] for r in conn.execute(f"SELECT goal_id FROM goal WHERE lifecycle_state IN ({marks}) AND updated_at < ?", (*TERMINAL, cutoff))]
+        for goal_id in ids:
+            conn.execute("DELETE FROM goal_trace WHERE goal_id=?", (goal_id,))
+            conn.execute("DELETE FROM goal WHERE goal_id=?", (goal_id,))
+        _finish(conn)
+        return len(ids)
+    finally:
+        conn.close()
+
+
+def erase_tasks_and_drafts(db):
+    """Principal FORGET for the other two owner stores: tasks and drafts hold titles, bodies and targets. Same rules as goals. Idempotent."""
+    conn = _open(db)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        for table in sorted(tables & {"tasks", "drafts"}):
+            conn.execute(f'DELETE FROM "{table}"')
+        _finish(conn)
+    finally:
+        conn.close()
+
+
+def prune_discarded_drafts(db, days=30, now=None):
+    """Daily retention: discarded drafts older than `days`. A live draft never ages out, and nothing here decides about tasks."""
+    cutoff = int(((now or datetime.now(timezone.utc)) - timedelta(days=days)).timestamp())
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute("DELETE FROM drafts WHERE status='discarded' AND updated_at < ?", (cutoff,)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
+TASK_TERMINAL = ("succeeded", "partial", "failed", "cancelled")      # _TERMINAL_STATUSES in app.py
+
+
+def prune_terminal_tasks(db, days, now=None):
+    """Retention for finished tasks. There is no default age: that is an owner decision, so a caller must pass one."""
+    cutoff = int(((now or datetime.now(timezone.utc)) - timedelta(days=days)).timestamp())
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute(f"DELETE FROM tasks WHERE status IN ({','.join('?' * len(TASK_TERMINAL))}) AND updated_at < ?", (*TASK_TERMINAL, cutoff)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
+def retention_step(db, hold_path, goal_days=30, draft_days=30, evidence_days=30, task_days=None):
+    """The daily call. A FORGET hold stops all of it, and an unreadable hold counts as a hold. Tasks stay until their age is decided."""
+    try:
+        if hold_path.exists():
+            return {"result": "held"}
+    except OSError:
+        return {"result": "held"}
+    done = {"result": "pruned", "goals": prune_terminal_goals(db, goal_days), "drafts": prune_discarded_drafts(db, draft_days), "evidence": prune_superseded_evidence(db, evidence_days)}
+    done["tasks"] = prune_terminal_tasks(db, task_days) if task_days is not None else "not_decided"
+    return done
+
+
+WORLD_TABLES = ("world_belief", "world_belief_evidence", "world_belief_conflict", "world_belief_trace", "world_working_seed")
+
+
+def erase_world_model(db):
+    """Principal FORGET for beliefs. The ingest cursor stays: resetting it would rebuild every belief from career_events. Idempotent."""
+    conn = _open(db)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        for table in WORLD_TABLES:
+            if table in tables:
+                conn.execute(f'DELETE FROM "{table}"')
+        conn.execute("DELETE FROM sqlite_sequence WHERE name LIKE 'world_%'")
+        _finish(conn)
+    finally:
+        conn.close()
+
+
+def world_rows_zero(db):
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return all(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] == 0 for t in tables & set(WORLD_TABLES))
+    finally:
+        conn.close()
+
+
+def prune_superseded_evidence(db, days=30, now=None):
+    """Daily retention: evidence already superseded, older than `days`. Current evidence never ages out, because a belief rests on it."""
+    cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).isoformat()
+    conn = _open(db)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            raise Refused("locked")
+        n = conn.execute("DELETE FROM world_belief_evidence WHERE superseded=1 AND ingested_at < ?", (cutoff,)).rowcount
+        _finish(conn)
+        return n
+    finally:
+        conn.close()
+
+
+def goal_rows_zero(db):
+    """The check the FORGET executor would add: read-only, and an absent goal table counts as zero only if the table was never made."""
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return all(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] == 0 for t in tables & {"goal", "goal_trace"})
+    finally:
+        conn.close()
+
+
+def forget_goals_unless_held(db, hold_active):
+    """A FORGET hold blocks both erasure and retention. Returns 'held', with nothing changed, or 'erased' after an independent check."""
+    if hold_active:
+        return "held"
+    erase_all_goals(db)
+    if not goal_rows_zero(db):
+        raise Refused("rows_remain")
+    return "erased"
+
+
+def backup_restore_allowed(backup_db):
+    """Restore gate: a backup holding goal rows could resurrect erased data, so it is refused until listed in an erasure ledger."""
+    return goal_rows_zero(backup_db)
+
+
+def channel_label(source_channel):
+    """Provenance: keep the channel name, drop the session key after it. `lilith_os:chat-123` becomes `lilith_os`."""
+    name = str(source_channel or "").split(":", 1)[0].strip().lower()
+    return name if name.replace("_", "").isalnum() else "unknown"
+
+
+def forget_step(db, hold_path):
+    """The one call the FORGET executor would make, under its own lock. Fail-closed: a hold marker that cannot be checked counts as a hold."""
+    try:
+        held = hold_path.exists()
+    except OSError:
+        held = True
+    return {"goal_forget": forget_goals_unless_held(db, held), "goal_rows_zero": goal_rows_zero(db)}
+
+
+def main(argv):
+    """python -I -B goal_erasure.py prune <db>  The retention timer's entry point. Prints a count only."""
+    if len(argv) != 3 or argv[1] != "prune":
+        print("usage: goal_erasure.py prune <db>")
+        return 2
+    try:
+        print("GOAL_RETENTION pruned=%d" % prune_terminal_goals(argv[2]))
+    except Refused as e:
+        print("GOAL_RETENTION REFUSED %s" % e)
+        return 3
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main(sys.argv))
