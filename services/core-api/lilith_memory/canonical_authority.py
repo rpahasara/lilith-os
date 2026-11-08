@@ -388,6 +388,32 @@ POLICY_DECISION_V3_DDL = (
 )
 
 
+
+# Schema v4 (applied only by relationship_origin_correction_migration): the same two tables again, where a family that
+# admits SUPERSEDE (the relationship origin) may also record an owner-approved correction of its one tuple, bound to the
+# active revision it replaces. Every other family's scope and every other byte are exactly v3's.
+def _row_scope_v4(family: MA.VersionedFamilyV1) -> str:
+    if C.SUPERSEDE not in family.operations:
+        return _row_scope(family)
+    memory_class, namespace, key = family.identity
+    return (f"((operation='CREATE' AND expected_active_revision_id IS NULL) "
+            f"OR (operation='SUPERSEDE' AND expected_active_revision_id IS NOT NULL)) "
+            f"AND memory_class='{memory_class}' AND subject_namespace='{namespace}' "
+            f"AND subject_key='{key}' AND restore_revision_id IS NULL")
+
+
+def _v4(ddl: str) -> str:
+    for family in MA.VERSIONED_FAMILIES:
+        if C.SUPERSEDE in family.operations:
+            if ddl.count(_row_scope(family)) != 1:
+                raise RuntimeError("v3 family scope not found exactly once")
+            ddl = ddl.replace(_row_scope(family), _row_scope_v4(family))
+    return ddl
+
+
+CONSENT_GRANT_V4_DDL = _v4(CONSENT_GRANT_V3_DDL)
+POLICY_DECISION_V4_DDL = _v4(POLICY_DECISION_V3_DDL)
+
 class AuthorityError(RuntimeError):
     code = INVALID
 
