@@ -86,5 +86,57 @@ class TurnIdTests(unittest.TestCase):
             self.assertTrue(cfg.load().turn_trace_enabled)
 
 
+class TurnEndTests(TurnIdTests):
+    """P-1 T-2: one metadata-only turn-end record per turn."""
+
+    def end(self, **kw):
+        gi = self.gi
+        with mock.patch.object(gi._config, "load", return_value=self.cfg):
+            gi.log_turn_end(types.SimpleNamespace(source=src(user_id=OWNER, chat_id=OWNER, chat_type="dm"),
+                                                  session_key="k", message=SECRET), **kw)
+        return [r for r in self.records() if r.get("lane") == "turn"]
+
+    def test_lean_turn(self):
+        self.turn()
+        self.gi._social_lean.LAST_USAGE.set({"model": "qwen", "provider": "groq", "tokens_in": 2400, "tokens_out": 120})
+        rec = self.end(result={"api_calls": 0}, reply_chars=42)[-1]
+        self.assertEqual((rec["answered_by"], rec["model"], rec["tokens_in"], rec["tokens_out"]), ("lean", "qwen", 2400, 120))
+        self.assertEqual((rec["route"], rec["owner"], rec["reply_chars"]), ("groq_lean", True, 42))
+        self.assertEqual(rec["turn_id"], self.records()[0]["turn_id"])           # joins the lane records
+        self.assertIn("duration_ms", rec)
+
+    def test_agent_turn_token_delta_and_fallback(self):
+        agent = types.SimpleNamespace(model="gpt-4.1", provider="copilot", _fallback_activated=True,
+                                      session_prompt_tokens=9000, session_completion_tokens=300)
+        self.turn()
+        first = self.end(agent=agent, result={"api_calls": 2})[-1]
+        self.assertEqual((first["tokens_in"], first["tokens_out"], first["fallback_activated"]), (9000, 300, True))
+        agent.session_prompt_tokens, agent.session_completion_tokens = 15000, 450
+        self.turn()
+        second = self.end(agent=agent, result={"api_calls": 1})[-1]
+        self.assertEqual((second["tokens_in"], second["tokens_out"]), (6000, 150))   # this turn only
+        self.assertEqual((second["answered_by"], second["provider"]), ("agent", "copilot"))
+
+    def test_ready_answer_and_guard_flags(self):
+        self.turn()
+        rec = self.end(result={"api_calls": 0}, guard_changed=True, d1_recorded=True)[-1]
+        self.assertEqual((rec["answered_by"], rec["guard_changed"], rec["d1_recorded"]), ("router", True, True))
+
+    def test_turn_end_has_no_text_and_respects_flag(self):
+        self.turn()
+        self.end(result={"api_calls": 0}, reply_chars=10)
+        self.assertNotIn(SECRET, self.log.read_text(encoding="utf-8"))
+        self.turn(flag=False)
+        before = len(self.records())
+        self.end(result={"api_calls": 0})
+        self.assertEqual(len(self.records()), before)                            # no turn id -> no record
+
+    def test_run_py_calls_it_once_after_the_guard(self):
+        text = (ROOT / "deploy/prod/hermes_gateway/run.py").read_text(encoding="utf-8")
+        self.assertEqual(text.count("_lilith_router.log_turn_end("), 1)
+        self.assertLess(text.index("final_response = _lilith_router.enforce_reply(final_response, ctx)"),
+                        text.index("_lilith_router.log_turn_end("))
+
+
 if __name__ == "__main__":
     unittest.main()

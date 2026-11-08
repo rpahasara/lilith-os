@@ -142,7 +142,8 @@ class DeliveredReplyTests(unittest.TestCase):
         k = text.index("_lilith_router.record_delivered_reply(")
         self.assertLess(i, j)
         self.assertLess(j, k)
-        self.assertIn("if final_response is not _lrg_original and final_response != _lrg_original:", text)
+        self.assertIn("_lrg_changed = final_response is not _lrg_original and final_response != _lrg_original", text)
+        self.assertLess(text.index("if _lrg_changed:"), k)
 
 
 if __name__ == "__main__":

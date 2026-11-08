@@ -19,6 +19,7 @@ full path. No secret or message text is logged.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import re
 import threading
@@ -238,6 +239,10 @@ def _default_client(runtime: dict, timeout: float):
     return OpenAI(base_url=runtime["base_url"], api_key=runtime["api_key"], timeout=timeout, max_retries=0)
 
 
+# P-1 T-2: token usage of this turn's lean call (numbers and model name only), read by the turn-end record.
+LAST_USAGE = contextvars.ContextVar("lilith_lean_usage", default=None)
+
+
 def reply(*, runner, cfg, home: Path, session_key: str, message: str, policy: str, runtime: dict,
           client_factory=None, now: Optional[float] = None, include_profile: bool = False) -> Tuple[Optional[str], str]:
     """One lean Groq reply, or (None, reason). Never raises."""
@@ -266,6 +271,12 @@ def reply(*, runner, cfg, home: Path, session_key: str, message: str, policy: st
             return None, "groq_error:%s" % type(exc).__name__
         usage = getattr(resp, "usage", None)
         BUDGET.record(int(getattr(usage, "total_tokens", 0) or need), now)
+        try:
+            LAST_USAGE.set({"model": cfg.groq_model, "provider": cfg.groq_provider,
+                            "tokens_in": int(getattr(usage, "prompt_tokens", 0) or 0),
+                            "tokens_out": int(getattr(usage, "completion_tokens", 0) or 0)})
+        except Exception:
+            pass
         text = (resp.choices[0].message.content or "") if resp.choices else ""
         text = _THINK_RE.sub("", text).strip()
         return (text, "") if text else (None, "empty_reply")

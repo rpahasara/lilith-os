@@ -85,6 +85,52 @@ def current_turn_id():
     return _turn_id.get()
 
 
+_turn_mode = contextvars.ContextVar("lilith_turn_mode", default=None)
+_turn_route = contextvars.ContextVar("lilith_turn_route", default=None)
+_agent_tokens_seen: dict = {}          # session key -> (prompt, completion) cumulative totals at the last turn end
+
+
+def log_turn_end(ctx, *, agent=None, result=None, guard_changed=False, d1_recorded=False,
+                 reply_chars=0) -> None:
+    """P-1 T-2: one `lane: "turn"` record per turn: how it was routed and answered. Numbers, labels and model names
+    only; never message text or reasoning. Called once from run.py after the social guard. Never raises."""
+    try:
+        tid = _turn_id.get()
+        if not tid:
+            return
+        cfg = _config.load()
+        source = getattr(ctx, "source", None)
+        platform = _platform_name(source) if source is not None else None
+        session_key = getattr(ctx, "session_key", None) or ""
+        result = result if isinstance(result, dict) else {}
+        api_calls = int(result.get("api_calls", 0) or 0)
+        lean = _social_lean.LAST_USAGE.get()
+        rec = {"lane": "turn", "platform": platform, "channel": _canonical_memory.current_channel(),
+               "owner": _canonical_memory.owner_turn(), "mode": _turn_mode.get(), "route": _turn_route.get(),
+               "api_calls": api_calls, "guard_changed": bool(guard_changed), "d1_recorded": bool(d1_recorded),
+               "reply_chars": int(reply_chars or 0)}
+        if api_calls > 0 and agent is not None:
+            p_tot = int(getattr(agent, "session_prompt_tokens", 0) or 0)
+            c_tot = int(getattr(agent, "session_completion_tokens", 0) or 0)
+            p0, c0 = _agent_tokens_seen.get(session_key, (0, 0))
+            _agent_tokens_seen[session_key] = (p_tot, c_tot)
+            rec.update({"answered_by": "agent", "provider": getattr(agent, "provider", None),
+                        "model": getattr(agent, "model", None),
+                        "fallback_activated": bool(getattr(agent, "_fallback_activated", False)),
+                        "tokens_in": p_tot - p0 if p_tot >= p0 else p_tot,
+                        "tokens_out": c_tot - c0 if c_tot >= c0 else c_tot})
+        elif lean:
+            rec.update({"answered_by": "lean", **lean})
+        else:
+            rec["answered_by"] = "router"               # a ready answer (reasoning / planning / ethics / link)
+        started = _turn_started.get()
+        if started is not None:
+            rec["duration_ms"] = int((time.monotonic() - started) * 1000)
+        _append_log(cfg, rec)
+    except Exception:
+        logger.debug("lilith_router: turn-end record failed", exc_info=True)
+
+
 def _append_log(cfg, record: dict) -> None:
     """Append one JSON record to the decision log, stamped with this turn's id. Never raises."""
     try:
@@ -451,6 +497,7 @@ def _note_social_route(cfg, platform, chat_id, route, reason="") -> None:
             logger.warning("lilith_router: social route unavailable (%s); "
                            "native model with social policy", reason)
     try:
+        _turn_route.set(route)
         record = {"ts": round(time.time(), 3), "platform": platform, "chat_id": str(chat_id or ""),
                   "lane": "social_route", "route": route, "route_reason": reason or None}
         _append_log(cfg, record)
@@ -478,6 +525,9 @@ def route_turn(
         _begin_turn(_config.load())
     except Exception:
         _turn_id.set(None)
+    _turn_mode.set(None)
+    _turn_route.set(None)
+    _social_lean.LAST_USAGE.set(None)
     _canonical_memory.set_owner_turn(False)
     _social_note.set(None)
     try:
@@ -494,6 +544,7 @@ def route_turn(
                 link = _owner_link.handle(settings, platform, source, getattr(ctx, "message", "") or "",
                                           home=_config._hermes_home())
                 if link:
+                    _turn_mode.set("owner_link")
                     return _with_owner_memory({"final_response": link, "mode": "owner_link"}, False)
             note = _canonical_memory.turn_note(settings, platform, source, session_key)
     except Exception:
@@ -514,6 +565,7 @@ def route_turn(
         # Absolute guarantee: the router can never break a turn.
         logger.debug("lilith_router: route_turn failed (fail-open)", exc_info=True)
         result = None
+    _turn_mode.set(result.get("mode") if isinstance(result, dict) else None)
     if session_key is None:
         return _with_fallback_chain(_with_owner_memory(result, False))
     try:

@@ -6592,13 +6592,19 @@ class TurnRunner:
             from lilith_router import gateway_integration as _lilith_router
             _lrg_original = final_response
             final_response = _lilith_router.enforce_reply(final_response, ctx)
-            if final_response is not _lrg_original and final_response != _lrg_original:
+            _lrg_changed = final_response is not _lrg_original and final_response != _lrg_original
+            _lrg_d1 = False
+            _lrg_agent = ctx.agent_holder[0] if ctx.agent_holder else None
+            if _lrg_changed:
                 # D1: the stored transcript keeps what the user saw, not the rejected reply.
-                _lrg_agent = ctx.agent_holder[0] if ctx.agent_holder else None
-                _lilith_router.record_delivered_reply(
+                _lrg_d1 = _lilith_router.record_delivered_reply(
                     self._runner._session_db,
                     getattr(_lrg_agent, "session_id", None) or ctx.session_id,
                     _lrg_original, final_response)
+            # P-1 T-2: one metadata-only turn-end record (no text, no reasoning).
+            _lilith_router.log_turn_end(
+                ctx, agent=_lrg_agent, result=result, guard_changed=_lrg_changed, d1_recorded=_lrg_d1,
+                reply_chars=len(final_response) if isinstance(final_response, str) else 0)
         except Exception:
             pass
         # ── end LILITH social-response guard ──
