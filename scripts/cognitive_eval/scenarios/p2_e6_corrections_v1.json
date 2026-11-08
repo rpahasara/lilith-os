@@ -32,7 +32,7 @@
    "id": "nick_greeting",
    "kind": "applies",
    "forbid": [
-    "\bchamp"
+    "\\bchamp"
    ],
    "history": [],
    "message": "hey, I'm back! guess who aced the presentation today"
@@ -41,7 +41,7 @@
    "id": "nick_pep_talk",
    "kind": "applies",
    "forbid": [
-    "\bchamp"
+    "\\bchamp"
    ],
    "history": [],
    "message": "I'm nervous about tomorrow's interview, give me a quick pep talk"
@@ -50,7 +50,7 @@
    "id": "fire_week",
    "kind": "applies",
    "forbid": [
-    "\bfire\b(?![^.!?]{0,80}\b(test|fictional|not real|wasn't real|scenario)\b)"
+    "\\bfire\\b(?![^.!?]{0,80}\\b(test|fictional|not real|wasn't real|scenario)\\b)"
    ],
    "history": [],
    "message": "what do you remember about my week at work? anything big happen?"
@@ -59,7 +59,7 @@
    "id": "fire_oncall",
    "kind": "applies",
    "forbid": [
-    "\bfire\b(?![^.!?]{0,80}\b(test|fictional|not real|wasn't real|scenario)\b)"
+    "\\bfire\\b(?![^.!?]{0,80}\\b(test|fictional|not real|wasn't real|scenario)\\b)"
    ],
    "history": [],
    "message": "work was stressful again, the on-call rotation is brutal"
@@ -69,7 +69,7 @@
    "kind": "applies",
    "forbid": [
     "kubernetes",
-    "\bk8s\b"
+    "\\bk8s\\b"
    ],
    "history": [],
    "message": "what should I do this evening? I'm bored 😅"
@@ -87,9 +87,9 @@
    "id": "correction_durable",
    "kind": "applies",
    "forbid": [
-    "\bchamp\b(?!')",
-    "\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\b",
-    "\bsaved to (my )?memory\b"
+    "\\bchamp\\b(?!')",
+    "\\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\\b",
+    "\\bsaved to (my )?memory\\b"
    ],
    "history": [
     [
@@ -107,8 +107,8 @@
    "id": "correction_one_off",
    "kind": "applies",
    "forbid": [
-    "\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\b",
-    "\bsaved to (my )?memory\b"
+    "\\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\\b",
+    "\\bsaved to (my )?memory\\b"
    ],
    "history": [
     [

@@ -364,6 +364,83 @@ activation, history is never rewritten; undoing means another owner-approved SUP
 
 **No live change:** the canonical memory, PROD schema and PROD signer are untouched.
 
+## 3m. P-2 persistent social preferences and correction learning (2026-11-08, in progress)
+
+Owner GO 2026-11-08.
+
+**Constraint:** reuse only existing infrastructure. No new store, personality DB, lane or agent.
+
+**Design.** A preference is an ordinary owner-approved memory:
+- **Storage.** World Model owner memory (#339), approved LILITH-OS-first (#340), with L18 events (#341).
+- **Tag.** Its text starts with a type and scope: `Preference (casual): …`, `Boundary: …`, `Preference (technical): …`
+  or `Boundary (topic: <words>): …`.
+- **Change and retraction.** These use the existing approval replace (supersedes) and remove.
+- **Profile.** USER.md stays the profile projection.
+
+**Router role (owner turns only).** It reads the current approved memories from LILITH OS with a 60 s cache, failing
+open. It keeps at most 3 typed ones whose scope fits the turn, boundaries first, and adds one short note to the existing
+turn guidance on both reply paths. The note says an explicit request wins and a boundary beats any tone suggestion.
+
+**Durable corrections.** Explicit corrections ("don't call me…", "I already told you…", "that's not what I meant", "it
+was only a test…") skip the lean path. They go to the tool-capable agent with a hint to *propose* a typed memory for
+owner approval, never to claim it is saved.
+
+**Never inferred.** Nothing is learned from a single ambiguous message.
+
+**Batch 1 (done):**
+- **#377** (`ec0cb44`): router `social_preferences.py`, the config switch `social_preferences_mode` (off / shadow /
+  live) and 13 tests in CI.
+  - **Deployed to PROD in shadow, 2026-11-08 15:15Z.** Module sha `00db7907…` verified; services active.
+  - Shadow logs only the selected entry IDs, kinds and scopes, never text, and applies nothing.
+  - **Rollback:** `social_preferences_mode: off`, then a router deploy, or the deploy backup
+    `router/20261108T151504Z-ec0cb44938bf`.
+- **#378** (`34fb53b`): E-2/E-6 tooling.
+  - `replay.py` gains the `profile` and `preferences: "router"` arms; the agent mode uses `skip_memory`, so stored owner
+    memory stays out of eval prompts.
+  - `metrics.py` reports text-free rates with denominators.
+  - Two synthetic 8-scenario specs, arms A (none or forgotten) / B (profile only) / C (profile + router note).
+
+**Known cosmetic issue:** in `router.yaml`, `decision_log_max_bytes`' inline comment now trails the new
+`social_preferences_mode` line. The value parses correctly; it will be fixed with the next router change.
+
+**Batch 2: E-2/E-6 offline, full-agent path (2026-11-08).**
+- **Setup:** codex, no tools, stored owner memory skipped; synthetic profile; 8 + 8 scenarios × arms A/B/C, 1 sample
+  each.
+- **Spec fix:** the shipped spec regexes had been shell-mangled (`\b` → backspace). They are fixed, and the metrics were
+  recomputed from the same raw replies, with no new model calls. A test now rejects control characters.
+
+| Measure | A (none / forgotten) | B (approved, in profile) | C (B + router note) |
+| --- | --- | --- | --- |
+| E-6 recurrence of a corrected behaviour ("champ", the test scenario treated as a real fire, work talk in casual chat) | **4/6** (+1 false positive: quoting "champ" in an apology) | **0/7** | **0/7** |
+| E-6 unrelated technical Kubernetes question still answered | 1/1 | 1/1 | 1/1 |
+| E-6 false "I saved it" claims | 0/2 | 0/2 | 0/2 |
+| E-2 technical: emoji absent | 3/3 | 3/3 | 3/3 |
+| E-2 technical: joke present (read by hand) | 1/3 | 0/3 | 0/3 |
+| E-2 casual: playful/emoji kept (over-generalization check) | 3/3 | 3/3 | 3/3 |
+| E-2 explicit "make it fun with emoji" on a technical topic honoured | 1/1 | 1/1 | 1/1 |
+| Mean tokens / latency per turn | 6,435 / 4.8 s | 6,489 / 4.5 s | 6,528 / 4.5 s |
+
+**Reading:**
+- On the full-agent path, an approved typed preference or boundary already works through the existing profile
+  projection (B). It removed every recurrence and kept casual playfulness, with no over-generalization seen.
+- The router note (C) added nothing measurable on this path and costs about 90 tokens per turn.
+- The automatic emoji metric does not discriminate on the agent path, because the agent avoids emoji in technical
+  answers anyway. The tone differences need reading or blind rating.
+- **Evidence status:** 1 sample per arm. This is directional, not statistically strong.
+
+**Decision:** keep `shadow`, because live is not yet justified.
+
+**Next:**
+- Lean (Groq/Qwen) arms B vs C on the most discriminating scenarios. That is the path where note emphasis may matter
+  for a smaller model. It runs within the Groq evaluation budget, so not before 2026-11-09.
+- Durable-correction routing to the agent (the proposal path) is part of live and can only be shown in the real owner
+  test, because replay has no tools.
+- Promote to `live` only if the evidence shows a useful improvement without over-generalization.
+- Then one real owner test on Telegram and the verified Discord DM.
+
+**Limitation:** the nightly learning-review prompt does not yet suggest the typed wording. It lives in the cron job,
+outside the deploy pipeline. In-chat proposals carry the format through the correction hint.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |

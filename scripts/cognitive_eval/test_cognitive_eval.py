@@ -1,5 +1,6 @@
 """P-1 T-3/T-4/T-5 tools: summarizer never prints text; blinding is deterministic and keyless; scoring is honest."""
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -140,7 +141,12 @@ class P2EvalTests(unittest.TestCase):
 
     def test_shipped_p2_specs_are_synthetic_and_in_budget(self):
         for name in ("p2_e2_preferences_v1.json", "p2_e6_corrections_v1.json"):
-            spec = json.loads((Path(__file__).parent / "scenarios" / name).read_text(encoding="utf-8"))
+            text = (Path(__file__).parent / "scenarios" / name).read_text(encoding="utf-8")
+            self.assertFalse(any(ord(c) < 32 and c != "\n" for c in text), name)   # e.g. a shell-mangled \b
+            spec = json.loads(text)
+            for s in spec["scenarios"]:
+                for p in s.get("forbid", []) + s.get("expect", []):
+                    re.compile(p)
             self.assertEqual(set(spec["variants"]), {"A", "B", "C"})
             self.assertEqual(spec["variants"]["C"].get("preferences"), "router")
             self.assertLessEqual(spec["budget_tokens"], 50000)
