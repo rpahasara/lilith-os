@@ -7,8 +7,13 @@ The DeepSeek review (2026-11-08) inspected the public repository.
   system.
 - This page states, point by point, what we **accept**, **adapt** or **reject**, and corrects claims that newer
   evidence contradicts.
-- Its literature citations are **EXTERNAL-CLAIM**: plausible, not verified by us, and to be checked before any design
-  cites them as support (task R-0 in [09-roadmap.md](09-roadmap.md)).
+- Its literature citations were **EXTERNAL-CLAIM** until R-0. **R-0 is complete** ([12](12-r0-citation-verification.md)):
+  - 6 are verified as described;
+  - 4 exist but with a narrower scope than stated;
+  - 3 are preprints, not published work;
+  - none were not found.
+  - No decision below changes; two are strengthened (D8 deterministic appraisal by CoRE; behavioural measurement by
+    the ToM position paper).
 
 ## 1. Factual corrections (the review is out of date or misread)
 

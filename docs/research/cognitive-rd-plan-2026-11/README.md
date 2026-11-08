@@ -42,6 +42,7 @@ including several in the independent DeepSeek review.
 | 09 | [09-roadmap.md](09-roadmap.md) | Phases, dependencies, gates, inference costs |
 | 10 | [10-experiments.md](10-experiments.md) | Registered experiments: hypotheses, baselines, metrics, kill criteria |
 | 11 | [11-traceability.md](11-traceability.md) | Requirement and source mapping (contracts, Master RQs, repo RQs) |
+| 12 | [12-r0-citation-verification.md](12-r0-citation-verification.md) | R-0: the 13 external citations verified, with status, findings, limits and applicability |
 
 ## Evidence labels
 
@@ -50,7 +51,7 @@ including several in the independent DeepSeek review.
 - **MEASURED**: an offline or live experiment with a recorded method and result.
 - **PROPOSED**: this package, or a contract that is not accepted.
 - **EXTERNAL-CLAIM**: a statement or citation from the DeepSeek review that we have not independently verified. It
-  stays marked unverified until roadmap task R-0 checks it.
+  stays marked unverified until roadmap task R-0 checks it. R-0 was completed 2026-11-08; see [12](12-r0-citation-verification.md).
 
 ## The plan in five sentences
 

@@ -11,6 +11,12 @@ Common method (from the measured Social Cognition A/B, work note §3a):
 
 Each experiment declares its kill criterion before running (AP-32 preregistration; SM-46).
 
+**Scenario design patterns verified in R-0** ([12](12-r0-citation-verification.md)):
+- E-2 and E-6 use LoCoMo-Plus's **cue → later trigger**: a preference or constraint stated once, then tested later
+  without restatement.
+- E-8 and reappraisal scoring use a Memora-style **obsolete-memory penalty**.
+- All experiments measure behavioural adaptation, not the model's stated read of the user (ICML 2025 ToM position).
+
 **Scenario counts below are cumulative targets** (owner clarification 2026-11-08).
 - Each experiment begins with a focused set of about 5–10 scenarios.
 - It expands toward the stated count only when evidence warrants.

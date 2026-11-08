@@ -27,7 +27,7 @@ flowchart TD
 
 | Phase | Deliverables | Depends on | Promotion gate | Rollback |
 | --- | --- | --- | --- | --- |
-| **R-0** | Verify each DeepSeek citation (existence, venue, claim) and record it in [11](11-traceability.md) | — | — | — |
+| **R-0** ✔ 2026-11-08 | Verify each DeepSeek citation (existence, venue, claim): results in [12](12-r0-citation-verification.md) | — | done: 13/13 checked, 0 not found, 3 preprints | — |
 | **P-0** (now → 2026-11-18) | VM migration; durable OAuth client and one-time authorization; off-project backup with restore verification; E-10 identity suite run before and after | owner, migration plan | all identity and canonical recall items pass after the switch | old VM kept until accepted |
 | **P-1** Evaluation foundation | per-turn correlated trace (metadata); blind pairwise rater tool for the owner; token and latency accounting per arm; extend `sc_eval.py`; **focused scenario sets per experiment, starting small** (see the note below) | P-0 | harness reproduces the §3a A/B result within noise | n/a (offline) |
 | **P-2** Preferences and corrections | `kind`/`scope` on owner-memory records; preference proposer (explicit and repeated-correction triggers); preference retrieval into the tone path; read-only "what I know about you" view; nightly review covers Discord DM sessions | P-1 | E-2 (recall ↑, over-generalization ≤ baseline) and E-6 (recurrence ↓) | `preferences_mode: shadow` |
