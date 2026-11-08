@@ -270,6 +270,35 @@ No code change is needed. All 14 scenarios have now been measured.
   - **247 legacy records hold a `preview` field of up to 60 characters of message text**, from both owner and public channels, the latest about 5 days old. That code was replaced at Cutover 2, and the current router writes no text.
   - **Owner decision needed** (T-6b): drop the field during the migration rather than carry it into the off-project backup.
 
+## 3j. P-1 implementation: trace, retention and offline evaluation (2026-11-08)
+
+Owner GO 2026-11-08: implement P-1 now; migration stays separate and needs explicit authorization.
+
+| Task | PR | Deployed | What |
+| --- | --- | --- | --- |
+| T-1 turn id | #366 | router `218da29` | `turn_id` (16 hex) on every decision-log record through one `_append_log` writer; `turn_trace_enabled` flag |
+| T-2 turn-end record | #367 | router + hermes-gateway `456158d` | one `lane: turn` record: route, mode, answered_by, provider/model, fallback, api_calls, per-turn tokens, guard_changed, d1_recorded, reply length, duration |
+| T-6 retention | #369 | router `1890d10` | `decisions.log` rotates to `.1` at `decision_log_max_bytes` (2 MB) |
+| T-3/T-4/T-5 tools | #368, #370 | (operator tools) | `scripts/cognitive_eval/`: `trace_summary.py`, `replay.py`, `blind.py`, the 14-scenario synthetic set |
+
+**Rules held:**
+- No extra model call for tracing.
+- No message text or reasoning in any record (tests assert it; the summarizer prints only allow-listed labels).
+- LILITH's behaviour is unchanged.
+- Rollback: `turn_trace_enabled: false`, or the deploy backups.
+- Tests: 26 new in `test_p1_trace.py` plus 6 tool tests in CI; deploy/prod suite 138/138.
+
+**Measured** (`OPERATOR-REPORTED`):
+- **Legacy scrub** (owner decision): `scrub_legacy_preview.py` removed **284** `preview` message-snippet fields (247 in the live log, 37 in the 2026-08-26 `.bak`). Every record and all other metadata were kept; 0 remain. Conversation history and canonical memory were not touched.
+- **Harness smoke on PROD:** 6 scenarios × 2 arms (baseline vs deployed tone note), 12/12 calls succeeded, **33,357 tokens** (2,623–3,177 per lean call, the same as the §3a A/B), inside the 40K run budget.
+  - The run exposed a tool bug: latency included the TPM back-off sleep (~22 s per call). Fixed in #370 before any latency was reported.
+  - The blind sheet is kept by the operator for the owner's rating; no quality result is claimed yet.
+- **Live trace:** the newest records (08:15Z) predate the deploys, and there have been no turns since, so turn-end records are **not yet observed live**. One owner message on each path verifies T-1/T-2.
+
+**Smallest useful P-2** (proposed, not started):
+- **(a) Correction routing.** Owner corrections ("don't call me…", "stop …", "I told you…") stay on the tool-less lean path today, so no memory proposal can follow. Adding correction phrasing to the existing durable-statement detector (`social_lean._MEMORY_STATEMENT_RE`, #338) routes them to the full agent. There the existing in-chat proposal → owner approval → LILITH OS → L18 flow handles them. No new store or lane; flag-gated.
+- **(b) E-6 first, 6–8 cue → trigger scenarios.** Compare a correction left only in history against the same correction as an approved profile line (≤30K tokens), plus live recurrence from the trace.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
