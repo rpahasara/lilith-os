@@ -173,6 +173,14 @@ class P3EvalTests(unittest.TestCase):
             fired = replay.meta_note(s, spec["variants"]["B"], prof) is not None
             self.assertEqual(fired, s["kind"] == "applies", s["id"])
 
+    def test_spec_patterns_accept_typographic_apostrophes(self):
+        for name in ("p3_e5_recall_gap_v1.json", "p3_e4_appraisal_v1.json"):
+            spec = json.loads((Path(__file__).parent / "scenarios" / name).read_text(encoding="utf-8"))
+            for s in spec["scenarios"]:
+                for pat in s.get("expect", []) + s.get("forbid", []):
+                    if "'" in pat:
+                        self.assertIn("\u2019", pat, (name, s["id"]))      # the model writes ’ (N-47)
+
     def test_appraisal_arm_reuses_the_deployed_mapping(self):
         from lilith_router import classifier as cl
         spec = json.loads((Path(__file__).parent / "scenarios/p3_e4_appraisal_v1.json").read_text(encoding="utf-8"))

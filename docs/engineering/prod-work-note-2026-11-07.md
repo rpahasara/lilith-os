@@ -576,6 +576,50 @@ experiment justifies it; approved tone wording unchanged; per-mechanism rollback
 - E-4 replay arm `appraisal: "router"` and spec `p3_e4_appraisal_v1.json` (8 synthetic: 5 setbacks, 2 progress, 1
   neutral; arms A = deployed tone note, B = A + appraisal).
 - Cost: 0 calls; about 40 prompt tokens when a goal line fires.
+- Merged as #385.
+
+**Deployment (owner GO 2026-11-08).** The earlier dispatch was refused by the session permission check; after the
+owner's explicit GO the same deploy workflow ran normally (run 42512814721): `DEPLOY OK router 148c9b1`, 19:01:49Z,
+backup taken. Read-only verification: all 7 installed router files match `origin/main` by sha256; `hermes-gateway` and
+`lilith-os-api` active, 0 restarts, 0 tracebacks since the restart; parsed settings `metacognition_mode: shadow`
+(control `ask`), `appraisal_mode: shadow`, `social_preferences_mode: shadow`, `social_corrections_mode: live`
+(unchanged, P-2). Memory, goals and canonical authority untouched (the new code only reads `GET /os/goals`).
+
+**E-5 / E-4, full-agent path (offline replay, codex gpt-5.6-sol, no tools, stored memory skipped; synthetic; 2 samples
+per arm; 2026-11-08 ~19:10Z).**
+
+*Spec fix (no new model calls):* the shipped expect/forbid patterns matched only `'`, while the model writes `’`
+("don’t"), so the first automatic scores undercounted admissions. Patterns now accept both; the same raw replies were
+re-scored and read by hand (N-47).
+
+| E-5 recall gap | A (no gate) | B (G-ASK note) | C (G-ESCALATE note) |
+| --- | --- | --- | --- |
+| Invented personal facts on 6 gap scenarios (read by hand) | **0/12** | **0/12** | **0/12** |
+| Admitted not knowing (automatic) | 11/12 (the 12th: "can't access your calendar", not an invention) | 12/12 | 12/12 |
+| Grounded controls answered correctly (Miso, CKA) / false "I don't know" | 4/4 / 0/4 | 4/4 / 0/4 | 4/4 / 0/4 |
+| Gap replies opening with the same "I don't know—" | 2/12 | **12/12** | 11/12 |
+| Mean tokens / latency | 6,358 / 2.9 s | 6,349 / 2.0 s | 6,361 / 2.4 s |
+
+*Reading:* the full agent already refuses to invent personal facts (floor effect), so the gate cannot reduce errors
+there. It does homogenise the voice: every gated reply opened with the same phrase. **Negative result on this path**
+(N-46). E-5's kill criterion ("no error drop") is met for the agent path; the fast path, where the risk was expected,
+is not yet measured.
+
+| E-4 appraisal | A (deployed tone note) | B (A + appraisal) |
+| --- | --- | --- |
+| Setback acknowledged (5 scenarios) | 10/10 | 10/10 |
+| Forced cheer on a setback | 0/10 | 0/10 |
+| Somber reply to good news (over-inference) | 0/6 | 0/6 |
+| Good news connected to the specific tracked goal (Acme interview) | 1/2 | 2/2 (one quoted the internal "Application 12" label) |
+| Mean tokens / latency | 6,365 / 3.0 s | 6,417 / 3.1 s |
+
+*Reading:* on the full agent, appraisal changed little: setbacks were already handled well (the tone line changed on 3 of 5 setbacks and a goal line was added on 6 of 8 scenarios, with no visible effect on setbacks)
+The only visible gain is goal connection on good news, at about +50 tokens; one reply recited an
+internal label. **Neutral, with a small goal-context benefit**; E-4's pass bar (≥60% blind wins) is not shown.
+
+**Fast (Groq) path: pending.** Today's evaluation cap (~50K Groq tokens/day) was used by the P-2 lean runs (≈44.5K), so
+the lean arms run after 00:00Z: E-5 A/B on 4 gaps + 2 grounded, E-4 A/B on 4 scenarios, 1 sample each (≈35K).
+
 
 ## 4. Feature readiness vs. remaining work
 
