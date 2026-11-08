@@ -8,6 +8,7 @@ None makes a model call except `replay.py`, and none writes to LILITH's state.
 | `trace_summary.py` | T-3 | the LILITH host, as the log owner | Read-only aggregates of `decisions.log`: turns, lanes, routes, answered-by, models, fallback / guard / D1 rates, tokens, latency p50/p95, tone keys. Prints only counts and allow-listed labels, never free text |
 | `replay.py` | T-4 | the LILITH host, as `lilith` | Offline A/B replay of the lean reply (`mode: lean`) or the full agent without tools (`mode: agent`) for synthetic scenarios. No session DB, memory or tools. Token budget per run (≤50K by default) |
 | `blind.py` | T-5 | anywhere | `make` builds a blind sheet, a sealed key and a verdict template; `score` joins the owner's 1–5 ratings with the key and reports per-arm means, scenario wins, ties and skips |
+| `scrub_legacy_preview.py` | T-6 | the LILITH host, as the log owner | One-time removal of the legacy `preview` message-snippet field from old decision logs; keeps all other metadata; counts-only output |
 | `scenarios/` | — | — | Small focused **synthetic** scenario sets. `social_tone_v1.json` is the 14-scenario set from the 2026-11-07 tone-note A/B |
 
 **Rules:**
