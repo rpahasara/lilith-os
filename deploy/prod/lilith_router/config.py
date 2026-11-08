@@ -43,6 +43,7 @@ class RouterConfig:
     recent_turns: int = 6
     decision_log_max_bytes: int = 2_000_000   # P-1 T-6: rotate decisions.log to .1 at this size (100K..50M)
     social_preferences_mode: str = "off"   # P-2: off | shadow (log selection only) | live (apply on owner turns)
+    social_corrections_mode: str = "off"   # P-2: off | live (explicit durable owner corrections -> full agent + hint)
     turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -155,6 +156,11 @@ class RouterConfig:
 
     def social_preferences_is_live(self) -> bool:
         return self.social_preferences_mode == "live"
+
+    def social_corrections_is_live(self) -> bool:
+        """Explicit durable owner corrections go to the tool-capable agent (with the proposal hint). Independent of
+        the preference note; preferences live also implies it (unchanged behaviour)."""
+        return self.social_corrections_mode == "live" or self.social_preferences_is_live()
 
     def channel_is_live(self, platform: str, chat_id: str) -> bool:
         """True when live switching is allowed for this channel."""
@@ -322,6 +328,8 @@ def load() -> RouterConfig:
         cfg.turn_trace_enabled = raw.get("turn_trace_enabled", True) is not False
         mode = str(raw.get("social_preferences_mode", "off")).strip().lower()
         cfg.social_preferences_mode = mode if mode in ("off", "shadow", "live") else "off"
+        mode = str(raw.get("social_corrections_mode", "off")).strip().lower()
+        cfg.social_corrections_mode = mode if mode in ("off", "live") else "off"
         try:
             cfg.decision_log_max_bytes = max(100_000, min(50_000_000, int(raw.get(
                 "decision_log_max_bytes", cfg.decision_log_max_bytes))))
