@@ -19,6 +19,8 @@ Variant keys (all optional; an empty variant is the baseline):
                     profile block, agent: the ephemeral system prompt). A scenario's own "profile" is added to it
     preferences     "router": also the P-2 router note, selected from the profile entries by the deployed
                     social_preferences module exactly as a live owner turn would (plus the correction hint)
+    meta            P-3: "ask" | "escalate": the L16 recall-gap control, decided by the deployed metacognition module
+                    with the synthetic profile as grounding, exactly as a live owner turn would (note only if it fires)
 
 Budget: stops sampling when this run's tokens reach budget_tokens, or when the provider reports fewer than 7000
 remaining tokens per minute (then waits for the reset). Errors are recorded, never retried blindly.
@@ -52,6 +54,16 @@ def preference_parts(scn: dict, variant: dict, sp, focused: bool):
                  sp.render(sp.select(prefs, focused=focused, message=scn["message"]))]
         note = "\n\n".join(p for p in parts if p) or None
     return prof, note
+
+
+def meta_note(scn: dict, variant: dict, prof: str):
+    """P-3 arm: the router's L16 note for this scenario, or None (no control, or the gate did not fire)."""
+    control = variant.get("meta")
+    if control not in ("ask", "escalate"):
+        return None
+    from lilith_router import metacognition as mc
+    sig = mc.recall_gap(scn["message"], prof)
+    return mc.note_for(control) if sig and sig["fired"] else None
 
 
 def _focused(cl, scn) -> bool:
@@ -90,6 +102,9 @@ def lean_runner(spec):
         prof, pref_note = preference_parts(scn, variant, sp, _focused(cl, scn))
         if pref_note:
             policy += "\n\n" + pref_note                  # the router appends the P-2 note to the lean policy
+        mnote = meta_note(scn, variant, prof)
+        if mnote:
+            policy += "\n\n" + mnote                      # then the P-3 L16 note (turn_context.lean_suffix order)
         if variant.get("system_suffix"):
             policy += "\n\n" + variant["system_suffix"]
         msg = (variant.get("message_prefix", "") + "\n\n" + scn["message"]) if variant.get("message_prefix") \
@@ -130,7 +145,8 @@ def agent_runner(spec):
         a = AIAgent(model=model, **{k: rt[k] for k in ("provider", "base_url", "api_key", "api_mode") if k in rt},
                     quiet_mode=True, verbose_logging=False, enabled_toolsets=[], skip_context_files=True,
                     load_soul_identity=True, ephemeral_system_prompt=system, max_iterations=2, **extra)
-        prefix = "\n\n".join(p for p in (variant.get("message_prefix"), pref_note) if p)   # the router's turn hint
+        prefix = "\n\n".join(p for p in (variant.get("message_prefix"), pref_note, meta_note(scn, variant, prof))
+                               if p)                                                # the router's turn hint
         msg = (prefix + "\n\n" + scn["message"]) if prefix else scn["message"]
         t0 = time.monotonic()
         r = a.run_conversation(msg, conversation_history=[{"role": x, "content": y} for x, y in scn.get("history", [])])
