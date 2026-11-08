@@ -215,7 +215,7 @@ No code change is needed. All 14 scenarios have now been measured.
 - **Host check** (`OPERATOR-REPORTED`, labels and counts only): the verified DM resolves to `discord_owner_dm`, and the same account in the server channel resolves to `public`. The context service grants the DM label (`ownerChannel` true, 2 canonical memories).
 - **Live tests** (owner-reported done; router log metadata): the DM recall turn was routed **live** (`groq_lean`). Live switching for that DM comes only from the `discord_owner_dm` label, so the turn ran as an owner turn. The server-channel isolation turns stayed on the server channel's own route, with no owner label. No tracebacks.
   - Reply text was not read (privacy). Correctness of the recall is owner-reported.
-- **Limitation:** nightly learning review (`owner_memory_review.py`, not a pipeline component) still reads only the console and Telegram sessions.
+- **Nightly learning review:** includes the verified Discord DM since 2026-11-08 (see §3h).
 
 **Documentation cleanup:**
 - **#311:** not merged. Its scripts embed operator account and infrastructure details, including a personal email. Its 16 historical records were preserved redacted in #356 (merged).
@@ -235,7 +235,24 @@ No code change is needed. All 14 scenarios have now been measured.
   - workstreams for social and relationship continuity, appraisal, metacognition, consolidation, goals and initiative, and identity;
   - a phased roadmap with token-budget costs and ten registered experiments.
 - It authorizes nothing. P-0 is the 2026-11-14 migration.
-- **Nightly learning review and Discord:** recommended to include verified Discord owner-DM sessions. This is a one-line source change in `owner_memory_review.py` (`owner_sessions` reads `ownerDiscordDms`) plus a host install, because that script is outside the deploy pipeline. Planned as part of P-2 unless the owner approves it earlier.
+- **Planning package merged** as #360 (owner-approved *as a documentation proposal*; no implementation until after the migration and OAuth recovery). Clarifications:
+  - P-1 scenario suites are cumulative targets that start small;
+  - external literature stays unverified until R-0.
+- **Nightly learning review includes the verified Discord owner DM** (`SOURCE-VERIFIED` #362; owner GO 2026-11-08).
+  - `owner_memory_review.py` adds only Discord sessions whose (user id, DM channel id) pair is in the root-owned `canonical_memory.json` `ownerDiscordDms` with `chat_type` dm, the router's own owner rule.
+  - Server channels, threads, other DMs and other users are excluded; malformed pairs fail closed.
+  - Proposals, owner approval, LILITH-OS-first recording and L18 events are unchanged. There is no new store.
+  - Identical lines from two channels appear once, and the remembered / pending / rejected lists stop repeat proposals.
+  - **Install** (outside the deploy pipeline): one file at `~/.hermes/scripts/owner_memory_review.py`, hash `8c9bc4fe`, backup `/var/backups/lilith-review/20261108T093502Z`.
+  - **Verification** (`OPERATOR-REPORTED`, counts only): 1 verified pair; owner sessions are 28 console, 4 Telegram DM and 1 Discord DM. 6 lines in the window come from the Discord DM; the server-channel session is excluded; the context header names the verified Discord DM.
+  - **Rollback:** `p3tx/deployer/review_discord_install.py rollback 20261108T093502Z`.
+- **Migration implications (2026-11-14).** The new VM must carry all of these unchanged, or the Discord DM silently loses owner status and leaves the review:
+  - **(1)** root-owned `lilith_router/canonical_memory.json`, including `ownerDiscordDms`;
+  - **(2)** the owner grant `/etc/lilith-first-memory-dev/hermes-owner-channel.json`, including `discord_owner_dm`;
+  - **(3)** `~/.hermes/scripts/owner_memory_review.py`, which is outside the pipeline, so its hash must be checked against main;
+  - **(4)** `~/.hermes/owner-link/verified.json`, kept as evidence;
+  - **(5)** `state.db`, for session history.
+  The Discord user and DM channel ids don't change with the host, so no re-verification is needed. Re-run the counts-only check after the switch.
 
 ## 4. Feature readiness vs. remaining work
 
