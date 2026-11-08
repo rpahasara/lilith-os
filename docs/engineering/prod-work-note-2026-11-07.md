@@ -293,7 +293,12 @@ Owner GO 2026-11-08: implement P-1 now; migration stays separate and needs expli
 - **Harness smoke on PROD:** 6 scenarios × 2 arms (baseline vs deployed tone note), 12/12 calls succeeded, **33,357 tokens** (2,623–3,177 per lean call, the same as the §3a A/B), inside the 40K run budget.
   - The run exposed a tool bug: latency included the TPM back-off sleep (~22 s per call). Fixed in #370 before any latency was reported.
   - The blind sheet is kept by the operator for the owner's rating; no quality result is claimed yet.
-- **Live trace:** the newest records (08:15Z) predate the deploys, and there have been no turns since, so turn-end records are **not yet observed live**. One owner message on each path verifies T-1/T-2.
+- **Live trace verified** (owner Telegram messages, 2026-11-08; `trace_summary.py`, aggregates only):
+  - 3 turns; `turn_id` coverage 100% (14 of 14 records); 0 legacy-preview records.
+  - Answered by: 1 lean (`groq/qwen3.8-27b`) and 2 agent (`openai-codex/gpt-5.6-sol`). No fallback, guard rewrite or D1 correction.
+  - Tokens per turn: **lean ≈ 3.7K; agent ≈ 39K**, almost all prompt (system, tools and history). Agent turns cost about 10× a lean turn, which matters for P-3 G-ESCALATE.
+  - Turn duration: lean 5.7 s; agent p50 9.5 s and slowest 23.7 s (n = 2; indicative only).
+  - 4–5 lane records per turn, all joined by `turn_id`.
 
 **Smallest useful P-2** (proposed, not started):
 - **(a) Correction routing.** Owner corrections ("don't call me…", "stop …", "I told you…") stay on the tool-less lean path today, so no memory proposal can follow. Adding correction phrasing to the existing durable-statement detector (`social_lean._MEMORY_STATEMENT_RE`, #338) routes them to the full agent. There the existing in-chat proposal → owner approval → LILITH OS → L18 flow handles them. No new store or lane; flag-gated.
