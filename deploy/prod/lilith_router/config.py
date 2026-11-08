@@ -41,6 +41,7 @@ class RouterConfig:
     # next turn. Empty = no fallback (previous behavior).
     full_agent_fallback: List[Dict[str, str]] = field(default_factory=list)
     recent_turns: int = 6
+    turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
     # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ────
@@ -309,6 +310,7 @@ def load() -> RouterConfig:
         cfg.hermes_provider = str(raw.get("hermes_provider", cfg.hermes_provider))
         cfg.full_agent_fallback = parse_fallback_chain(raw.get("full_agent_fallback"))
         cfg.recent_turns = int(raw.get("recent_turns", cfg.recent_turns))
+        cfg.turn_trace_enabled = raw.get("turn_trace_enabled", True) is not False
         cfg.log_path = str(raw.get("log_path", cfg.log_path) or "")
         # Slice 7.2 cognitive lane (additive; safe defaults keep it OFF).
         cfg.cognitive_enabled = bool(raw.get("cognitive_enabled", cfg.cognitive_enabled))

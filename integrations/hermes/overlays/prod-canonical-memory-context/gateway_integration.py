@@ -69,6 +69,37 @@ def _message_meta(message) -> dict:
     return {"event_id": uuid.uuid4().hex, "msg_chars": len(text), "msg_lines": len(text.splitlines())}
 
 
+# P-1 T-1 (2026-11-08): one id per turn on every decision-log record, so the lanes of a turn can be joined.
+# Metadata only (never message text or model reasoning). `turn_trace_enabled: false` in router.yaml stops the stamp.
+_turn_id = contextvars.ContextVar("lilith_turn_id", default=None)
+_turn_started = contextvars.ContextVar("lilith_turn_started", default=None)
+
+
+def _begin_turn(cfg) -> None:
+    enabled = getattr(cfg, "turn_trace_enabled", True) is not False
+    _turn_id.set(uuid.uuid4().hex[:16] if enabled else None)
+    _turn_started.set(time.monotonic() if enabled else None)
+
+
+def current_turn_id():
+    return _turn_id.get()
+
+
+def _append_log(cfg, record: dict) -> None:
+    """Append one JSON record to the decision log, stamped with this turn's id. Never raises."""
+    try:
+        tid = _turn_id.get()
+        if tid:
+            record.setdefault("turn_id", tid)
+        record.setdefault("ts", round(time.time(), 3))
+        path = cfg.resolved_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.debug("lilith_router: decision log write failed", exc_info=True)
+
+
 def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
     """Append one JSON line describing the routing decision. Never raises.
 
@@ -76,8 +107,6 @@ def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
     and non-content metadata from :func:`_message_meta`.
     """
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -89,8 +118,7 @@ def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
             "live": bool(live),
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: decision log write failed", exc_info=True)
 
@@ -98,8 +126,6 @@ def _log_decision(cfg, platform, chat_id, decision, live, message) -> None:
 def _log_cognitive(cfg, platform, chat_id, intent, cog_mode, message) -> None:
     """Append one JSON line describing a cognitive-lane decision. Never raises."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -112,8 +138,7 @@ def _log_cognitive(cfg, platform, chat_id, intent, cog_mode, message) -> None:
             },
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: cognitive log write failed", exc_info=True)
 
@@ -121,8 +146,6 @@ def _log_cognitive(cfg, platform, chat_id, intent, cog_mode, message) -> None:
 def _log_goal(cfg, platform, chat_id, gintent, goal_mode, message) -> None:
     """Append one JSON line describing a goal-lane decision. Never raises."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -132,8 +155,7 @@ def _log_goal(cfg, platform, chat_id, gintent, goal_mode, message) -> None:
             "intent": {k: gintent.get(k) for k in ("goal_query", "goal_create", "app_id", "subtype")},
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: goal log write failed", exc_info=True)
 
@@ -141,8 +163,6 @@ def _log_goal(cfg, platform, chat_id, gintent, goal_mode, message) -> None:
 def _log_reasoning(cfg, platform, chat_id, rintent, mode, message, trace) -> None:
     """Append one JSON line describing a reasoning-lane decision (safe, non-CoT)."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -154,8 +174,7 @@ def _log_reasoning(cfg, platform, chat_id, rintent, mode, message, trace) -> Non
             "trace": trace,
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: reasoning log write failed", exc_info=True)
 
@@ -163,8 +182,6 @@ def _log_reasoning(cfg, platform, chat_id, rintent, mode, message, trace) -> Non
 def _log_workspace(cfg, platform, chat_id, snapshot, mode, message, trace) -> None:
     """Append one JSON line describing a workspace-lane decision (safe, non-CoT)."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -174,8 +191,7 @@ def _log_workspace(cfg, platform, chat_id, snapshot, mode, message, trace) -> No
             "trace": trace,
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: workspace log write failed", exc_info=True)
 
@@ -183,8 +199,6 @@ def _log_workspace(cfg, platform, chat_id, snapshot, mode, message, trace) -> No
 def _log_motivation(cfg, platform, chat_id, snapshot, mode, message, trace) -> None:
     """Append one JSON line describing a motivation-lane decision (safe, non-CoT)."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -194,8 +208,7 @@ def _log_motivation(cfg, platform, chat_id, snapshot, mode, message, trace) -> N
             "trace": trace,
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: motivation log write failed", exc_info=True)
 
@@ -203,8 +216,6 @@ def _log_motivation(cfg, platform, chat_id, snapshot, mode, message, trace) -> N
 def _log_planning(cfg, platform, chat_id, pintent, mode, message, trace) -> None:
     """Append one JSON line describing a planning-lane decision (safe, non-CoT)."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -216,8 +227,7 @@ def _log_planning(cfg, platform, chat_id, pintent, mode, message, trace) -> None
             "trace": trace,
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: planning log write failed", exc_info=True)
 
@@ -225,8 +235,6 @@ def _log_planning(cfg, platform, chat_id, pintent, mode, message, trace) -> None
 def _log_ethics(cfg, platform, chat_id, eintent, mode, message, trace) -> None:
     """Append one JSON line describing an ethics-lane decision (safe, non-CoT)."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": round(time.time(), 3),
             "platform": platform,
@@ -238,8 +246,7 @@ def _log_ethics(cfg, platform, chat_id, eintent, mode, message, trace) -> None:
             "trace": trace,
             **_message_meta(message),
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: ethics log write failed", exc_info=True)
 
@@ -247,10 +254,7 @@ def _log_ethics(cfg, platform, chat_id, eintent, mode, message, trace) -> None:
 def _log_social_cognition(cfg, trace) -> None:
     """Append one safe Slice-14 observer trace. Never logs turn text or roles."""
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(trace, ensure_ascii=True) + "\n")
+        _append_log(cfg, dict(trace))
     except Exception:
         logger.debug("lilith_router: social cognition trace write failed", exc_info=True)
 
@@ -447,12 +451,9 @@ def _note_social_route(cfg, platform, chat_id, route, reason="") -> None:
             logger.warning("lilith_router: social route unavailable (%s); "
                            "native model with social policy", reason)
     try:
-        path = cfg.resolved_log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
         record = {"ts": round(time.time(), 3), "platform": platform, "chat_id": str(chat_id or ""),
                   "lane": "social_route", "route": route, "route_reason": reason or None}
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _append_log(cfg, record)
     except Exception:
         logger.debug("lilith_router: social route log write failed", exc_info=True)
 
@@ -473,6 +474,10 @@ def route_turn(
     # Hermes' personal memory (USER.md / MEMORY.md) follows the same owner rule: `owner_memory` in the result tells
     # gateway/run.py whether this turn's agent may keep its memory store; the lean path reads owner_turn().
     note, session_key, owner = None, None, False
+    try:
+        _begin_turn(_config.load())
+    except Exception:
+        _turn_id.set(None)
     _canonical_memory.set_owner_turn(False)
     _social_note.set(None)
     try:
