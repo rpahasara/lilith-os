@@ -381,8 +381,9 @@ Owner GO 2026-11-08.
 open. It keeps at most 3 typed ones whose scope fits the turn, boundaries first, and adds one short note to the existing
 turn guidance on both reply paths. The note says an explicit request wins and a boundary beats any tone suggestion.
 
-**Durable corrections.** Explicit corrections ("don't call me…", "I already told you…", "that's not what I meant", "it
-was only a test…") skip the lean path. They go to the tool-capable agent with a hint to *propose* a typed memory for
+**Durable corrections.** Explicit corrections about future behaviour ("don't call me…", "stop doing…", "I already
+told you…", "it was only a fictional test") skip the lean path (#381 narrowed the cues; one-off fixes such as "that's not
+what I meant" stay on their normal path). They go to the tool-capable agent with a hint to *propose* a typed memory for
 owner approval, never to claim it is saved.
 
 **Never inferred.** Nothing is learned from a single ambiguous message.
@@ -400,8 +401,8 @@ owner approval, never to claim it is saved.
   - `metrics.py` reports text-free rates with denominators.
   - Two synthetic 8-scenario specs, arms A (none or forgotten) / B (profile only) / C (profile + router note).
 
-**Known cosmetic issue:** in `router.yaml`, `decision_log_max_bytes`' inline comment now trails the new
-`social_preferences_mode` line. The value parses correctly; it will be fixed with the next router change.
+**Known cosmetic issue (fixed in #381):** in `router.yaml`, `decision_log_max_bytes`' inline comment trailed the
+`social_preferences_mode` line. The value always parsed correctly.
 
 **Batch 2: E-2/E-6 offline, full-agent path (2026-11-08).**
 - **Setup:** codex, no tools, stored owner memory skipped; synthetic profile; 8 + 8 scenarios × arms A/B/C, 1 sample
@@ -466,6 +467,59 @@ mode or a correction-routing-only setting.
 
 **Limitation:** the nightly learning-review prompt does not yet suggest the typed wording. It lives in the cron job,
 outside the deploy pipeline. In-chat proposals carry the format through the correction hint.
+
+**Batch 4: correction-only routing (#381, owner GO 2026-11-08).**
+- **Merged** `e3727705`; **deployed to PROD 2026-11-08 16:58:47Z** through the pipeline (run 42502504371, success;
+  `router.yaml` sha `d9d72dd126a2`; `hermes-gateway` and `lilith-os-api` active).
+- New independent switch `social_corrections_mode: live` (off / live). The preference note stays
+  `social_preferences_mode: shadow`.
+- Explicit durable owner corrections on verified owner channels go to the tool-capable agent with the proposal hint;
+  one-off corrections and casual chat stay on the fast path; non-owner turns are untouched. No new lane, store or model
+  call. The decision record adds `corrections_mode` and `correction_routed`, with no text.
+- 17 focused P-2 tests in CI; router suite 155/155.
+- **Rollback:** `social_corrections_mode: off`, then a router deploy.
+
+**Batch 5: practical owner test (2026-11-08, Telegram owner DM). Result: functional PASS.**
+
+The owner taught a technical-conversation preference by correction, approved the proposal, then, in a fresh session,
+asked a playful but technically demanding Kubernetes question (memory-pressure eviction, OOMKilled, QoS classes, kubelet
+thresholds). The owner's own reading: a detailed technical explanation, playful personality kept, no inappropriate
+simplification.
+
+Metadata-only verification on PROD (ids, kinds, scopes, timestamps and labels; no memory or message text read):
+
+| Step | Evidence | Result |
+| --- | --- | --- |
+| Correction routed | `social_preferences` record 18:06:51Z: `durable_correction: true`, `correction_routed: true`, preferences `shadow`; that turn `answered_by: agent` (codex, 2 calls), channel `telegram_owner_dm`, owner | PASS |
+| Proposal → approval | proposal `0c2dd300` approved 18:09:53Z; L18 `APPROVED` event for it at the same second | PASS |
+| Persisted in LILITH OS | owner memory `om_e21544a6…`: `ACTIVE`, `USER_ASSERTED`, typed `preference/technical`, provenance `OWNER_APPROVED_PROPOSAL 0c2dd300`; USER.md projection holds one typed entry, `preference/technical` | PASS |
+| Fresh session | old Telegram session ended 18:10:04Z (`session_reset`); new session started 18:10:04Z, after the approval; the question at 18:10:23Z was its first user message | PASS |
+| Memory path | the new session started after the approval, so its profile snapshot (USER.md) includes the preference; the shadow selector for that turn found it (`available: 1`, `selected: [om_e21544a6…]`, `focused: true`, scope `technical`) and, being shadow, added no note | PASS |
+| Question answered | turn 18:11:51Z: `answered_by: agent` (codex, 1 call), route `native_recall`, 4,590 reply characters, no fallback | PASS |
+
+**Causal limitation.** This shows the chain works end to end: correction → proposal → owner approval → durable typed
+memory → available to a fresh session through the expected memory path. It does **not** show that the preference
+caused the reply's quality or tone: there was no controlled comparison (same question without the preference), and the
+full agent already answers technical questions in depth. The controlled evidence for effect remains the synthetic
+E-2/E-6 runs above (directional, 1 sample per arm).
+
+**Observations:**
+- The proposal and the correction turn are linked only by time (18:07 → 18:09); records carry no proposal id. Nothing
+  suggests a mismatch.
+- No L18 `PROPOSED` event exists for in-chat proposals (only for nightly-review snapshots), so the L18 trail for an
+  in-chat proposal starts at `APPROVED`. This is existing #341 behaviour, not a P-2 change.
+
+**Remaining P-2 completion criteria:**
+1. **Change and retract** a typed preference through the existing replace/remove approvals (supersession → L18
+   `SUPERSEDED`/`RETRACTED`) at least once on PROD. Not yet exercised live.
+2. **Verified Discord DM** owner turn reaching the same preference (same code path; not observed yet).
+3. **Nightly learning review** should suggest the typed `Preference/Boundary (scope):` wording (cron job outside the
+   pipeline).
+4. **Preference note:** stays `shadow`. Promote only if a controlled comparison shows benefit; current evidence says it
+   adds nothing over the profile projection.
+5. Optional: an L18 `PROPOSED` event for in-chat proposals, if the owner wants a complete trail.
+
+These can be met during normal use; no extra test ceremony is planned.
 
 ## 4. Feature readiness vs. remaining work
 
