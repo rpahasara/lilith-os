@@ -304,6 +304,36 @@ Owner GO 2026-11-08: implement P-1 now; migration stays separate and needs expli
 - **(a) Correction routing.** Owner corrections ("don't call me…", "stop …", "I told you…") stay on the tool-less lean path today, so no memory proposal can follow. Adding correction phrasing to the existing durable-statement detector (`social_lean._MEMORY_STATEMENT_RE`, #338) routes them to the full agent. There the existing in-chat proposal → owner approval → LILITH OS → L18 flow handles them. No new store or lane; flag-gated.
 - **(b) E-6 first, 6–8 cue → trigger scenarios.** Compare a correction left only in history against the same correction as an approved profile line (≤30K tokens), plus live recurrence from the trace.
 
+## 3k. Relationship-origin wording error: finding (2026-11-08)
+
+**Observation** (owner, Discord owner DM): LILITH quoted the origin memory as "I'm *saving* this…". The owner intended "I'm *saying* this…".
+
+**Finding** (`OPERATOR-REPORTED`, read-only; no memory text printed or committed):
+- **Canonical integrity worked.** The live canonical record is byte-identical to the statement admitted on DEV 2026-10-27 and on PROD 2026-11-06 (sha256 `047de4a8…`, 598 chars). The read-only first-memory recall returns it exactly.
+- The **original admitted text itself** contains the human wording error: one occurrence of "saving", none of "saying".
+- **No Hermes projection holds the sentence:** USER.md, MEMORY.md and World Model beliefs have 0 occurrences.
+- LILITH quoted the stored text faithfully, so this is not a quotation-fidelity problem. The sentence appears in 3 past conversation sessions, which stay untouched.
+
+**Gap:** there is no supported correction for this family. The relationship-origin family is CREATE-only at every layer:
+- the action contract (`memory_action_v2`);
+- the L04 ledger CHECKs (`consent_grant`, `policy_decision`, schema v3);
+- the L18 family tables (`learning_ro_*_v1` CHECK `operation='CREATE'`);
+- the authority signer (`authority-dev/protocol.py` `RelationshipOriginActionV1`);
+- the conversation offer.
+
+The storage layer already keeps revisions with lineage (`memory_revision`, `prior_revision_id`, active revision), and SUPERSEDE exists for the codename family.
+
+**Owner decision:** build an owner-approved canonical SUPERSEDE for this family. The original revision stays immutable; a successor changes exactly one word; activation needs the owner's signature. No FORGET and no conversation rewrite. Scope, recorded so it isn't under-estimated:
+- action contract;
+- an L04 / L18 schema v4 migration (backup-gated, reusing the v3 rebuild procedure);
+- the signer protocol and its staged transition (FM-2 tooling);
+- the correction offer;
+- the First Memory host release;
+- one owner ceremony;
+- a fresh-session owner-DM recall.
+
+The canonical record stays unchanged until the exact correction and owner approval are ready.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
