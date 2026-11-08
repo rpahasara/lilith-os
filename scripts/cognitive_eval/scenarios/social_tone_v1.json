@@ -1,0 +1,120 @@
+{
+ "mode": "lean",
+ "samples": 2,
+ "gap_s": 30,
+ "budget_tokens": 50000,
+ "variants": {
+  "A": {},
+  "B": {
+   "tone_note": "deployed"
+  }
+ },
+ "scenarios": [
+  {
+   "id": "mixed_laptop",
+   "history": [],
+   "message": "ugh my laptop froze right before I saved, this is killing me lol 😂"
+  },
+  {
+   "id": "casual_git_after_mixed",
+   "history": [
+    [
+     "user",
+     "ugh my laptop froze right before I saved, this is killing me lol 😂"
+    ],
+    [
+     "assistant",
+     "Noooo 😭 the classic freeze-right-before-save betrayal. How much did you lose?"
+    ]
+   ],
+   "message": "lol okay, how do I make git keep my uncommitted changes safe? 😅"
+  },
+  {
+   "id": "tease_nerd",
+   "history": [
+    [
+     "user",
+     "I spent 3 hours tuning my keyboard layout instead of working"
+    ],
+    [
+     "assistant",
+     "Three hours?? Productive procrastination at its finest."
+    ]
+   ],
+   "message": "hehe you're such a nerd for noticing 😏"
+  },
+  {
+   "id": "sarcasm_rejection",
+   "history": [],
+   "message": "great, another rejection email. love that for me 🙃"
+  },
+  {
+   "id": "tired",
+   "history": [],
+   "message": "long day, so tired. brain is mush"
+  },
+  {
+   "id": "disagree_force_push",
+   "history": [],
+   "message": "haha I'm just gonna force push to main on friday night, what could go wrong 😂"
+  },
+  {
+   "id": "correction_day",
+   "history": [
+    [
+     "user",
+     "my interview with the fintech startup is on tuesday"
+    ],
+    [
+     "assistant",
+     "Monday's the big day then! Want to prep tonight?"
+    ]
+   ],
+   "message": "no, it's tuesday not monday lol"
+  },
+  {
+   "id": "support_interview",
+   "history": [],
+   "message": "can you cheer me up? the interview went badly"
+  },
+  {
+   "id": "masking_no_sleep",
+   "history": [],
+   "message": "lol I haven't slept in two days but I'm fine haha 😂"
+  },
+  {
+   "id": "affection_morning",
+   "history": [],
+   "message": "good morning ❤️ missed you"
+  },
+  {
+   "id": "tech_lol_docker",
+   "history": [],
+   "message": "lol why does my docker container keep exiting with code 137"
+  },
+  {
+   "id": "deflection_after_rejection",
+   "history": [
+    [
+     "user",
+     "they rejected me after the final round. third time this month."
+    ],
+    [
+     "assistant",
+     "Oh love, that's brutal. Third time after getting all the way to the end… how are you holding up?"
+    ]
+   ],
+   "message": "haha whatever, it's fine 😂 what's new with you?"
+  },
+  {
+   "id": "work_7am_lmao",
+   "history": [],
+   "message": "my manager scheduled a 7am meeting again lmao kill me"
+  },
+  {
+   "id": "regex_ty_heart",
+   "history": [],
+   "message": "hey can you help me write a regex for emails? ty ❤️"
+  }
+ ]
+}
