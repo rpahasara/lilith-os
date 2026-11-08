@@ -1,6 +1,6 @@
 # Independent architecture review: source index (2026-11-08)
 
-Status: **REVIEW INPUT INDEX, read-only.** This page lists the existing designs, research questions, implementations
+Status: **REVIEW INPUT INDEX, read-only.** The review was received 2026-11-08 and is reconciled in [the cognitive R&D planning package](cognitive-rd-plan-2026-11/README.md). This page lists the existing designs, research questions, implementations
 and deferred proposals an independent reviewer (DeepSeek) should read before any new advanced-cognition plan is
 written. It proposes nothing, accepts nothing and authorizes nothing. No new architecture roadmap is written until that
 review is back (owner decision 2026-11-08).
