@@ -47,6 +47,9 @@ jobs:
       - name: Validate repository contracts
         run: python scripts/validate_repository.py
 
+      - name: Cognitive evaluation tools (P-1)
+        run: python -m unittest scripts/cognitive_eval/test_cognitive_eval.py
+
       - name: Validate trusted DEV durability controls
         run: python -m unittest scripts/test_core_api_dev_durability_probe.py
 
