@@ -326,24 +326,32 @@ _PREFERENCES = _social_prefs.ApprovedPreferenceSource(os.environ.get("LILITH_OS_
 
 
 def _apply_social_preferences(cfg, decision, message: str) -> None:
-    """P-2 (owner turns): select approved preferences whose scope fits this turn; in live mode set the note and, for an
-    explicit durable correction, the correction hint. Shadow logs the selection only. Never raises; no text logged."""
+    """P-2 (owner turns only). Two independent switches:
+    - preferences (off / shadow / live): select approved preferences whose scope fits this turn; live sets the note,
+      shadow only logs the selection;
+    - corrections (off / live): an explicit durable correction sets the proposal hint, which also moves the turn off
+      the lean path to the tool-capable agent. Ordinary one-off corrections stay where they are.
+    Never raises; no text logged."""
     try:
-        if not (cfg.social_preferences_is_active() and _canonical_memory.owner_turn()):
+        prefs_active = cfg.social_preferences_is_active()
+        corrections_live = cfg.social_corrections_is_live()
+        if not ((prefs_active or corrections_live) and _canonical_memory.owner_turn()):
             return
-        focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))
-        available = _PREFERENCES.current()
-        chosen = _social_prefs.select(available, focused=focused, message=message)
         correction = _social_prefs.durable_correction(message)
-        live = cfg.social_preferences_is_live()
-        if live:
-            _pref_note.set(_social_prefs.render(chosen))
-            _correction_hint.set(_social_prefs.CORRECTION_HINT if correction else None)
-        _append_log(cfg, {"lane": "social_preferences", "mode": cfg.social_preferences_mode, "focused": focused,
-                          "available": len(available), "selected": [p.entry_id for p in chosen],
-                          "kinds": [p.kind for p in chosen],
-                          "scopes": [p.scope.split(":", 1)[0] for p in chosen],
-                          "durable_correction": correction})
+        if corrections_live and correction:
+            _correction_hint.set(_social_prefs.CORRECTION_HINT)
+        rec = {"lane": "social_preferences", "mode": cfg.social_preferences_mode,
+               "corrections_mode": "live" if corrections_live else "off", "durable_correction": correction,
+               "correction_routed": bool(corrections_live and correction)}
+        if prefs_active:
+            focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))
+            available = _PREFERENCES.current()
+            chosen = _social_prefs.select(available, focused=focused, message=message)
+            if cfg.social_preferences_is_live():
+                _pref_note.set(_social_prefs.render(chosen))
+            rec.update(focused=focused, available=len(available), selected=[p.entry_id for p in chosen],
+                       kinds=[p.kind for p in chosen], scopes=[p.scope.split(":", 1)[0] for p in chosen])
+        _append_log(cfg, rec)
     except Exception:
         _pref_note.set(None)
         _correction_hint.set(None)

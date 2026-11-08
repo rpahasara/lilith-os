@@ -33,10 +33,14 @@ recent_turns: 6         # bounded recent context considered by the classifier
 # P-1 trace: turn_id on every decision-log record + one turn-end record. Metadata only, never message text.
 # Off: turn_trace_enabled: false (behaviour of LILITH is unaffected either way).
 turn_trace_enabled: true
-decision_log_max_bytes: 2000000
+decision_log_max_bytes: 2000000   # bounded retention: rotate to decisions.log.1 (one generation kept)
 # P-2 social preferences (owner turns only): off | shadow (log which approved preferences would apply) | live (apply on
-# both reply paths; route explicit durable corrections to the tool-capable agent). Rollback: shadow or off.
-social_preferences_mode: shadow   # bounded retention: rotate to decisions.log.1 (one generation kept)
+# both reply paths; also routes corrections as below). Rollback: shadow or off.
+social_preferences_mode: shadow
+# P-2 correction routing (owner turns only), independent of the preference note: off | live. Live sends explicit
+# durable corrections ("don't call me that", "stop doing X", "that was only a test") to the tool-capable agent with a
+# hint to PROPOSE a typed memory for owner approval (never to claim it is saved). Rollback: off.
+social_corrections_mode: live
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

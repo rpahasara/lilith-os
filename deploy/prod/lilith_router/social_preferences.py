@@ -139,13 +139,21 @@ class ApprovedPreferenceSource:
 # -------------------------------------------------------------------------------- durable-correction cues ---
 # Explicit owner corrections that MAY be worth remembering. They route the turn to the tool-capable agent (which can
 # propose a memory for approval) and add CORRECTION_HINT; they never write anything themselves.
+# Durable = about how she behaves from now on ("don't call me…", "stop doing…", "I've already told you…", "that was
+# only a fictional test"). Ordinary one-off corrections of an answer ("that's not what I meant", "no, I meant…", a
+# bare "I told you so") are NOT matched: they stay on their normal path, with no proposal.
 DURABLE_CORRECTION_RE = re.compile(
-    r"\b(?:don'?t|do not|stop|quit|never)\s+(?:ever\s+)?(?:call(?:ing)?\s+me|say(?:ing)?|bring(?:ing)?\s+up|"
-    r"mention(?:ing)?|use|using|do(?:ing)?\s+that|doing\s+this)\b|"
-    r"\bi(?:'ve| have)?\s+(?:already\s+)?told\s+you\b|"
-    r"\bthat'?s\s+not\s+what\s+i\s+meant\b|"
-    r"\b(?:it|that|this)\s+was\s+(?:only|just)\s+a\s+test\b|"
-    r"\bnot\s+a\s+real\s+(?:event|incident|thing|situation)\b",
+    r"(?<!can't )(?<!cant )(?<!cannot )(?<!won't )(?<!couldn't )(?<!can not )"
+    r"\b(?:don'?t|do not|stop|quit|never)\s+(?:ever\s+)?(?:again\s+)?"
+    r"(?:call(?:ing)?\s+me|say(?:ing)?|bring(?:ing)?\s+up|mention(?:ing)?(?!\s+it\b)|use|using|"
+    r"do(?:ing)?\s+(?:that|this)|being|send(?:ing)?|add(?:ing)?|treat(?:ing)?|pretend(?:ing)?|joking|"
+    r"asking\s+me|making\s+(?:jokes|fun))\b|"
+    r"\bi(?:'ve|\s+have)\s+(?:already\s+)?told\s+you\b|\bi\s+already\s+told\s+you\b|"
+    r"\btold\s+you\s+(?:this|that)\s+(?:before|already)\b|\bhow\s+many\s+times\s+have\s+i\s+told\s+you\b|"
+    r"\b(?:it|that|this)\s+was\s+(?:only|just)\s+(?:a\s+)?(?:fictional\s+|made[- ]up\s+|hypothetical\s+)?"
+    r"(?:test|scenario|fiction|story|example)\b|"
+    r"\b(?:it|that|this)\s+(?:was|is)\s+(?:only\s+|just\s+)?(?:fictional|made[- ]up|hypothetical)\b|"
+    r"\bnot\s+a\s+real\s+(?:event|incident|thing|situation|story)\b",
     re.IGNORECASE,
 )
 

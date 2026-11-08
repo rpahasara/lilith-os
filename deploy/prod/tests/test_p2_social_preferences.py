@@ -82,15 +82,25 @@ class SourceTests(unittest.TestCase):
 class CorrectionCueTests(unittest.TestCase):
     def test_explicit_durable_corrections(self):
         for msg in ("Don't call me champ.", "stop calling me that", "I already told you I hate that",
-                    "That's not what I meant", "that was only a test scenario, not a real event",
+                    "that was only a test scenario, not a real event", "That was only a fictional test",
                     "please stop bringing up the outage", "it was just a test", "never say that again",
-                    "I've told you this before"):
+                    "I've told you this before", "stop being so formal with me", "stop doing that",
+                    "the outage story? that was fictional", "how many times have I told you",
+                    "quit sending me so many emoji", "don't ever joking about my exams again"):
             with self.subTest(msg=msg):
                 self.assertTrue(SP.durable_correction(msg))
 
     def test_ordinary_messages_are_not_corrections(self):
         for msg in ("don't worry about it", "I stopped by the shop", "that's what I meant", "I don't know",
                     "can you help me test this?", "never mind lol", "good morning"):
+            with self.subTest(msg=msg):
+                self.assertFalse(SP.durable_correction(msg))
+
+    def test_one_off_corrections_stay_on_their_path(self):
+        # a fix of this answer, not a lasting preference: no proposal, no rerouting
+        for msg in ("That's not what I meant", "no, I meant the cheaper one", "I told you so! it rained",
+                    "thanks! don't mention it", "lol I can't stop laughing", "I can't stop being nervous",
+                    "I told you it would work", "wrong, it's Tuesday not Monday"):
             with self.subTest(msg=msg):
                 self.assertFalse(SP.durable_correction(msg))
 
@@ -105,18 +115,60 @@ class RouterIntegrationTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
         shutil.rmtree(self.log.parent, ignore_errors=True)
 
-    def cfg(self, mode):
-        return self.gi._config.RouterConfig(enabled=True, log_path=str(self.log), social_preferences_mode=mode)
+    def cfg(self, mode, corrections="off"):
+        return self.gi._config.RouterConfig(enabled=True, log_path=str(self.log), social_preferences_mode=mode,
+                                            social_corrections_mode=corrections)
 
-    def apply(self, mode, message, owner=True, mode_of_turn="social", tech=0):
+    def apply(self, mode, message, owner=True, mode_of_turn="social", tech=0, corrections="off"):
         gi = self.gi
         gi._pref_note.set(None)
         gi._correction_hint.set(None)
         gi._canonical_memory.set_owner_turn(owner, "telegram_owner_dm" if owner else "public")
         gi._turn_id.set("t" * 16)
         decision = types.SimpleNamespace(mode=mode_of_turn, signals={"tech": tech})
-        gi._apply_social_preferences(self.cfg(mode), decision, message)
+        gi._apply_social_preferences(self.cfg(mode, corrections), decision, message)
         return gi._pref_note.get(), gi._correction_hint.get()
+
+    def test_correction_routing_is_independent_of_the_preference_note(self):
+        gi = self.gi
+        note, hint = self.apply("shadow", "Don't call me champ.", corrections="live")
+        self.assertIsNone(note)                                                          # the note stays shadow
+        self.assertEqual(hint, gi._social_prefs.CORRECTION_HINT)
+        rec = self.records()[-1]
+        self.assertEqual((rec["mode"], rec["corrections_mode"], rec["correction_routed"]), ("shadow", "live", True))
+        self.assertTrue(rec["selected"])                                                 # shadow still logs selection
+        out = gi._with_social_note({})
+        self.assertEqual(out["turn_hint"], gi._social_prefs.CORRECTION_HINT)          # hint only, no preference note
+        # ordinary casual and one-off turns: no hint, so they stay on the fast path
+        for msg in ("good morning!", "That's not what I meant, I asked about price"):
+            self.assertEqual(self.apply("shadow", msg, corrections="live"), (None, None))
+            self.assertFalse(self.records()[-1]["correction_routed"])
+        # off + off: nothing at all; corrections live with preferences off: hint, no preference lookup
+        before = len(self.records())
+        self.assertEqual(self.apply("off", "Don't call me champ."), (None, None))
+        self.assertEqual(len(self.records()), before)
+        self.gi._PREFERENCES = self.gi._social_prefs.ApprovedPreferenceSource(
+            fetch=lambda: (_ for _ in ()).throw(AssertionError("no lookup when preferences are off")))
+        _, hint = self.apply("off", "stop doing that", corrections="live")
+        self.assertEqual(hint, gi._social_prefs.CORRECTION_HINT)
+        self.assertNotIn("selected", self.records()[-1])
+
+    def test_correction_routing_never_on_non_owner_turns(self):
+        self.assertEqual(self.apply("shadow", "Don't call me champ.", owner=False, corrections="live"), (None, None))
+        self.assertEqual(self.records(), [])
+
+    def test_corrections_config_parsing(self):
+        cfg = self.gi._config
+        self.assertFalse(cfg.RouterConfig().social_corrections_is_live())
+        self.assertTrue(cfg.RouterConfig(social_preferences_mode="live").social_corrections_is_live())
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            for raw, want in (("live", "live"), ("LIVE", "live"), ("shadow", "off"), ("yes", "off")):
+                (tmp / "r.yaml").write_text("enabled: true\nsocial_corrections_mode: %s\n" % raw, encoding="utf-8")
+                with mock.patch.object(cfg, "CONFIG_PATH", tmp / "r.yaml"):
+                    self.assertEqual(cfg.load().social_corrections_mode, want, raw)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def records(self):
         return [json.loads(l) for l in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
@@ -169,7 +221,10 @@ class RouterIntegrationTests(unittest.TestCase):
     def test_router_yaml_starts_in_shadow(self):
         cfg = self.gi._config
         with mock.patch.object(cfg, "CONFIG_PATH", ROOT / "deploy/prod/lilith_router/router.yaml"):
-            self.assertEqual(cfg.load().social_preferences_mode, "shadow")
+            loaded = cfg.load()
+            self.assertEqual(loaded.social_preferences_mode, "shadow")                 # the note stays in shadow
+            self.assertEqual(loaded.social_corrections_mode, "live")
+            self.assertEqual(loaded.decision_log_max_bytes, 2000000)
 
     def test_lean_path_skips_durable_corrections_and_carries_the_note(self):
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
