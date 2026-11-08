@@ -15,9 +15,11 @@ This roadmap is evidence-gated, not date-driven. A phase advances when its exit 
 
 No schedule alone promotes an autonomy level.
 
+**Status update, 2026-11-08.** The phase statuses below were written on 2026-09-13 and are corrected in place, with the original kept in brackets. Phase content and exit criteria are unchanged. Evidence: merged pull requests (SOURCE-VERIFIED) and [the PROD work note](../engineering/prod-work-note-2026-11-07.md) (OPERATOR-REPORTED).
+
 ## Phase 0 — Repository and architecture foundation
 
-**Status:** IN PROGRESS
+**Status:** DONE (SOURCE-VERIFIED: validator, CI, ADRs, research register). *(2026-09-13: IN PROGRESS)*
 
 Deliverables:
 
@@ -36,7 +38,7 @@ Exit criteria:
 
 ## Phase 1 — Current-system audit and import
 
-**Status:** PLANNED
+**Status:** LARGELY DONE. The October source consolidation and PROD source recovery imported the running code (SOURCE-VERIFIED); `docs/engineering/vm-only-source-gaps.md` lists what remains host-only. *(2026-09-13: PLANNED)*
 
 - Import existing LILITH implementation intentionally, preserving history where possible.
 - Map every reported component to code, tests, state, data flows, and deployment evidence.
@@ -53,7 +55,7 @@ Exit criteria:
 
 ## Phase 2 — Engineering quality and CI/CD foundation
 
-**Status:** PLANNED
+**Status:** LARGELY DONE. PR CI, exact-SHA DEV deployment and a constrained PROD deployer with backup, smoke check and rollback (SOURCE-VERIFIED). Production deployment is **enabled** through that deployer. Immutable artifact provenance and restore-tested recovery remain open. *(2026-09-13: PLANNED)*
 
 - Select language-specific formatting, linting, type, test, and security checks.
 - Add contract, integration, concurrency, failure-injection, and migration tests.
@@ -70,7 +72,7 @@ Exit criteria:
 
 ## Phase 3 — Architecture V2 and Slice 4 design
 
-**Status:** PLANNED
+**Status:** DONE (SOURCE-VERIFIED: Cognitive Architecture V1, Command System and Slice 4 design). *(2026-09-13: PLANNED)*
 
 - Review every proposed layer for a real invariant, state, trust, or failure boundary.
 - Version core task, capability, policy, approval, and evidence contracts.
@@ -87,7 +89,7 @@ Exit criteria:
 
 ## Phase 4 — First approval-gated reversible write
 
-**Status:** FUTURE
+**Status:** DONE. Approval-gated drafts (Slice 4) with policy (Slice 5) and the connector fabric (Slice 6); live-accepted (OPERATOR-REPORTED). *(2026-09-13: FUTURE)*
 
 - Implement one vertical slice through intent, task, plan, policy, approval, execution, read-back, verification, evidence, and presence.
 - Run sandbox, fault-injection, and replay tests.
@@ -103,7 +105,9 @@ Exit criteria:
 
 ## Phase 5 — Memory and resumable goals
 
-**Status:** FUTURE / RESEARCH-DEPENDENT
+**Status:** PARTIAL.
+- Live (OPERATOR-REPORTED): goals and the World Model; canonical memory admitted and recalled on owner channels; approval-gated owner learning; the L18 event ledger.
+- Still open: consolidation is shadow only; FORGET covers one memory profile; contradiction and decay are research. *(2026-09-13: FUTURE / RESEARCH-DEPENDENT)*
 
 - Separate conversation, task, goal, memory, evidence, preference, and operational state.
 - Implement candidate-memory admission with provenance and sensitivity.
@@ -119,7 +123,7 @@ Exit criteria:
 
 ## Phase 6 — Workers and automation
 
-**Status:** FUTURE
+**Status:** EARLY PARTIAL. Scheduled watchers and briefs exist on PROD (OPERATOR-REPORTED; Google-dependent ones are degraded); there is no bounded worker delegation. *(2026-09-13: FUTURE)*
 
 - Add specialized workers with bounded delegation envelopes.
 - Add resumable workflows, schedules, event triggers, budgets, cancellation, and compensation.
@@ -133,7 +137,7 @@ Exit criteria:
 
 ## Phase 7 — Proactive intelligence and bounded authority
 
-**Status:** FUTURE / RESEARCH-DEPENDENT
+**Status:** FUTURE. The Motivation lane is live, but there are no predelegated or proactive actions. *(2026-09-13: FUTURE / RESEARCH-DEPENDENT)*
 
 - Implement attention and interruption policy.
 - Pilot predelegated low-risk actions only after shadow evaluation.
@@ -147,7 +151,7 @@ Exit criteria:
 
 ## Phase 8 — Multi-runtime and cross-device continuity
 
-**Status:** FUTURE / RESEARCH-DEPENDENT
+**Status:** FUTURE. One runtime (Hermes). One identity across the console and Telegram (a verified Discord DM is in progress, #355), with a provider fallback; that is not runtime replacement. *(2026-09-13: FUTURE / RESEARCH-DEPENDENT)*
 
 - Add another conforming runtime beside Hermes.
 - Introduce sync authority, leases or other selected coordination mechanism, and offline constraints.

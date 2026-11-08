@@ -63,11 +63,12 @@ These labels apply throughout the public documentation. Dates and diagrams do no
 - A Next.js LILITH OS application and a backend Core API under `services/core-api`.
 - A persistent command and task lifecycle with backend task records, policy probes, connectors, verification paths, and tests.
 - Implemented foundations for the world model, goal/executive system, reasoning, global workspace, motivation, planning and replanning, ethical deliberation, social/presence behavior, and learning/consolidation. Maturity varies by slice.
-- Canonical-memory groundwork, including guarded authority, privacy, containment, and provenance boundaries. Production memory apply remains disabled.
+- Canonical-memory groundwork, including guarded authority, privacy, containment, and provenance boundaries. Two governed canonical memories are admitted on PROD and recalled on owner channels only (OPERATOR-REPORTED, 2026-11-06); general memory creation stays disabled.
 - Hermes integration for model and tool execution.
 - Voice and text interaction foundations.
 - Hsin assets and presence foundations, including gaze, ambient motion, expression, lip-sync, and semantic presence states.
-- GitHub source control, protected `main`, pull-request CI, exact-SHA deployment to isolated DEV, health verification, Core API deployment to private PROD, and tested source rollback behavior.
+- GitHub source control, protected `main`, pull-request CI, exact-SHA deployment to isolated DEV, health verification, and constrained PROD deployment of the Core API, router and gateway components with backup, smoke check and automatic rollback.
+- An active PROD deployment: Cutover 2 (seven cognition lanes) was accepted 2026-11-04. Current PROD status lives in [docs/engineering/prod-work-note-2026-11-07.md](docs/engineering/prod-work-note-2026-11-07.md).
 
 ### PARTIAL
 
