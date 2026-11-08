@@ -4,7 +4,7 @@
 >
 > **Evidence discipline:** `SOURCE-VERIFIED` = PR/code on GitHub; `OPERATOR-REPORTED` = Claude's live-host run reports and owner's Telegram tests, not independently re-run by this document; `PENDING` = not confirmed complete. This note is a **handoff/work log**, not a replacement for acceptance records, audits or live probes.
 >
-> **Source baseline:** `main` at `c09e01d80826c2008cfdfccd5b997e32ce25655a` (PR #351 merge; previously `6cfc3be`, PR #349). Keep this note updated after later merges.
+> **Source baseline:** `main` at `28dbe12e76de6a4a9336bbf17b7166ed10633c66` (PR #355 merge; previously `c09e01d`, PR #351). Keep this note updated after later merges.
 >
 > **Public-safe:** This repository was publicly accessible at the time of writing. This document deliberately excludes private memory text, identities/IDs, credentials, secrets, custody values, internal access endpoints and detailed snapshot locations.
 
@@ -193,6 +193,37 @@ No code change is needed. All 14 scenarios have now been measured.
 - **Natural-learning gap** ("rejected within one 10-minute snapshot window can be re-proposed"): closed by #340/#341. A rejection now writes an L18 `REJECTED` event, with `memory-review/rejected.jsonl` as fallback, at the moment of rejection, and the nightly review reads both.
 - **WhatsApp** and the **private owner Discord DM** need owner decisions: whether WhatsApp is still wanted, and which Discord DM identity counts as the owner. They are left as they are.
 
+## 3g. Private Discord owner DM, documentation cleanup, review index (2026-11-08)
+
+**Schedule (owner, 2026-11-08):** the VM migration moves to **2026-11-14**; the trial still expires 2026-11-18.
+
+**Discord owner DM** (`SOURCE-VERIFIED` #355; router deployed at `28dbe12`, 5 files, smoke OK, backup taken):
+- A Discord DM is an owner channel, `discord_owner_dm`, only when all of these hold:
+  - it has no guild or thread and is not from a bot;
+  - its (user id, DM channel id) pair is listed in the root-owned `canonical_memory.json` `ownerDiscordDms`.
+- Display names, roles and server membership prove nothing. Server channels, threads, groups and other users stay `public`.
+- **Reuse:** an owner turn takes the existing path. Canonical memory comes through the owner grant (label added at activation); Hermes profile memory and full tools through `owner_memory=True`; Social Cognition owner mode is unchanged; live and cognitive lanes match the label in `router.yaml`, so no Discord id is in the repository. No new store, personality or contract.
+- **One-time challenge** (`owner_link.py`):
+  1. Send `link owner` in the Discord DM.
+  2. A one-time code goes to the verified owner Telegram DM.
+  3. Type the code back in that same Discord DM.
+  4. The verified pair is recorded as evidence only. The code is kept as a salted hash and expires after 10 minutes (5 tries; at most 3 requests per hour).
+- **Activation:** `p3tx/deployer/discord_owner_activate.py` (operator) copies the verified pair into `canonical_memory.json` and adds `discord_owner_dm` to the owner grant. It keeps backups and needs no restart; rollback is by timestamp.
+- **Tests:** 14 new; deploy/prod suite 103/103.
+- **Post-deploy check** (`OPERATOR-REPORTED`): existing settings load, Telegram is still the owner channel, an unverified Discord DM is `public`, and the grant lists only `lilith_os` and `telegram_owner_dm`.
+- **Status: `ACTIVE` (2026-11-08).** The owner completed the challenge in the Discord DM; the first attempt, in the #lilith-home server channel, was correctly ignored. Activation installed the verified pair and the grant label (backup `20261108T081312Z`, no restart).
+- **Host check** (`OPERATOR-REPORTED`, labels and counts only): the verified DM resolves to `discord_owner_dm`, and the same account in the server channel resolves to `public`. The context service grants the DM label (`ownerChannel` true, 2 canonical memories).
+- **Live tests** (owner-reported done; router log metadata): the DM recall turn was routed **live** (`groq_lean`). Live switching for that DM comes only from the `discord_owner_dm` label, so the turn ran as an owner turn. The server-channel isolation turns stayed on the server channel's own route, with no owner label. No tracebacks.
+  - Reply text was not read (privacy). Correctness of the recall is owner-reported.
+- **Limitation:** nightly learning review (`owner_memory_review.py`, not a pipeline component) still reads only the console and Telegram sessions.
+
+**Documentation cleanup:**
+- **#311:** not merged. Its scripts embed operator account and infrastructure details, including a personal email. Its 16 historical records were preserved redacted in #356 (merged).
+- **#296:** clean, unique proposals (cognition dependencies, goal erasure). Recommended to merge; awaiting the owner's go.
+- **#357:** outdated status claims corrected. AS-IS, the roadmap, `development.md` and the README now say there is an active PROD deployment. Dated updates carry SOURCE-VERIFIED / OPERATOR-REPORTED labels, and the original text is kept as history.
+
+**Review index:** [docs/research/deepseek-review-index-2026-11.md](../research/deepseek-review-index-2026-11.md) indexes the 19-layer architecture, the Master v1.1 affect design (drives, appraisal, fast affect, slow mood, expression), the research questions, implemented lanes and deferred proposals for an independent DeepSeek review. Read-only; no new roadmap until that review is back.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
@@ -208,7 +239,7 @@ No code change is needed. All 14 scenarios have now been measured.
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
 | E-T4 and D1 | E-T4 `OWNER-CONFIRMED PASS` (2026-11-08); D1 `DEPLOYED` (#351) | None (D1 not live-reproducible; guard rewrites are rare) |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
-| Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
+| Private owner Discord DM continuity | `ACTIVE` (#355; activated 2026-11-08) | Optional: include Discord DM sessions in the nightly learning review (§3g) |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
 | PROD backup/snapshot retention | `PARTIALLY COMPLETE`; inventory 2026-11-08 (§3f) | Off-project portable backup + restore verification during migration; no snapshot deletion before then |
 | VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, backup + restore verification of all data, durable OAuth client + one-time authorization of both accounts, then switch |

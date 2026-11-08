@@ -12,7 +12,7 @@
 
 enabled: true          # master switch — keep OFF until validated
 mode: live            # "shadow" (observe only) | "live" (may switch to Groq)
-live_channels: ["discord:1540720958573125732", "telegram", "lilith_os"]       # allow-list of "platform:chat_id" (or "*"); empty = none live
+live_channels: ["discord:1540720958573125732", "telegram", "lilith_os", "discord_owner_dm"]       # allow-list of "platform:chat_id" (or "*"); empty = none live
 
 groq_model: "qwen/qwen3.8-27b"
 groq_provider: "groq"
@@ -43,7 +43,7 @@ recent_turns: 6         # bounded recent context considered by the classifier
 #   cognitive_channels: ["*"]                               -> all channels
 cognitive_enabled: true
 cognitive_mode: live
-cognitive_channels: ["lilith_os", "telegram"]
+cognitive_channels: ["lilith_os", "telegram", "discord_owner_dm"]   # discord_owner_dm = verified owner DM only
 cognitive_draft_dedup: true
 
 # -- Slice 8: Goal / Executive lane (independent rollout; reuses cognitive_channels) --

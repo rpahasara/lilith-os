@@ -46,6 +46,7 @@ from . import policy as _policy
 from . import social_guard as _social_guard
 from . import social_lean as _social_lean
 from . import canonical_memory as _canonical_memory
+from . import owner_link as _owner_link
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -480,8 +481,15 @@ def route_turn(
             platform = _platform_name(source)
             session_key = getattr(ctx, "session_key", None) or f"{platform}:{getattr(source, 'chat_id', '') or ''}"
             settings = _canonical_memory.load_settings(_config._hermes_home())
-            owner = _canonical_memory.is_owner_turn(settings, platform, source)
-            _canonical_memory.set_owner_turn(owner)
+            channel = _canonical_memory.channel_for(settings, platform, source)
+            owner = channel != _canonical_memory.PUBLIC
+            _canonical_memory.set_owner_turn(owner, channel)
+            # Discord owner-DM link challenge (a ready reply, no model call; never on an owner channel)
+            if not owner:
+                link = _owner_link.handle(settings, platform, source, getattr(ctx, "message", "") or "",
+                                          home=_config._hermes_home())
+                if link:
+                    return _with_owner_memory({"final_response": link, "mode": "owner_link"}, False)
             note = _canonical_memory.turn_note(settings, platform, source, session_key)
     except Exception:
         note, owner = None, False
