@@ -122,7 +122,7 @@ No code change is needed. All 14 scenarios have now been measured.
 **E-T4** (`OPERATOR-REPORTED`, Cutover 2 acceptance 2026-11-04): "what am I working toward right now?" took the `native_self_status` route and read the tracked goals, but twice the model led with a casual weekend plan from the previous turn. Two system-prompt wording fixes did not change that.
 - **Fix** (`SOURCE-VERIFIED` #351): the same instruction, shortened, now also rides on the **current message** as an API-only turn hint, the mechanism the tone note uses (never stored). It applies on owner turns only, and replaces the tone note on that turn. Reading the tracked goals on this route is now also owner-only; before this, any live channel could receive the owner's goal lines.
 - **Check** (`OPERATOR-REPORTED`): a synthetic run on gpt-5.6-sol (2 samples per variant, synthetic history and goals, no owner data, no tools) did **not** reproduce the original failure: both variants led with the goals. With the hint the answers were fuller and added the long-term goals.
-- **Status: `DEPLOYED, NOT YET CONFIRMED`.** The real confirmation is the owner asking the question once on Telegram after a casual turn. If it still fails, the recorded next step is asking a short clarifying question.
+- **Status: `OWNER-CONFIRMED PASS` (2026-11-08).** In a real owner Telegram test after a casual conversation, LILITH correctly put the owner's tracked goals first. **E-T4 is closed** (the Cutover 2 acceptance exception E-T4 is resolved).
 
 **D1** (`SOURCE-VERIFIED`, foundation audit 2026-11-02): when the social guard replaced a reply, `state.db` kept the rejected original. Its `codex_message_items` would also resend that text on the next turn.
 - **Fix** (#351): `run.py` calls `record_delivered_reply` only when the guard changed the reply.
@@ -148,7 +148,9 @@ No code change is needed. All 14 scenarios have now been measured.
 2. Re-consent each account with `p3tx/deployer/oauth_reconsent.py <primary|secondary>` (local operator tool). It runs Google's loopback flow on the VM behind an IAP SSH port-forward, so the authorization code goes from the browser straight to the VM. The new token is verified with one Gmail profile read before it replaces the old one (kept as `.invalid-<ts>`, 0600).
 3. Confirm the next timer runs succeed and the two failed units clear.
 
-**Migration note:** the OAuth client lives in the trial project. Plan its future together with the VM migration (Gmail/Calendar APIs need no billing, but the project must survive the trial).
+**Owner progress (2026-11-08):** publishing was blocked because the Branding page is incomplete (homepage, privacy-policy URL and authorized domains empty). The owner is completing Branding; re-consent follows.
+
+**Migration note:** the OAuth client lives in the trial project (trial expiry owner-confirmed 2026-11-18). Plan its future together with the VM migration (Gmail/Calendar APIs need no billing, but the project must survive the trial).
 
 ## 3e. L18 consolidation and canonical FORGET — what can be finished now (2026-11-08)
 
@@ -180,12 +182,12 @@ No code change is needed. All 14 scenarios have now been measured.
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
 | Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` (cause: Testing-status 7-day tokens) | Owner publishes consent screen + re-consents both accounts (§3d) |
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
-| E-T4 and D1 | `DEPLOYED` (#351); E-T4 `NOT YET CONFIRMED` live | Owner asks the Test 4 question once on Telegram |
+| E-T4 and D1 | E-T4 `OWNER-CONFIRMED PASS` (2026-11-08); D1 `DEPLOYED` (#351) | None (D1 not live-reproducible; guard rewrites are rare) |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
 | Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
 | PROD backup/snapshot retention | `PARTIALLY COMPLETE` | Verify recoverable copies, review old snapshots and remove only proven redundant copies |
-| VM migration | `NOT STARTED` | Verify actual cloud trial deadline (owner expects 2026-11-11), prepare destination, re-seal host-bound credentials, restore-test all data, then switch |
+| VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, restore-test all data, then switch |
 
 **Key caution:** The 2026-11-06 operator inventory said PROD was ahead of DEV for relevant cognition source. Apart from governed canonical FORGET, **there is no confirmed backlog of valuable DEV-only cognition code needing a wholesale port**. This is a reported deployment comparison, not independently rechecked on the hosts here.
 
@@ -193,7 +195,7 @@ No code change is needed. All 14 scenarios have now been measured.
 
 1. **Finish already-known operational gaps:** Google OAuth and dependent jobs (requires owner re-consent) and reproducible E-T4/D1 fixes (provider fallback done, §3b). Preserve working Telegram and Core API behavior.
 2. **Close existing optional/incomplete integrations according to actual usage:** WhatsApp, owner-private Discord DM, canonical FORGET (DEV-derived), UI if needed. Do not conflate these with incomplete DEV→PROD cutover.
-3. **Keep recovery viable:** validate destination-VM key re-sealing, protected memory/World Model/L18 backup and restore, and old snapshot retention. Plan migration separately before the owner's expected cloud-trial expiry.
+3. **Keep recovery viable:** validate destination-VM key re-sealing, protected memory/World Model/L18 backup and restore, and old snapshot retention. Plan migration separately before the cloud-trial expiry (owner-confirmed **2026-11-18**; earlier provisional date 2026-11-11 superseded).
 4. **After existing work:** pursue measured L18 consolidation, advanced Social Cognition, other lane improvements, memory expression, optional low-risk automatic learning and under-budget alternative model research.
 
 Avoid rewriting active subsystems, adding ceremonial gates, or scheduling repeated live user tests when offline regression tests suffice. The owner prefers one real functional example for feature validation.
