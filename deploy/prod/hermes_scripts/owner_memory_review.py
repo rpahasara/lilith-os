@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Context for LILITH's nightly memory review (Hermes cron --script; stdout goes into the review prompt). Read only.
 
-Prints the owner's own conversations of the last REVIEW_HOURS: the console (lilith_os) and the owner's private
-Telegram DM (fast Groq turns included: they are stored in state.db like every other turn), plus what is already
+Prints the owner's own conversations of the last REVIEW_HOURS: the console (lilith_os), the owner's private
+Telegram DM and the owner's verified Discord DM (fast Groq turns included: they are stored in state.db like every
+other turn). The Discord DM counts only for a (user id, DM channel id) pair the owner verified through the Telegram
+owner DM and the operator installed in canonical_memory.json `ownerDiscordDms` (the router's own owner rule). Plus
+what is already
 remembered, what is already waiting for approval and what the owner already rejected, so the review never proposes
 the same thing twice. Nothing from any other chat is read. Prints NO_NEW_OWNER_CONVERSATION when there is nothing new.
 
@@ -35,7 +38,18 @@ def owner_ids(home: Path) -> set:
         return set()
 
 
-def owner_sessions(con: sqlite3.Connection, ids: set) -> list:
+def owner_discord_dms(home: Path) -> set:
+    """Verified (Discord user id, DM channel id) pairs; empty when absent or malformed (fail closed)."""
+    try:
+        settings = json.loads((home / "lilith_router" / "canonical_memory.json").read_text(encoding="ascii"))
+        pairs = settings.get("ownerDiscordDms", [])
+        return {(str(p["userId"]), str(p["chatId"])) for p in pairs
+                if isinstance(p, dict) and str(p.get("userId", "")).isdigit() and str(p.get("chatId", "")).isdigit()}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return set()
+
+
+def owner_sessions(con: sqlite3.Connection, ids: set, discord_dms: set = frozenset()) -> list:
     out = []
     for sid, source, user, chat, kind in con.execute(
             "SELECT id, source, user_id, chat_id, chat_type FROM sessions"):
@@ -43,6 +57,9 @@ def owner_sessions(con: sqlite3.Connection, ids: set) -> list:
             out.append(sid)
         elif (source == "telegram" and ids and str(user or "") in ids and str(chat or "") == str(user or "")
               and str(kind or "").lower() in ("dm", "private")):
+            out.append(sid)
+        elif (source == "discord" and (str(user or ""), str(chat or "")) in discord_dms
+              and str(kind or "").lower() == "dm"):
             out.append(sid)
     return out
 
@@ -203,7 +220,8 @@ def main(home: Path = HOME, now: float = None) -> str:
     except sqlite3.Error:
         return "NO_NEW_OWNER_CONVERSATION"
     try:
-        lines = conversation(con, owner_sessions(con, owner_ids(home)), now - REVIEW_HOURS * 3600)
+        lines = conversation(con, owner_sessions(con, owner_ids(home), owner_discord_dms(home)),
+                             now - REVIEW_HOURS * 3600)
     finally:
         con.close()
     if not any(l.startswith("OWNER: ") for l in lines):
@@ -221,7 +239,8 @@ def main(home: Path = HOME, now: float = None) -> str:
         "=== REJECTED BY THE OWNER (never propose these again) ===", "\n".join(rejected(home)) or "(none)", "",
         "=== ALSO STORED ELSEWHERE (never propose) ===",
         "- the project codename and the relationship-origin statement (canonical memory)", "",
-        f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM) ===", *body,
+        f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM) ===",
+        *body,
     ])
 
 
