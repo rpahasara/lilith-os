@@ -364,7 +364,9 @@ activation, history is never rewritten; undoing means another owner-approved SUP
 
 **No live change:** the canonical memory, PROD schema and PROD signer are untouched.
 
-## 3m. P-2 persistent social preferences and correction learning (2026-11-08, in progress)
+## 3m. P-2 persistent social preferences and correction learning (2026-11-08, functionally passed; 3 items open)
+
+**Status (owner, 2026-11-08):** correction routing and the end-to-end owner test are functionally passed. P-2 is **not** complete. Open: (1) preference replacement / retraction not yet verified live; (2) a verified Discord DM turn applying a preference not yet observed; (3) the nightly learning review does not yet suggest the typed wording. These are finished with existing mechanisms during normal use; they do not block P-3.
 
 Owner GO 2026-11-08.
 
@@ -520,6 +522,29 @@ E-2/E-6 runs above (directional, 1 sample per arm).
 5. Optional: an L18 `PROPOSED` event for in-chat proposals, if the owner wants a complete trail.
 
 These can be met during normal use; no extra test ceremony is planned.
+
+## 3n. P-3 cognitive coordination, metacognition and appraisal (2026-11-08, in progress)
+
+Owner GO 2026-11-08 (Option A). References: R&D plan [04](../research/cognitive-rd-plan-2026-11/04-target-architecture.md)
+§2–§4, [05](../research/cognitive-rd-plan-2026-11/05-social-affect.md) §3,
+[06](../research/cognitive-rd-plan-2026-11/06-metacognition-memory.md) §1–§2, [09](../research/cognitive-rd-plan-2026-11/09-roadmap.md)
+P-3, [10](../research/cognitive-rd-plan-2026-11/10-experiments.md) E-4/E-5.
+
+**Constraints:** one Lilith; no new lane, personality system or memory authority; no extra model call unless an
+experiment justifies it; approved tone wording unchanged; per-mechanism rollback flag; offline evidence before live.
+
+**Batch 1: TurnContext + typed StyleDirective (no behaviour change).**
+- New `lilith_router/turn_context.py`. `route_turn` starts one ephemeral `TurnContext` per turn (channel, owner); lanes
+  write typed fields: classifier mode and focus, the Social Cognition line keys as a `StyleDirective` (register,
+  focus, approved line keys, preference refs, appraisal refs, confidence), the selected approved preferences and the
+  correction flag. Slots exist for L16 meta-signals and appraisal signals (batches 2–3).
+- One renderer produces the prompt text for both reply paths, replacing three per-lane variables and two glue sites.
+  It reproduces the approved wording byte for byte: a test compares it with the previous composition over 72
+  combinations (tone lines × preferences × correction × goals-status hint), lean and agent.
+- `confidence: low` (no lines) renders nothing, as before. Non-owner turns render nothing.
+- The turn-end trace record gains `style_lines`, `style_confidence`, `style_focus`, `pref_refs`, `pref_applied`,
+  `correction` (keys, ids, flags; no text).
+- **Cost:** 0 calls, 0 tokens. **Rollback:** redeploy the previous router (pure refactor; no flag needed).
 
 ## 4. Feature readiness vs. remaining work
 

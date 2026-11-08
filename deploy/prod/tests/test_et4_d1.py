@@ -48,16 +48,16 @@ class SelfStatusTests(unittest.TestCase):
         self.assertNotIn("self_status_hint", out)
 
     def test_hint_becomes_the_turn_hint_and_replaces_a_tone_note(self):
-        token = gi._social_note.set("[tone note]")
-        try:
-            with mock.patch.object(gi._canonical_memory, "owner_turn", return_value=True):
-                out = gi._with_social_note({"self_status_hint": gi.SELF_STATUS_HINT})
-                self.assertEqual(out, {"turn_hint": gi.SELF_STATUS_HINT})
-                self.assertEqual(gi._with_social_note({})["turn_hint"], "[tone note]")   # other turns unchanged
-            with mock.patch.object(gi._canonical_memory, "owner_turn", return_value=False):
-                self.assertEqual(gi._with_social_note({"self_status_hint": gi.SELF_STATUS_HINT}), {})
-        finally:
-            gi._social_note.reset(token)
+        ctx = gi._tc.begin("telegram_owner_dm", True)
+        ctx.style = gi._tc.directive(("playful",), focused=False)
+        tone = gi._tc.tone_text(ctx)
+        with mock.patch.object(gi._canonical_memory, "owner_turn", return_value=True):
+            out = gi._with_social_note({"self_status_hint": gi.SELF_STATUS_HINT})
+            self.assertEqual(out, {"turn_hint": gi.SELF_STATUS_HINT})
+            self.assertEqual(gi._with_social_note({})["turn_hint"], tone)               # other turns unchanged
+        with mock.patch.object(gi._canonical_memory, "owner_turn", return_value=False):
+            self.assertEqual(gi._with_social_note({"self_status_hint": gi.SELF_STATUS_HINT}), {})
+        gi._tc.begin()
 
     def test_hint_wording_targets_the_observed_failure(self):
         h = gi.SELF_STATUS_HINT

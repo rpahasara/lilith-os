@@ -121,13 +121,12 @@ class RouterIntegrationTests(unittest.TestCase):
 
     def apply(self, mode, message, owner=True, mode_of_turn="social", tech=0, corrections="off"):
         gi = self.gi
-        gi._pref_note.set(None)
-        gi._correction_hint.set(None)
+        ctx = gi._tc.begin("telegram_owner_dm" if owner else "public", owner)
         gi._canonical_memory.set_owner_turn(owner, "telegram_owner_dm" if owner else "public")
         gi._turn_id.set("t" * 16)
         decision = types.SimpleNamespace(mode=mode_of_turn, signals={"tech": tech})
         gi._apply_social_preferences(self.cfg(mode, corrections), decision, message)
-        return gi._pref_note.get(), gi._correction_hint.get()
+        return gi._tc.preference_text(ctx), gi._tc.correction_text(ctx)
 
     def test_correction_routing_is_independent_of_the_preference_note(self):
         gi = self.gi
@@ -207,16 +206,19 @@ class RouterIntegrationTests(unittest.TestCase):
     def test_hint_composition_on_the_agent_path(self):
         gi = self.gi
         self.apply("live", "Don't call me champ.")
-        gi._social_note.set("[tone]")
+        ctx = gi._tc.current()
+        ctx.style = gi._tc.dataclasses_replace(gi._tc.directive(("playful",), focused=False),
+                                               preference_refs=ctx.style.preference_refs)
+        tone = gi._tc.tone_text(ctx)
         out = gi._with_social_note({"owner_memory": True})
         self.assertEqual(out["turn_hint"].split("\n\n")[0], gi._social_prefs.CORRECTION_HINT)
-        self.assertIn("[tone]", out["turn_hint"])
+        self.assertIn(tone, out["turn_hint"])
         self.assertIn("Don't call me 'champ'.", out["turn_hint"])
         out = gi._with_social_note({"self_status_hint": "[status]"})                    # status replaces the tone
         self.assertTrue(out["turn_hint"].startswith("[status]"))
-        self.assertNotIn("[tone]", out["turn_hint"])
+        self.assertNotIn(tone, out["turn_hint"])
         self.assertNotIn("turn_hint", gi._with_social_note({"final_response": "hi"}))
-        gi._social_note.set(None)
+        gi._tc.begin()
 
     def test_router_yaml_starts_in_shadow(self):
         cfg = self.gi._config
@@ -228,8 +230,8 @@ class RouterIntegrationTests(unittest.TestCase):
 
     def test_lean_path_skips_durable_corrections_and_carries_the_note(self):
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('if not why and _correction_hint.get():\n                why = "durable_correction"', text)
-        self.assertIn('+ ("\\n\\n" + _pref_note.get() if _pref_note.get() else ""))', text)
+        self.assertIn('if not why and tctx.correction:\n                why = "durable_correction"', text)
+        self.assertIn('+ _tc.lean_suffix(tctx))', text)
 
 
 if __name__ == "__main__":
