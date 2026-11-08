@@ -4,7 +4,7 @@
 >
 > **Evidence discipline:** `SOURCE-VERIFIED` = PR/code on GitHub; `OPERATOR-REPORTED` = Claude's live-host run reports and owner's Telegram tests, not independently re-run by this document; `PENDING` = not confirmed complete. This note is a **handoff/work log**, not a replacement for acceptance records, audits or live probes.
 >
-> **Source baseline:** `main` at `6cfc3be1d4ba70e6801735a30d03dde0268d3ce9` (PR #349 merge; previously `27253c8`, PR #346). Keep this note updated after later merges.
+> **Source baseline:** `main` at `c09e01d80826c2008cfdfccd5b997e32ce25655a` (PR #351 merge; previously `6cfc3be`, PR #349). Keep this note updated after later merges.
 >
 > **Public-safe:** This repository was publicly accessible at the time of writing. This document deliberately excludes private memory text, identities/IDs, credentials, secrets, custody values, internal access endpoints and detailed snapshot locations.
 
@@ -42,6 +42,7 @@ All rows below are `SOURCE-VERIFIED` merged PRs. Individual PROD outcomes are fr
 | [#344](https://github.com/rpahasara/lilith-os/pull/344) | Live owner-only Social Cognition tone note, lean + full-agent | Deployed, healthy, one natural two-turn owner DM smoke test reported successful |
 | [#346](https://github.com/rpahasara/lilith-os/pull/346) | Context-aware tone-note line selection (playful gate); `git`/`force push` technical terms | Router deploy OK (3 files, backup taken); deployed selection self-check and gateway health reported OK |
 | [#349](https://github.com/rpahasara/lilith-os/pull/349) | Full-agent provider fallback (Copilot Free `gpt-4.1`) via Hermes' native chain; cached agents get the router chain | Router + hermes-gateway deploys OK (backups taken); host e2e fallback for 429/401/503 with the tool run exactly once |
+| [#351](https://github.com/rpahasara/lilith-os/pull/351) | E-T4 self-status hint on the current message (owner-only goal read); D1 stored reply = delivered reply | Router + hermes-gateway deploys OK (backups taken); gateway/API healthy, new code loaded |
 
 **Pre-PR context:** Gate 6.3b/6.4 reported initial hold released, isolated canonical store established, anchor/checkpoint/unlock ready. Gate 7.1 admitted the first PROD canonical memory; Gate 7.2/7.2r connected owner Telegram/console recall; post-boot test found and repaired the Privacy marker permissions. These gate procedures and their local evidence remain in owner-operated work folders, not reproduced here.
 
@@ -116,6 +117,22 @@ No code change is needed. All 14 scenarios have now been measured.
 - The Copilot token exchange reports `degraded to RAW token`; free models work in that mode.
 - A cached agent that is mid-cooldown on a fallback keeps it until the cooldown ends (Hermes behavior).
 
+## 3c. E-T4 and D1 (2026-11-08)
+
+**E-T4** (`OPERATOR-REPORTED`, Cutover 2 acceptance 2026-11-04): "what am I working toward right now?" took the `native_self_status` route and read the tracked goals, but twice the model led with a casual weekend plan from the previous turn. Two system-prompt wording fixes did not change that.
+- **Fix** (`SOURCE-VERIFIED` #351): the same instruction, shortened, now also rides on the **current message** as an API-only turn hint, the mechanism the tone note uses (never stored). It applies on owner turns only, and replaces the tone note on that turn. Reading the tracked goals on this route is now also owner-only; before this, any live channel could receive the owner's goal lines.
+- **Check** (`OPERATOR-REPORTED`): a synthetic run on gpt-5.6-sol (2 samples per variant, synthetic history and goals, no owner data, no tools) did **not** reproduce the original failure: both variants led with the goals. With the hint the answers were fuller and added the long-term goals.
+- **Status: `DEPLOYED, NOT YET CONFIRMED`.** The real confirmation is the owner asking the question once on Telegram after a casual turn. If it still fails, the recorded next step is asking a short clarifying question.
+
+**D1** (`SOURCE-VERIFIED`, foundation audit 2026-11-02): when the social guard replaced a reply, `state.db` kept the rejected original. Its `codex_message_items` would also resend that text on the next turn.
+- **Fix** (#351): `run.py` calls `record_delivered_reply` only when the guard changed the reply.
+  - It updates exactly one row: the session's latest active assistant row without tool calls, whose cleaned text matches the rejected reply.
+  - It writes the delivered text into that row and clears its replay columns (`api_content`, `codex_*`, `reasoning*`). The existing FTS update triggers re-index the row.
+  - It uses Hermes' own `_execute_write` and never raises. If no row matches, nothing changes.
+- Not live-reproduced: guard rewrites are rare and can't be triggered on demand.
+
+**Tests:** 10 new (`test_et4_d1.py`, added to the deploy workflow); deploy/prod suite 89/89. **Deploy:** router and hermes-gateway at `c09e01d`, smoke checks OK, backups taken. **Rollback:** redeploy the previous backups.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
@@ -129,7 +146,7 @@ No code change is needed. All 14 scenarios have now been measured.
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
 | Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` | Re-consent affected accounts, confirm scheduler jobs and functional reads |
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
-| E-T4 and D1 | `OPEN KNOWN DEFECTS` | Reproduce and fix based on current code; don't invent their exact semantics |
+| E-T4 and D1 | `DEPLOYED` (#351); E-T4 `NOT YET CONFIRMED` live | Owner asks the Test 4 question once on Telegram |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
 | Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
