@@ -383,6 +383,13 @@ relevant. If they explicitly ask about today, tonight, this weekend or a recent 
 directly. Answer in the second person. Never answer with your own role, mission or development. If you
 do not know something, say so; never invent goals."""
 
+# E-T4 (2026-11-08): the note above sits in the system prompt, and twice the model still let a casual weekend plan
+# from the last turn outweigh the durable goals. The same instruction, short, on the current message itself
+# (API-only, like the tone note; never stored) is what the model weighs most. Owner turns only.
+SELF_STATUS_HINT = ("[About this question: they mean their ongoing goals and direction - career, certifications, "
+                    "active projects and the tracked goals in your notes - not today's or this weekend's plans from "
+                    "recent chat. Lead with those, specifically, in the second person.]")
+
 
 def _self_status_route(runner, cfg, platform, chat_id, session_key, turn_route, combined_ephemeral,
                        cached_agent, mode):
@@ -390,7 +397,8 @@ def _self_status_route(runner, cfg, platform, chat_id, session_key, turn_route, 
     read path (no write: no goal_create, do_write False). Fail-open to the note alone."""
     _note_social_route(cfg, platform, chat_id, "native_self_status")
     parts = [SELF_STATUS_NOTE]
-    if cfg.goals_is_live(platform, str(chat_id)):
+    owner = _canonical_memory.owner_turn()
+    if owner and cfg.goals_is_live(platform, str(chat_id)):
         try:
             suffix, _unused = _world_context.build_goal_grounding(
                 message="", session_key=session_key, do_write=False,
@@ -406,8 +414,11 @@ def _self_status_route(runner, cfg, platform, chat_id, session_key, turn_route, 
     STATE.set_native_social_agent(session_key, False)
     if getattr(cached_agent, "model", None) == cfg.groq_model:
         _evict(runner, session_key)
-    return {"turn_route": turn_route, "combined_ephemeral": (base + "\n\n" + suffix) if base else suffix,
-            "force_rebuild": True, "mode": mode}
+    out = {"turn_route": turn_route, "combined_ephemeral": (base + "\n\n" + suffix) if base else suffix,
+           "force_rebuild": True, "mode": mode}
+    if owner:
+        out["self_status_hint"] = SELF_STATUS_HINT
+    return out
 
 
 def _groq_runtime(runner, cfg):
@@ -522,10 +533,47 @@ def _with_fallback_chain(out: dict) -> dict:
 def _with_social_note(out: dict) -> dict:
     """The owner tone note rides on the current user message, API-only (run.py `turn_hint`), so the cached agent and
     its prompt stay as they are. A ready reply (lean, Reasoning, Planning, Ethics) gets none here."""
-    hint = _social_note.get()
+    hint = out.pop("self_status_hint", None) or _social_note.get()   # a goals question needs no tone note
     if hint and _canonical_memory.owner_turn() and "final_response" not in out:
         out["turn_hint"] = hint
     return out
+
+
+# D1 (2026-11-08): when the social guard replaces a reply, Hermes has already stored the rejected original -- and
+# its provider replay items (codex_message_items etc.) would resend the original text on the next turn. Make the
+# stored row say what the user actually saw. One row, this session's latest assistant reply, and only when it is
+# the reply the guard replaced; replay columns are cleared (costs one prompt-cache boundary). Never raises.
+_REPLAY_COLUMNS = ("api_content", "codex_message_items", "codex_reasoning_items", "reasoning", "reasoning_content",
+                   "reasoning_details")
+
+
+def record_delivered_reply(session_db, session_id, original, delivered) -> bool:
+    try:
+        if not (session_id and isinstance(original, str) and isinstance(delivered, str)):
+            return False
+        if not delivered.strip() or delivered == original:
+            return False
+        db = getattr(session_db, "_db", session_db)
+        if db is None or not hasattr(db, "_execute_write"):
+            return False
+        want = _social_guard.clean(original)
+
+        def _do(conn):
+            row = conn.execute(
+                "SELECT id, content FROM messages WHERE session_id = ? AND role = 'assistant' AND active = 1 "
+                "AND (tool_calls IS NULL OR tool_calls = '' OR tool_calls = '[]') ORDER BY id DESC LIMIT 1",
+                (session_id,)).fetchone()
+            if row is None or not isinstance(row[1], str) or _social_guard.clean(row[1]) != want:
+                return False
+            cols = set(db._message_column_names(conn))
+            sets = ["content = ?"] + ["%s = NULL" % c for c in _REPLAY_COLUMNS if c in cols]
+            conn.execute("UPDATE messages SET %s WHERE id = ?" % ", ".join(sets), (delivered, row[0]))
+            return True
+
+        return bool(db._execute_write(_do))
+    except Exception:
+        logger.debug("lilith_router: delivered-reply record failed (transcript unchanged)", exc_info=True)
+        return False
 
 
 def _with_owner_memory(result, owner: bool):
