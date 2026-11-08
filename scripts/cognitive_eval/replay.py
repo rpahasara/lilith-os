@@ -15,6 +15,10 @@ Variant keys (all optional; an empty variant is the baseline):
     system_suffix   text appended to the lean policy / the agent's ephemeral system prompt
     message_prefix  text prefixed to the current message (API-only turn-hint style)
     tone_note       "deployed": the router's own owner tone note for this turn (lean mode)
+    profile         P-2: a list of SYNTHETIC memory entries, given as the owner profile (USER.md shape; lean: the
+                    profile block, agent: the ephemeral system prompt). A scenario's own "profile" is added to it
+    preferences     "router": also the P-2 router note, selected from the profile entries by the deployed
+                    social_preferences module exactly as a live owner turn would (plus the correction hint)
 
 Budget: stops sampling when this run's tokens reach budget_tokens, or when the provider reports fewer than 7000
 remaining tokens per minute (then waits for the reset). Errors are recorded, never retried blindly.
@@ -37,11 +41,30 @@ def _dur(s: str) -> float:
     return (int(m.group(1) or 0) * 60 + float(m.group(2))) if m else 10.0
 
 
+def preference_parts(scn: dict, variant: dict, sp, focused: bool):
+    """P-2 arms: (synthetic profile text, router preference note or None). `sp` is lilith_router.social_preferences."""
+    entries = list(variant.get("profile") or []) + list(scn.get("profile") or [])
+    prof = ("[About them]\n" + "\n§\n".join(entries)) if entries else ""
+    note = None
+    if variant.get("preferences") == "router":
+        prefs = [p for p in (sp.parse(t, "e%d" % i) for i, t in enumerate(entries)) if p]
+        parts = [sp.CORRECTION_HINT if sp.durable_correction(scn["message"]) else None,
+                 sp.render(sp.select(prefs, focused=focused, message=scn["message"]))]
+        note = "\n\n".join(p for p in parts if p) or None
+    return prof, note
+
+
+def _focused(cl, scn) -> bool:
+    users = [c for r, c in scn.get("history", []) if r == "user"]
+    d = cl.classify(scn["message"], users, "social" if users else None)
+    return d.mode != "social" or bool((d.signals or {}).get("tech"))
+
+
 def lean_runner(spec):
     sys.path.insert(0, str(HOME))
     sys.path.insert(0, str(HOME / "hermes-agent"))
     from lilith_router import classifier as cl, config as cfgmod, policy as pol, social_cognition as sc
-    from lilith_router import social_lean as sl
+    from lilith_router import social_lean as sl, social_preferences as sp
     from gateway.run import _resolve_runtime_agent_kwargs_for_provider as res
     from openai import OpenAI
     cfg = cfgmod.load()
@@ -64,11 +87,14 @@ def lean_runner(spec):
             note = sc.tone_note(snap, focused=d.mode != "social" or bool((d.signals or {}).get("tech")),
                                 context=sc.tone_context(scn["message"], users))
             policy += ("\n\n" + note) if note else ""
+        prof, pref_note = preference_parts(scn, variant, sp, _focused(cl, scn))
+        if pref_note:
+            policy += "\n\n" + pref_note                  # the router appends the P-2 note to the lean policy
         if variant.get("system_suffix"):
             policy += "\n\n" + variant["system_suffix"]
         msg = (variant.get("message_prefix", "") + "\n\n" + scn["message"]) if variant.get("message_prefix") \
             else scn["message"]
-        msgs = sl.build_messages(core, policy, "", hist, msg)
+        msgs = sl.build_messages(core, policy, prof, hist, msg)
         t0 = time.monotonic()
         raw = client.chat.completions.with_raw_response.create(
             model=cfg.groq_model, messages=msgs, max_tokens=cfg.social_lean_max_output_tokens, temperature=0.7,
@@ -84,21 +110,28 @@ def lean_runner(spec):
 
 
 def agent_runner(spec):
+    sys.path.insert(0, str(HOME))
     sys.path.insert(0, str(HOME / "hermes-agent"))
+    import inspect
     import logging
     logging.disable(logging.WARNING)
+    from lilith_router import classifier as cl, social_preferences as sp
     from run_agent import AIAgent
+    # synthetic profile only: keep the owner's stored memory out of the eval prompt when the agent supports it
+    params = inspect.signature(AIAgent.__init__).parameters
+    extra = {k: True for k in ("skip_memory",) if k in params}
     from gateway.run import _resolve_runtime_agent_kwargs_for_provider as res
     rt = res(spec.get("agent_provider", "openai-codex"))
     model = spec.get("agent_model", "gpt-5.6-sol")
 
     def run(scn, variant):
+        prof, pref_note = preference_parts(scn, variant, sp, _focused(cl, scn))
+        system = "\n\n".join(p for p in (prof, variant.get("system_suffix")) if p) or None
         a = AIAgent(model=model, **{k: rt[k] for k in ("provider", "base_url", "api_key", "api_mode") if k in rt},
                     quiet_mode=True, verbose_logging=False, enabled_toolsets=[], skip_context_files=True,
-                    load_soul_identity=True, ephemeral_system_prompt=variant.get("system_suffix") or None,
-                    max_iterations=2)
-        msg = (variant.get("message_prefix", "") + "\n\n" + scn["message"]) if variant.get("message_prefix") \
-            else scn["message"]
+                    load_soul_identity=True, ephemeral_system_prompt=system, max_iterations=2, **extra)
+        prefix = "\n\n".join(p for p in (variant.get("message_prefix"), pref_note) if p)   # the router's turn hint
+        msg = (prefix + "\n\n" + scn["message"]) if prefix else scn["message"]
         t0 = time.monotonic()
         r = a.run_conversation(msg, conversation_history=[{"role": x, "content": y} for x, y in scn.get("history", [])])
         toks = int(getattr(a, "session_prompt_tokens", 0) or 0) + int(getattr(a, "session_completion_tokens", 0) or 0)

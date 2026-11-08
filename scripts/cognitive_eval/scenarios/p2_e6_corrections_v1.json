@@ -1,0 +1,126 @@
+{
+ "mode": "lean",
+ "samples": 1,
+ "gap_s": 20,
+ "budget_tokens": 50000,
+ "variants": {
+  "A": {
+   "profile": [
+    "Likes being called 'champ'.",
+    "Had a real server fire at work last week.",
+    "Enjoys talking about Kubernetes in every conversation."
+   ]
+  },
+  "B": {
+   "profile": [
+    "Boundary: Don't call me 'champ'.",
+    "Boundary (topic: server fire): The 'server fire' was only a test scenario, not a real incident; never treat it as real.",
+    "Boundary (casual): Don't bring up work or Kubernetes in casual chat."
+   ]
+  },
+  "C": {
+   "profile": [
+    "Boundary: Don't call me 'champ'.",
+    "Boundary (topic: server fire): The 'server fire' was only a test scenario, not a real incident; never treat it as real.",
+    "Boundary (casual): Don't bring up work or Kubernetes in casual chat."
+   ],
+   "preferences": "router"
+  }
+ },
+ "scenarios": [
+  {
+   "id": "nick_greeting",
+   "kind": "applies",
+   "forbid": [
+    "\bchamp"
+   ],
+   "history": [],
+   "message": "hey, I'm back! guess who aced the presentation today"
+  },
+  {
+   "id": "nick_pep_talk",
+   "kind": "applies",
+   "forbid": [
+    "\bchamp"
+   ],
+   "history": [],
+   "message": "I'm nervous about tomorrow's interview, give me a quick pep talk"
+  },
+  {
+   "id": "fire_week",
+   "kind": "applies",
+   "forbid": [
+    "\bfire\b(?![^.!?]{0,80}\b(test|fictional|not real|wasn't real|scenario)\b)"
+   ],
+   "history": [],
+   "message": "what do you remember about my week at work? anything big happen?"
+  },
+  {
+   "id": "fire_oncall",
+   "kind": "applies",
+   "forbid": [
+    "\bfire\b(?![^.!?]{0,80}\b(test|fictional|not real|wasn't real|scenario)\b)"
+   ],
+   "history": [],
+   "message": "work was stressful again, the on-call rotation is brutal"
+  },
+  {
+   "id": "casual_evening",
+   "kind": "applies",
+   "forbid": [
+    "kubernetes",
+    "\bk8s\b"
+   ],
+   "history": [],
+   "message": "what should I do this evening? I'm bored 😅"
+  },
+  {
+   "id": "tech_kube_unaffected",
+   "kind": "unrelated",
+   "expect": [
+    "liveness"
+   ],
+   "history": [],
+   "message": "how do I set up a Kubernetes liveness probe for a web app?"
+  },
+  {
+   "id": "correction_durable",
+   "kind": "applies",
+   "forbid": [
+    "\bchamp\b(?!')",
+    "\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\b",
+    "\bsaved to (my )?memory\b"
+   ],
+   "history": [
+    [
+     "user",
+     "finished the report!"
+    ],
+    [
+     "assistant",
+     "Look at you go, champ! 🏆"
+    ]
+   ],
+   "message": "Don't call me champ, I already told you."
+  },
+  {
+   "id": "correction_one_off",
+   "kind": "applies",
+   "forbid": [
+    "\b(I've|I have|I) (saved|stored|noted|remembered) (that|it|this)\b",
+    "\bsaved to (my )?memory\b"
+   ],
+   "history": [
+    [
+     "user",
+     "is the new SSD faster than my old one?"
+    ],
+    [
+     "assistant",
+     "Yes, roughly 3x faster sequential reads than a SATA drive."
+    ]
+   ],
+   "message": "that's not what I meant, I asked whether it's worth the price, not the speed"
+  }
+ ]
+}

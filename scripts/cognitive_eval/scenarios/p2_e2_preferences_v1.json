@@ -1,0 +1,102 @@
+{
+ "mode": "lean",
+ "samples": 1,
+ "gap_s": 20,
+ "budget_tokens": 50000,
+ "variants": {
+  "A": {
+   "profile": [
+    "Works as a software engineer; studying for a cloud certification exam."
+   ]
+  },
+  "B": {
+   "profile": [
+    "Works as a software engineer; studying for a cloud certification exam.",
+    "Preference (technical): In technical answers, no emoji and no jokes; be precise and concise.",
+    "Preference (casual): Playful teasing and emoji are welcome in casual chat.",
+    "Boundary (topic: exam): Never joke about exam results; be warm and supportive about exams."
+   ]
+  },
+  "C": {
+   "profile": [
+    "Works as a software engineer; studying for a cloud certification exam.",
+    "Preference (technical): In technical answers, no emoji and no jokes; be precise and concise.",
+    "Preference (casual): Playful teasing and emoji are welcome in casual chat.",
+    "Boundary (topic: exam): Never joke about exam results; be warm and supportive about exams."
+   ],
+   "preferences": "router"
+  }
+ },
+ "scenarios": [
+  {
+   "id": "tech_git",
+   "kind": "applies",
+   "emoji": "none",
+   "history": [],
+   "message": "how do I undo my last git commit but keep the changes?"
+  },
+  {
+   "id": "tech_python",
+   "kind": "applies",
+   "emoji": "none",
+   "history": [],
+   "message": "what's the difference between a list and a tuple in python?"
+  },
+  {
+   "id": "tech_after_banter",
+   "kind": "applies",
+   "emoji": "none",
+   "history": [
+    [
+     "user",
+     "lol my cat just walked across the keyboard 😹"
+    ],
+    [
+     "assistant",
+     "Ha! Did she push to prod? 😼"
+    ]
+   ],
+   "message": "lol ok 😅 why does my docker container exit immediately after starting?"
+  },
+  {
+   "id": "explicit_wins",
+   "kind": "explicit",
+   "emoji": "some",
+   "history": [],
+   "message": "explain DNS like I'm five, and make it fun with lots of emoji please!"
+  },
+  {
+   "id": "casual_morning",
+   "kind": "unrelated",
+   "emoji": "some",
+   "history": [],
+   "message": "good morning!! finally the weekend 🎉"
+  },
+  {
+   "id": "casual_pizza",
+   "kind": "unrelated",
+   "emoji": "some",
+   "history": [],
+   "message": "I just ate an entire pizza by myself, no regrets 😂"
+  },
+  {
+   "id": "exam_fail",
+   "kind": "applies",
+   "forbid": [
+    "\blol\b",
+    "\bhaha",
+    "😂",
+    "🤣"
+   ],
+   "history": [],
+   "message": "I failed my cloud exam by 2 points 😞"
+  },
+  {
+   "id": "casual_dinner",
+   "kind": "unrelated",
+   "emoji": "some",
+   "history": [],
+   "message": "what should I cook tonight? something easy 😋"
+  }
+ ]
+}
