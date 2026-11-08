@@ -148,7 +148,14 @@ No code change is needed. All 14 scenarios have now been measured.
 2. Re-consent each account with `p3tx/deployer/oauth_reconsent.py <primary|secondary>` (local operator tool). It runs Google's loopback flow on the VM behind an IAP SSH port-forward, so the authorization code goes from the browser straight to the VM. The new token is verified with one Gmail profile read before it replaces the old one (kept as `.invalid-<ts>`, 0600).
 3. Confirm the next timer runs succeed and the two failed units clear.
 
-**Owner progress (2026-11-08):** publishing was blocked because the Branding page is incomplete (homepage, privacy-policy URL and authorized domains empty). The owner is completing Branding; re-consent follows.
+**Owner progress (2026-11-08):** publishing was blocked because the Branding page is incomplete (homepage, privacy-policy URL and authorized domains empty).
+
+**Owner decision (2026-11-08): OAuth recovery DEFERRED to the migration.**
+- No Google OAuth change in the current trial project, to avoid configuring and authorizing twice.
+- During migration, create a **durable OAuth client in the destination project**, publish it (In production, with Branding complete), and authorize **both Google accounts once**.
+- Keep that client independent of future VM changes where possible: a project not tied to one VM, tokens restored with the data.
+- Until then, the Google-dependent jobs (career watcher, meeting prep, agenda snapshot, Gmail watcher, morning brief Google parts) stay degraded as they have been since 2026-08-31.
+- The recovery tooling above (`oauth_reconsent.py`) is reused against the new client.
 
 **Migration note:** the OAuth client lives in the trial project (trial expiry owner-confirmed 2026-11-18). Plan its future together with the VM migration (Gmail/Calendar APIs need no billing, but the project must survive the trial).
 
@@ -180,14 +187,14 @@ No code change is needed. All 14 scenarios have now been measured.
 | L18 long-term memory consolidation | `SHADOW / PARTIAL` (source stale since 08-31) | After OAuth: schedule the existing shadow worker; promotion/dedup/reconciliation is future engineering (§3e) |
 | Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) Offline A/B complete (14/14 scenarios); deeper contextual reasoning and appraisal **deferred research** |
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
-| Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` (cause: Testing-status 7-day tokens) | Owner publishes consent screen + re-consents both accounts (§3d) |
+| Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` (cause: Testing-status 7-day tokens); **deferred to migration** (owner, 2026-11-08) | New durable client in the destination project, published, both accounts authorized once (§3d) |
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
 | E-T4 and D1 | E-T4 `OWNER-CONFIRMED PASS` (2026-11-08); D1 `DEPLOYED` (#351) | None (D1 not live-reproducible; guard rewrites are rare) |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
 | Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
 | PROD backup/snapshot retention | `PARTIALLY COMPLETE` | Verify recoverable copies, review old snapshots and remove only proven redundant copies |
-| VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, restore-test all data, then switch |
+| VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, backup + restore verification of all data, durable OAuth client + one-time authorization of both accounts, then switch |
 
 **Key caution:** The 2026-11-06 operator inventory said PROD was ahead of DEV for relevant cognition source. Apart from governed canonical FORGET, **there is no confirmed backlog of valuable DEV-only cognition code needing a wholesale port**. This is a reported deployment comparison, not independently rechecked on the hosts here.
 
