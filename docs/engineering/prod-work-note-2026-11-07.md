@@ -219,10 +219,23 @@ No code change is needed. All 14 scenarios have now been measured.
 
 **Documentation cleanup:**
 - **#311:** not merged. Its scripts embed operator account and infrastructure details, including a personal email. Its 16 historical records were preserved redacted in #356 (merged).
-- **#296:** clean, unique proposals (cognition dependencies, goal erasure). Recommended to merge; awaiting the owner's go.
+- **#296:** clean, unique proposals (cognition dependencies, goal erasure). **Merged 2026-11-08** with the owner's go. Inert: nothing references its code or config (the drop-in is an uninstalled sample).
+- **#311:** **closed unmerged** 2026-11-08 (owner decision) with a pointer to #356.
 - **#357:** outdated status claims corrected. AS-IS, the roadmap, `development.md` and the README now say there is an active PROD deployment. Dated updates carry SOURCE-VERIFIED / OPERATOR-REPORTED labels, and the original text is kept as history.
 
 **Review index:** [docs/research/deepseek-review-index-2026-11.md](../research/deepseek-review-index-2026-11.md) indexes the 19-layer architecture, the Master v1.1 affect design (drives, appraisal, fast affect, slow mood, expression), the research questions, implemented lanes and deferred proposals for an independent DeepSeek review. Read-only; no new roadmap until that review is back.
+
+## 3h. Advanced cognition planning (2026-11-08, documentation only)
+
+- The DeepSeek independent review was received.
+- PR #360 adds the R&D planning package `docs/research/cognitive-rd-plan-2026-11/` for owner review:
+  - AS-IS maturity and gaps against the 19 layers;
+  - DeepSeek reconciliation, including factual corrections;
+  - a two-loop runtime view with a shared TurnContext;
+  - workstreams for social and relationship continuity, appraisal, metacognition, consolidation, goals and initiative, and identity;
+  - a phased roadmap with token-budget costs and ten registered experiments.
+- It authorizes nothing. P-0 is the 2026-11-14 migration.
+- **Nightly learning review and Discord:** recommended to include verified Discord owner-DM sessions. This is a one-line source change in `owner_memory_review.py` (`owner_sessions` reads `ownerDiscordDms`) plus a host install, because that script is outside the deploy pipeline. Planned as part of P-2 unless the owner approves it earlier.
 
 ## 4. Feature readiness vs. remaining work
 

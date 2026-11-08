@@ -120,5 +120,50 @@ class ReviewContextTests(unittest.TestCase):
         self.assertNotIn("violin", out)
 
 
+DU, DC = "200000000000000001", "300000000000000001"          # synthetic verified Discord user / DM channel
+
+
+class DiscordOwnerDmTests(ReviewContextTests):
+    """Owner request 2026-11-08: the verified Discord owner DM joins the review; nothing else from Discord does."""
+
+    def setUp(self):
+        super().setUp()
+        (self.home / "lilith_router" / "canonical_memory.json").write_text(json.dumps(
+            {"schemaVersion": 1, "enabled": True, "ownerTelegramUserIds": [OWNER],
+             "ownerDiscordDms": [{"userId": DU, "chatId": DC}]}), encoding="ascii")
+        con = sqlite3.connect(self.home / "state.db")
+        con.executemany("INSERT INTO sessions VALUES (?,?,?,?,?)", [
+            ("ddm", "discord", DU, DC, "dm"),                           # the verified owner DM
+            ("dsrv", "discord", DU, "400000000000000001", "group"),     # same user, server channel
+            ("dthr", "discord", DU, DC, "thread"),                      # same ids, not a DM
+            ("dodm", "discord", DU, "300000000000000009", "dm"),        # same user, another (unverified) DM
+            ("dusr", "discord", "200000000000000009", DC, "dm"),        # another user
+        ])
+        con.executemany("INSERT INTO messages (session_id, role, content, timestamp, active) VALUES (?,?,?,?,?)", [
+            ("ddm", "user", "DISCORD-OWNER: I prefer short answers in the morning", NOW - 300, 1),
+            ("ddm", "user", "I started learning the violin this week", NOW - 250, 1),   # same fact, other channel
+            ("dsrv", "user", "SERVER-TEXT", NOW - 100, 1), ("dthr", "user", "THREAD-TEXT", NOW - 100, 1),
+            ("dodm", "user", "UNVERIFIED-DM", NOW - 100, 1), ("dusr", "user", "OTHER-DISCORD-USER", NOW - 100, 1)])
+        con.commit()
+        con.close()
+
+    def test_verified_dm_only_and_one_copy_across_channels(self):
+        out = OMR.main(self.home, now=NOW)
+        self.assertIn("DISCORD-OWNER: I prefer short answers in the morning", out)
+        self.assertEqual(out.count("violin"), 1)                  # the same line from Telegram and Discord: once
+        for absent in ("SERVER-TEXT", "THREAD-TEXT", "UNVERIFIED-DM", "OTHER-DISCORD-USER", "DISCORD-TEXT",
+                       "GROUP-SECRET", "OTHER-USER"):
+            self.assertNotIn(absent, out, absent)
+        self.assertIn("verified Discord DM", out)
+
+    def test_malformed_or_missing_pairs_fail_closed(self):
+        for pairs in ([{"userId": DU}], "x", [{"userId": "abc", "chatId": DC}]):
+            with self.subTest(pairs=pairs):
+                (self.home / "lilith_router" / "canonical_memory.json").write_text(json.dumps(
+                    {"schemaVersion": 1, "enabled": True, "ownerTelegramUserIds": [OWNER], "ownerDiscordDms": pairs}),
+                    encoding="ascii")
+                self.assertNotIn("DISCORD-OWNER", OMR.main(self.home, now=NOW))
+
+
 if __name__ == "__main__":
     unittest.main()
