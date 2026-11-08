@@ -42,6 +42,7 @@ class RouterConfig:
     full_agent_fallback: List[Dict[str, str]] = field(default_factory=list)
     recent_turns: int = 6
     decision_log_max_bytes: int = 2_000_000   # P-1 T-6: rotate decisions.log to .1 at this size (100K..50M)
+    social_preferences_mode: str = "off"   # P-2: off | shadow (log selection only) | live (apply on owner turns)
     turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -147,6 +148,13 @@ class RouterConfig:
     def social_lean_is_on(self, platform: str) -> bool:
         return bool(self.social_lean_enabled) and (
             "*" in self.social_lean_channels or platform in self.social_lean_channels)
+
+    def social_preferences_is_active(self) -> bool:
+        """P-2 selection runs (shadow logs it; live also applies it). Owner turns only, checked by the caller."""
+        return self.social_preferences_mode in ("shadow", "live")
+
+    def social_preferences_is_live(self) -> bool:
+        return self.social_preferences_mode == "live"
 
     def channel_is_live(self, platform: str, chat_id: str) -> bool:
         """True when live switching is allowed for this channel."""
@@ -312,6 +320,8 @@ def load() -> RouterConfig:
         cfg.full_agent_fallback = parse_fallback_chain(raw.get("full_agent_fallback"))
         cfg.recent_turns = int(raw.get("recent_turns", cfg.recent_turns))
         cfg.turn_trace_enabled = raw.get("turn_trace_enabled", True) is not False
+        mode = str(raw.get("social_preferences_mode", "off")).strip().lower()
+        cfg.social_preferences_mode = mode if mode in ("off", "shadow", "live") else "off"
         try:
             cfg.decision_log_max_bytes = max(100_000, min(50_000_000, int(raw.get(
                 "decision_log_max_bytes", cfg.decision_log_max_bytes))))

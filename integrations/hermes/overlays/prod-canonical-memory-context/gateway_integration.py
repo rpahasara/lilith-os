@@ -37,6 +37,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -47,6 +48,7 @@ from . import social_guard as _social_guard
 from . import social_lean as _social_lean
 from . import canonical_memory as _canonical_memory
 from . import owner_link as _owner_link
+from . import social_preferences as _social_prefs
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -317,6 +319,35 @@ def _log_social_cognition(cfg, trace) -> None:
 
 
 _social_note = contextvars.ContextVar("lilith_social_note", default=None)
+# P-2: the owner's approved, scope-matched preferences for this turn, and the durable-correction hint (owner turns).
+_pref_note = contextvars.ContextVar("lilith_pref_note", default=None)
+_correction_hint = contextvars.ContextVar("lilith_correction_hint", default=None)
+_PREFERENCES = _social_prefs.ApprovedPreferenceSource(os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765"))
+
+
+def _apply_social_preferences(cfg, decision, message: str) -> None:
+    """P-2 (owner turns): select approved preferences whose scope fits this turn; in live mode set the note and, for an
+    explicit durable correction, the correction hint. Shadow logs the selection only. Never raises; no text logged."""
+    try:
+        if not (cfg.social_preferences_is_active() and _canonical_memory.owner_turn()):
+            return
+        focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))
+        available = _PREFERENCES.current()
+        chosen = _social_prefs.select(available, focused=focused, message=message)
+        correction = _social_prefs.durable_correction(message)
+        live = cfg.social_preferences_is_live()
+        if live:
+            _pref_note.set(_social_prefs.render(chosen))
+            _correction_hint.set(_social_prefs.CORRECTION_HINT if correction else None)
+        _append_log(cfg, {"lane": "social_preferences", "mode": cfg.social_preferences_mode, "focused": focused,
+                          "available": len(available), "selected": [p.entry_id for p in chosen],
+                          "kinds": [p.kind for p in chosen],
+                          "scopes": [p.scope.split(":", 1)[0] for p in chosen],
+                          "durable_correction": correction})
+    except Exception:
+        _pref_note.set(None)
+        _correction_hint.set(None)
+        logger.debug("lilith_router: social preferences failed (none applied)", exc_info=True)
 
 
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
@@ -541,6 +572,8 @@ def route_turn(
     _social_lean.LAST_USAGE.set(None)
     _canonical_memory.set_owner_turn(False)
     _social_note.set(None)
+    _pref_note.set(None)
+    _correction_hint.set(None)
     try:
         source = getattr(ctx, "source", None)
         if source is not None:
@@ -609,7 +642,10 @@ def _with_fallback_chain(out: dict) -> dict:
 def _with_social_note(out: dict) -> dict:
     """The owner tone note rides on the current user message, API-only (run.py `turn_hint`), so the cached agent and
     its prompt stay as they are. A ready reply (lean, Reasoning, Planning, Ethics) gets none here."""
-    hint = out.pop("self_status_hint", None) or _social_note.get()   # a goals question needs no tone note
+    status = out.pop("self_status_hint", None)                       # a goals question needs no tone note
+    parts = [status] if status else [_correction_hint.get(), _social_note.get()]
+    parts.append(_pref_note.get())                                   # P-2: approved preferences in scope
+    hint = "\n\n".join(p for p in parts if p)
     if hint and _canonical_memory.owner_turn() and "final_response" not in out:
         out["turn_hint"] = hint
     return out
@@ -705,6 +741,7 @@ def _route_turn_impl(
         except Exception:
             _social_note.set(None)
             logger.debug("lilith_router: social tone note failed (no note)", exc_info=True)
+    _apply_social_preferences(cfg, decision, message)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending
@@ -1022,13 +1059,16 @@ def _route_turn_impl(
             # turns go through one lean, tool-less call; everything else (and any
             # lean failure) takes the native model with the social policy.
             why = _social_lean.skip_reason(message)
+            if not why and _correction_hint.get():
+                why = "durable_correction"           # P-2: the tool-capable agent may propose remembering it
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
                     message=message, runtime=groq_runtime, include_profile=_canonical_memory.owner_turn(),
                     policy=_policy.SOCIAL_POLICY + ("\n\n" + _canonical_memory.current_note()
                                                     if _canonical_memory.current_note() else "")
-                    + ("\n\n" + _social_note.get() if _social_note.get() else ""))
+                    + ("\n\n" + _social_note.get() if _social_note.get() else "")
+                    + ("\n\n" + _pref_note.get() if _pref_note.get() else ""))
                 if text:
                     _note_social_route(cfg, platform, chat_id, "groq_lean")
                     return {"final_response": text, "mode": SOCIAL}
