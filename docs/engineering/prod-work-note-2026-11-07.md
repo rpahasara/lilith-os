@@ -176,6 +176,23 @@ No code change is needed. All 14 scenarios have now been measured.
 - **Not covered:** erasure of Hermes conversation copies (`state.db`, Telegram) is out of scope by D-2. The DEV-only Hermes erasure executor (F9c2) has no PROD equivalent.
 - Nothing was run or changed in this inspection.
 
+## 3f. Snapshot inventory and other existing items (2026-11-08)
+
+**Snapshots** (`OPERATOR-REPORTED`, read-only `gcloud`):
+- **33 snapshots**, about **22.5 GB** incremental storage.
+- 7 are daily auto snapshots of `lilith-01` (policy `lilith-01-daily`, 18:00 UTC, 30-day retention).
+- 26 are manual gate, cutover and fix snapshots from 2026-10-27 to 2026-11-06. The largest is `lilith-01-preserve-20261027`, 5.7 GB.
+- `lilith-dev-01` has one manual snapshot (2026-10-27) and no schedule.
+
+**Decision:**
+- No deletions now. Snapshots are incremental, so removing the small gate snapshots saves little.
+- All snapshots live in the trial project, so they are **not** a migration backup. The migration needs an off-project, portable backup (data, keys handled per the custody rules, tokens) and a verified restore on the destination before switching.
+- Retention cleanup happens with the old project's retirement.
+
+**Other existing items re-checked:**
+- **Natural-learning gap** ("rejected within one 10-minute snapshot window can be re-proposed"): closed by #340/#341. A rejection now writes an L18 `REJECTED` event, with `memory-review/rejected.jsonl` as fallback, at the moment of rejection, and the nightly review reads both.
+- **WhatsApp** and the **private owner Discord DM** need owner decisions: whether WhatsApp is still wanted, and which Discord DM identity counts as the owner. They are left as they are.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
@@ -193,7 +210,7 @@ No code change is needed. All 14 scenarios have now been measured.
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
 | Private owner Discord DM continuity | `NOT CONFIGURED` | Verify owner identity and channel before sharing private context; server groups remain non-owner |
 | Command Center/mobile access | `NOT HOSTED / OPTIONAL` | Separate UI/remote-access project |
-| PROD backup/snapshot retention | `PARTIALLY COMPLETE` | Verify recoverable copies, review old snapshots and remove only proven redundant copies |
+| PROD backup/snapshot retention | `PARTIALLY COMPLETE`; inventory 2026-11-08 (§3f) | Off-project portable backup + restore verification during migration; no snapshot deletion before then |
 | VM migration | `NOT STARTED` (planned from 2026-11-09) | GCP trial expiry **owner-confirmed 2026-11-18**. Prepare destination, re-seal host-bound credentials, backup + restore verification of all data, durable OAuth client + one-time authorization of both accounts, then switch |
 
 **Key caution:** The 2026-11-06 operator inventory said PROD was ahead of DEV for relevant cognition source. Apart from governed canonical FORGET, **there is no confirmed backlog of valuable DEV-only cognition code needing a wholesale port**. This is a reported deployment comparison, not independently rechecked on the hosts here.
