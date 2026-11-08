@@ -44,27 +44,16 @@
 | 9 Identity continuity | RQ-001..004, RQ-007, RQ-045, RQ-049 | RQ-104 identity versioning | I; AH-03/04, AH-10, AH-25; CR-03, CR-27, CR-30, CR-35; PE-18 |
 | 10 Other | RQ-013, RQ-038, RQ-046 | RQ-117 | RC-24; E-15, E-29; PE-31 |
 
-## 3. External citations (EXTERNAL-CLAIM; verify in R-0)
+## 3. External citations: R-0 completed 2026-11-08
 
-The DeepSeek review cites:
-- a Third-Person Appraisal Agent (EMNLP 2025 Findings);
-- the CoRE benchmark (NeurIPS);
-- human emotion verification by action languages (Cambridge, 2026);
-- Reflective Memory Management (Tan et al., ACL 2025);
-- MASC (ACL 2026 Findings);
-- a metacognitive architecture for correcting LLM errors (AAAI 2026);
-- Think² (2026);
-- CRSA (Estienne et al., EMNLP 2025);
-- ES-MemEval (ACM Web Conference 2026);
-- LoCoMo-Plus;
-- Memora (ACL 2026 Findings);
-- AgentMemBench;
-- an ICML 2025 position paper on Theory-of-Mind benchmarks.
+All 13 citations in the DeepSeek review were checked against primary listings. Per-citation results, actual findings,
+limits and applicability are in [12-r0-citation-verification.md](12-r0-citation-verification.md). Summary:
 
-None has been verified by this project. They **remain marked EXTERNAL-CLAIM / UNVERIFIED until R-0 independently
-checks** existence, venue and the specific claim attributed to each. Until then:
-- no document may cite them as support;
-- no design decision in this package depends on any of them;
-- they are used only as pointers for R-0.
+| Status | Citations |
+| --- | --- |
+| VERIFIED (citable with stated limits) | CoRE (NeurIPS 2025); Reflective Memory Management (ACL 2025); metacognitive architecture (AAAI 2026); LoCoMo-Plus (ACL 2026); Memora (Findings ACL 2026); ToM position paper (ICML 2025) |
+| VERIFIED, SCOPE DIFFERS (conceptual use only) | Third-Person Appraisal Agent (needs RL fine-tuning); MASC (multi-agent); CRSA (referential and template dialogs); ES-MemEval (emotional-support specific, *more* relevant) |
+| PREPRINT (not support) | Human Emotion Verification by Action Languages (under consideration at TPLP); Think² (arXiv, 8B models); AgentMemBench (single-author, under submission) |
+| NOT FOUND | none |
 
-R-0 records its result per citation here: VERIFIED, NOT FOUND, or CLAIM DIFFERS.
+Dataset and code licences were not checked; check each before any use.

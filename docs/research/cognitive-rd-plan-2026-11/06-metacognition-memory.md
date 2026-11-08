@@ -86,6 +86,9 @@ scenarios).
 - C-5 is human-paced.
 
 **Benchmarks (DeepSeek D12, adapted).** A LILITH-specific recall suite comes first (E-2, E-8).
-- Public long-term-memory benchmarks are named in the review (ES-MemEval, LoCoMo-Plus, Memora, AgentMemBench).
-- They are EXTERNAL-CLAIM, to be verified (R-0) before use.
-- Even then, they evaluate the *retrieval architecture*, not personal correctness.
+- R-0 ([12](12-r0-citation-verification.md)) verified ES-MemEval (WWW '26; emotional-support specific), LoCoMo-Plus (ACL 2026) and Memora (Findings ACL 2026).
+- AgentMemBench is only a preprint.
+- Two verified patterns are adopted in experiment design: LoCoMo-Plus's cue → later-trigger structure, and Memora's
+  obsolete-memory penalty (FAMA-style).
+- ES-MemEval is a candidate external check after a licence review.
+- Public suites evaluate the *retrieval architecture*, not personal correctness.
