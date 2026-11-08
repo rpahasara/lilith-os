@@ -228,7 +228,7 @@ No code change is needed. All 14 scenarios have now been measured.
 ## 3h. Advanced cognition planning (2026-11-08, documentation only)
 
 - The DeepSeek independent review was received.
-- PR #360 adds the R&D planning package [docs/research/cognitive-rd-plan-2026-11/](../research/cognitive-rd-plan-2026-11/README.md) for owner review:
+- PR #360 adds the R&D planning package `docs/research/cognitive-rd-plan-2026-11/` for owner review:
   - AS-IS maturity and gaps against the 19 layers;
   - DeepSeek reconciliation, including factual corrections;
   - a two-loop runtime view with a shared TurnContext;
