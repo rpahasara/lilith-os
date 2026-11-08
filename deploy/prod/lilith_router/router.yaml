@@ -33,6 +33,7 @@ recent_turns: 6         # bounded recent context considered by the classifier
 # P-1 trace: turn_id on every decision-log record + one turn-end record. Metadata only, never message text.
 # Off: turn_trace_enabled: false (behaviour of LILITH is unaffected either way).
 turn_trace_enabled: true
+decision_log_max_bytes: 2000000   # bounded retention: rotate to decisions.log.1 (one generation kept)
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

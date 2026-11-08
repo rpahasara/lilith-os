@@ -131,6 +131,16 @@ def log_turn_end(ctx, *, agent=None, result=None, guard_changed=False, d1_record
         logger.debug("lilith_router: turn-end record failed", exc_info=True)
 
 
+def _rotate_if_full(path, max_bytes: int) -> None:
+    """P-1 T-6: bounded retention. At max_bytes the log moves to `<name>.1` (replacing the previous one), so at most
+    about 2 x max_bytes is kept. Never raises."""
+    try:
+        if path.stat().st_size >= max_bytes:
+            path.replace(path.with_name(path.name + ".1"))
+    except OSError:
+        pass
+
+
 def _append_log(cfg, record: dict) -> None:
     """Append one JSON record to the decision log, stamped with this turn's id. Never raises."""
     try:
@@ -140,6 +150,7 @@ def _append_log(cfg, record: dict) -> None:
         record.setdefault("ts", round(time.time(), 3))
         path = cfg.resolved_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_if_full(path, getattr(cfg, "decision_log_max_bytes", 2_000_000))
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
