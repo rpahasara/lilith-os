@@ -1,6 +1,8 @@
 # LILITH Advanced Cognition: R&D Planning Package v0.1 (2026-11-08)
 
-Status: **PROPOSED / DOCUMENTATION ONLY.**
+Status: **PROPOSED / DOCUMENTATION ONLY.** The architecture and research direction were approved by the owner on
+2026-11-08 *as a documentation proposal*. Implementation of advanced cognition starts only after the migration and OAuth
+recovery, phase by phase, each with its own go.
 - It authorizes no implementation, PROD deployment, live experiment, memory or personality mutation, or new lane.
 - Every mechanism here is a candidate that must earn promotion through the experiments in
   [10-experiments.md](10-experiments.md).
@@ -47,7 +49,8 @@ including several in the independent DeepSeek review.
 - **OPERATOR-REPORTED**: observed on the running hosts and recorded in the work note.
 - **MEASURED**: an offline or live experiment with a recorded method and result.
 - **PROPOSED**: this package, or a contract that is not accepted.
-- **EXTERNAL-CLAIM**: a statement or citation from the DeepSeek review that we have not independently verified.
+- **EXTERNAL-CLAIM**: a statement or citation from the DeepSeek review that we have not independently verified. It
+  stays marked unverified until roadmap task R-0 checks it.
 
 ## The plan in five sentences
 

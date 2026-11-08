@@ -61,5 +61,10 @@ The DeepSeek review cites:
 - AgentMemBench;
 - an ICML 2025 position paper on Theory-of-Mind benchmarks.
 
-None has been verified by this project. **No design decision in this package depends on any of them.** Each is used only
-as a pointer for R-0.
+None has been verified by this project. They **remain marked EXTERNAL-CLAIM / UNVERIFIED until R-0 independently
+checks** existence, venue and the specific claim attributed to each. Until then:
+- no document may cite them as support;
+- no design decision in this package depends on any of them;
+- they are used only as pointers for R-0.
+
+R-0 records its result per citation here: VERIFIED, NOT FOUND, or CLAIM DIFFERS.

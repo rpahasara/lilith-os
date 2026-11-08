@@ -29,13 +29,21 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | **R-0** | Verify each DeepSeek citation (existence, venue, claim) and record it in [11](11-traceability.md) | — | — | — |
 | **P-0** (now → 2026-11-18) | VM migration; durable OAuth client and one-time authorization; off-project backup with restore verification; E-10 identity suite run before and after | owner, migration plan | all identity and canonical recall items pass after the switch | old VM kept until accepted |
-| **P-1** Evaluation foundation | per-turn correlated trace (metadata); frozen scenario suites (social 40, recall 30, correction 20, identity 20, technical-drift 15); blind pairwise rater tool for the owner; token and latency accounting per arm; extend `sc_eval.py` | P-0 | harness reproduces the §3a A/B result within noise | n/a (offline) |
+| **P-1** Evaluation foundation | per-turn correlated trace (metadata); blind pairwise rater tool for the owner; token and latency accounting per arm; extend `sc_eval.py`; **focused scenario sets per experiment, starting small** (see the note below) | P-0 | harness reproduces the §3a A/B result within noise | n/a (offline) |
 | **P-2** Preferences and corrections | `kind`/`scope` on owner-memory records; preference proposer (explicit and repeated-correction triggers); preference retrieval into the tone path; read-only "what I know about you" view; nightly review covers Discord DM sessions | P-1 | E-2 (recall ↑, over-generalization ≤ baseline) and E-6 (recurrence ↓) | `preferences_mode: shadow` |
 | **P-3** Coordination and causal gates | `TurnContext`; typed `StyleDirective` (same approved wording); L16 gates G-ASK / G-WIDEN / G-ESCALATE / G-DEGRADE; deterministic appraiser (goal relevance and congruence, correction) | P-1, P-2 | E-4 and E-5 pass; latency p95 not worse than +10% | per-gate flags |
 | **P-4** Episodic layer and consolidation | episode records C-1 (privacy review, FORGET coverage); nightly consolidation proposals C-2; commitments ([07 §1](07-goals-initiative-learning.md)); reappraisal proposals C-4 | P-3 | E-7 (commitments), E-8 (episodic recall); approval-fatigue < 50% reject or ignore | stop the proposer; records stay inert |
 | **P-5** Initiative and outcomes | bounded check-ins on the owner's Telegram (cap 1–2/day); outcome events from read-back → C-3 reinforcement; Slice 15A worker on a live career source (shadow) | P-4, P-0 (OAuth) | E-9 veto rate < 20%, owner-rated usefulness ≥ 4/5 | `initiative_enabled: false` |
 | **P-5b** Interpretation experiment | E-3 offline, then shadow on gated turns | P-3, budget | E-3 beats the no-extra-call arm by a pre-set margin within budget | never live without passing |
 | **P-6** Research gates | canonical autobiographical families (C-5); slow-mood study (AP-32 preregistration); self-directed goal policy (GC-26); learned interruption policy | P-5 evidence | separate owner decisions | — |
+
+**P-1 scenario scope (owner clarification, 2026-11-08).**
+- The suite sizes named anywhere in this package (social 40, recall 30, correction 20, identity 20, technical-drift 15,
+  and the per-experiment counts in [10](10-experiments.md)) are **cumulative research targets, not upfront
+  requirements**.
+- Each experiment starts with the smallest focused set that can show an effect (typically 5–10 scenarios, as in the
+  §3a A/B).
+- Sets grow only when a result is promising or ambiguous and more evidence would change a decision.
 
 ## 3. Explicit non-goals for this cycle
 

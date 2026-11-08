@@ -11,6 +11,11 @@ Common method (from the measured Social Cognition A/B, work note §3a):
 
 Each experiment declares its kill criterion before running (AP-32 preregistration; SM-46).
 
+**Scenario counts below are cumulative targets** (owner clarification 2026-11-08).
+- Each experiment begins with a focused set of about 5–10 scenarios.
+- It expands toward the stated count only when evidence warrants.
+- Pass and kill criteria apply at whatever size the decision is made, reported with denominators.
+
 | ID | Question | Arms | Primary metric | Secondary metrics | Pass (promote) | Kill | Phase |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | **E-1** | Does the tone note help? | shadow vs live note | blind preference | over-inference count | — | — | **DONE** (MEASURED, §3a: helps on mixed / tease / no-sleep; neutral elsewhere; technical fixed by #346) |
