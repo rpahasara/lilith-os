@@ -138,5 +138,48 @@ class TurnEndTests(TurnIdTests):
                         text.index("_lilith_router.log_turn_end("))
 
 
+class RetentionTests(TurnIdTests):
+    """P-1 T-6: bounded log; legacy preview scrub keeps every other field."""
+
+    def test_rotation_keeps_one_generation(self):
+        self.cfg.decision_log_max_bytes = 300
+        for i in range(40):
+            self.gi._append_log(self.cfg, {"lane": "x", "n": i})
+        rotated = self.log.with_name(self.log.name + ".1")
+        self.assertTrue(rotated.exists())
+        self.assertLess(self.log.stat().st_size, 400)
+        self.assertFalse(self.log.with_name(self.log.name + ".2").exists())
+        ns = [json.loads(l)["n"] for l in rotated.read_text(encoding="utf-8").splitlines()]
+        ns += [json.loads(l)["n"] for l in self.log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(ns, sorted(ns))                                         # order preserved, newest kept
+
+    def test_config_bounds(self):
+        cfg = self.gi._config
+        with tempfile.TemporaryDirectory() as d:
+            y = Path(d) / "router.yaml"
+            for raw, want in (("decision_log_max_bytes: 10", 100_000), ("decision_log_max_bytes: 9999999999", 50_000_000),
+                              ("decision_log_max_bytes: abc", 2_000_000)):
+                y.write_text("enabled: true" + chr(10) + raw + chr(10), encoding="utf-8")
+                with mock.patch.object(cfg, "CONFIG_PATH", y):
+                    self.assertEqual(cfg.load().decision_log_max_bytes, want, raw)
+
+    def test_scrub_removes_only_preview(self):
+        sys.path.insert(0, str(ROOT / "scripts" / "cognitive_eval"))
+        import scrub_legacy_preview as S
+        self.log.write_text(chr(10).join([
+            json.dumps({"ts": 1, "mode": "social", "msg_chars": 30, "preview": SECRET}),
+            json.dumps({"ts": 2, "lane": "turn", "turn_id": "a" * 16}),
+            "not json"]) + chr(10), encoding="utf-8")
+        out = S.scrub_file(self.log)
+        self.assertEqual((out["status"], out["removed"], out["records"]), ("SCRUBBED", 1, 3))
+        text = self.log.read_text(encoding="utf-8")
+        self.assertNotIn(SECRET, text)
+        self.assertNotIn("preview", text)
+        first = json.loads(text.splitlines()[0])
+        self.assertEqual(first, {"ts": 1, "mode": "social", "msg_chars": 30})     # metadata kept
+        self.assertIn("not json", text)
+        self.assertEqual(S.scrub_file(self.log)["status"], "CLEAN")
+
+
 if __name__ == "__main__":
     unittest.main()

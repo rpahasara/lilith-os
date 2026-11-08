@@ -41,6 +41,7 @@ class RouterConfig:
     # next turn. Empty = no fallback (previous behavior).
     full_agent_fallback: List[Dict[str, str]] = field(default_factory=list)
     recent_turns: int = 6
+    decision_log_max_bytes: int = 2_000_000   # P-1 T-6: rotate decisions.log to .1 at this size (100K..50M)
     turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -311,6 +312,11 @@ def load() -> RouterConfig:
         cfg.full_agent_fallback = parse_fallback_chain(raw.get("full_agent_fallback"))
         cfg.recent_turns = int(raw.get("recent_turns", cfg.recent_turns))
         cfg.turn_trace_enabled = raw.get("turn_trace_enabled", True) is not False
+        try:
+            cfg.decision_log_max_bytes = max(100_000, min(50_000_000, int(raw.get(
+                "decision_log_max_bytes", cfg.decision_log_max_bytes))))
+        except (TypeError, ValueError):
+            pass
         cfg.log_path = str(raw.get("log_path", cfg.log_path) or "")
         # Slice 7.2 cognitive lane (additive; safe defaults keep it OFF).
         cfg.cognitive_enabled = bool(raw.get("cognitive_enabled", cfg.cognitive_enabled))
