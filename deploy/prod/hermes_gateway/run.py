@@ -6590,7 +6590,15 @@ class TurnRunner:
             if _lrg_home not in _lrg_sys.path:
                 _lrg_sys.path.insert(0, _lrg_home)
             from lilith_router import gateway_integration as _lilith_router
+            _lrg_original = final_response
             final_response = _lilith_router.enforce_reply(final_response, ctx)
+            if final_response is not _lrg_original and final_response != _lrg_original:
+                # D1: the stored transcript keeps what the user saw, not the rejected reply.
+                _lrg_agent = ctx.agent_holder[0] if ctx.agent_holder else None
+                _lilith_router.record_delivered_reply(
+                    self._runner._session_db,
+                    getattr(_lrg_agent, "session_id", None) or ctx.session_id,
+                    _lrg_original, final_response)
         except Exception:
             pass
         # ── end LILITH social-response guard ──
