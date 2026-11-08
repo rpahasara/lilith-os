@@ -166,7 +166,8 @@ class RouterTests(unittest.TestCase):
         self.route("telegram", src(user_id=OWNER, chat_id=OWNER, chat_type="dm"), "hehe good morning \U0001f338")
         r = self.route("discord", src(user_id=OWNER, chat_id="55", chat_type="group"), "what's up")
         self.assertNotIn("turn_hint", r)
-        self.assertIsNone(self.gi._social_note.get())
+        self.assertEqual(self.gi._tc.current().style.lines, ())
+        self.assertIsNone(self.gi._tc.tone_text(self.gi._tc.current()))
 
 
 class RunPyTests(unittest.TestCase):
@@ -248,8 +249,8 @@ class ContextGateTests(unittest.TestCase):
 
     def test_router_logs_the_choice_without_text(self):
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))', text)
-        self.assertIn("tctx = _sc.tone_context(message, recent)", text)
+        self.assertIn('tctx.focused = decision.mode != SOCIAL or bool((decision.signals or {}).get("tech"))', text)
+        self.assertIn("tone_ctx = _sc.tone_context(message, recent)", text)
 
 
 if __name__ == "__main__":
