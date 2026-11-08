@@ -133,18 +133,52 @@ No code change is needed. All 14 scenarios have now been measured.
 
 **Tests:** 10 new (`test_et4_d1.py`, added to the deploy workflow); deploy/prod suite 89/89. **Deploy:** router and hermes-gateway at `c09e01d`, smoke checks OK, backups taken. **Rollback:** redeploy the previous backups.
 
+## 3d. Google OAuth diagnosis (2026-11-08, owner step pending)
+
+**Evidence** (`OPERATOR-REPORTED`, read-only; metadata only, no token values):
+- Both tokens (primary `~/.hermes/google_token.json`, secondary `accounts/secondary/google_token.json`) fail refresh with `invalid_grant`. Their last refresh was 2026-08-31.
+- Every 15 minutes, `lilith-career-watcher` and `lilith-meeting-prep` fail (units `failed`; 94 failures each on the last day), and `lilith-agenda-snapshot` and `lilith-gmail-watcher` log a `RefreshError` per account.
+- The morning brief runs degraded.
+- Both accounts use one *installed* OAuth client (redirect `http://localhost`) in the GCP project `lilith-agent-260823-27389`, with scopes for Calendar, `gmail.modify`, `gmail.readonly` and `gmail.send`.
+
+**Cause (strong inference):** the OAuth client files date from 2026-08-24 and both refresh tokens died on 2026-08-31, exactly 7 days later. That matches Google's 7-day refresh-token expiry for consent screens in **Testing** status. Re-consent alone would fail again within a week.
+
+**Recovery (owner steps):**
+1. Google Cloud console, project `lilith-agent-260823-27389`: OAuth consent screen, Audience, **Publish app** (Testing to In production). For personal use the app stays unverified; Google shows an "unverified app" warning on consent.
+2. Re-consent each account with `p3tx/deployer/oauth_reconsent.py <primary|secondary>` (local operator tool). It runs Google's loopback flow on the VM behind an IAP SSH port-forward, so the authorization code goes from the browser straight to the VM. The new token is verified with one Gmail profile read before it replaces the old one (kept as `.invalid-<ts>`, 0600).
+3. Confirm the next timer runs succeed and the two failed units clear.
+
+**Migration note:** the OAuth client lives in the trial project. Plan its future together with the VM migration (Gmail/Calendar APIs need no billing, but the project must survive the trial).
+
+## 3e. L18 consolidation and canonical FORGET — what can be finished now (2026-11-08)
+
+**L18 shadow consolidation** (`SOURCE-VERIFIED` code; `OPERATOR-REPORTED` PROD counts):
+- `learning_worker.py` (Slice 15A) is a manually invoked, bounded worker. It reads one source, `career_events`, and writes shadow candidates and assessments to `cognitive_memory.db`, with no prompt or retrieval consumer.
+- On PROD it has run once (September test batch: 1 job, 3 candidates, 3 assessments). There are 0 `memory_consolidation` traces in the router log, and `memory_item` is 0.
+- Its only source is stale: `career_events` = 11, the latest from **2026-08-31**, because the career watcher has been broken by the OAuth failure since then.
+- **Completable now:** nothing useful before OAuth is restored. After that, the existing worker can run on a schedule in SHADOW. A unit/timer is outside the deploy pipeline's components, so it needs one owner-approved install. Promotion, deduplication and reconciliation into memory remain **future engineering** (no redesign today).
+- The L18 *learning-event ledger* (#341; 12 events) is live and separate.
+
+**Canonical FORGET** (`SOURCE-VERIFIED` code and plans; `OPERATOR-REPORTED` PROD presence):
+- The governed FORGET path is already on PROD in the First Memory host tree: `privacy_forget_runner`, `privacy_forget_intent` (hold-first) and the owner tool `relationship_origin_forget_dev.py` (`status | forget --owner-approval REF | resume`).
+- Per the accepted PROD plan, its scope is **canonical records only** (D-2) under the interim V1 HMAC authorization (D-6). It covers exactly two closed profiles: First Interaction (synthetic) and **Relationship Origin**, with owners L04 and L18_V2.
+- **Completable now without new engineering:** an owner-directed FORGET of the relationship-origin memory. It needs an owner go, owner-device checkpoint (K-PCK) and witness anchoring. The gateway is stopped while it runs, so LILITH is offline briefly.
+- **Not covered:** the project-codename canonical memory admitted at Gate 7.1 has no FORGET profile (a new closed profile would be new engineering).
+- **Not covered:** erasure of Hermes conversation copies (`state.db`, Telegram) is out of scope by D-2. The DEV-only Hermes erasure executor (F9c2) has no PROD equivalent.
+- Nothing was run or changed in this inspection.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
 | --- | --- | --- |
 | Seven cognition lanes + Working Memory | `OPERATOR-REPORTED LIVE` | Behavioral quality improvements are **new development**, not missing DEV files |
-| L04 canonical memory and owner-only recall | `OPERATOR-REPORTED LIVE` | DEV canonical FORGET not yet promoted; consider separately after critical operational fixes |
+| L04 canonical memory and owner-only recall | `OPERATOR-REPORTED LIVE` | Relationship-origin FORGET available on owner request (§3e); codename memory has no FORGET profile |
 | World Model owner memory + exports | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Prove actual replacement runtime/VM can rebuild and use the same identity knowledge |
 | L18 owner learning-event ledger | `SOURCE-VERIFIED IMPLEMENTED`, `OPERATOR-REPORTED LIVE` | Do not mistake event tracking for full consolidation |
-| L18 long-term memory consolidation | `SHADOW / PARTIAL` | Review existing candidate workers; measured promotion/deduplication/reconciliation is future engineering |
+| L18 long-term memory consolidation | `SHADOW / PARTIAL` (source stale since 08-31) | After OAuth: schedule the existing shadow worker; promotion/dedup/reconciliation is future engineering (§3e) |
 | Social Cognition cue + tone guidance | `SOURCE-VERIFIED LIVE FOR OWNER` (context-aware selection, #346) Offline A/B complete (14/14 scenarios); deeper contextual reasoning and appraisal **deferred research** |
 | Natural owner learning | `OPERATOR-REPORTED LIVE, APPROVAL-GATED` | Selective autonomous low-risk learning **deferred**; do not disable approvals casually |
-| Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` | Re-consent affected accounts, confirm scheduler jobs and functional reads |
+| Google OAuth and related jobs | `OPERATOR-REPORTED BROKEN` (cause: Testing-status 7-day tokens) | Owner publishes consent screen + re-consents both accounts (§3d) |
 | Primary full-agent provider fallback | `SOURCE-VERIFIED LIVE` (#349, Copilot Free `gpt-4.1`) | Optional later: same-model paid second provider (owner approval) |
 | E-T4 and D1 | `DEPLOYED` (#351); E-T4 `NOT YET CONFIRMED` live | Owner asks the Test 4 question once on Telegram |
 | WhatsApp | `OPERATOR-REPORTED DISCONNECTED` | Repair only if still needed; owner Telegram is working |
