@@ -430,13 +430,39 @@ owner approval, never to claim it is saved.
 
 **Decision:** keep `shadow`, because live is not yet justified.
 
-**Next:**
-- Lean (Groq/Qwen) arms B vs C on the most discriminating scenarios. That is the path where note emphasis may matter
-  for a smaller model. It runs within the Groq evaluation budget, so not before 2026-11-09.
-- Durable-correction routing to the agent (the proposal path) is part of live and can only be shown in the real owner
-  test, because replay has no tools.
-- Promote to `live` only if the evidence shows a useful improvement without over-generalization.
-- Then one real owner test on Telegram and the verified Discord DM.
+**Batch 3: lean (Groq/Qwen) path, B vs C (2026-11-08 ~16:15Z, owner GO "tonight if the quota allows").**
+
+**Quota, measured with one 1-token probe call:**
+- 998 of 1,000 requests per day remained; 7,986 of 8,000 tokens per minute.
+- Groq's headers do not report tokens per day. Against the known 200K/day rolling limit, today's use was about 33K
+  eval smoke plus light PROD lean traffic (1 traced lean turn, 3.7K).
+- The binding limit was the 50K/day evaluation cap, which keeps headroom for chat: about 17K remained.
+
+**Run:** the smallest discriminating pair, 4 calls in total, hard-capped:
+- E-2 `tech_after_banter`: emoji or jokes creeping into a technical answer after banter;
+- E-6 `nick_greeting`: a corrected nickname recurring.
+
+| Scenario | B (approved, in profile) | C (B + router note) |
+| --- | --- | --- |
+| tech_after_banter: no emoji / no jokes | yes (numbered causes) | yes (shorter, more concise) |
+| nick_greeting: no "champ" | yes | yes |
+| Tokens / latency | 3,055 / 1.2 s · 2,748 / 0.6 s | 2,855 / 0.5 s · 2,831 / 0.5 s |
+
+About 11.5K tokens were used, so today's evaluation total was about 44.5K, under the 50K cap.
+
+**Reading:** on the lean path too, the approved typed memory in the profile (B) is enough. The router note gave no
+measurable improvement; the only difference seen was C's somewhat more concise technical answer. This is 1 sample per
+cell: directional only.
+
+**Decision: stay in `shadow`; live is not supported by the evidence.** Typed preferences already reach both reply
+paths through the existing owner-memory → USER.md projection once approved.
+
+**What live would still add, untested offline:** durable-correction routing. It sends explicit corrections from the
+lean path to the tool-capable agent so Lilith can propose a memory. This is an owner decision.
+
+**Next:** the real owner test of teach → propose → approve → apply → change/retract. It works in shadow wherever the
+turn already reaches the agent (approval commands, memory statements). Corrections on casual lean turns need either live
+mode or a correction-routing-only setting.
 
 **Limitation:** the nightly learning-review prompt does not yet suggest the typed wording. It lives in the cron job,
 outside the deploy pipeline. In-chat proposals carry the format through the correction hint.
