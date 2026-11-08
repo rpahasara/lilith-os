@@ -100,5 +100,54 @@ class ReplayLoopTests(unittest.TestCase):
         self.assertLessEqual(spec["budget_tokens"], 50000)
 
 
+class P2EvalTests(unittest.TestCase):
+    """P-2 E-2/E-6: the arms reuse the deployed social_preferences module; metrics never print reply text."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy/prod"))
+        from lilith_router import social_preferences
+        cls.sp = social_preferences
+        import metrics
+        cls.metrics = metrics
+
+    def test_preference_arms(self):
+        prof = ["Works nights.", "Preference (technical): no emoji.", "Boundary: Don't call me 'champ'."]
+        scn = {"message": "how do I rebase?"}
+        self.assertEqual(replay.preference_parts(scn, {}, self.sp, True), ("", None))
+        p, note = replay.preference_parts(scn, {"profile": prof}, self.sp, True)
+        self.assertTrue(p.startswith("[About them]\nWorks nights.") and note is None)
+        _, note = replay.preference_parts(scn, {"profile": prof, "preferences": "router"}, self.sp, True)
+        self.assertIn("- Preference: no emoji.", note)
+        _, note = replay.preference_parts(scn, {"profile": prof, "preferences": "router"}, self.sp, False)
+        self.assertNotIn("no emoji", note)                                     # technical scope, casual turn
+        _, note = replay.preference_parts({"message": "don't call me that"}, {"profile": prof, "preferences": "router"},
+                                          self.sp, False)
+        self.assertTrue(note.startswith(self.sp.CORRECTION_HINT))
+
+    def test_metrics(self):
+        spec = {"scenarios": [{"id": "s1", "kind": "applies", "emoji": "none", "forbid": ["\\bchamp"]},
+                              {"id": "s2", "kind": "unrelated", "emoji": "some", "expect": ["probe"]}]}
+        raw = [{"id": "s1", "replies": {"A": ["hey champ 🎉", SECRET], "C": ["hello"]},
+                "tokens": {"A": [10, 20], "C": [30]}, "latency_ms": {"A": [5, 7], "C": [9]}},
+               {"id": "s2", "replies": {"A": ["a probe 🙂"], "C": ["<<ERROR X >>"]}}]
+        out = self.metrics.measure(raw, spec)
+        self.assertEqual(out["arms"]["A"], {"applies:emoji_ok": "1/2", "applies:forbid_hit": "1/2",
+                                            "unrelated:emoji_ok": "1/1", "unrelated:expect_hit": "1/1"})
+        self.assertEqual(out["errors"], {"C": 1})
+        self.assertEqual(out["cost"]["A"], {"mean_tokens": 15, "mean_latency_ms": 6, "n": 2})
+        self.assertNotIn(SECRET, json.dumps(out))
+
+    def test_shipped_p2_specs_are_synthetic_and_in_budget(self):
+        for name in ("p2_e2_preferences_v1.json", "p2_e6_corrections_v1.json"):
+            spec = json.loads((Path(__file__).parent / "scenarios" / name).read_text(encoding="utf-8"))
+            self.assertEqual(set(spec["variants"]), {"A", "B", "C"})
+            self.assertEqual(spec["variants"]["C"].get("preferences"), "router")
+            self.assertLessEqual(spec["budget_tokens"], 50000)
+            self.assertEqual(len(spec["scenarios"]), 8)
+            for s in spec["scenarios"]:
+                self.assertIn(s.get("kind"), ("applies", "unrelated", "explicit"))
+
+
 if __name__ == "__main__":
     unittest.main()
