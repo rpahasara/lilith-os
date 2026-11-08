@@ -2,6 +2,8 @@
 
 ## Foundation phase
 
+*(Historical, 2026-09-13. The repository now contains product code: the Next.js LILITH OS app, `services/core-api`, the PROD router and gateway mirrors under `deploy/prod/` and their tests. See [testing-strategy.md](testing-strategy.md), [ci-cd.md](ci-cd.md) and [prod-work-note-2026-11-07.md](prod-work-note-2026-11-07.md).)*
+
 The repository currently contains architecture, research, security, and workflow scaffolding rather than product code. Toolchain choices should follow the imported implementation and an ADR where they create long-lived constraints.
 
 ## Local validation
