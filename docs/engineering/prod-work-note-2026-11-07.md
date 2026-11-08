@@ -334,6 +334,36 @@ The storage layer already keeps revisions with lineage (`memory_revision`, `prio
 
 The canonical record stays unchanged until the exact correction and owner approval are ready.
 
+## 3l. Relationship-origin correction: source ready, deployment pending (2026-11-08)
+
+Owner GO 2026-11-08: "Source now, PROD later". Record: `docs/architecture/relationship-origin-correction.md`.
+
+**Source (PR A #374, merged `d307dac`):** `VersionedFamilyV1.operations` (relationship origin = CREATE + SUPERSEDE; First Interaction
+CREATE-only); the L04 apply family check; schema v4 DDL for `consent_grant` / `policy_decision` and the three
+`learning_ro_*` tables; `relationship_origin_correction_migration` (v3 → v4, backup-gated, row-preserving, fault
+rollback, idempotent; the v3 / FM-02 tooling refuse v4); the conversation's `correct our origin: …` offer (one SUPERSEDE
+of the same item bound to the ACCEPTED active revision; refuses on v3, with nothing to correct, or with no change).
+**Tests:** 12 new plus 1 updated contract test.
+- Core API suite 414/414.
+- Owner-memory and authority suites: no new failures against the local baseline. The environment-only failures on this
+  Windows machine are identical before and after.
+- Proven on isolated copies: the original revision is byte-identical after the correction; the successor is linked by
+  `supersedes_revision_id` / `prior_revision_id`; both admissions and audits are kept; a stale correction is refused;
+  CREATE and FORGET are unchanged (FORGET erases every revision); the codename is untouched; with an admitting signer, a
+  new session recalls the corrected statement through the full accepted-read chain.
+
+**Signer (PR B #375, draft):** `RelationshipOriginActionV1` admits SUPERSEDE. It is kept out of `main` until the release step,
+because the signer-release pin tests require `main` == the installed signer (FM-2 pattern). The installed signer still
+refuses a correction (tested).
+
+**Deployment: PENDING** (destination host, after migration, one owner go per step): signer release (FM-3 contract and
+staged transition) → First Memory host release → schema v4 on the cognitive DB (verified backup first) → correction
+ceremony (capability enabled for the window only; one-token `saving` → `saying` diff verified by hash and position; owner
+WSL signature) → recall checks plus one fresh-session owner-DM recall. Rollback is per step (see the record). After
+activation, history is never rewritten; undoing means another owner-approved SUPERSEDE.
+
+**No live change:** the canonical memory, PROD schema and PROD signer are untouched.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
