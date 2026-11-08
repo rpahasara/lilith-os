@@ -80,8 +80,12 @@ class ContractTests(unittest.TestCase):
                       subject_key=MA.FIRST_INTERACTION_IDENTITY[2])[0].validate()
         with self.assertRaises(C.ContractError):
             ro_action(value_schema=learning_v2.VALUE_SCHEMA)[0].validate()
-        with self.assertRaisesRegex(C.ContractError, "CREATE-only"):
-            ro_action(operation=C.SUPERSEDE, expected_active_revision_id="mrev.1")[0].validate()
+        ro_action(operation=C.SUPERSEDE, expected_active_revision_id="mrev.1")[0].validate()   # owner correction (v4)
+        with self.assertRaisesRegex(C.ContractError, "SUPERSEDE action shape"):            # no prior revision
+            ro_action(operation=C.SUPERSEDE)[0].validate()
+        with self.assertRaisesRegex(C.ContractError, "CREATE/SUPERSEDE only"):
+            ro_action(operation=C.RESTORE, value_schema=None, expected_active_revision_id="mrev.1",
+                      restore_revision_id="mrev.0")[0].validate()
         ro_action(operation=C.FORGET, value_schema=None)[0].validate()           # Privacy-owned FORGET
         with self.assertRaises(C.ContractError):
             MA.capability_for_purpose("LONG_TERM_OWNER_RELATIONSHIP_ORIGIN")

@@ -358,6 +358,34 @@ RELATIONSHIP_ORIGIN_TABLES = family_tables(MA.RELATIONSHIP_ORIGIN)
 RELATIONSHIP_ORIGIN_SCHEMA_OBJECTS = family_schema_objects(MA.RELATIONSHIP_ORIGIN)
 LEARNING_V2_SCHEMA_OBJECTS_V3 = LEARNING_V2_SCHEMA_OBJECTS_V2 | RELATIONSHIP_ORIGIN_SCHEMA_OBJECTS
 RELATIONSHIP_ORIGIN_MIGRATION_STATEMENTS = family_migration_statements(MA.RELATIONSHIP_ORIGIN)
+
+
+# Schema v4 (applied only by relationship_origin_correction_migration): a family that admits SUPERSEDE gets its three
+# value-bearing L18 tables (intent, candidate, proposal) rebuilt with the operation widened to CREATE or SUPERSEDE and a
+# table CHECK binding SUPERSEDE to the active revision it replaces. Same names, same columns, every other byte v3's.
+_V3_OPERATION = "operation TEXT NOT NULL CHECK(operation='CREATE'), "
+_V4_OPERATION = "operation TEXT NOT NULL CHECK(operation IN ('CREATE','SUPERSEDE')), "
+_V3_EXPECTED = "expected_active_revision_id TEXT CHECK(expected_active_revision_id IS NULL), "
+_V4_EXPECTED = "expected_active_revision_id TEXT, "
+_V4_PAIR = (", CHECK((operation='CREATE' AND expected_active_revision_id IS NULL) "
+            "OR (operation='SUPERSEDE' AND expected_active_revision_id IS NOT NULL)))")
+
+
+def family_v4_table_ddl(family: MA.VersionedFamilyV1) -> Dict[str, str]:
+    """{table: v4 DDL} for the family's intent, candidate and proposal tables; {} for a CREATE-only family."""
+    if C.SUPERSEDE not in family.operations:
+        return {}
+    out: Dict[str, str] = {}
+    for name in ("intent", "candidate", "proposal"):
+        table = f"{family.table_prefix}_{name}_v1"
+        (ddl,) = [s for s in family_migration_statements(family) if s.startswith(f"CREATE TABLE {table} (")]
+        if ddl.count(_V3_OPERATION) != 1 or ddl.count(_V3_EXPECTED) != 1 or not ddl.endswith(")"):
+            raise RuntimeError(f"{table}: v3 DDL is not the expected form")
+        out[table] = ddl.replace(_V3_OPERATION, _V4_OPERATION).replace(_V3_EXPECTED, _V4_EXPECTED)[:-1] + _V4_PAIR
+    return out
+
+
+RELATIONSHIP_ORIGIN_V4_TABLE_DDL = family_v4_table_ddl(MA.RELATIONSHIP_ORIGIN)
 VERSIONED_FAMILY_TABLES = frozenset().union(*(family_tables(family) for family in MA.VERSIONED_FAMILIES))
 
 
@@ -618,6 +646,20 @@ class LearningV2Store:
             )
         }
         return family_tables(family).issubset(names)
+
+    def supports_family_operation(self, family: MA.VersionedFamilyV1, operation: str) -> bool:
+        """Read-only: True when the family's installed L18 schema admits `operation` (SUPERSEDE needs schema v4)."""
+        if operation not in family.operations:
+            return False
+        if operation == C.CREATE:
+            return True
+        conn = self.connect()
+        try:
+            row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                               (f"{family.table_prefix}_intent_v1",)).fetchone()
+        finally:
+            conn.close()
+        return row is not None and _V4_OPERATION.strip(", ") in " ".join(str(row[0]).split())
 
     @staticmethod
     def has_first_interaction_schema(conn: sqlite3.Connection) -> bool:

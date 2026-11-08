@@ -3,7 +3,9 @@
 `canonical_contracts` stays byte-identical: it is a governed shared module of the signer and broker releases
 (sha256 f93d26d8...). Codename actions keep using its unchanged `FrozenMemoryActionV1`, so their meaning and every
 digest are unchanged. This module adds a closed set of versioned families on top, each exactly one tuple, one purpose,
-one capability, one value schema and one epistemic basis, CREATE only (FORGET stays Privacy-owned):
+one capability, one value schema and one epistemic basis. Every family is CREATE (FORGET stays Privacy-owned); the
+relationship-origin family also allows an owner-approved SUPERSEDE (a corrected successor revision of the same item,
+bound to the active revision it replaces; schema v4, `relationship_origin_correction_migration`):
 
 - FM-02 First Interaction: purpose `OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION`, capability
   `canonical_memory.first_interaction.create`, basis `RECORDED_INTERACTION`, value schema `FirstInteractionEpisodeV1`,
@@ -56,6 +58,8 @@ class VersionedFamilyV1:
     proposal_family: str
     descriptor_family: str
     table_prefix: str
+    # Value-bearing L04 operations the family admits (Privacy FORGET is always separate). CREATE only unless widened.
+    operations: frozenset = frozenset({C.CREATE})
 
 
 OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION = "OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION"
@@ -87,7 +91,7 @@ RELATIONSHIP_ORIGIN = VersionedFamilyV1(
     capability=CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE, identity=RELATIONSHIP_ORIGIN_IDENTITY,
     value_schema=RELATIONSHIP_ORIGIN_VALUE_SCHEMA, epistemic_basis=USER_ASSERTED, sensitivity=OWNER_PERSONAL,
     proposal_family="OWNER_DIRECTED_RELATIONSHIP_ORIGIN_V1", descriptor_family="RELATIONSHIP_ORIGIN_V1",
-    table_prefix="learning_ro")
+    table_prefix="learning_ro", operations=frozenset({C.CREATE, C.SUPERSEDE}))
 VERSIONED_FAMILIES = (FIRST_INTERACTION, RELATIONSHIP_ORIGIN)
 _FAMILY_BY_PURPOSE = MappingProxyType({family.purpose: family for family in VERSIONED_FAMILIES})
 _FAMILY_BY_IDENTITY = MappingProxyType({family.identity: family for family in VERSIONED_FAMILIES})
@@ -150,13 +154,19 @@ def epistemic_basis_for_purpose(purpose: Any) -> str:
         raise C.ContractError("purpose is unsupported") from None
 
 
+def _refuse_operation(family: VersionedFamilyV1, what: str = "memory") -> C.ContractError:
+    if family.operations == frozenset({C.CREATE}):
+        return C.ContractError(f"{family.label} {what} is CREATE-only")
+    return C.ContractError(f"{family.label} {what} is " + "/".join(sorted(family.operations)) + " only")
+
+
 def require_family_scope(purpose: Any, operation: Any, identity: Tuple[str, str, str]) -> None:
-    """A family purpose and its tuple imply each other; every family is CREATE (or Privacy FORGET) only."""
+    """A family purpose and its tuple imply each other; a family admits only its own operations (or Privacy FORGET)."""
     family = family_for_purpose(purpose)
     if family != family_for_identity(identity):
         raise C.ContractError("purpose and memory tuple do not match")
-    if family is not None and operation not in {C.CREATE, C.FORGET}:
-        raise C.ContractError(f"{family.label} memory is CREATE-only")
+    if family is not None and operation not in family.operations | {C.FORGET}:
+        raise _refuse_operation(family)
 
 
 def _as_codename(value: Any, **extra: Any) -> Any:
@@ -184,7 +194,7 @@ class VersionedFamilyActionV1(C.FrozenMemoryActionV1):
             raise C.ContractError("purpose is unsupported")
         _as_codename(self).validate()
         require_family_scope(self.purpose, self.operation, self.identity)
-        if self.operation == C.CREATE and self.value_schema != family.value_schema:
+        if self.operation in {C.CREATE, C.SUPERSEDE} and self.value_schema != family.value_schema:
             raise C.ContractError(f"{family.label} value schema is invalid")
 
 
@@ -252,8 +262,8 @@ def validate_consent(consent: C.ConsentRefV1) -> None:
         return
     _as_codename(consent).validate_shape()
     require_family_scope(consent.purpose, consent.operation, identity)
-    if consent.operation != C.CREATE:
-        raise C.ContractError(f"{family.label} consent is CREATE-only")
+    if consent.operation not in family.operations:
+        raise _refuse_operation(family, "consent")
 
 
 def validate_policy(decision: C.PolicyDecisionRefV1) -> None:
@@ -270,5 +280,5 @@ def validate_policy(decision: C.PolicyDecisionRefV1) -> None:
         raise C.ContractError("policy capability is unsupported")
     _as_codename(decision, capability=C.CANONICAL_MEMORY_PROJECT_CODENAME_MUTATE).validate_shape()
     require_family_scope(decision.purpose, decision.operation, identity)
-    if decision.operation != C.CREATE:
-        raise C.ContractError(f"{family.label} policy is CREATE-only")
+    if decision.operation not in family.operations:
+        raise _refuse_operation(family, "policy")

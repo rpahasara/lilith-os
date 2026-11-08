@@ -322,11 +322,12 @@ class CanonicalMemoryStoreV2:
             raise CanonicalStoreError("V1_DISPATCH_UNAVAILABLE")
         action = self._action(proposal)
         action.validate()
-        # Family, purpose and (below) capability must agree; every versioned family is CREATE-only.
+        # Family, purpose and (below) capability must agree; a versioned family applies only its own operations (CREATE;
+        # the relationship origin also an owner-approved SUPERSEDE, bound by the normal expected-active-revision check).
         family = MA.family_for_proposal_family(ref.proposal_family)
         if family is not MA.family_for_purpose(action.purpose):
             raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
-        if family is not None and action.operation != C.CREATE:
+        if family is not None and action.operation not in family.operations:
             raise CanonicalStoreError("UNKNOWN_PROPOSAL_FAMILY")
         if (
             ref.immutable_fingerprint != str(proposal["proposal_fingerprint"])

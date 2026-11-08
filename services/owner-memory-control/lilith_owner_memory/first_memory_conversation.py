@@ -20,6 +20,9 @@ Kinds (closed; each its own governed tuple, purpose and capability):
     relationship origin         "remember our origin: <the owner's own statement>" / "what is our origin"
                                 (only when the composition is given the relationship-origin tuple; the statement is
                                 stored exactly as the owner wrote it, NFC and trimmed, USER_ASSERTED, OWNER_PERSONAL)
+                                "correct our origin: <the full corrected statement>" offers an owner-approved
+                                SUPERSEDE: a successor revision of the SAME item, bound to the active revision it
+                                replaces; the original revision stays as history (schema v4 required)
 
 Composition only. Every rule stays with its owner: the issuer verifies the owner proof and signs; the adapter
 re-verifies the evidence, the Privacy hold and every L04 rule; the accepted read re-verifies the whole chain. This
@@ -77,6 +80,8 @@ _RECALL = re.compile(r"\A\s*what\s+is\s+my\s+project\s+codename\s*\??\s*\Z", re.
 _REMEMBER_ORIGIN = re.compile(r"\A\s*remember\s+our\s+origin\s*:\s*(?P<value>\S(?:.*\S)?)\s*\Z",
                               re.IGNORECASE | re.DOTALL)
 _RECALL_ORIGIN = re.compile(r"\A\s*what\s+is\s+our\s+origin\s*\??\s*\Z", re.IGNORECASE)
+_CORRECT_ORIGIN = re.compile(r"\A\s*correct\s+our\s+origin\s*:\s*(?P<value>\S(?:.*\S)?)\s*\Z",
+                             re.IGNORECASE | re.DOTALL)
 _SESSION = re.compile(r"\A[A-Za-z0-9._:-]{1,128}\Z")
 # Trusted challenge context: the deployment's owner, RP, authority domain, policy and ledger (never from a request).
 CHALLENGE_CONTEXT_FIELDS = frozenset({
@@ -96,6 +101,7 @@ class MemoryKindV1:
     purpose: str
     capability: str
     normalize: Callable[[Mapping[str, Any]], tuple]
+    correct: "Optional[re.Pattern[str]]" = None     # an owner-approved correction (SUPERSEDE) grammar, if any
 
 
 CODENAME = MemoryKindV1("codename", _REMEMBER, _RECALL, "codename", learning_v2.VALUE_SCHEMA,
@@ -104,7 +110,7 @@ CODENAME = MemoryKindV1("codename", _REMEMBER, _RECALL, "codename", learning_v2.
 RELATIONSHIP_ORIGIN = MemoryKindV1("relationship-origin", _REMEMBER_ORIGIN, _RECALL_ORIGIN, "statement",
                                    MA.RELATIONSHIP_ORIGIN_VALUE_SCHEMA, MA.LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL,
                                    MA.CANONICAL_MEMORY_RELATIONSHIP_ORIGIN_CREATE,
-                                   learning_v2.normalize_relationship_origin)
+                                   learning_v2.normalize_relationship_origin, _CORRECT_ORIGIN)
 KINDS = (CODENAME, RELATIONSHIP_ORIGIN)
 
 
@@ -199,6 +205,8 @@ class OfferV1:
     webauthn_challenge: Optional[bytes] = None      # what the owner's authenticator signs
     kind: Optional[str] = None
     value: Optional[str] = None                     # exactly what would be stored (codename or statement)
+    operation: str = "CREATE"                       # SUPERSEDE for an owner-approved correction
+    replaces_revision_id: Optional[str] = None      # the active revision a correction supersedes
 
 
 @dataclass(frozen=True)
@@ -274,18 +282,31 @@ class FirstMemoryConversationV1:
         self._privacy.require_ready()
         _need(isinstance(session_id, str) and _SESSION.match(session_id) is not None, "SESSION_INVALID")
         kind, match = self._match(text, "remember")
+        operation, item_id, expected = C.CREATE, None, None
         if match is None:
-            return OfferV1(NOT_A_MEMORY_REQUEST)
+            kind, match = self._match_correction(text)
+            if match is None:
+                return OfferV1(NOT_A_MEMORY_REQUEST)
+            operation = C.SUPERSEDE
         try:
             encoded, payload_digest = kind.normalize({kind.value_key: match.group("value")})
         except learning_v2.LearningV2Error as exc:
             raise FirstMemoryRefused("VALUE_REFUSED") from exc
         identity = self._policies[kind.name].identity
         _need(not self._privacy.resolver.is_held(*identity), "IDENTITY_HELD_OR_SUPPRESSED")
+        if operation == C.SUPERSEDE:
+            # A correction needs schema v4, and replaces exactly the ACCEPTED active revision; nothing to correct, or
+            # no change, refuses. Nothing is written by an offer.
+            _need(self._l04.learning.supports_family_operation(MA.family_for_purpose(kind.purpose), C.SUPERSEDE),
+                  "CORRECTION_SCHEMA_UNAVAILABLE")
+            current = self._read(kind)
+            _need(current.status == V2.ACCEPTED_MEMORY, "NOTHING_TO_CORRECT")
+            item_id, expected = str(current.row["memory_item_id"]), str(current.row["revision_id"])
+            _need(json.loads(current.row["normalized_value_json"]) != json.loads(encoded), "CORRECTION_UNCHANGED")
         action = MA.action_from_fields(
-            schema_version=1, actor_ref_id=self._l04.actor.ACTOR.actor_ref_id, operation=C.CREATE,
+            schema_version=1, actor_ref_id=self._l04.actor.ACTOR.actor_ref_id, operation=operation,
             memory_class=identity[0], subject_namespace=identity[1], subject_key=identity[2],
-            value_schema=kind.value_schema, payload_digest=payload_digest, expected_active_revision_id=None,
+            value_schema=kind.value_schema, payload_digest=payload_digest, expected_active_revision_id=expected,
             restore_revision_id=None, purpose=kind.purpose)
         action.validate()
         offer_id = "och.fm1." + secrets.token_hex(16)
@@ -297,8 +318,8 @@ class FirstMemoryConversationV1:
             "requestDigest": hashlib.sha256(json.dumps(request, sort_keys=True).encode("ascii")).hexdigest(),
             "payloadDigest": action.payload_digest, "operation": action.operation,
             "memoryClass": action.memory_class, "subjectNamespace": action.subject_namespace,
-            "subjectKey": action.subject_key, "purpose": action.purpose, "memoryItemId": None,
-            "expectedActiveRevisionId": None, "restoreTargetRevisionId": None, "restoreTargetDigest": None,
+            "subjectKey": action.subject_key, "purpose": action.purpose, "memoryItemId": item_id,
+            "expectedActiveRevisionId": expected, "restoreTargetRevisionId": None, "restoreTargetDigest": None,
             "nonce": _b64(secrets.token_bytes(32)), "issuedAt": _instant(issued),
             "expiresAt": _instant(issued + CHALLENGE_TTL)})
         challenge_json = challenge.canonical_bytes()
@@ -306,7 +327,18 @@ class FirstMemoryConversationV1:
         value = json.loads(encoded)[kind.value_key]
         self._pending[offer_id] = _Pending(session_id, kind, value, action, encoded, challenge, challenge_json)
         return OfferV1(OFFERED, offer_id, session_id, value if kind is CODENAME else None, challenge_json,
-                       challenge.webauthn_challenge(), kind.name, value)
+                       challenge.webauthn_challenge(), kind.name, value, operation, expected)
+
+    def _match_correction(self, text: Any) -> tuple:
+        """The first configured kind with a correction grammar that matches exactly, else (None, None)."""
+        if not isinstance(text, str):
+            return None, None
+        for kind in KINDS:
+            if kind.correct is not None and kind.name in self._policies:
+                match = kind.correct.match(text)
+                if match is not None:
+                    return kind, match
+        return None, None
 
     def _match(self, text: Any, which: str) -> tuple:
         """The first configured kind whose closed grammar matches exactly, else (None, None)."""
