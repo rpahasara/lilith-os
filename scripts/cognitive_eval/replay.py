@@ -74,11 +74,12 @@ def lean_runner(spec):
             model=cfg.groq_model, messages=msgs, max_tokens=cfg.social_lean_max_output_tokens, temperature=0.7,
             extra_body={"reasoning_effort": "none"})
         resp, h = raw.parse(), raw.headers
+        ms = int((time.monotonic() - t0) * 1000)          # the call itself; the back-off below is not latency
         text = sl._THINK_RE.sub("", resp.choices[0].message.content or "").strip()
         rem = int(h.get("x-ratelimit-remaining-tokens", "99999") or 99999)
         if rem < 7000:
             time.sleep(min(65, _dur(h.get("x-ratelimit-reset-tokens")) + 1))
-        return text, int(getattr(resp.usage, "total_tokens", 0) or 0), int((time.monotonic() - t0) * 1000)
+        return text, int(getattr(resp.usage, "total_tokens", 0) or 0), ms
     return run
 
 
