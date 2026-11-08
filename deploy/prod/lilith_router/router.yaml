@@ -30,6 +30,9 @@ full_agent_fallback:
   - {provider: copilot, model: gpt-4.1}
 
 recent_turns: 6         # bounded recent context considered by the classifier
+# P-1 trace: turn_id on every decision-log record + one turn-end record. Metadata only, never message text.
+# Off: turn_trace_enabled: false (behaviour of LILITH is unaffected either way).
+turn_trace_enabled: true
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────
