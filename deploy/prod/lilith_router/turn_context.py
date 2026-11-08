@@ -65,6 +65,8 @@ class TurnContext:
     correction: bool = False                     # an explicit durable correction routed to the agent (P-2)
     meta: Dict[str, Any] = field(default_factory=dict)        # L16 meta-signals -> gate decisions (batch 2)
     appraisal: Tuple[Any, ...] = ()              # deterministic appraisal signals (batch 3)
+    goals: Tuple[Any, ...] = ()                  # related ACTIVE tracked goals (id, title, state) for G-WIDEN
+    appraisal_live: bool = False                 # appraisal switch: live renders the goal line, shadow only traces
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -75,6 +77,7 @@ class TurnContext:
             out["meta"] = dict(self.meta)
         if self.appraisal:
             out["appraisal"] = [getattr(a, "kind", str(a)) for a in self.appraisal]
+            out["appraisal_refs"] = list(self.style.appraisal_refs)
         return out
 
 
@@ -128,6 +131,14 @@ def meta_text(ctx: TurnContext) -> Optional[str]:
     return mc.note_for(ctx.meta.get("control"))
 
 
+def goal_text(ctx: TurnContext) -> Optional[str]:
+    """G-WIDEN: the related tracked goal, when appraisal is live (P-3 batch 3)."""
+    if not (ctx.owner and ctx.appraisal_live and ctx.goals):
+        return None
+    from . import appraisal as ap
+    return ap.goal_note(list(ctx.goals))
+
+
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
     """The API-only turn hint for the main agent (run.py `turn_hint`). A goals-status question carries its status hint
     instead of the tone and correction lines; approved preferences ride on either."""
@@ -135,6 +146,8 @@ def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[
         return None
     parts: List[Optional[str]] = [status_hint] if status_hint else [correction_text(ctx), tone_text(ctx)]
     parts += [preference_text(ctx), meta_text(ctx)]
+    if not status_hint:                          # a goals-status turn already carries its goals
+        parts.append(goal_text(ctx))
     return "\n\n".join(p for p in parts if p) or None
 
 
@@ -143,4 +156,5 @@ def lean_suffix(ctx: TurnContext) -> str:
     (A durable correction never reaches the lean path: it routes to the agent.)"""
     if not ctx.owner:
         return ""
-    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx)) if p)
+    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx), goal_text(ctx))
+                   if p)

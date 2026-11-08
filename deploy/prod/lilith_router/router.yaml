@@ -46,6 +46,10 @@ social_corrections_mode: live
 # don't-guess note, same call) | escalate (fast-path turn -> tool-capable agent). Rollback: shadow or off.
 metacognition_mode: shadow
 metacognition_recall_control: ask
+# P-3 deterministic appraisal (owner turns only): off | shadow (log signals) | live (a reported setback takes the
+# approved difficulty / mixed line, never a playful nudge; a related ACTIVE goal adds one context line). No emotion
+# score, nothing persisted. Rollback: shadow or off.
+appraisal_mode: shadow
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

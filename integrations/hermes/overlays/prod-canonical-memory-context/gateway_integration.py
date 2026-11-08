@@ -51,6 +51,7 @@ from . import owner_link as _owner_link
 from . import social_preferences as _social_prefs
 from . import turn_context as _tc
 from . import metacognition as _meta
+from . import appraisal as _appraisal
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -386,6 +387,43 @@ def _apply_metacognition(cfg, message: str) -> None:
     except Exception:
         tctx.meta = {}
         logger.debug("lilith_router: metacognition failed (no control)", exc_info=True)
+
+
+_GOALS = _appraisal.GoalSource(os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765"))
+
+
+def _apply_appraisal(cfg, message: str) -> None:
+    """P-3 deterministic appraisal (owner turns only): setback / progress from the owner's own words, and relevance to
+    an ACTIVE tracked goal. Live: a setback takes the approved difficulty (or mixed) line instead of any playful nudge,
+    and a related goal adds one bounded context line. Shadow logs only. Never raises; no text logged."""
+    tctx = _tc.current()
+    try:
+        mode = cfg.appraisal_mode
+        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()):
+            return
+        if _SELF_STATUS_RE.search(message or ""):
+            return                                    # the goals-status route grounds its own goals
+        goals = _GOALS.current()
+        sigs = _appraisal.appraise(message, goals)
+        if not sigs:
+            return
+        refs = {s.ref for s in sigs if s.kind == "goal"}
+        related = tuple({"goalId": g.get("goalId"), "title": g.get("title"), "lifecycleState": g.get("lifecycleState")}
+                        for g in goals if str(g.get("goalId") or "") in refs)
+        before = tctx.style.lines
+        tctx.appraisal, tctx.goals = sigs, related
+        tctx.appraisal_live = mode == "live"
+        if tctx.appraisal_live:
+            lines = _appraisal.adjust_lines(before, sigs, focused=tctx.focused)
+            tctx.style = _tc.dataclasses_replace(
+                _tc.directive(lines, focused=tctx.focused, preference_refs=tctx.style.preference_refs),
+                appraisal_refs=tuple(s.kind + (":" + s.ref if s.ref else "") for s in sigs))
+        _append_log(cfg, {"lane": "appraisal", "mode": mode, "signals": [s.kind for s in sigs],
+                          "goal_refs": sorted(refs), "lines_before": list(before),
+                          "lines_after": list(_appraisal.adjust_lines(before, sigs, focused=tctx.focused))})
+    except Exception:
+        tctx.appraisal, tctx.goals, tctx.appraisal_live = (), (), False
+        logger.debug("lilith_router: appraisal failed (none applied)", exc_info=True)
 
 
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
@@ -782,6 +820,7 @@ def _route_turn_impl(
             logger.debug("lilith_router: social tone note failed (no note)", exc_info=True)
     _apply_social_preferences(cfg, decision, message)
     _apply_metacognition(cfg, message)
+    _apply_appraisal(cfg, message)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending

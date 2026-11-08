@@ -559,6 +559,23 @@ experiment justifies it; approved tone wording unchanged; per-mechanism rollback
   nothing. Rollback: `off`. 10 tests. E-5 replay arm `meta` and spec `p3_e5_recall_gap_v1.json` (8 synthetic
   scenarios: 6 gaps, 2 grounded controls).
 - Cost: 0 calls; about 60 prompt tokens on gated turns only.
+- Merged as #384.
+
+**Batch 3: deterministic appraisal signals (shadow).**
+- New `lilith_router/appraisal.py`. Signals from evidence only, no emotion score: `setback` / `progress` (the owner's
+  own outcome statements: "I got rejected", "didn't get the job", "I passed!") and `goal` (the message shares a content
+  word with an ACTIVE tracked goal's title, read-only from the durable Goals store `GET /os/goals`, 60 s cache,
+  fail-open). Precision cases are in the tests: "failed to see the point", "didn't get your message" and goal-title
+  boilerplate ("follow up on that application") fire nothing.
+- Effects (`appraisal_mode: live` only): a setback maps onto the approved Social Cognition lines (`difficulty`, or
+  `mixed` instead of `playful`); never on a focused or formal turn; no new tone wording. A related goal adds one
+  bounded line (title and state; new wording, G-WIDEN). Progress is recorded only: there is no approved celebration
+  line.
+- Nothing persists (AP-35). Owner turns only; goals-status questions keep their own route. Shadow logs
+  `lane: appraisal` (signal kinds, goal ids, line keys before/after; no text). Rollback: `off`. 10 tests.
+- E-4 replay arm `appraisal: "router"` and spec `p3_e4_appraisal_v1.json` (8 synthetic: 5 setbacks, 2 progress, 1
+  neutral; arms A = deployed tone note, B = A + appraisal).
+- Cost: 0 calls; about 40 prompt tokens when a goal line fires.
 
 ## 4. Feature readiness vs. remaining work
 

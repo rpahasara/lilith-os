@@ -19,6 +19,9 @@ Variant keys (all optional; an empty variant is the baseline):
                     profile block, agent: the ephemeral system prompt). A scenario's own "profile" is added to it
     preferences     "router": also the P-2 router note, selected from the profile entries by the deployed
                     social_preferences module exactly as a live owner turn would (plus the correction hint)
+    appraisal       P-3: "router": the deployed appraisal module over the message and the SYNTHETIC "goals" (variant
+                    plus scenario), applied to the deployed tone note lines and adding the goal line (needs
+                    tone_note "deployed"; the agent arm then also carries the tone note as its turn hint)
     meta            P-3: "ask" | "escalate": the L16 recall-gap control, decided by the deployed metacognition module
                     with the synthetic profile as grounding, exactly as a live owner turn would (note only if it fires)
 
@@ -54,6 +57,27 @@ def preference_parts(scn: dict, variant: dict, sp, focused: bool):
                  sp.render(sp.select(prefs, focused=focused, message=scn["message"]))]
         note = "\n\n".join(p for p in parts if p) or None
     return prof, note
+
+
+def style_parts(scn: dict, variant: dict, focused: bool):
+    """(tone note, goal line) exactly as the router renders them for this scenario: the deployed Social Cognition
+    lines, then (appraisal arm) the deployed appraisal mapping and goal line. (None, None) without tone_note."""
+    if variant.get("tone_note") != "deployed":
+        return None, None
+    from lilith_router import social_cognition as sc
+    users = [c for r, c in scn.get("history", []) if r == "user"]
+    snap = sc.build_social_context(sc.build_social_input(scn["message"], "eval.replay", "telegram"))
+    keys = sc.tone_note_keys(snap, focused=focused, context=sc.tone_context(scn["message"], users))
+    goal = None
+    if variant.get("appraisal") == "router":
+        from lilith_router import appraisal as ap
+        goals = list(variant.get("goals") or []) + list(scn.get("goals") or [])
+        sigs = ap.appraise(scn["message"], goals)
+        keys = list(ap.adjust_lines(keys, sigs, focused=focused))
+        refs = {s.ref for s in sigs if s.kind == "goal"}
+        goal = ap.goal_note([g for g in goals if str(g.get("goalId") or "") in refs])
+    tone = (sc.TONE_HEADER + "\n" + "\n".join("- " + sc.TONE_LINES[k] for k in keys)) if keys else None
+    return tone, goal
 
 
 def meta_note(scn: dict, variant: dict, prof: str):
@@ -93,18 +117,16 @@ def lean_runner(spec):
         hist = [{"role": r, "content": c} for r, c in scn.get("history", [])]
         users = [c for r, c in scn.get("history", []) if r == "user"]
         policy = pol.SOCIAL_POLICY
-        if variant.get("tone_note") == "deployed":
-            d = cl.classify(scn["message"], users, "social" if users else None)
-            snap = sc.build_social_context(sc.build_social_input(scn["message"], "eval.replay", "telegram"))
-            note = sc.tone_note(snap, focused=d.mode != "social" or bool((d.signals or {}).get("tech")),
-                                context=sc.tone_context(scn["message"], users))
-            policy += ("\n\n" + note) if note else ""
+        tone, goal = style_parts(scn, variant, _focused(cl, scn))
+        policy += ("\n\n" + tone) if tone else ""
         prof, pref_note = preference_parts(scn, variant, sp, _focused(cl, scn))
         if pref_note:
             policy += "\n\n" + pref_note                  # the router appends the P-2 note to the lean policy
         mnote = meta_note(scn, variant, prof)
         if mnote:
             policy += "\n\n" + mnote                      # then the P-3 L16 note (turn_context.lean_suffix order)
+        if goal:
+            policy += "\n\n" + goal                       # then the P-3 appraisal goal line
         if variant.get("system_suffix"):
             policy += "\n\n" + variant["system_suffix"]
         msg = (variant.get("message_prefix", "") + "\n\n" + scn["message"]) if variant.get("message_prefix") \
@@ -145,8 +167,9 @@ def agent_runner(spec):
         a = AIAgent(model=model, **{k: rt[k] for k in ("provider", "base_url", "api_key", "api_mode") if k in rt},
                     quiet_mode=True, verbose_logging=False, enabled_toolsets=[], skip_context_files=True,
                     load_soul_identity=True, ephemeral_system_prompt=system, max_iterations=2, **extra)
-        prefix = "\n\n".join(p for p in (variant.get("message_prefix"), pref_note, meta_note(scn, variant, prof))
-                               if p)                                                # the router's turn hint
+        tone, goal = style_parts(scn, variant, _focused(cl, scn))
+        prefix = "\n\n".join(p for p in (variant.get("message_prefix"), tone, pref_note, meta_note(scn, variant, prof),
+                                          goal) if p)                               # the router's turn hint
         msg = (prefix + "\n\n" + scn["message"]) if prefix else scn["message"]
         t0 = time.monotonic()
         r = a.run_conversation(msg, conversation_history=[{"role": x, "content": y} for x, y in scn.get("history", [])])
