@@ -260,6 +260,29 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
 
+    def test_owner_prod_p3_transition_tooling_is_control_only_and_nothing_else_is(self):
+        p3 = (
+            "services/owner-memory-control/tools/owner_prod_release_stages.py",
+            "services/owner-memory-control/tools/owner_prod_operator.py",
+            "services/owner-memory-control/tests/owner_prod_transform.py",
+            "services/owner-memory-control/tests/test_owner_prod_p3_transition.py",
+            "docs/architecture/canonical-memory-p3-dev-transition.md",
+        )
+        modified = ("services/owner-memory-control/tools/owner_prod_signer_upgrade.py",
+                    "services/owner-memory-control/tests/test_owner_prod_signer_upgrade.py")
+        this_pr = (*(changed(path, "A", "000000") for path in p3), *(changed(path) for path in modified),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py"))
+        self.assertEqual(self.classify(*this_pr), gate.CONTROL_ONLY_NO_DEPLOY)
+        for extra in (
+            changed("services/authority-dev/lilith_authority_dev/profile.py"),      # release payload
+            changed("services/core-api/lilith_memory/privacy_forget_runner.py"),    # Core API runtime
+            changed("services/owner-memory-control/tools/owner_prod_keygen.py"),    # a PROD ceremony tool
+            changed(p3[1], "M", "100644", "120000"),                               # symlink swap
+            changed(modified[0], "D", "100644", "000000"),                         # a deletion
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*this_pr[1:], extra), gate.DEPLOY_REQUIRED)
+
     def test_source_consolidation_record_is_control_only_at_its_reviewed_revision(self):
         record = {
             "docs/adr/0016-private-repository-holds-reviewed-runtime-source.md": "A",
@@ -282,6 +305,46 @@ class DevGateClassifierTests(unittest.TestCase):
         ):
             with self.subTest(extra=extra):
                 self.assertEqual(self.classify(*entries[:1], extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
+
+    def test_runner_amendment_is_control_only_at_its_reviewed_revision_only(self):
+        pinned = (
+            "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py",
+            "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py",
+            "docs/architecture/ci-contracts-runner-amendment-20261105.md",
+        )
+        reviewed = {path: gate.PINNED_CANDIDATE_BLOBS[path] for path in pinned}
+        entries = [changed(pinned[0]), changed(pinned[1]), changed(pinned[2], "A", "000000"),
+                   changed(".github/workflows/ci.yml"), changed("scripts/test_memory_broker_stage2_control.py"),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py")]
+        self.assertEqual(self.classify(*entries, blobs=reviewed), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(*entries), gate.DEPLOY_REQUIRED)                  # revision unknown
+        for path in pinned:
+            with self.subTest(other_revision=path):
+                self.assertEqual(self.classify(*entries, blobs={**reviewed, path: "f" * 40}), gate.DEPLOY_REQUIRED)
+        for extra in (
+            changed("services/owner-memory-control/tests/test_b1b3e_mb11_operator.py"),
+            changed("services/owner-memory-control/tools/mb11_operator.py"),
+            changed("docs/architecture/slice-15b2b-b1b3e-mb11-signer-start-design.md"),
+            changed("services/core-api/app.py"),
+            changed(pinned[2], "D", "100644", "000000"),
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*entries, extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
+
+    def test_deploy_gate_runner_addendum_is_control_only_at_the_reviewed_record_only(self):
+        record = "docs/architecture/ci-contracts-runner-amendment-20261105.md"
+        entries = [changed(".github/workflows/deploy-dev.yml"), changed(record),
+                   changed("scripts/test_pr_ci_dev_separation.py"), changed("scripts/test_memory_broker_stage2_control.py"),
+                   changed("scripts/classify_dev_deployment.py"), changed("scripts/test_classify_dev_deployment.py")]
+        reviewed = {record: gate.PINNED_CANDIDATE_BLOBS[record]}
+        self.assertEqual(self.classify(*entries, blobs=reviewed), gate.CONTROL_ONLY_NO_DEPLOY)
+        self.assertEqual(self.classify(*entries, blobs={record: "0169fb517c469f38469fdec056dceb3c75829bca"}),
+                         gate.DEPLOY_REQUIRED)                                    # the #322 revision is superseded
+        self.assertEqual(self.classify(*entries), gate.DEPLOY_REQUIRED)
+        for extra in (changed(".github/workflows/deploy.yml"), changed("scripts/dev_deployer/lilith-dev-deploy"),
+                      changed("services/core-api/app.py")):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.classify(*entries, extra, blobs=reviewed), gate.DEPLOY_REQUIRED)
 
     def test_new_preserved_hermes_source_is_control_only_and_nothing_else_is(self):
         additions = [

@@ -1,0 +1,27 @@
+--- a/plugins/lilith_os/adapter.py
++++ b/plugins/lilith_os/adapter.py
+@@ -39,6 +39,8 @@
+ )
+ from gateway.config import Platform
+ 
++from .lilith_memory_context import DEFAULT_SOCKET, note_for_turn
++
+ logger = logging.getLogger(__name__)
+ 
+ _DEFAULT_PORT = 9901
+@@ -294,6 +296,15 @@
+             user_name=_OPERATOR_NAME,
+             message_id=uuid.uuid4().hex,
+         )
++        # Canonical memory (read-only; the root context service checks Privacy on every turn). The note is the
++        # turn's ephemeral channel_prompt, which Hermes applies at call time and never persists. Any failure
++        # means no note: the turn proceeds without canonical memory, never with a guessed one.
++        try:
++            event.channel_prompt = note_for_turn(
++                os.getenv("LILITH_MEMORY_CONTEXT_SOCKET", DEFAULT_SOCKET), channel="lilith_os", session=session,
++                timeout=20.0)
++        except Exception:
++            event.channel_prompt = None
+ 
+         try:
+             asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)

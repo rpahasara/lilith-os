@@ -17,7 +17,11 @@ concurrency:
 jobs:
   repository-contracts:
     name: Repository contracts
-    runs-on: ubuntu-latest
+    # GitHub-hosted, pinned to the DEV/PROD host OS (Ubuntu 24.04, systemd 255). Owner-approved runner amendment of
+    # 2026-11-05: docs/architecture/ci-contracts-runner-amendment-20261105.md. The floating latest label moved to
+    # Ubuntu 26.04 (systemd 259), which rejects the broker stage-2 probe's systemd-run flags (--pipe with
+    # --remain-after-exit).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:

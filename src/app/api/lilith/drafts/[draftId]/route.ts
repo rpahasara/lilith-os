@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy for a single follow-up draft (Slice 4): read-back (`GET`)
@@ -25,7 +26,7 @@ async function forward(method: "GET" | "DELETE", url: string) {
   try {
     const upstream = await fetch(url, {
       method,
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...coreApiHeaders(true) },
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });

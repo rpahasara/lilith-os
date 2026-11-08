@@ -58,13 +58,15 @@ def readiness_reasons(credential: CredentialStatusV1) -> tuple[str, ...]:
 
 class DevAuthoritySignerCoreV1:
     def __init__(self, credential: CredentialStatusV1, *, recovery: Any = None,
-                 self_view: Callable[[], dict[str, Any]] | None = None, issuance: Any = None):
+                 self_view: Callable[[], dict[str, Any]] | None = None, issuance: Any = None,
+                 profile_name: str = PROFILE):
         if not isinstance(credential, CredentialStatusV1):
             raise TypeError("credential status is required")
         self._credential = credential
         self._recovery = recovery
         self._self_view = self_view
         self._issuance = issuance          # RR-39 governed path (+ First Memory evidence use); None refuses both
+        self._profile_name = profile_name  # DEV_SYNTHETIC, or OWNER_PROD on a production deployment
 
     def _reasons(self) -> list[str]:
         if self._self_view is None:
@@ -74,7 +76,7 @@ class DevAuthoritySignerCoreV1:
 
     def health(self) -> dict[str, Any]:
         return {
-            "profile": PROFILE,
+            "profile": self._profile_name,
             "signingDomain": SIGNING_DOMAIN,
             "foundation": FOUNDATION,
             "service": SERVICE_AVAILABLE,

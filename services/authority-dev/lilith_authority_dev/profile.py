@@ -94,6 +94,56 @@ DEV_AUTHORITY_DOMAIN = "authority.dev-synthetic.memory"
 DEV_LOGICAL_OWNER = "owner.dev-synthetic.v1"
 
 
+# OWNER_PROD (2026-11): the production owner's signer profile. `prod` only, `prod.` key ids carrying `.owner-prod.`;
+# never a `test-only.` key, never `dev`. The two profile types are disjoint: neither validates the other's values.
+PROD_PROFILE = "OWNER_PROD"
+PROD_ENVIRONMENT = "prod"
+PROD_KEY_ID_PREFIX = A.PROD_ROOT_PREFIX  # "prod."
+PROD_KEY_ID_LABEL = ".owner-prod."
+PROD_K_ACT_KEY_ID = "prod.owner-prod.actor.1"
+PROD_POLICY_VERSION = "policy.owner-prod.v1"
+PROD_AUTHORITY_DOMAIN = "authority.owner-prod.memory"
+PROD_LOGICAL_OWNER = "owner.prod.v1"
+PROFILE_BY_ENVIRONMENT = {ENVIRONMENT: PROFILE, PROD_ENVIRONMENT: PROD_PROFILE}
+
+
+@dataclass(frozen=True)
+class OwnerProdSignerProfileV1(DevSyntheticSignerProfileV1):
+    """The OWNER_PROD signer profile: the same bindings as DEV_SYNTHETIC with production values only."""
+
+    def validate(self) -> None:
+        if self.environment != PROD_ENVIRONMENT:
+            raise ProfileError("the OWNER_PROD signer profile admits only environment=prod")
+        if not isinstance(self.key_id, str) or not self.key_id.startswith(PROD_KEY_ID_PREFIX) \
+                or PROD_KEY_ID_LABEL not in self.key_id or self.key_id.startswith(KEY_ID_PREFIX):
+            raise ProfileError("the OWNER_PROD signer profile admits only prod owner-prod key IDs")
+        try:
+            _id(self.key_id, "key_id")
+            _id(self.policy_version, "policy_version")
+            if _id(self.authority_domain, "authority_domain") in A.SIGNING_DOMAINS:
+                raise ProfileError("authorityDomain is a logical context, not a signing domain")
+            K._pattern(self.logical_owner_id, K._LOGICAL_OWNER, "logical_owner_id")
+        except OwnerProofError as exc:
+            raise ProfileError(exc.code) from exc
+
+
+def prod_runtime_profile() -> OwnerProdSignerProfileV1:
+    profile = OwnerProdSignerProfileV1(environment=PROD_ENVIRONMENT, key_id=PROD_K_ACT_KEY_ID,
+                                       authority_domain=PROD_AUTHORITY_DOMAIN, logical_owner_id=PROD_LOGICAL_OWNER,
+                                       policy_version=PROD_POLICY_VERSION)
+    profile.validate()
+    return profile
+
+
+def runtime_profile(environment: str) -> DevSyntheticSignerProfileV1:
+    """The one signer profile for a deployment environment (`dev` or `prod`); anything else refuses."""
+    if environment == ENVIRONMENT:
+        return dev_runtime_profile()
+    if environment == PROD_ENVIRONMENT:
+        return prod_runtime_profile()
+    raise ProfileError("no signer profile for this environment")
+
+
 def dev_runtime_profile() -> DevSyntheticSignerProfileV1:
     profile = DevSyntheticSignerProfileV1(environment=ENVIRONMENT, key_id=PROPOSED_K_ACT_KEY_ID,
                                           authority_domain=DEV_AUTHORITY_DOMAIN, logical_owner_id=DEV_LOGICAL_OWNER,

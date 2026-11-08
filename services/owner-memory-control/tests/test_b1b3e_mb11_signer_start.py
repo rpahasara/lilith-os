@@ -659,6 +659,11 @@ class StaticBoundaryTests(unittest.TestCase):
 # control-side `scripts/probe_signer_restart_boundary.py`; it never names the live operator, the real signer, a real
 # credential or an authority operation. Any other M-B11 reference, any live-capable token, a moved, renamed or
 # altered step, a self-hosted runner, wider permissions, credentials, or a weakened PR / DEV separation fails.
+#
+# Runner amendment (owner-approved 2026-11-05, Option A; record RUNNER_AMENDMENT): the approved job's GitHub-hosted
+# runner label moves from the floating `ubuntu-latest` (now Ubuntu 26.04 / systemd 259) to the fixed
+# `ubuntu-24.04` (systemd 255, the DEV/PROD host OS and the runner the M-B11 design named, design record §6).
+# Only the label changes; every other condition of the exception is unchanged, and any other label still fails.
 APPROVED_WORKFLOW = "ci.yml"
 APPROVED_JOB = "repository-contracts"
 APPROVED_STEP = (
@@ -674,6 +679,9 @@ APPROVED_STEP = (
     "          sudo -n cat \"${RUNNER_TEMP}/mb11-restart-boundary.json\" || true\n"
     "          exit \"${status}\"\n")
 PROBE_SCRIPT = "scripts/probe_signer_restart_boundary.py"
+APPROVED_RUNNER = "ubuntu-24.04"
+SUPERSEDED_RUNNER = "ubuntu-latest"
+RUNNER_AMENDMENT = ROOT / "docs/architecture/ci-contracts-runner-amendment-20261105.md"
 MB11_MARK = re.compile(r"(?i)m-?b11")
 # Live-capable M-B11 / signer / credential / authority operations: never in any workflow.
 LIVE_TOKENS = ("mb11_operator", "mb11_signer_verifier", "mb11_dr5_target", "lilith-authority-hold-dev",
@@ -735,7 +743,7 @@ def mb11_workflow_violations(workflows: dict[str, str]) -> list[str]:
     if len(MB11_MARK.findall(ci)) != len(MB11_MARK.findall(APPROVED_STEP)) or ci.count(PROBE_SCRIPT) != 1:
         out.append("MB11_REFERENCE_OUTSIDE_THE_APPROVED_STEP")
     job = jobs.get(APPROVED_JOB, "")
-    if re.findall(r"(?m)^    runs-on: (.+)$", job) != ["ubuntu-latest"]:
+    if re.findall(r"(?m)^ *runs-on:(.*)$", job) != [" " + APPROVED_RUNNER]:
         out.append("APPROVED_JOB_NOT_ON_A_GITHUB_HOSTED_RUNNER")
     if re.search(r"(?m)^    (?:permissions|environment|container|services|env|if|needs|strategy|uses):", job):
         out.append("APPROVED_JOB_CONTEXT_CHANGED")
@@ -743,6 +751,9 @@ def mb11_workflow_violations(workflows: dict[str, str]) -> list[str]:
     if any(needle not in separation for needle in DEV_SEPARATION):
         out.append("PR_DEV_SEPARATION_WEAKENED")
     return out
+
+
+RUNS_ON = f"    runs-on: {APPROVED_RUNNER}\n"
 
 
 class Mb11WorkflowGuardTests(unittest.TestCase):
@@ -772,8 +783,15 @@ class Mb11WorkflowGuardTests(unittest.TestCase):
             "live command substituted": self.ci.replace(
                 "scripts/probe_signer_restart_boundary.py run --disposable-runner",
                 "services/owner-memory-control/tools/mb11_operator.py mb11 . . go.txt"),
-            "self-hosted runner": self.ci.replace("    name: Repository contracts\n    runs-on: ubuntu-latest\n",
-                                                  "    name: Repository contracts\n    runs-on: self-hosted\n"),
+            "self-hosted runner": self.ci.replace(RUNS_ON, "    runs-on: self-hosted\n"),
+            "self-hosted label list": self.ci.replace(RUNS_ON, "    runs-on: [self-hosted, ubuntu-24.04]\n"),
+            "self-hosted label block": self.ci.replace(RUNS_ON, "    runs-on:\n      - self-hosted\n"),
+            "runner group": self.ci.replace(RUNS_ON, "    runs-on:\n      group: lilith\n"),
+            "superseded floating runner": self.ci.replace(RUNS_ON, "    runs-on: ubuntu-latest\n"),
+            "other hosted image": self.ci.replace(RUNS_ON, "    runs-on: ubuntu-26.04\n"),
+            "larger hosted runner": self.ci.replace(RUNS_ON, "    runs-on: ubuntu-24.04-8core\n"),
+            "expression runner": self.ci.replace(RUNS_ON, "    runs-on: ${{ vars.RUNNER }}\n"),
+            "second runs-on": self.ci.replace(RUNS_ON, RUNS_ON + "    runs-on: self-hosted\n"),
             "wider token permissions": self.ci.replace("permissions:\n  contents: read\n",
                                                        "permissions:\n  contents: write\n", 1),
             "id-token added": self.ci.replace("permissions:\n  contents: read\n",
@@ -809,6 +827,27 @@ class Mb11WorkflowGuardTests(unittest.TestCase):
                             [])
         self.assertIn("MB11_OUTSIDE_APPROVED_WORKFLOW:deploy-dev.yml",
                       self.violations(**{"deploy-dev.yml": deploy + "\n# mb11\n"}))
+
+
+    def test_the_runner_amendment_changes_only_the_runner_label_and_is_recorded(self):
+        job = _jobs(self.ci)[APPROVED_JOB]
+        self.assertEqual(job.count(RUNS_ON), 1)
+        self.assertNotIn(SUPERSEDED_RUNNER, job)
+        # the superseded value restored in place of the approved one is a departure, not a pass
+        self.assertIn("APPROVED_JOB_NOT_ON_A_GITHUB_HOSTED_RUNNER", self.violations(**{
+            APPROVED_WORKFLOW: self.ci.replace(RUNS_ON, f"    runs-on: {SUPERSEDED_RUNNER}\n")}))
+        record = RUNNER_AMENDMENT.read_text(encoding="utf-8")
+        for needle in (f"`{SUPERSEDED_RUNNER}`", f"`{APPROVED_RUNNER}`", "2026-11-05", "PR #183", "#322",
+                       "Option A", "systemd 259", "systemd 255", "GitHub-hosted",
+                       "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py",
+                       "docs/architecture/slice-15b2b-b1b3e-mb11-signer-start-design.md"):
+            self.assertIn(needle, record)
+        state = record.split("## State", 1)[1].splitlines()
+        for line in (f"APPROVED_RUNNER = {APPROVED_RUNNER} (GitHub-hosted)",
+                     "M-B11 EXCEPTION SCOPE = UNCHANGED EXCEPT THE RUNNER LABEL", "M-B11 = NOT AUTHORIZED",
+                     "DEV = NOT TOUCHED", "PROD = NOT TOUCHED", "SYSTEMD_259_PROBE_PORT = FUTURE WORK (NOT IN THIS CHANGE)"):
+            self.assertIn(line, state, line)
+        self.assertIn("docs/architecture/ci-contracts-runner-amendment-20261105.md", self.ci)
 
 
 # ------------------------------------------------------------------------------------------ records ---

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy for the follow-up draft store — collection routes
@@ -30,7 +31,7 @@ async function forward(method: "GET" | "POST", url: string, init?: { body?: stri
   try {
     const upstream = await fetch(url, {
       method,
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers: { "content-type": "application/json", accept: "application/json", ...coreApiHeaders(true) },
       body: init?.body,
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),

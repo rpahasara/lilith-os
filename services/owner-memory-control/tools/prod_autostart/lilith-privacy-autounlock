@@ -1,0 +1,56 @@
+#!/bin/bash
+# LILITH: automatic Privacy unlock for this boot (owner decision 2026-11-06; root oneshot, run by systemd).
+#
+# The owner approved a host COPY of the K-PCK checkpoint key (systemd-creds encrypted) so an ordinary reboot needs no
+# owner-device step. Nothing here changes a contract: the installed owner tool (privacy_checkpoint_tool.py, unchanged)
+# signs THIS boot's challenge only after its own FRESH check against the witness anchor chain and the latest
+# checkpoint, and the installed host step (privacy_freshness_host unlock, unchanged) verifies it and publishes the
+# tmpfs marker. A rolled-back or forked Privacy set is still refused; the gate then simply stays closed.
+# Trade-off (accepted by the owner): root on this VM can now also produce an unlock. The owner's WSL K-PCK and the
+# offline backups remain the authoritative custody.
+#
+#   lilith-privacy-autounlock            unlock unless this boot already has a marker
+#   lilith-privacy-autounlock --force    unlock even if a marker exists (republishes it for the same boot)
+set -euo pipefail
+# umask 022: the host step creates /run/lilith-privacy-fresh after a reboot with mkdir(0o755); a stricter umask
+# makes it 0700 and the context host (uid lilith) then cannot read the marker. Private files below get explicit modes.
+umask 022
+HT=/opt/lilith-first-memory-dev/current
+PY=/opt/lilith-authority-dev/current/venv/bin/python
+CONF=/etc/lilith-privacy-autounlock
+TOOL=/usr/local/lib/lilith-privacy-autounlock/privacy_checkpoint_tool.py
+PRIVACY_DB=/home/lilith/.hermes/lilith-os/canonical/privacy_governance.db
+MARKER=/run/lilith-privacy-fresh/verified
+WITNESS_SOCKET=/run/lilith-recovery-witness/owner.sock
+W=${RUNTIME_DIRECTORY:?run me through lilith-privacy-autounlock.service}
+KEY=${CREDENTIALS_DIRECTORY:?no credential}/kpck-key
+boot=$(cat /proc/sys/kernel/random/boot_id)
+
+host() {
+  "$PY" -I -B -c "import sys; sys.path.insert(0, '$HT/services/core-api'); from lilith_memory import privacy_freshness_host as H; sys.exit(H.main(sys.argv[1:]))" \
+    --environment OWNER_PROD --privacy-db "$PRIVACY_DB" "$@"
+}
+owner() {
+  "$PY" -I -B -c "import runpy, sys; sys.path.insert(0, '$HT/services/core-api'); sys.argv = ['$TOOL'] + sys.argv[1:]; runpy.run_path('$TOOL', run_name='__main__')" "$@"
+}
+
+if [ "${1:-}" != --force ] && grep -q "\"bootId\":\"$boot\"" "$MARKER" 2>/dev/null; then
+  echo "Privacy already unlocked for boot $boot"; exit 0
+fi
+for _ in $(seq 1 30); do [ -S "$WITNESS_SOCKET" ] && break; sleep 2; done
+
+c="$W/custody"; rm -rf -- "$c"; mkdir -m 0700 "$c"
+trap 'rm -rf -- "$c"' EXIT
+install -m 0600 "$KEY" "$c/kpck.key"
+install -m 0600 "$CONF/kpck.pin.json" "$CONF/checkpoints.jsonl" "$c/"
+grep . "$CONF/checkpoints.jsonl" | tail -n 1 > "$W/checkpoint.json"
+
+step() { local name=$1; shift; local out; if ! out=$("$@" 2>&1); then echo "$name REFUSED: ${out:0:400}"; exit 1; fi; echo "$name: ${out:0:160}"; }
+step challenge host challenge --out "$W/challenge.json"
+step export-anchor host export-anchor --out "$W/anchor-chain.json"
+rm -f -- "$W/unlock.json"
+step owner-unlock owner unlock --custody "$c" --challenge "$W/challenge.json" --anchor-chain "$W/anchor-chain.json"   --anchor-pin /etc/lilith-privacy-fresh/kpan.pin.json --at "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" --out "$W/unlock.json"
+step host-unlock host unlock --unlock "$W/unlock.json" --checkpoint "$W/checkpoint.json"
+st=$(host status) || { echo "status REFUSED: $st"; exit 1; }
+echo "status: $st"
+grep -q "\"bootId\":\"$boot\"" "$MARKER" && echo "$st" | grep -Eq '"gate": ?"READY"'

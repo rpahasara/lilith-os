@@ -212,7 +212,7 @@ class RelayRefusalTests(unittest.TestCase):
         import tempfile
         self.root = Path(tempfile.mkdtemp(prefix="f9c-relay-"))
         self.path = self.root / "hermes-forget" / "intent" / "first-interaction.intent"
-        self.env = mock.patch.dict(os.environ, {"LILITH_FORGET_INTENT_PATH": str(self.path)})
+        self.env = mock.patch.dict(os.environ, {"LILITH_FORGET_INTENT_PATH": str(self.path), "LILITH_OS_READ_AUTH": "open-acknowledged"})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.console_calls = 0

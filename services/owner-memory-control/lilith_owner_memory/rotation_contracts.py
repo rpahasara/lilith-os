@@ -479,7 +479,8 @@ def _verify_authorization(value: Any, *, fields: frozenset[str], signing_bytes, 
     try:
         _require(isinstance(registry_root, A.TrustedRegistryRootV1) and environment in DEPLOYMENT_ENVIRONMENTS,
                  "MALFORMED_CONTEXT")
-        _require(registry_root.test_only, "REGISTRY_ROOT_NOT_TEST_ONLY")
+        _require(registry_root.admissible_for(environment),
+                 "AUTHORIZATION_ENVIRONMENT_MISMATCH" if environment == "prod" else "REGISTRY_ROOT_NOT_TEST_ONLY")
         _require(value is not None, "AUTHORIZATION_MISSING")
         _require(isinstance(value, Mapping), "AUTHORIZATION_MALFORMED")
         _require(value.get("signature") is not None, "AUTHORIZATION_UNSIGNED")
@@ -638,7 +639,8 @@ def verify_recovery_witness_v2(*, anchor: R.TrustedWitnessAnchorV1, witness: Map
         _require(isinstance(anchor, R.TrustedWitnessAnchorV1) and isinstance(registry_root, A.TrustedRegistryRootV1)
                  and environment in DEPLOYMENT_ENVIRONMENTS and isinstance(authority_public_keys, frozenset),
                  "MALFORMED_CONTEXT")
-        _require(anchor.test_only, "WITNESS_ANCHOR_NOT_TEST_ONLY")
+        _require(anchor.admissible_for(environment),
+                 "WITNESS_ENVIRONMENT_MISMATCH" if environment == "prod" else "WITNESS_ANCHOR_NOT_TEST_ONLY")
         _require(anchor.public_key != registry_root.public_key and anchor.public_key not in authority_public_keys,
                  "WITNESS_KEY_IS_AUTHORITY_KEY")
         _require(witness is not None, "WITNESS_MISSING")

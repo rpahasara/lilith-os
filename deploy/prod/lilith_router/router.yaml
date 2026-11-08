@@ -1,0 +1,119 @@
+# LILITH Conversation Intelligence Router V2 — runtime config
+#
+# Rollout ladder (change one step at a time, watch decisions.log):
+#   1. enabled: false                      -> router is a complete no-op (DEFAULT)
+#   2. enabled: true,  mode: shadow        -> logs decisions on all traffic, never switches
+#   3. enabled: true,  mode: live,
+#      live_channels: ["discord:<chat_id>"] -> live switching on ONE channel only
+#   4. live_channels: ["*"]                -> global live switching
+#
+# Mode/provider decisions are invisible to the user. Never expose provider or
+# model names in responses.
+
+enabled: true          # master switch — keep OFF until validated
+mode: live            # "shadow" (observe only) | "live" (may switch to Groq)
+live_channels: ["discord:1540720958573125732", "telegram", "lilith_os"]       # allow-list of "platform:chat_id" (or "*"); empty = none live
+
+groq_model: "qwen/qwen3.8-27b"
+groq_provider: "groq"
+
+# Social-turn fallback: if the Groq call fails / rate-limits / times out, the
+# turn retries on this Hermes model carrying the same social behavior policy.
+hermes_model: "gpt-5.6-sol"
+hermes_provider: "openai-codex"
+
+# Full-agent provider fallback (every routed turn; after the social fallback above). Hermes switches only on
+# auth / billing / rate-limit / overload / timeout / missing-model errors, retries just the failed model call (no tool
+# re-run) and returns to the primary next turn. GitHub Copilot Free: 200 chat requests/month, overage not permitted
+# (never billed); gpt-4.1 is the free tool-capable model. Disable: full_agent_fallback: []
+full_agent_fallback:
+  - {provider: copilot, model: gpt-4.1}
+
+recent_turns: 6         # bounded recent context considered by the classifier
+# log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
+
+# ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────
+# Additive. Governs ONLY belief / pending / durable-draft turns; never alters the
+# social/technical/work routing above. Default OFF so deploying the code changes
+# NO behavior. Read per-turn (edits are live — NO gateway restart needed).
+# Ladder:
+#   cognitive_enabled: true, cognitive_mode: shadow        -> detect + log only
+#   cognitive_mode: live, cognitive_channels: ["lilith_os"] -> Home free-chat live
+#   cognitive_channels: ["lilith_os","telegram"]            -> add Telegram
+#   cognitive_channels: ["*"]                               -> all channels
+cognitive_enabled: true
+cognitive_mode: live
+cognitive_channels: ["lilith_os", "telegram"]
+cognitive_draft_dedup: true
+
+# -- Slice 8: Goal / Executive lane (independent rollout; reuses cognitive_channels) --
+# goals_enabled + goals_mode: shadow (detect+log) -> live (inject grounding +
+# create on explicit 'track as a goal'). Read per-turn (no gateway restart to flip).
+goals_enabled: true
+goals_mode: live
+
+# -- Slice 9: Reasoning lane (independent rollout; reuses cognitive_channels) --
+# reasoning_enabled + reasoning_mode: shadow (detect+log) -> live (bounded
+# tool-less reasoning answer). Analytic framings only. Read per-turn.
+reasoning_enabled: true
+reasoning_mode: live
+
+# -- Slice 10: Global Workspace / Attention lane (reuses cognitive_channels) --
+# workspace_enabled + workspace_mode: shadow (build+log snapshot only) -> live
+# (snapshot bounds the Slice 9 ReasoningInput). workspace_capacity = secondary
+# capacity (hard-bounded [0,8]). Read per-turn (no gateway restart to flip).
+workspace_enabled: true
+workspace_mode: live
+workspace_capacity: 4
+
+# -- Slice 11: Motivation / Homeostasis lane (reuses cognitive_channels) --
+# motivation_enabled + motivation_mode: shadow (build+log snapshot only) ->
+# live (eligible MOTIVATION_DRIVE candidates merge into the Workspace pool +
+# bounded motivationSummary on the ReasoningInput). Read per-turn (no restart).
+motivation_enabled: true
+motivation_mode: live
+
+# -- Slice 12: Planning / Replanning lane (reuses cognitive_channels) --
+# planning_enabled + planning_mode: shadow (build+validate+log a plan snapshot
+# only) -> live (PLAN_PROPOSED / USER_DECISION_REQUIRED answer becomes the turn
+# final_response). Proposal-only; no writes/tools/execution. Read per-turn.
+planning_enabled: true
+planning_mode: live
+planning_max_steps: 6
+
+# -- Slice 13: Ethical Deliberation lane (reuses cognitive_channels) --
+# ethics_enabled + ethics_mode: shadow (build+validate+log an advisory result
+# only) -> live (a grounded advisory answer becomes the turn final_response).
+# ADVISORY ONLY; no ALLOW/DENY, no writes/tools/execution, no Policy impersonation.
+ethics_enabled: true
+ethics_mode: live
+ethics_max_concerns: 4
+ethics_max_tensions: 3
+
+# -- Slice 14: Social Cognition observer (reuses cognitive_channels) --
+# TURN-only: compute + validate + safe trace. mode live (owner-approved 2026-11-07) adds a light,
+# optional tone note to the reply model on OWNER turns only (console + owner Telegram DM); every other
+# channel stays shadow. It never changes routes, Social Guard, or Presence rendering. Back to shadow: set
+# social_cognition_mode: shadow.
+social_cognition_enabled: true
+social_cognition_mode: live
+
+# -- Slice 15A: Learning / Consolidation foundation --
+# One-shot, deterministic, bounded, and shadow-only. This does not create
+# canonical LTM and is not connected to prompts, retrieval, or conversation flow.
+memory_consolidation_enabled: true
+memory_consolidation_mode: SHADOW
+
+# -- Slice 15B1: canonical Long-Term Memory foundation --
+# Production apply remains impossible. This switch is checked inside L04.
+# It is independent from the Slice 15A shadow Learning worker above.
+canonical_ltm_enabled: false
+
+# >>> lilith lean social reply (voice-fix L) >>>
+social_lean_enabled: true
+social_lean_channels: ["*"]          # still limited to live_channels
+social_lean_history_turns: 12
+social_lean_max_output_tokens: 600
+social_lean_tpm_budget: 7500
+social_lean_tpd_budget: 190000
+# <<< lilith lean social reply <<<

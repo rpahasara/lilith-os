@@ -1,0 +1,4 @@
+# LILITH PROD: the GitHub deployer (OS Login, non-admin) may run only the fixed PROD deploy helper.
+# No shell, interpreter, systemctl, key, data or unit rule. Installed as /etc/sudoers.d/lilith-deploy (0440).
+Defaults:@DEPLOYER@ env_reset, !requiretty
+@DEPLOYER@ ALL=(root) NOPASSWD: /usr/local/sbin/lilith-deploy core-api *, /usr/local/sbin/lilith-deploy router *, /usr/local/sbin/lilith-deploy hermes-gateway *, /usr/local/sbin/lilith-deploy hermes-approval *, /usr/local/sbin/lilith-deploy status

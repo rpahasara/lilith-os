@@ -1,0 +1,46 @@
+{
+  "release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1",
+  "base_definition": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1/RELEASE-DELTA.json",
+  "note": "The m1 release with the Slice 12 Planning lane also authorized in SHADOW on lilith_os only, the counts-only planning.py, an adapter with hardened Planning detection, one read per route in a turn and no application number in any intent the gateway logs, and the verifier pinning both. Every other lane stays off.",
+  "members": {
+    "RELEASE_ID": {
+      "change": "replace",
+      "from": "36840ea8503a96a7d932aa969bda0776272b42f10e65f4903fb7170a9c1b6b39",
+      "sha256": "e3d4a51ada6f17c4a969a57614cd4a04fcac02072b6e2db9886b9dc04687a97f",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1/RELEASE_ID"
+    },
+    "bin/verify_release.py": {
+      "change": "replace",
+      "sha256": null,
+      "template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1/templates/bin/verify_release.py.tmpl",
+      "template_sha256": "2487b2b6217e7f1e557ced02915821399b86d223c26ae70400a9a44bd39374da",
+      "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1/templates/bin/verify_release.py.tmpl",
+      "base_template_sha256": "9d2e914b18bac139aa62a83fb5a09b944649b98c674a1b75f7f5d5c49fae599a",
+      "placeholder": "__LILITH_GATE_CLIENT_TOKEN__",
+      "rendered": "on the host from the installed m1 verifier (install_p1.sh)"
+    },
+    "home/router.yaml": {
+      "change": "replace",
+      "from": "3ff4d3dc5f0dcfda11b79ca2e026e98b0be5e6460c4e936f2912e268cdd527ff",
+      "sha256": "666b5f2003c40bbfa53a82987cddfdb0eb4511b1f8457b5d0a0d0ac60f2c77cc",
+      "source": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1/home/router.yaml",
+      "installed_as": "/home/lilith/.hermes-dev/lilith_router/router.yaml (root:lilith 0640)"
+    },
+    "home/lilith_router/planning.py": {
+      "change": "replace",
+      "from": "e74f7f7e9c59b7b19bb17eaa4868cf4365a2d3c4edacf7818e887a242703b852",
+      "sha256": "4c74337d76fdd76947c21fb654b4463f6acd1a39db3670737427cf9fb0647e5b",
+      "source": "integrations/hermes/overlays/dev-planning-hardening/lilith_router/planning.py",
+      "installed_as": "/home/lilith/.hermes-dev/lilith_router/planning.py (root:root 0644)"
+    },
+    "home/lilith_router/world_context.py": {
+      "change": "replace",
+      "from": "848fdb7d309659bcc889c8b8284dbe5e5e23830bed0b70e9649f6eabe10340d1",
+      "sha256": "a96d705f8801f6a9689ed0d8f54383bc6de7764c2d92d91ecce00d687d9128db",
+      "source": "integrations/hermes/overlays/dev-cognition-private-intent/lilith_router/world_context.py",
+      "installed_as": "/home/lilith/.hermes-dev/lilith_router/world_context.py (root:root 0644)"
+    }
+  }
+}

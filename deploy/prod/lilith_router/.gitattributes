@@ -1,0 +1,3 @@
+# Byte-exact mirror of the live PROD router (deploy source): no end-of-line conversion; whitespace is content.
+* -text -whitespace
+.gitattributes text

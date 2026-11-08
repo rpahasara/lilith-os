@@ -586,7 +586,7 @@ class ReleaseFileSetTests(unittest.TestCase):
         self.assertEqual([name for name, data in payloads.items() if b"from .evidence_minter import" in data],
                          ["lilith_authority_dev/issuance.py"])
         server = payloads["lilith_authority_dev/server.py"]
-        self.assertIn(b"registration=lambda: HI.read_owner_registration(environment=ENVIRONMENT)", server)
+        self.assertIn(b"registration=lambda: HI.read_owner_registration(environment=environment)", server)
         self.assertNotIn(b"owner_proof=", server)
         self.assertNotIn(b"registered_credentials=", server)
 

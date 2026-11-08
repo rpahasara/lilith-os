@@ -1,4 +1,4 @@
-name: Deploy LILITH Core API
+name: Deploy LILITH to PROD
 
 # Production deployment is owner-dispatched only (ADR-0005: Git-driven from protected main).
 # Merges to main never start it; a dispatch is refused unless it is the exact approved main commit.
@@ -9,6 +9,15 @@ on:
         description: "Exact protected-main SHA approved for this production deployment"
         required: true
         type: string
+      component:
+        description: "What to deploy (each runs its own tests, then the fixed PROD helper /usr/local/sbin/lilith-deploy)"
+        required: true
+        type: choice
+        options:
+          - core-api
+          - router
+          - hermes-gateway
+          - hermes-approval
 
 permissions:
   contents: read
@@ -24,13 +33,11 @@ env:
   GCP_INSTANCE: lilith-01
   GCP_WIF_PROVIDER: projects/763184673487/locations/global/workloadIdentityPools/github-actions/providers/github
   GCP_DEPLOY_SA: github-lilith-deployer@lilith-agent-260823-27389.iam.gserviceaccount.com
-  LOCAL_APP: services/core-api/app.py
-  LIVE_APP: /home/lilith/.hermes/lilith-os/api/app.py
-  SERVICE_NAME: lilith-os-api.service
+  COMPONENT: ${{ inputs.component }}
 
 jobs:
   deploy:
-    name: Deploy core API to GCP
+    name: Deploy ${{ inputs.component }} to lilith-01
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -59,11 +66,42 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate backend locally
+      - name: Test the component
+        shell: bash
         run: |
-          python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
-          python -m py_compile services/core-api/app.py
-          python -m unittest discover -s services/core-api/tests -p "test_*.py"
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pyyaml
+          bash deploy/prod/test_lilith_deploy.sh
+          python -m unittest deploy/prod/tests/test_prod_deploy_source.py deploy/prod/tests/test_owner_memory.py deploy/prod/tests/test_owner_memory_review.py deploy/prod/tests/test_social_cues.py deploy/prod/tests/test_social_tone_live.py deploy/prod/tests/test_full_agent_fallback.py deploy/prod/tests/test_et4_d1.py
+          case "$COMPONENT" in
+            core-api)
+              python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
+              python -m py_compile services/core-api/app.py
+              python -m unittest discover -s services/core-api/tests -p "test_*.py"
+              python -m unittest deploy/prod/tests/test_owner_memory_sync.py ;;
+            router)
+              python -m compileall -q deploy/prod/lilith_router ;;
+            hermes-gateway)
+              python -m py_compile deploy/prod/hermes_gateway/run.py ;;
+            hermes-approval)
+              python -m pip install --disable-pip-version-check -r services/core-api/requirements.txt
+              python -m py_compile deploy/prod/hermes_cli/write_approval_commands.py
+              python -m unittest deploy/prod/tests/test_lilith_first_approval.py ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Build the bundle (only the component's files)
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$COMPONENT" in
+            core-api) tar -cf "$RUNNER_TEMP/bundle.tar" -C services/core-api app.py ;;
+            router)   (cd deploy/prod/lilith_router && tar -cf "$RUNNER_TEMP/bundle.tar" *.py router.yaml) ;;
+            hermes-gateway) tar -cf "$RUNNER_TEMP/bundle.tar" -C deploy/prod/hermes_gateway run.py ;;
+            hermes-approval) tar -cf "$RUNNER_TEMP/bundle.tar" -C deploy/prod/hermes_cli write_approval_commands.py ;;
+          esac
+          tar -tvf "$RUNNER_TEMP/bundle.tar"
+          sha256sum "$RUNNER_TEMP/bundle.tar"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -82,21 +120,17 @@ jobs:
           gcloud auth list --filter=status:ACTIVE --format="value(account)"
           gcloud compute instances describe "${GCP_INSTANCE}" --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --format="value(name,status)"
 
-      - name: Upload deployment candidate
-        env:
-          REMOTE_APP: /tmp/lilith-app-${{ github.sha }}.py
-          REMOTE_SCRIPT: /tmp/lilith-deploy-core-api-${{ github.sha }}.sh
+      - name: Upload the bundle
+        shell: bash
         run: |
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap "${LOCAL_APP}" "${GCP_INSTANCE}:${REMOTE_APP}"
-          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap scripts/deploy_core_api_remote.sh "${GCP_INSTANCE}:${REMOTE_SCRIPT}"
+          gcloud compute scp --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap             "$RUNNER_TEMP/bundle.tar" "${GCP_INSTANCE}:lilith-deploy-${GITHUB_SHA}.tar"
 
-      - name: Deploy with production validation, health check, and rollback
-        env:
-          REMOTE_APP: /tmp/lilith-app-${{ github.sha }}.py
-          REMOTE_SCRIPT: /tmp/lilith-deploy-core-api-${{ github.sha }}.sh
+      - name: Deploy through the fixed helper (tests, backup, restart, smoke check, rollback)
+        shell: bash
         run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap --command="sudo bash '${REMOTE_SCRIPT}' '${REMOTE_APP}' '${LIVE_APP}' '${SERVICE_NAME}'"
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap             --command="set -o pipefail; trap 'rm -f \"\$HOME/lilith-deploy-${GITHUB_SHA}.tar\"' EXIT; sudo -n /usr/local/sbin/lilith-deploy ${COMPONENT} \"\$HOME/lilith-deploy-${GITHUB_SHA}.tar\" ${GITHUB_SHA}"
 
       - name: Final production verification
+        shell: bash
         run: |
-          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap --command="curl -fsS http://127.0.0.1:8765/health && echo"
+          gcloud compute ssh "${GCP_INSTANCE}" --quiet --project="${GCP_PROJECT_ID}" --zone="${GCP_ZONE}" --tunnel-through-iap             --command="curl -fsS http://127.0.0.1:8765/health && echo; systemctl is-active hermes-gateway.service lilith-os-api.service; sudo -n /usr/local/sbin/lilith-deploy status | tail -3"

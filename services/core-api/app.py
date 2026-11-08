@@ -1,3 +1,4 @@
+import contextvars as _contextvars
 import html
 import json
 import re
@@ -7,6 +8,7 @@ import os as _os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+from fastapi.responses import JSONResponse as _JSONResponse
 from fastapi import FastAPI, HTTPException
 
 HOME = Path(_os.getenv("LILITH_HOME", Path.home()))
@@ -42,6 +44,8 @@ def health():
         "version": "0.1.0",
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "database": DB.exists(),
+        "writeAuth": _write_auth_state(),
+        "readAuth": _read_auth_state(),
     }
 
 
@@ -1522,6 +1526,77 @@ def _capture_store():
     return ConversationCaptureStore(_capture_db_path(), privacy_gate=_capture_privacy_gate, provisioned_only=True)
 
 
+_request_peer = _contextvars.ContextVar("lilith_request_peer", default=None)
+
+
+def _trusted_local_caller() -> bool:
+    """The on-host router. Off by default. A token adds nothing against a process that already runs as the same user and can read the database itself, and IAP arrives from its own range, never loopback."""
+    return _os.getenv("LILITH_OS_TRUST_LOOPBACK", "") == "1" and _request_peer.get() in ("127.0.0.1", "::1")
+
+
+def _write_auth_state() -> str:
+    """enforced, open-acknowledged or refused. Anything unset or unknown is refused: a lost setting must not open writes."""
+    mode = _os.getenv("LILITH_OS_WRITE_AUTH", "")
+    if mode == "enforced":
+        return "enforced" if len(_os.getenv("LILITH_OS_WRITE_TOKEN", "")) >= 32 else "refused"
+    return "open-acknowledged" if mode == "open-acknowledged" else "refused"
+
+
+def _require_write_auth(credential) -> None:
+    """Fail-closed check for Goals, Tasks and Drafts writes. Runs before any DB access."""
+    state = _write_auth_state()
+    if state == "open-acknowledged":
+        return
+    if state == "refused":
+        raise HTTPException(status_code=503, detail="WRITE_AUTH_UNCONFIGURED")
+    if _trusted_local_caller():
+        return
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), _os.getenv("LILITH_OS_WRITE_TOKEN", "").encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="WRITE_NOT_AUTHENTICATED")
+
+
+# Owner-content reads. Deny by default: every GET is protected unless listed here, so a new route can't be left open by forgetting it.
+_PUBLIC_READS = frozenset({"/health"})
+
+
+def _read_auth_state() -> str:
+    """Same three states as writes. Anything unset or unknown is refused: a lost setting must not open owner content."""
+    mode = _os.getenv("LILITH_OS_READ_AUTH", "")
+    if mode == "enforced":
+        return "enforced" if len(_os.getenv("LILITH_OS_READ_TOKEN", "")) >= 32 else "refused"
+    return "open-acknowledged" if mode == "open-acknowledged" else "refused"
+
+
+def _read_auth_decision(path, credential, trust_local=True):
+    """None to allow, or (status, detail). Pure, so it is tested without an HTTP client."""
+    if path in _PUBLIC_READS:
+        return None
+    state = _read_auth_state()
+    if state == "open-acknowledged":
+        return None
+    if state == "refused":
+        return 503, "READ_AUTH_UNCONFIGURED"
+    if trust_local and _trusted_local_caller():
+        return None
+    if not isinstance(credential, str) or not _hmac.compare_digest(
+        credential.encode("utf-8"), _os.getenv("LILITH_OS_READ_TOKEN", "").encode("utf-8")
+    ):
+        return 401, "READ_NOT_AUTHENTICATED"
+    return None
+
+
+@app.middleware("http")
+async def _owner_read_gate(request, call_next):
+    _request_peer.set(request.client.host if request.client else None)
+    if request.method in ("GET", "HEAD"):
+        blocked = _read_auth_decision(request.url.path, request.headers.get("x-lilith-os-read"))
+        if blocked:
+            return _JSONResponse(status_code=blocked[0], content={"detail": blocked[1]})
+    return await call_next(request)
+
+
 def _require_capture_auth(credential) -> None:
     if not _capture_enabled():
         raise HTTPException(status_code=403, detail="CAPTURE_INACTIVE")
@@ -1576,6 +1651,7 @@ def _refuse_while_forget_pending() -> None:
 def os_conversation(
     payload: dict = _Body(default=None),
     x_lilith_os_owner_capture: str = _Header(default=None),
+    x_lilith_os_read: str = _Header(default=None),
 ):
     _refuse_while_forget_pending()
     if not isinstance(payload, dict):
@@ -1588,6 +1664,9 @@ def os_conversation(
         raise HTTPException(status_code=400, detail="message is required")
     if session.startswith(_CAPTURE_PREFIX):
         return _captured_conversation(payload, message, session, x_lilith_os_owner_capture)
+    blocked = _read_auth_decision("/os/conversation", x_lilith_os_read, trust_local=False)     # a turn returns owner context and spends the provider budget, so it is an owner read
+    if blocked:
+        raise HTTPException(status_code=blocked[0], detail=blocked[1])
     return _relay_conversation(message, session)
 
 
@@ -1797,7 +1876,8 @@ def _transition_ok(old_status, old_attempt, new_status, new_attempt):
 
 
 @app.post("/os/tasks")
-def create_task(payload: dict = _Body(default=None)):
+def create_task(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     record = payload.get("record", payload)
@@ -1868,7 +1948,8 @@ def get_task(task_id: str):
 
 
 @app.patch("/os/tasks/{task_id}")
-def update_task(task_id: str, payload: dict = _Body(default=None)):
+def update_task(task_id: str, payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     record = payload.get("record", payload)
@@ -2019,7 +2100,8 @@ def _row_to_draft(row):
 
 
 @app.post("/os/drafts")
-def create_draft(payload: dict = _Body(default=None)):
+def create_draft(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     draft_id = payload.get("draftId")
@@ -2126,7 +2208,8 @@ def get_draft(draft_id: str):
 
 
 @app.delete("/os/drafts/{draft_id}")
-def discard_draft(draft_id: str):
+def discard_draft(draft_id: str, x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     # Reversibility: soft-discard keeps the audit row but flips status.
     if not _DRAFT_ID_RE.match(draft_id or ""):
         raise HTTPException(status_code=400, detail="invalid draftId")
@@ -2468,9 +2551,36 @@ def world_freshness_sweep(now=None):
         conn.close()
 
 
+def _world_erasure_guard():
+    """None without a configured ledger. Otherwise the tombstones FORGET left. Raises on anything it can't read or trust, and the caller then ingests nothing."""
+    path = _os.getenv("LILITH_WORLD_ERASURE_LEDGER", "")
+    if not path:
+        return None
+    key = Path(_os.environ["LILITH_WORLD_ERASURE_KEY"]).read_bytes().strip()
+    if len(key) < 32:
+        raise ValueError("weak_key")
+    lines = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line] if Path(path).exists() else []
+    finished = {e["erasure_id"] for e in lines if e.get("state") in ("COMPLETE", "ABORTED")}
+    if {e["erasure_id"] for e in lines if e.get("state") == "PENDING"} - finished:
+        raise ValueError("erasure_in_progress")
+    done = [e for e in lines if e.get("state") == "COMPLETE"]
+    return {"key": key, "through": max([e["through_event_id"] for e in done], default=0),
+            "tombstones": {t for e in done for t in e["tombstones"]}}
+
+
+def _world_tombstoned(guard, entity_type, entity_id):
+    if guard is None:
+        return False
+    return _hmac.new(guard["key"], ("%s|%s" % (entity_type, entity_id)).encode("utf-8"), _hashlib.sha256).hexdigest() in guard["tombstones"]
+
+
 def world_ingest_career(limit=200):
     """First live domain. Reads job_applications (+companies). NULL fields skipped
     (R7/R8 — never ingest emptiness). follow_up is NOT emitted here (no column)."""
+    try:
+        guard = _world_erasure_guard()
+    except Exception:
+        return {"refused": "erasure_ledger_unreadable", "applications": 0, "observations": 0}
     conn = db()
     try:
         _ensure_world_schema(conn)
@@ -2481,6 +2591,8 @@ def world_ingest_career(limit=200):
         n = 0
         for a in apps:
             eid = a["id"]
+            if _world_tombstoned(guard, "career.application", eid):
+                continue
             prov = dict(source_type="career.application", source_id="career-store",
                         origin_ref="job_applications/%s" % eid, observed_at=a["last_activity"],
                         note=("acct:%s" % a["source_account"]) if a["source_account"] else None)
@@ -2588,6 +2700,8 @@ def os_world(entity_type: str = None, entity_id: str = None,
             q += " AND lifecycle_state != 'SUPERSEDED'"
         if entity_type:
             q += " AND entity_type=?"; args.append(entity_type)
+        else:   # owner-approved memories are owner context: only on an explicit entity_type request
+            q += " AND entity_type != 'owner'"
         if entity_id:
             q += " AND entity_id=?"; args.append(str(entity_id))
         q += " ORDER BY entity_type, entity_id, predicate LIMIT ?"; args.append(int(limit))
@@ -2682,11 +2796,17 @@ def world_ingest_from_events(limit=1000):
     duplicate evidence even if the same events are reprocessed after a crash before
     the cursor advanced. Never fabricates predicates; a missing application or NULL
     field is skipped, never written as an empty value."""
+    try:
+        guard = _world_erasure_guard()
+    except Exception:
+        return {"refused": "erasure_ledger_unreadable", "new_events": 0, "beliefs_touched": 0}
     conn = db()
     try:
         _ensure_world_schema(conn)
         _ensure_world_ingest_schema(conn)
         last = _world_cursor_get(conn, "career_events")
+        if guard is not None:
+            last = max(last, guard["through"])      # a restored cursor must not replay events FORGET already covered
         events = conn.execute(
             "SELECT id, entity_type, entity_id, source, confidence, created_at "
             "FROM career_events WHERE id > ? ORDER BY id LIMIT ?", (last, limit)).fetchall()
@@ -2702,6 +2822,8 @@ def world_ingest_from_events(limit=1000):
                 latest_evt[e["entity_id"]] = (e["id"], e["source"], e["confidence"], e["created_at"])
         touched = 0
         for aid, (evid, src, conf, cat) in latest_evt.items():
+            if _world_tombstoned(guard, "career.application", aid):
+                continue
             row = conn.execute(
                 "SELECT ja.id, ja.role_title, ja.stage, ja.last_activity, ja.source_account, "
                 "c.name AS company FROM job_applications ja LEFT JOIN companies c ON c.id = ja.company_id "
@@ -3369,7 +3491,8 @@ def goal_focus():
     conn = _goals_db()
     try:
         result = _arbitrate(conn)
-        _record_focus_trace(conn, result)
+        if _os.getenv("LILITH_OS_FOCUS_READ_ONLY") != "1":      # off until the owner decides: PROD has goals, so today every changed focus read writes a trace
+            _record_focus_trace(conn, result)
         return result
     finally:
         conn.close()
@@ -3392,7 +3515,9 @@ def get_goal(goal_id: str):
 # ── Controlled write API (typed operations; NO generic setGoal/setState) ────
 
 @app.post("/os/goals")
-def post_goal(payload: dict = _Body(default=None)):
+def post_goal(payload: dict = _Body(default=None),
+              x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     conn = _goals_db()
@@ -3411,7 +3536,9 @@ def post_goal(payload: dict = _Body(default=None)):
 
 
 @app.post("/os/goals/{goal_id}/transition")
-def post_goal_transition(goal_id: str, payload: dict = _Body(default=None)):
+def post_goal_transition(goal_id: str, payload: dict = _Body(default=None),
+                         x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):
@@ -3428,7 +3555,9 @@ def post_goal_transition(goal_id: str, payload: dict = _Body(default=None)):
 
 
 @app.post("/os/goals/{goal_id}/link_task")
-def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None)):
+def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None),
+                        x_lilith_os_write: str = _Header(default=None)):
+    _require_write_auth(x_lilith_os_write)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     if not _GOAL_ID_RE.match(goal_id or ""):
@@ -3471,4 +3600,281 @@ def post_goal_link_task(goal_id: str, payload: dict = _Body(default=None)):
 
 # ============================================================================
 # END SLICE 8 — GOAL / EXECUTIVE SYSTEM V1
+# ============================================================================
+
+
+# ============================================================================
+# BEGIN OWNER MEMORY — World Model record of owner-approved memories  [additive; append-only]
+# Owner decision 2026-11-06: LILITH OS (not Hermes) holds every memory the owner approved, so a new agent runtime,
+# model or VM can recover them. Compatibility batch 1: Hermes' USER.md / MEMORY.md entries are mirrored here with
+# honest provenance. Each memory is its own World Model belief (entity owner/owner, predicate memory.<store>.<id>),
+# so different memories never overwrite each other; conflicts stay visible. A belief only stops being current through
+# an explicit owner-approved replace or removal (lifecycle SUPERSEDED, with evidence and trace), never because a file
+# entry went missing. Reuses _world_reconcile / _world_trace; owner beliefs are left out of the default /os/world
+# overview (see os_world), so they reach no lane prompt unless asked for by entity_type.
+# ============================================================================
+
+OWNER_MEMORY_ENTITY = "owner"
+OWNER_MEMORY_STORES = ("user", "memory")
+OWNER_MEMORY_KINDS = ("HERMES_PREEXISTING_IMPORT", "OWNER_APPROVED_PROPOSAL")
+OWNER_MEMORY_SOURCE_CLASS = "OWNER_MEMORY"
+_OWNER_MEMORY_PROPOSAL = re.compile(r"[A-Za-z0-9._:-]{1,64}\Z")
+_OWNER_MEMORY_ID = re.compile(r"om_[0-9a-f]{20}\Z")
+_OWNER_MEMORY_MAX_TEXT = 2000
+
+
+def owner_memory_id(store: str, text: str) -> str:
+    """Stable identifier: the same store + text (whitespace-normalised) is always the same memory."""
+    norm = " ".join(str(text).split())
+    return "om_" + _hashlib.sha256((store + "\n" + norm).encode("utf-8")).hexdigest()[:20]
+
+
+def _owner_memory_key(store: str, entry_id: str) -> str:
+    return _world_key(OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY, "memory.%s.%s" % (store, entry_id))
+
+
+def _owner_memory_provenance(prov):
+    if not isinstance(prov, dict):
+        raise HTTPException(status_code=400, detail="provenance must be an object")
+    kind = prov.get("kind")
+    if kind not in OWNER_MEMORY_KINDS:
+        raise HTTPException(status_code=400, detail="provenance.kind must be one of %s" % (OWNER_MEMORY_KINDS,))
+    pid = prov.get("proposal_id")
+    if kind == "OWNER_APPROVED_PROPOSAL" and not (isinstance(pid, str) and _OWNER_MEMORY_PROPOSAL.match(pid)):
+        raise HTTPException(status_code=400, detail="an approved memory needs its proposal_id")
+    if kind == "HERMES_PREEXISTING_IMPORT" and pid is not None:
+        raise HTTPException(status_code=400, detail="a pre-existing import has no proposal")
+    approved_at = prov.get("approved_at")
+    if approved_at is not None:
+        if kind != "OWNER_APPROVED_PROPOSAL" or not isinstance(approved_at, str):
+            raise HTTPException(status_code=400, detail="approved_at only for an approved memory")
+        try:
+            datetime.fromisoformat(approved_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="approved_at must be ISO 8601")
+    channel, note = prov.get("channel"), prov.get("note")
+    for name, v in (("channel", channel), ("note", note)):
+        if v is not None and not (isinstance(v, str) and len(v) <= 300):
+            raise HTTPException(status_code=400, detail="%s must be a short string" % name)
+    origin = "%s:%s" % (kind, pid or "import")
+    return kind, pid, approved_at, channel, note, origin
+
+
+def _owner_memory_supersede(conn, key, reason, origin, pid, note):
+    row = conn.execute("SELECT * FROM world_belief WHERE key=?", (key,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=409, detail="unknown owner memory: %s" % key.rsplit(".", 1)[-1])
+    if row["lifecycle_state"] == "SUPERSEDED":
+        return False
+    now = _wm_now()
+    conn.execute(
+        "INSERT INTO world_belief_evidence (belief_key, source_class, source_id, source_type, correlation_id,"
+        " value_json, epistemic_state, confidence, observed_at, ingested_at, origin_ref, note, superseded)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+        (key, OWNER_MEMORY_SOURCE_CLASS, pid, "OWNER_APPROVED_PROPOSAL", origin, row["value_json"],
+         row["epistemic_state"], row["confidence"], None, now, origin, reason + (": " + note if note else "")))
+    conn.execute("UPDATE world_belief SET lifecycle_state='SUPERSEDED', updated_at=? WHERE key=?", (now, key))
+    _world_trace(conn, origin, key, now, row["lifecycle_state"], "SUPERSEDED", row["epistemic_state"],
+                 row["epistemic_state"], row["confidence"], row["confidence_basis"], OWNER_MEMORY_SOURCE_CLASS, reason)
+    return True
+
+
+@app.post("/os/owner-memory")
+def post_owner_memory(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    """Record one owner-approved memory (assert) or an owner-approved removal (retract). Idempotent per provenance."""
+    _require_write_auth(x_lilith_os_write)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    action = payload.get("action", "assert")
+    store = payload.get("store")
+    if store not in OWNER_MEMORY_STORES:
+        raise HTTPException(status_code=400, detail="store must be user or memory")
+    kind, pid, approved_at, channel, note, origin = _owner_memory_provenance(payload.get("provenance"))
+    _world_ensure_once()
+    conn = db()
+    try:
+        _ensure_world_schema(conn)
+        if action == "retract":
+            if kind != "OWNER_APPROVED_PROPOSAL":
+                raise HTTPException(status_code=400, detail="only an owner-approved removal retracts")
+            entry_id = payload.get("entry_id")
+            if not (isinstance(entry_id, str) and _OWNER_MEMORY_ID.match(entry_id)):
+                raise HTTPException(status_code=400, detail="entry_id required")
+            changed = _owner_memory_supersede(conn, _owner_memory_key(store, entry_id), "owner_approved_removal",
+                                              origin, pid, note)
+            _ensure_l18_schema(conn)
+            _l18_event(conn, "RETRACTED", proposal_id=pid, store=store, entry_id=entry_id, source=channel)
+            conn.commit()
+            return {"entry_id": entry_id, "action": "retracted" if changed else "noop"}
+        if action != "assert":
+            raise HTTPException(status_code=400, detail="action must be assert or retract")
+        text = payload.get("text")
+        if not (isinstance(text, str) and text.strip() and len(text) <= _OWNER_MEMORY_MAX_TEXT):
+            raise HTTPException(status_code=400, detail="text must be 1..%d characters" % _OWNER_MEMORY_MAX_TEXT)
+        text = text.strip()
+        supersedes = payload.get("supersedes") or []
+        if not (isinstance(supersedes, list) and all(isinstance(s, str) and _OWNER_MEMORY_ID.match(s) for s in supersedes)):
+            raise HTTPException(status_code=400, detail="supersedes must be a list of entry ids")
+        if supersedes and kind != "OWNER_APPROVED_PROPOSAL":
+            raise HTTPException(status_code=400, detail="only an owner-approved change supersedes")
+        entry_id = owner_memory_id(store, text)
+        if entry_id in supersedes:
+            raise HTTPException(status_code=400, detail="a memory cannot supersede itself")
+        key = _owner_memory_key(store, entry_id)
+        for old in supersedes:                       # validate every target before writing anything
+            if conn.execute("SELECT 1 FROM world_belief WHERE key=?", (_owner_memory_key(store, old),)).fetchone() is None:
+                raise HTTPException(status_code=409, detail="unknown owner memory: %s" % old)
+        seen = conn.execute("SELECT 1 FROM world_belief_evidence WHERE belief_key=? AND origin_ref=? LIMIT 1",
+                            (key, origin)).fetchone()
+        if seen:
+            result = {"key": key, "action": "noop", "reason": "already_recorded"}
+        else:
+            result = _world_reconcile(
+                conn, OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY, "memory.%s.%s" % (store, entry_id),
+                {"entry_id": entry_id, "store": store, "text": text}, "USER_ASSERTED",
+                OWNER_MEMORY_SOURCE_CLASS, source_id=pid, source_type=kind, correlation_id=origin,
+                observed_at=approved_at, origin_ref=origin, note=" | ".join(x for x in (channel, note) if x) or None)
+        superseded = [old for old in supersedes
+                      if _owner_memory_supersede(conn, _owner_memory_key(store, old), "owner_approved_replace",
+                                                 origin, pid, "superseded by %s" % entry_id)]
+        _ensure_l18_schema(conn)          # L18: the learning event for this write (replays restore a missing one)
+        _l18_event(conn, "APPROVED" if kind == "OWNER_APPROVED_PROPOSAL" else "IMPORTED", proposal_id=pid,
+                   store=store, entry_id=entry_id, text=text, source=channel, at=approved_at)
+        for old in supersedes:
+            _l18_event(conn, "SUPERSEDED", proposal_id=pid, store=store, entry_id=old, detail="superseded by " + entry_id)
+        conn.commit()
+        return {"entry_id": entry_id, "action": result.get("action"), "superseded": superseded}
+    finally:
+        conn.close()
+
+
+@app.get("/os/owner-memory")
+def get_owner_memory(include_superseded: int = 0):
+    """Export: every owner-approved memory LILITH OS holds, with its provenance. Needs no Hermes file."""
+    _world_ensure_once()
+    conn = _world_ro_conn()
+    try:
+        q = "SELECT * FROM world_belief WHERE entity_type=? AND entity_id=? AND predicate LIKE 'memory.%'"
+        if not include_superseded:
+            q += " AND lifecycle_state != 'SUPERSEDED'"
+        rows = conn.execute(q + " ORDER BY created_at, key", (OWNER_MEMORY_ENTITY, OWNER_MEMORY_ENTITY)).fetchall()
+        entries = []
+        for r in rows:
+            value = json.loads(r["value_json"])
+            ev = conn.execute("SELECT source_type, source_id, origin_ref, observed_at, ingested_at, note FROM"
+                              " world_belief_evidence WHERE belief_key=? ORDER BY id", (r["key"],)).fetchall()
+            entries.append({
+                "entry_id": value.get("entry_id"), "store": value.get("store"), "text": value.get("text"),
+                "lifecycle_state": r["lifecycle_state"], "epistemic_state": r["epistemic_state"],
+                "created_at": r["created_at"], "updated_at": r["updated_at"],
+                "provenance": [{"kind": e["source_type"], "proposal_id": e["source_id"], "origin_ref": e["origin_ref"],
+                                "approved_at": e["observed_at"], "recorded_at": e["ingested_at"], "note": e["note"]}
+                               for e in ev]})
+        return {"entries": entries, "count": len(entries)}
+    finally:
+        conn.close()
+
+# ============================================================================
+# END OWNER MEMORY
+# ============================================================================
+
+
+# ============================================================================
+# BEGIN L18 LEARNING EVENTS — owner-memory learning stream  [additive; append-only]
+# Owner decision 2026-11-06: L18 owns learning events and provenance; the World Model owns the resulting beliefs.
+# Every owner-memory write records its event in the SAME transaction (APPROVED / IMPORTED / SUPERSEDED / RETRACTED);
+# PROPOSED and REJECTED come from the runtime (snapshot job, /memory reject) through POST /os/learning-events.
+# Events are idempotent (stable event_id). Separate from the closed Slice 15A career ledger (learning_store.py).
+# ============================================================================
+
+L18_EVENT_KINDS = ("PROPOSED", "REJECTED", "APPROVED", "IMPORTED", "SUPERSEDED", "RETRACTED")
+L18_RUNTIME_KINDS = ("PROPOSED", "REJECTED")
+_l18_schema_ready = False
+
+
+def _ensure_l18_schema(conn):
+    global _l18_schema_ready
+    if _l18_schema_ready:
+        return
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS l18_learning_event ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,"
+        " proposal_id TEXT, store TEXT, entry_id TEXT, text TEXT, source TEXT, at TEXT NOT NULL, detail TEXT);"
+        "CREATE INDEX IF NOT EXISTS ix_l18_event_kind ON l18_learning_event(kind, at);"
+        "CREATE INDEX IF NOT EXISTS ix_l18_event_proposal ON l18_learning_event(proposal_id);")
+    conn.commit()
+    _l18_schema_ready = True
+
+
+def _l18_event(conn, kind, *, proposal_id=None, store=None, entry_id=None, text=None, source=None, detail=None, at=None):
+    """Insert one learning event unless the same one exists. Does not commit (the caller's transaction does)."""
+    norm = " ".join(str(text).split()) if text else ""
+    event_id = "l18_" + _hashlib.sha256("|".join((kind, proposal_id or "", store or "", entry_id or "", norm))
+                                         .encode("utf-8")).hexdigest()[:24]
+    conn.execute(
+        "INSERT OR IGNORE INTO l18_learning_event (event_id, kind, proposal_id, store, entry_id, text, source, at, detail)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
+        (event_id, kind, proposal_id, store, entry_id, text, source, at or _wm_now(), detail))
+    return event_id
+
+
+@app.post("/os/learning-events")
+def post_learning_events(payload: dict = _Body(default=None), x_lilith_os_write: str = _Header(default=None)):
+    """Runtime learning events: a proposal was staged (PROPOSED) or the owner rejected it (REJECTED)."""
+    _require_write_auth(x_lilith_os_write)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    kind, pid = payload.get("kind"), payload.get("proposal_id")
+    if kind not in L18_RUNTIME_KINDS:
+        raise HTTPException(status_code=400, detail="kind must be PROPOSED or REJECTED")
+    if not (isinstance(pid, str) and _OWNER_MEMORY_PROPOSAL.match(pid)):
+        raise HTTPException(status_code=400, detail="proposal_id required")
+    items = payload.get("items")
+    if not (isinstance(items, list) and 0 < len(items) <= 20):
+        raise HTTPException(status_code=400, detail="items must list 1..20 writes")
+    clean = []
+    for it in items:
+        if not isinstance(it, dict) or it.get("store") not in OWNER_MEMORY_STORES:
+            raise HTTPException(status_code=400, detail="each item needs store user or memory")
+        action, text = it.get("action"), it.get("text")
+        if action not in ("add", "replace", "remove"):
+            raise HTTPException(status_code=400, detail="item action must be add, replace or remove")
+        if not (isinstance(text, str) and text.strip() and len(text) <= _OWNER_MEMORY_MAX_TEXT):
+            raise HTTPException(status_code=400, detail="item text must be 1..%d characters" % _OWNER_MEMORY_MAX_TEXT)
+        clean.append((it["store"], action, text.strip()))
+    source = payload.get("source")
+    if source is not None and not (isinstance(source, str) and len(source) <= 100):
+        raise HTTPException(status_code=400, detail="source must be a short string")
+    conn = db()
+    try:
+        _ensure_l18_schema(conn)
+        ids = [_l18_event(conn, kind, proposal_id=pid, store=s, text=t, source=source, detail=a) for s, a, t in clean]
+        conn.commit()
+        return {"recorded": ids}
+    finally:
+        conn.close()
+
+
+@app.get("/os/learning-events")
+def get_learning_events(kind: str = None, limit: int = 500):
+    """Export the learning stream (oldest first). Needs no Hermes file. A read never writes (no schema creation)."""
+    conn = _world_ro_conn()
+    try:
+        q, args = "SELECT * FROM l18_learning_event", []
+        if kind:
+            q += " WHERE kind=?"; args.append(kind)
+        q += " ORDER BY id LIMIT ?"; args.append(max(1, min(int(limit), 5000)))
+        try:
+            rows = conn.execute(q, args).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            rows = []
+        return {"events": [{k: r[k] for k in ("event_id", "kind", "proposal_id", "store", "entry_id", "text", "source",
+                                              "at", "detail")} for r in rows], "count": len(rows)}
+    finally:
+        conn.close()
+
+# ============================================================================
+# END L18 LEARNING EVENTS
 # ============================================================================

@@ -71,15 +71,20 @@ def containment_hmac_owner() -> dict:
     return {**body, "signature": S.b64(tag)}
 
 
-def prod_registry(keys=None) -> dict:
+# OWNER_PROD (2026-11): a `prod` context requires a `prod.` registry root (a `test-only.` root is refused there).
+PROD_ROOT_KEY_ID = "prod.registry-root-test-1"
+
+
+def prod_registry(keys=None, root_key_id=PROD_ROOT_KEY_ID) -> dict:
     keys = keys if keys is not None else [S.key_record("actor.current-2", environment="prod",
                                                        createdAt="2026-09-26T00:00:00Z",
                                                        notBefore="2026-09-26T00:00:00Z", registryVersion=3)]
-    return S.registry(keys=keys, environment="prod")
+    return S.registry(keys=keys, environment="prod", registryRootKeyId=root_key_id)
 
 
 def prod_context(**overrides):
-    return S.context(environment="prod", registry_root=S.trusted_root(environment="prod"), **overrides)
+    return S.context(environment="prod", registry_root=S.trusted_root(key_id=PROD_ROOT_KEY_ID, environment="prod"),
+                     **overrides)
 
 
 # (name, callable returning a result, expected NOT_ACCEPTED reason)
@@ -135,7 +140,7 @@ CASES = [
     # Registry binding to trusted context
     ("registry-dev-in-test-context", lambda: reg_result(reg=S.registry(environment="dev", keys=[S.key_record("actor.current-2", environment="dev", createdAt="2026-09-26T00:00:00Z", notBefore="2026-09-26T00:00:00Z", registryVersion=3)])), "REGISTRY_ENVIRONMENT_MISMATCH"),
     ("registry-root-for-other-environment", lambda: reg_result(ctx=S.context(registry_root=S.trusted_root(environment="dev")), reg=S.registry()), "REGISTRY_ENVIRONMENT_MISMATCH"),
-    ("registry-prod-in-dev-context", lambda: reg_result(ctx=S.context(environment="dev", registry_root=S.trusted_root(environment="dev")), reg=prod_registry()), "REGISTRY_ENVIRONMENT_MISMATCH"),
+    ("registry-prod-in-dev-context", lambda: reg_result(ctx=S.context(environment="dev", registry_root=S.trusted_root(environment="dev")), reg=prod_registry(root_key_id=S.ROOT_KEY_ID)), "REGISTRY_ENVIRONMENT_MISMATCH"),
     ("registry-downgrade", lambda: reg_result(reg=S.registry(registryVersion=2, keys=[k for k in S.default_keys() if k["keyId"] != "actor.current-2"])), "REGISTRY_DOWNGRADE"),
     ("registry-stale-version-vs-trusted-higher", lambda: reg_result(ctx=S.context(trusted_minimum_registry_version=7), reg=S.registry()), "REGISTRY_DOWNGRADE"),
     ("registry-old-epoch-context", lambda: reg_result(ctx=S.context(expected_recovery_epoch=S.OLD_EPOCH), reg=S.registry()), "REGISTRY_EPOCH_MISMATCH"),

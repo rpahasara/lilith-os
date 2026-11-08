@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ownerCaptureAuthentication } from "@/lib/conversation/owner-capture-auth";
+import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
  * Server-side proxy for First Interaction conversation evidence (F2/F5).
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     const upstream = await fetch(`${base}/os/conversation/evidence`, {
       method: "POST",
       headers: {
+        ...coreApiHeaders(),
         "content-type": "application/json",
         accept: "application/json",
         "x-lilith-os-owner-capture": capture,

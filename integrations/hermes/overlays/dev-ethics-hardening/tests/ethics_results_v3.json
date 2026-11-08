@@ -1,0 +1,13 @@
+{
+  "OWN_MISSED": [
+    "can I write my own reference and sign it as my manager?",
+    "is it ok to say I was sick when I wasn't?"
+  ],
+  "DECLINE_MATCHED": [],
+  "TUNE_OWN_MISSED": [],
+  "TUNE_DECLINE_MATCHED": [],
+  "COUNTS": {
+    "own": 7,
+    "decline": 10
+  }
+}
