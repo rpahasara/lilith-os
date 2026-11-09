@@ -145,16 +145,26 @@ OUTCOME_FIELDS = (("COMPLETED", "completedAt", "completed"), ("FAILED", "failedA
                   ("CANCELLED", "cancelledAt", "cancelled"), ("BLOCKED", "blockedAt", "became blocked"))
 
 
-def goal_outcomes(since: float) -> list:
-    """Tracked goals that reached an outcome in the window (read-only GET /os/goals). Fail-open: none."""
+def _goals(query: str = "limit=200"):
+    """Goals from the Goals store (read-only GET /os/goals), or None when it cannot be read."""
     try:
-        with urllib.request.urlopen(API + "/os/goals?limit=200", timeout=5) as resp:
+        with urllib.request.urlopen(API + "/os/goals?" + query, timeout=5) as resp:
             goals = json.loads(resp.read().decode("utf-8")).get("goals", [])
     except Exception:
-        return []
+        return None
+    return [g for g in goals if isinstance(g, dict)] if isinstance(goals, list) else None
+
+
+COMMITMENT_TYPES = ("commitment.once", "commitment.routine")
+
+
+def goal_outcomes(since: float) -> list:
+    """Their tracked LIFE goals that reached an outcome in the window. LILITH's own commitments are excluded: they
+    are reported separately (commitment_status) and are never memories about them. Fail-open: none."""
+    goals = _goals() or []
     out = []
-    for g in goals if isinstance(goals, list) else []:
-        if not isinstance(g, dict):
+    for g in goals:
+        if str(g.get("type") or "").startswith("commitment."):
             continue
         for state, field, verb in OUTCOME_FIELDS:
             at = _when(g.get(field))
@@ -166,6 +176,34 @@ def goal_outcomes(since: float) -> list:
     return out[:10]
 
 
+FAILED_WINDOW_S = 7 * 86400
+
+
+def commitment_status(now: float, since: float) -> list:
+    """LILITH's own scheduled commitments, from the scheduler evidence the commitment sync recorded in the Goals
+    store (P4-4). Unresolved ones (missed now, or failed in the last 7 days) are listed with their due time and the
+    recorded reason; kept ones are only counted. No delivery is claimed beyond what the scheduler recorded."""
+    once = _goals("limit=200&type=commitment.once")
+    if once is None:
+        return ["(commitment records unavailable this time; say nothing about commitments)"]
+    lines = []
+    for g in once:
+        title = " ".join(str(g.get("title") or "a scheduled reminder").split())[:80]
+        due = g.get("deadline") or "unknown time"
+        state = g.get("lifecycleState")
+        if state == "BLOCKED":
+            lines.append(f"- UNRESOLVED: \"{title}\" was due {due} and the scheduler has not run it "
+                         f"({str(g.get('blockedReason') or 'missed')[:120]})")
+        elif state == "FAILED" and (_when(g.get("failedAt")) or 0) >= now - FAILED_WINDOW_S:
+            lines.append(f"- UNRESOLVED: \"{title}\" (due {due}): the scheduled run failed or its delivery "
+                         "failed; it did not reach them as planned")
+    kept = sum(1 for g in once if g.get("lifecycleState") == "COMPLETED" and (_when(g.get("completedAt")) or 0) >= since)
+    if kept:
+        lines.append(f"- {kept} reminder(s) ran as scheduled (scheduler run completed; whether each reached them "
+                     "is not verified). Routine reminders: not memories, never propose them.")
+    return lines or ["(none)"]
+
+
 GUIDANCE = """\
 - Propose at most 3 items, the ones most worth keeping. Fewer is fine; nothing is fine.
 - A lasting preference or boundary about how LILITH talks or behaves: word it "Preference (scope): ..." or
@@ -175,6 +213,8 @@ GUIDANCE = """\
 - A fictional, hypothetical or test scenario is never a real fact about them. If they clarified that something was only
   a test or made up, you may propose a boundary to treat it that way; never store the scenario itself as true.
 - If a new statement contradicts something already remembered, propose replacing that entry, not adding a second one.
+- LILITH's own commitments (reminders, follow-ups she scheduled) are her responsibilities, not facts about them:
+  never propose them as memories. An UNRESOLVED one is hers to own next time they talk; never say it was delivered.
 - Lines tagged [moment: ...] are where LILITH's own signals saw something notable. They are hints, not proof: read
   the conversation itself before proposing anything."""
 
@@ -366,8 +406,10 @@ def main(home: Path = HOME, now: float = None) -> str:
         "=== ALSO STORED ELSEWHERE (never propose) ===",
         "- the project codename and the relationship-origin statement (canonical memory)", "",
         "=== HOW TO PROPOSE ===", GUIDANCE, "",
-        f"=== TRACKED GOAL OUTCOMES, last {REVIEW_HOURS} h (verified in their goals; propose a dated fact only if "
-        "it matters to them) ===", "\n".join(goal_outcomes(since)) or "(none)", "",
+        f"=== THEIR TRACKED GOAL OUTCOMES, last {REVIEW_HOURS} h (verified in their goals; propose a dated fact "
+        "only if it matters to them) ===", "\n".join(goal_outcomes(since)) or "(none)", "",
+        "=== LILITH'S OWN COMMITMENTS (scheduler evidence; her responsibilities, NOT memories about them) ===",
+        "\n".join(commitment_status(now, since)), "",
         f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM) ===",
         *body,
     ])

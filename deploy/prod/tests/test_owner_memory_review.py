@@ -221,12 +221,67 @@ class ConsolidationContextTests(unittest.TestCase):
         self.assertIn("=== HOW TO PROPOSE ===", out)
         self.assertIn('"Preference (scope): ..."', out)
         self.assertIn("never store the scenario itself as true", out)
-        self.assertIn("=== TRACKED GOAL OUTCOMES", out)
+        self.assertIn("=== THEIR TRACKED GOAL OUTCOMES", out)
 
     def test_goal_api_down_and_log_missing_fail_open(self):
         out = OMR.main(self.home, now=NOW)                                               # API is 127.0.0.1:9
-        self.assertIn("(none)", out.split("=== TRACKED GOAL OUTCOMES")[1])
+        self.assertIn("(none)", out.split("=== THEIR TRACKED GOAL OUTCOMES")[1])
         self.assertNotIn("[moment:", out.split("=== OWNER CONVERSATION")[1])
+
+
+class CommitmentSectionTests(unittest.TestCase):
+    """P-4 P4-5b: LILITH's own commitments are a separate section; kept ones are only counted and never memories;
+    missed / failed ones are her unresolved responsibilities with scheduler evidence; no delivery claims."""
+    setUp = ReviewContextTests.setUp
+    tearDown = ReviewContextTests.tearDown
+
+    def fake_goals(self, life, once):
+        class Resp:
+            def __init__(self, body): self.body = body
+            def read(self): return json.dumps({"goals": self.body}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def urlopen(url, timeout=5):
+            return Resp(once if "type=commitment.once" in url else life + once)
+        return unittest.mock.patch.object(OMR.urllib.request, "urlopen", side_effect=urlopen)
+
+    def iso(self, ts):
+        return OMR._dt.datetime.fromtimestamp(ts, OMR._dt.timezone.utc).isoformat()
+
+    def test_separate_section_kept_counted_unresolved_listed(self):
+        life = [{"goalId": "g1", "type": "career.followup", "title": "Pass the CKA exam", "lifecycleState": "COMPLETED",
+                 "completedAt": self.iso(NOW - 3600)}]
+        once = [
+            {"goalId": "c1", "type": "commitment.once", "title": "Water reminder", "lifecycleState": "COMPLETED",
+             "completedAt": self.iso(NOW - 600), "deadline": "2027-01-15T07:08:18Z"},
+            {"goalId": "c2", "type": "commitment.once", "title": "Call the bank", "lifecycleState": "BLOCKED",
+             "deadline": "2027-01-15T09:00:00Z", "blockedReason": "missed: due 2027-01-15T09:00:00Z and not run"},
+            {"goalId": "c3", "type": "commitment.once", "title": "Check release notes", "lifecycleState": "FAILED",
+             "failedAt": self.iso(NOW - 2 * 86400), "deadline": "2027-01-13T09:00:00Z"},
+            {"goalId": "c4", "type": "commitment.once", "title": "Old failure", "lifecycleState": "FAILED",
+             "failedAt": self.iso(NOW - 30 * 86400)},
+            {"goalId": "c5", "type": "commitment.once", "title": "Later", "lifecycleState": "ACTIVE"}]
+        with self.fake_goals(life, once):
+            out = OMR.main(self.home, now=NOW)
+        life_part = out.split("=== THEIR TRACKED GOAL OUTCOMES")[1].split("===")[1]
+        mine = out.split("=== LILITH'S OWN COMMITMENTS")[1].split("=== OWNER CONVERSATION")[0]
+        self.assertIn("Pass the CKA exam", life_part)
+        self.assertNotIn("Water reminder", out)                         # kept: counted, never listed or proposed
+        self.assertIn("1 reminder(s) ran as scheduled", mine)
+        self.assertIn('UNRESOLVED: "Call the bank" was due 2027-01-15T09:00:00Z', mine)
+        self.assertIn("missed: due", mine)
+        self.assertIn('UNRESOLVED: "Check release notes"', mine)
+        self.assertNotIn("Old failure", mine)
+        self.assertNotIn("Later", mine)
+        for claim in ("was delivered", "they received", "reached them as planned."):
+            self.assertNotIn(claim, mine)
+        self.assertIn("never propose them as memories", out)
+
+    def test_commitment_records_unavailable_says_so(self):
+        out = OMR.main(self.home, now=NOW)                               # API is 127.0.0.1:9
+        mine = out.split("=== LILITH'S OWN COMMITMENTS")[1].split("=== OWNER CONVERSATION")[0]
+        self.assertIn("commitment records unavailable", mine)
 
 
 if __name__ == "__main__":
