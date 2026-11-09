@@ -123,6 +123,15 @@ class LifecycleTests(Base):
         self.assertIn("delivery to the chat not verified", g["trace"][-1])
         self.assertNotIn("PRIVATE-PROMPT", json.dumps(self.api.calls))
 
+    def test_kept_job_without_delivery_error_is_stated_precisely(self):
+        self.jobs(self.job("j1"))
+        self.sync(T0 + 10)
+        self.run_record("j1", "completed", T0 + 3605)
+        self.jobs(self.job("j1", state="completed", last_status="ok", next_run_at=None))   # PROD 2026-11-09: kept
+        self.sync(T0 + 3700)
+        self.assertEqual(self.goal()["lifecycleState"], "COMPLETED")
+        self.assertIn("recorded no delivery error (receipt by the owner not confirmed)", self.goal()["trace"][-1])
+
     def test_visible_delivery_error_is_a_failure(self):
         self.jobs(self.job("j1"))
         self.sync(T0 + 10)

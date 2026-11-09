@@ -784,7 +784,7 @@ insufficient. It would need a privacy and FORGET review first.
 
 **Measures.** E-7 (commitments), E-8 (episodic recall without fabrication); approval fatigue (<50% rejected or ignored).
 
-## 3p. P4-4 Commitments: design and first slice (2026-11-09; review fixes DEV PASS; PROD install next)
+## 3p. P4-4 Commitments: design and first slice (2026-11-09; installed on PROD; E-7 functional test PASS)
 
 Owner GO 2026-11-09: cognitive coordination and long-term agent behaviour, **not** a reminders app. One Lilith, one
 authoritative state, no new commitments database.
@@ -888,9 +888,55 @@ created and nothing was delivered.
   **aborted with the state byte-for-byte unchanged**; with no state file, the mapping was rebuilt from DEV's Goals API
   (it found the 3 earlier test goals) without creating duplicates.
 
+**PROD install, 2026-11-09 06:39Z** (owner GO after the fixes).
+- `~/.hermes/scripts/commitment_sync.py` (sha256 `472fc2259cd3…`, main `8a5bdcd`); backup
+  `/var/backups/lilith-commitments/20261109T063931Z`.
+- Hermes cron job `5365cfb456d4`: `* * * * *`, `--no-agent --deliver local`, the same pattern as the snapshot job (no
+  model call; output kept locally).
+- The first pass rebuilt an empty mapping; later runs were `ok`.
+- **Tool:** `p3tx/deployer/commitment_install.py install | status | rollback <ts>`. Rollback removes the job and the
+  script; goals stay as history.
+
+**E-7 functional test: a real owner reminder, 2026-11-09 (Telegram owner DM; metadata only).** The owner asked for a
+water reminder in 10 minutes. Both messages at 12:28 local (Lilith's confirmation and the cronjob tool's response) were
+the **creation**, not the reminder. The scheduler's own records show the actual run 10 minutes later:
+
+| Step | UTC (local +5:30) | Evidence |
+| --- | --- | --- |
+| Job created from the owner Telegram DM | 06:58:18 | `jobs.json`: `schedule.kind once`, `repeat 1`, `deliver origin`, origin platform telegram |
+| Intended fire time | **07:08:18** | the job's `next_run_at`; used as the goal's deadline |
+| Commitment goal created and activated | 06:58:50 | next sync tick: `commitment.once`, `SCHEDULED`, channel `telegram_owner_dm`; trace "accepted by the scheduler" |
+| **Scheduled execution** | claimed **07:08:50**, finished **07:08:55** | `cron/executions.db`: `completed`, no error; output file at 07:08:54 |
+| Goal completed | 07:09:50 | trace: "the scheduled run completed at 2026-11-09T07:08:55Z; delivery to the chat not verified" |
+
+- **Execution vs delivery.** Execution is verified: it fired 32 s after its due time, within the scheduler's tick.
+  For delivery, the job record still exists after the run with `last_status ok` and **no delivery error recorded**
+  (`deliver origin`). That is the scheduler's evidence of an error-free hand-off, **not proof that the owner received
+  it**. Receipt of the 12:38 local message is the owner's to confirm.
+- **Correction.** Hermes did **not** delete this one-time job after its run. It remains with `state completed` and
+  `repeat 1/1`. The sync handles both (deleted or kept). For a kept job with `last_status ok` and no delivery error, the
+  reason now says exactly that: "the scheduler recorded no delivery error (receipt by the owner not confirmed)". This
+  ships with the next script install.
+- **Result: PASS for the commitment lifecycle** (created → active → scheduled execution → completed, with no
+  unattributed runs). Delivery: no error recorded; receipt not independently verified.
+
+**P4-4b Unbacked-promise check (shadow).** New `lilith_router/promise_guard.py`; `promise_guard_mode: shadow`. At turn
+end, the turn record gains four booleans:
+- `promise`: the reply promises Lilith's own future action, e.g. "I'll remind you", "I'll check in tomorrow";
+- `scheduling_claim`: the reply says something is scheduled, e.g. "I've set a reminder", "your reminder is set";
+- `scheduled`: in the same turn, a `cronjob` create call returned without error;
+- `unbacked_promise`: a promise or claim with no such job.
+
+It never changes a reply, makes no model call and logs no text. A promise counts as backed only by an accepted create
+call in that turn. 4 tests. Rollback: `off`. Any control (for example routing a promising turn to schedule, or
+rewording) is chosen only from these counts.
+
 **Next.**
-1. **PROD install** (owner GO, given after these fixes): the script beside the review scripts, plus one silent no-agent
-   Hermes cron job **every minute**, with backup and rollback. Then one harmless real owner reminder end to end.
+1. Router deploy (shadow only) and reinstall of the sync script with the precise delivery wording.
+2. Read `unbacked_promise` counts after normal use.
+3. **P4-5 outcome learning:** below.
+
+
 2. **PROD:** with owner GO, after DEV passes.
 3. **Unbacked-promise guard (shadow):** at turn end, flag a reply that promises a future action ("I'll remind you",
    "I'll check in tomorrow") when no `cronjob` create happened in that turn. Count first; choose a control only from
@@ -899,6 +945,25 @@ created and nothing was delivered.
 
 **Rollback:** disable or remove the sync cron job. Goals already created stay as accurate history and can be cancelled
 through the Goals API. Delete `~/.hermes/commitments/sync.json` to start fresh.
+
+## 3q. P4-5 Outcome learning: plan (2026-11-09)
+
+Roadmap C-3: verified outcomes adjust *priority and attention*, not truth. Built on what exists: commitment and goal
+outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval, and the Executive focus.
+
+1. **P4-5a E-7 reading** (read-only). A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
+   missed (BLOCKED, or terminal after a block), cancelled, held. Per week, with the sync's `unattributed_runs_24h` and
+   the promise check's `unbacked_promise` rate. E-7 bar: ≥ 90% kept or acknowledged, 0 duplicates.
+2. **P4-5b Commitment outcomes in the nightly review.** The review lists them separately from life goals: "commitments
+   Lilith kept / missed". A missed commitment is something to acknowledge and own in conversation; a routine reminder
+   that was kept is not a memory to propose. Read-only change to `owner_memory_review.py`; installed through the
+   existing review installer.
+3. **P4-5c Attention from outcomes.** A missed commitment raises its own visibility through the Goals lane, so it is
+   surfaced and owned rather than silently dropped. This first uses the existing goal-status grounding (read-only).
+   A priority change is a goal write, so DEV first, and only if the Goals FSM has a typed operation for it (no
+   generic set).
+4. **Not now:** changing beliefs or "truth" from outcomes; any affect or mood from outcomes (AP-35); self-directed
+   follow-ups without owner request (initiative is P-5).
 
 ## 4. Feature readiness vs. remaining work
 

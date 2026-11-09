@@ -52,6 +52,7 @@ from . import social_preferences as _social_prefs
 from . import turn_context as _tc
 from . import metacognition as _meta
 from . import appraisal as _appraisal
+from . import promise_guard as _promise_guard
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -135,6 +136,11 @@ def log_turn_end(ctx, *, agent=None, result=None, guard_changed=False, d1_record
             rec.update(_tc.current().summary())          # P-3: typed TurnContext summary (keys, ids, flags)
         except Exception:
             pass
+        if cfg.promise_guard_mode == "shadow":           # P-4: promise backed by an accepted scheduler job? (flags)
+            try:
+                rec.update(_promise_guard.check(result.get("final_response"), result.get("messages")))
+            except Exception:
+                pass
         _append_log(cfg, rec)
     except Exception:
         logger.debug("lilith_router: turn-end record failed", exc_info=True)
