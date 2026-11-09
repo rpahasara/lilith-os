@@ -67,6 +67,7 @@ class TurnContext:
     appraisal: Tuple[Any, ...] = ()              # deterministic appraisal signals (batch 3)
     goals: Tuple[Any, ...] = ()                  # related ACTIVE tracked goals (id, title, state) for G-WIDEN
     appraisal_live: bool = False                 # appraisal switch: live renders the goal line, shadow only traces
+    responsibility: Tuple[Any, ...] = ()         # P4-5c: LILITH's unresolved commitments to own (live only)
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -75,6 +76,8 @@ class TurnContext:
                "pref_applied": bool(self.preferences_live and self.preferences), "correction": self.correction}
         if self.meta:
             out["meta"] = dict(self.meta)
+        if self.responsibility:
+            out["responsibility"] = len(self.responsibility)
         if self.appraisal:
             out["appraisal"] = [getattr(a, "kind", str(a)) for a in self.appraisal]
             out["appraisal_refs"] = list(self.style.appraisal_refs)
@@ -139,6 +142,14 @@ def goal_text(ctx: TurnContext) -> Optional[str]:
     return ap.goal_note(list(ctx.goals))
 
 
+def responsibility_text(ctx: TurnContext) -> Optional[str]:
+    """P4-5c: a missed commitment for LILITH to own (live only; the full agent only)."""
+    if not (ctx.owner and ctx.responsibility):
+        return None
+    from . import commitments as cm
+    return cm.note(list(ctx.responsibility))
+
+
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
     """The API-only turn hint for the main agent (run.py `turn_hint`). A goals-status question carries its status hint
     instead of the tone and correction lines; approved preferences ride on either."""
@@ -148,6 +159,7 @@ def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[
     parts += [preference_text(ctx), meta_text(ctx)]
     if not status_hint:                          # a goals-status turn already carries its goals
         parts.append(goal_text(ctx))
+    parts.append(responsibility_text(ctx))       # agent path only: never rendered on the lean path (N-48)
     return "\n\n".join(p for p in parts if p) or None
 
 
