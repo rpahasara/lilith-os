@@ -57,6 +57,10 @@ promise_guard_mode: shadow
 # turn hint carries one short note to own it, once per commitment per process; the turn leaves the fast path).
 # Rollback: shadow or off.
 commitments_mode: shadow
+# P-4 E-8 episodic timeline (owner turns only): off | shadow (log when a time/order/change question would get it) |
+# live (the agent's turn hint carries approved memories with their learned dates and superseded entries; the turn
+# leaves the fast path). Read-only. Rollback: shadow or off.
+timeline_mode: shadow
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

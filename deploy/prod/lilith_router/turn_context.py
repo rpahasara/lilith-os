@@ -68,6 +68,7 @@ class TurnContext:
     goals: Tuple[Any, ...] = ()                  # related ACTIVE tracked goals (id, title, state) for G-WIDEN
     appraisal_live: bool = False                 # appraisal switch: live renders the goal line, shadow only traces
     responsibility: Tuple[Any, ...] = ()         # P4-5c: LILITH's unresolved commitments to own (live only)
+    timeline: Tuple[Any, ...] = ()               # P-4 E-8: owner-memory records for the dated timeline (live only)
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -78,6 +79,8 @@ class TurnContext:
             out["meta"] = dict(self.meta)
         if self.responsibility:
             out["responsibility"] = len(self.responsibility)
+        if self.timeline:
+            out["timeline"] = len(self.timeline)
         if self.appraisal:
             out["appraisal"] = [getattr(a, "kind", str(a)) for a in self.appraisal]
             out["appraisal_refs"] = list(self.style.appraisal_refs)
@@ -150,6 +153,14 @@ def responsibility_text(ctx: TurnContext) -> Optional[str]:
     return cm.note(list(ctx.responsibility))
 
 
+def timeline_text(ctx: TurnContext) -> Optional[str]:
+    """P-4 E-8: the dated approved-memory timeline on a time / order / change question (live; full agent only)."""
+    if not (ctx.owner and ctx.timeline):
+        return None
+    from . import timeline as tl
+    return tl.render(list(ctx.timeline))
+
+
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
     """The API-only turn hint for the main agent (run.py `turn_hint`). A goals-status question carries its status hint
     instead of the tone and correction lines; approved preferences ride on either."""
@@ -160,6 +171,7 @@ def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[
     if not status_hint:                          # a goals-status turn already carries its goals
         parts.append(goal_text(ctx))
     parts.append(responsibility_text(ctx))       # agent path only: never rendered on the lean path (N-48)
+    parts.append(timeline_text(ctx))             # agent path only, likewise
     return "\n\n".join(p for p in parts if p) or None
 
 

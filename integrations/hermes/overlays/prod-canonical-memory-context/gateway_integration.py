@@ -54,6 +54,7 @@ from . import metacognition as _meta
 from . import appraisal as _appraisal
 from . import promise_guard as _promise_guard
 from . import commitments as _commitments
+from . import timeline as _timeline
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -459,6 +460,33 @@ def _apply_commitments(cfg) -> None:
         logger.debug("lilith_router: commitments note failed (none)", exc_info=True)
 
 
+_OWNER_MEMORY = _timeline.OwnerMemorySource(os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765"))
+
+
+def _apply_timeline(cfg, message: str) -> None:
+    """P-4 E-8 (owner turns only): a question about time, order or change gets the dated timeline of approved memory
+    (approval = "learned" date; superseded entries as "no longer current"). Live: the agent's turn hint carries it and
+    the turn leaves the fast path. Shadow logs only. Read-only; never raises; counts only."""
+    tctx = _tc.current()
+    try:
+        mode = cfg.timeline_mode
+        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()) or tctx.focused:
+            return
+        if not _timeline.temporal(message):
+            return
+        entries = _OWNER_MEMORY.current()
+        if not entries:
+            return
+        if mode == "live":
+            tctx.timeline = tuple(entries)
+        _append_log(cfg, {"lane": "timeline", "mode": mode, "entries": len(entries),
+                          "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
+                          "applied": mode == "live"})
+    except Exception:
+        tctx.timeline = ()
+        logger.debug("lilith_router: timeline failed (none)", exc_info=True)
+
+
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
                               session_key: str, message: str):
     """Run the TURN-only Slice-14 observer. Returns the validated snapshot (or None); only the live owner tone note
@@ -855,6 +883,7 @@ def _route_turn_impl(
     _apply_metacognition(cfg, message)
     _apply_appraisal(cfg, message)
     _apply_commitments(cfg)
+    _apply_timeline(cfg, message)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending
@@ -1178,6 +1207,8 @@ def _route_turn_impl(
                 why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
             if not why and tctx.responsibility:
                 why = "responsibility"               # P4-5c: owning a missed commitment needs the full agent
+            if not why and tctx.timeline:
+                why = "timeline"                     # P-4 E-8: dated memory goes to the full agent only (N-48)
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,

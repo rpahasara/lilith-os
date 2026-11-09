@@ -1,0 +1,207 @@
+{
+ "_about": "P-4 E-8 arm C (synthetic): today's flat projection (= arm A) plus the timeline note rendered by lilith_router/timeline.py from REALISTIC records: approval ('learned') dates only, the old city as a superseded entry. Compared with arms A and B of p4_e8_episodic_v1.json.",
+ "mode": "agent",
+ "samples": 2,
+ "gap_s": 2,
+ "budget_tokens": 400000,
+ "variants": {
+  "C": {
+   "profile": [
+    "User's name is Sam; Sam is a data engineer.",
+    "Sam works at Acme as a data engineer.",
+    "Sam failed the first CKA attempt.",
+    "Sam passed the CKA on the second attempt.",
+    "Sam lives in Manchester.",
+    "Boundary (topic: server fire): The server-fire story was a fictional test scenario, never a real incident."
+   ],
+   "message_prefix": "[What you know about them, with when you learned it. \"learned\" is when they told you, not necessarily when it happened; use an event date only if the entry itself states one. An entry marked \"no longer current\" was true before and has been replaced. Never invent a date or an order you can't see here.]\n- learned 2026-09-02: Sam works at Acme as a data engineer.\n- learned 2026-10-05: Sam failed the first CKA attempt.\n- no longer current since 2026-10-20: Sam lives in Leeds.\n- learned 2026-10-20: Sam lives in Manchester.\n- learned 2026-10-28: Boundary (topic: server fire): The server-fire story was a fictional test scenario, never a real incident.\n- learned 2026-11-04: Sam passed the CKA on the second attempt.\n- undated: User's name is Sam; Sam is a data engineer."
+  }
+ },
+ "scenarios": [
+  {
+   "id": "when_job",
+   "kind": "applies",
+   "history": [
+    [
+     "user",
+     "today's 9 Nov btw, long week"
+    ]
+   ],
+   "message": "when did I start at Acme again?",
+   "expect": [
+    "sept|2026-09|2 sep|september 2"
+   ],
+   "forbid": [
+    "\\b(?:jan|feb|mar|apr|may|jun|jul|aug|oct|dec)[a-z]*\\b(?!.*sept)"
+   ]
+  },
+  {
+   "id": "order",
+   "kind": "applies",
+   "history": [],
+   "message": "what came first, starting at Acme or my failed CKA attempt?",
+   "expect": [
+    "(?:acme|job)[^.?!]{0,80}(?:first|before|earlier)|(?:first|before)[^.?!]{0,60}(?:acme|job)"
+   ],
+   "forbid": [
+    "(?:cka|exam)[^.?!]{0,40}(?:came first|was first|happened first)"
+   ]
+  },
+  {
+   "id": "past_city",
+   "kind": "applies",
+   "history": [],
+   "message": "where was I living when I started at Acme?",
+   "expect": [
+    "leeds"
+   ],
+   "forbid": [
+    "\\bin manchester\\b(?![^.?!]{0,60}(?:now|later|since|moved))"
+   ]
+  },
+  {
+   "id": "elapsed",
+   "kind": "applies",
+   "history": [
+    [
+     "user",
+     "today's 9 Nov btw"
+    ]
+   ],
+   "message": "how long ago did I pass the CKA?",
+   "expect": [
+    "5 days|five days|nov(?:ember)? 4|4 nov|2026-11-04|last week|earlier this month"
+   ],
+   "forbid": [
+    "\\b(?:month|months|weeks|year)s? ago\\b"
+   ]
+  },
+  {
+   "id": "other_city",
+   "kind": "applies",
+   "history": [],
+   "message": "have I ever lived anywhere other than where I live now?",
+   "expect": [
+    "leeds"
+   ],
+   "forbid": [
+    "\\b(?:london|york|bristol|liverpool|birmingham|sheffield)\\b"
+   ]
+  },
+  {
+   "id": "now_city",
+   "kind": "unrelated",
+   "history": [],
+   "message": "remind me which city I live in, brain's fried",
+   "expect": [
+    "manchester"
+   ],
+   "forbid": [
+    "\\bleeds\\b(?![^.?!]{0,40}(?:before|previously|used to|until))"
+   ]
+  },
+  {
+   "id": "first_try",
+   "kind": "unrelated",
+   "history": [],
+   "message": "did I pass the CKA on my first try?",
+   "expect": [
+    "\\bno\\b|second|2nd|didn['’]?t"
+   ],
+   "forbid": [
+    "\\byes,? (?:you|first)"
+   ]
+  },
+  {
+   "id": "fiction",
+   "kind": "unrelated",
+   "history": [],
+   "message": "was anyone hurt in that server fire?",
+   "expect": [
+    "fiction|test|made[- ]up|not (?:a )?real|wasn['’]?t real|never happened"
+   ],
+   "forbid": [
+    "\\b(?:injur|hospital|firefighter|evacuat)"
+   ]
+  }
+ ],
+ "timeline_records": [
+  {
+   "text": "User's name is Sam; Sam is a data engineer.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "HERMES_PREEXISTING_IMPORT",
+     "approved_at": null
+    }
+   ]
+  },
+  {
+   "text": "Sam lives in Leeds.",
+   "lifecycle_state": "SUPERSEDED",
+   "updated_at": "2026-10-20T18:00:00+00:00",
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-08-15T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "text": "Sam works at Acme as a data engineer.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-09-02T17:00:00Z"
+    }
+   ]
+  },
+  {
+   "text": "Sam failed the first CKA attempt.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-05T12:00:00Z"
+    }
+   ]
+  },
+  {
+   "text": "Sam lives in Manchester.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-20T18:00:00Z"
+    }
+   ]
+  },
+  {
+   "text": "Boundary (topic: server fire): The server-fire story was a fictional test scenario, never a real incident.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-28T09:00:00Z"
+    }
+   ]
+  },
+  {
+   "text": "Sam passed the CKA on the second attempt.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-11-04T15:00:00Z"
+    }
+   ]
+  }
+ ]
+}

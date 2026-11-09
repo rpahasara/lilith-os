@@ -1013,6 +1013,83 @@ outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval,
 4. **Not now:** changing beliefs or "truth" from outcomes; any affect or mood from outcomes (AP-35); self-directed
    follow-ups without owner request (initiative is P-5).
 
+## 3r. P-4 episodic memory: E-8 and the dated memory timeline (2026-11-09)
+
+Owner GO 2026-11-09. Decisions carried forward:
+- P4-5c-1 stays in shadow.
+- P4-5c-2 (persistent acknowledgement) is deferred until shadow evidence shows the need.
+- A missed commitment is **never** turned into CANCELLED because Lilith acknowledged it: the original failure stays
+  historically accurate, and acknowledgement, recovery and successful execution are distinct events.
+
+**Inventory: where episodic information lives** (read-only, counts only, PROD 2026-11-09).
+
+| Store | Holds | Reaches the reply model? |
+| --- | --- | --- |
+| World Model owner memory | 11 entries (10 active, 1 superseded); provenance 6 approved, 6 imported; **5 with an approval date**; **1 entry text contains a date** | only through the projection |
+| `USER.md` / `MEMORY.md` projection | 10 / 0 entries, flat current text; 1 with a date; superseded text not visible (correct for "now") | **yes**, but without approval dates, order or superseded history |
+| L18 events | 14 (6 imported, 5 approved, 1 superseded, 2 rejected) | no |
+| Transcripts (`state.db`) | 581 owner messages over 77 days | only through the agent's `session_search` tool; never on the fast path |
+| Canonical memory | codename and relationship origin (separate, governed) | owner channels, via its own note |
+
+**The loss is at projection, not storage.** When something was learned, the order of events, and what a superseded
+entry used to say are all kept in the authoritative store but dropped before the model sees them.
+
+**E-8, focused set** (synthetic only; full-agent path; no tools, stored memory skipped; 2 samples per arm; spec
+`scripts/cognitive_eval/scenarios/p4_e8_episodic_v1.json` and `_c_v1.json`). 5 episodic questions (when, order, past
+state, elapsed time, ever lived elsewhere) and 3 controls (current state, outcome detail, fiction vs fact).
+
+| Arm | Profile the model saw | Correct on 10 episodic replies (hand-read) | Invented facts | Controls | Tokens / latency |
+| --- | --- | --- | --- | --- | --- |
+| A, today's projection | flat current facts | **0/10**: each time it said honestly that it didn't know | 0 | 6/6 | 6,377 / 2.8 s |
+| B, ideal records | the same facts with **event dates** and superseded lineage | **10/10** | 0 | 6/6 | 6,402 / 2.5 s |
+| C, realistic records + timeline note | A, plus the router's timeline note: **learned (approval) dates** only, superseded entry marked "no longer current" | other city 2/2; elapsed 2/2 (one hedged "you told me then"); order 2/2 (one reply equated learned order with event order, a mild over-inference); start date: honest bound "you told me by 2 Sep, not necessarily when you started" 2/2; past city: honest "can't tell" 2/2 (conservative) | 0 | 6/6 | 6,578 / 2.9 s |
+
+**Reading.**
+- **Causal claim:** the arms differ only in what the prompt contains, so the gain from A to B and from A to C is caused
+  by the information made available, on this synthetic set. One sample per cell per run, 2 runs, one rater (me): this is
+  directional.
+- **Honesty was never the problem.** Arm A fabricated nothing; it simply could not answer.
+- **Remaining real gap: event time vs learned time.** Approved memories rarely state *when something happened*. C
+  correctly refused to turn "learned on" into "happened on", except for one over-inference about order. B shows what
+  dated event facts would allow. That is a consolidation problem: P4-1 already asks the nightly review to propose
+  achievements and setbacks as dated facts ("On 2026-11-09 …").
+- **Fiction vs fact** was handled correctly in all arms through the existing typed boundary.
+
+**Implemented (shadow): the dated memory timeline.**
+- New `lilith_router/timeline.py`, `timeline_mode: shadow`. On an owner turn that asks about time, order or change,
+  the router renders a compact timeline from the World Model's own records:
+  - `learned <approval date>: <text>`;
+  - `no longer current since <date>: <superseded text>`;
+  - `undated:` for imports.
+- The header says "learned" is not the event date and forbids inventing dates or order.
+- Read-only (GET `/os/owner-memory?include_superseded=1`, 60 s cache, fail-open); no new store; no records changed.
+- **Live** puts it in the agent's turn hint only, and the turn leaves the fast path: N-48 showed the fast model can
+  echo notes.
+- 5 tests. Rollback: `off`. The same module rendered arm C, so the evaluated text is the shipped text.
+
+**Remaining P-4 memory-intelligence gaps (honest list).**
+1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1); its
+   effect on real proposals is not measured yet.
+2. **Learned order ≠ event order.** One C reply conflated them. If live traffic shows it, add a line rather than a
+   mechanism.
+3. **Reappraisal (C-4).** Supersession works, but nothing proposes a replacement when a new statement contradicts a
+   remembered one beyond the P4-1 guidance line. Not yet observed live (P4-3 deferred until a genuine change).
+4. **Episodes vs facts.** There is still no durable episode record (C-1). E-8 does **not** show a need for a separate
+   episodic database: the gaps were representational and fixable with existing records. Revisit only if a question
+   type needs transcript-level detail that approved facts can't carry (then use the agent's `session_search` first).
+5. **Goal outcomes → attention.** The P4-5c-1 shadow is deployed; truth is never changed by outcomes.
+
+**P-5 readiness (Autonomous Initiative & Verified Outcome Learning).** **Not ready to start live initiative.**
+- **Ready:** commitments with scheduler evidence (P4-4, owner E2E passed), outcome readers (E-7), the
+  unbacked-promise check, approval-fatigue measurement and the dated timeline (shadow).
+- **Not ready:**
+  - shadow counts for unbacked promises and missed commitments (none observed yet);
+  - one week of E-7 and fatigue readings;
+  - event-dated consolidation (gap 1);
+  - P4-5c-2 deferred by owner decision.
+- **Recommendation:** P-5 design work can start on paper. Any initiative message waits for those readings, per the
+  roadmap's evidence gates.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
