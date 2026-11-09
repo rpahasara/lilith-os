@@ -47,6 +47,7 @@ class RouterConfig:
     metacognition_mode: str = "off"        # P-3: off | shadow (log L16 signals) | live (apply their controls)
     metacognition_recall_control: str = "ask"   # P-3 recall gap: ask (note, same call) | escalate (lean -> agent)
     appraisal_mode: str = "off"            # P-3: off | shadow (log appraisal signals) | live (style + goal context)
+    promise_guard_mode: str = "off"        # P-4: off | shadow (flag replies promising a follow-up nothing scheduled)
     turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -339,6 +340,8 @@ def load() -> RouterConfig:
         cfg.metacognition_recall_control = ctl if ctl in ("ask", "escalate") else "ask"
         mode = str(raw.get("appraisal_mode", "off")).strip().lower()
         cfg.appraisal_mode = mode if mode in ("off", "shadow", "live") else "off"
+        mode = str(raw.get("promise_guard_mode", "off")).strip().lower()
+        cfg.promise_guard_mode = mode if mode in ("off", "shadow") else "off"
         try:
             cfg.decision_log_max_bytes = max(100_000, min(50_000_000, int(raw.get(
                 "decision_log_max_bytes", cfg.decision_log_max_bytes))))

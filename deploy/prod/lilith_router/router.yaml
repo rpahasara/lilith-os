@@ -50,6 +50,9 @@ metacognition_recall_control: ask
 # approved difficulty / mixed line, never a playful nudge; a related ACTIVE goal adds one context line). No emotion
 # score, nothing persisted. Rollback: shadow or off.
 appraisal_mode: shadow
+# P-4 unbacked-promise check: off | shadow. Shadow adds four booleans to the turn-end record (promise, scheduling
+# claim, scheduler job created this turn, unbacked). Never changes a reply. Rollback: off.
+promise_guard_mode: shadow
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────

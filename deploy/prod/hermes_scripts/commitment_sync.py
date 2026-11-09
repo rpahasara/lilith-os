@@ -168,6 +168,9 @@ def desired(entry: dict, job, job_runs, now: float):
                     return "FAILED", "the scheduler run failed at %s" % (_iso(fin) or "unknown")
                 if job is not None and job.get("last_delivery_error"):
                     return "FAILED", "run completed at %s but delivery failed" % (_iso(fin) or "unknown")
+                if job is not None and job.get("last_status") == "ok":
+                    return "COMPLETED", ("the scheduled run completed at %s; the scheduler recorded no delivery "
+                                         "error (receipt by the owner not confirmed)" % (_iso(fin) or "unknown"))
                 return "COMPLETED", ("the scheduled run completed at %s; delivery to the chat not verified"
                                      % (_iso(fin) or "unknown"))
             if any(r[0] in ("claimed", "running") for r in mine):
