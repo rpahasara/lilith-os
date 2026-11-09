@@ -49,6 +49,7 @@ class RouterConfig:
     appraisal_mode: str = "off"            # P-3: off | shadow (log appraisal signals) | live (style + goal context)
     promise_guard_mode: str = "off"        # P-4: off | shadow (flag replies promising a follow-up nothing scheduled)
     commitments_mode: str = "off"          # P-4: off | shadow (log would-surface) | live (own a missed commitment)
+    timeline_mode: str = "off"             # P-4 E-8: off | shadow (log) | live (dated memory timeline on time questions)
     turn_trace_enabled: bool = True     # P-1: turn_id on decision-log records + one turn-end record (metadata only)
     log_path: str = ""              # decisions log; empty => <home>/lilith_router/decisions.log
 
@@ -345,6 +346,8 @@ def load() -> RouterConfig:
         cfg.promise_guard_mode = mode if mode in ("off", "shadow") else "off"
         mode = str(raw.get("commitments_mode", "off")).strip().lower()
         cfg.commitments_mode = mode if mode in ("off", "shadow", "live") else "off"
+        mode = str(raw.get("timeline_mode", "off")).strip().lower()
+        cfg.timeline_mode = mode if mode in ("off", "shadow", "live") else "off"
         try:
             cfg.decision_log_max_bytes = max(100_000, min(50_000_000, int(raw.get(
                 "decision_log_max_bytes", cfg.decision_log_max_bytes))))
