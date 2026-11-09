@@ -227,5 +227,41 @@ class ApprovalFatigueTests(unittest.TestCase):
         self.assertEqual(af.summarize({}, now)["total"]["fatigue_rate"], None)
 
 
+class CommitmentOutcomesTests(unittest.TestCase):
+    """P-4 P4-5a: E-7 counts from commitment goals, their traces, the sync state and the promise flags."""
+
+    def test_outcomes_rate_gate_and_no_text(self):
+        import commitment_outcomes as co
+        now = 1_800_000_000.0
+        iso = lambda ts: __import__("datetime").datetime.fromtimestamp(ts, __import__("datetime").timezone.utc).isoformat()
+        g = lambda gid, st, typ="commitment.once", job=None: {
+            "goalId": gid, "type": typ, "lifecycleState": st, "createdAt": iso(now - 3600),
+            "title": "SECRET TITLE", "target": {"type": "hermes.cron", "id": job or gid}}
+        goals = [g("a", "COMPLETED"), g("b", "COMPLETED"), g("c", "FAILED"), g("d", "BLOCKED"), g("e", "CANCELLED"),
+                 g("f", "ACTIVE"), g("r", "ACTIVE", "commitment.routine")]
+        traces = {"a": [("PENDING", "goal_created"), ("ACTIVE", "accepted"),
+                        ("COMPLETED", "the scheduled run completed at X; the scheduler recorded no delivery error")],
+                  "b": [("ACTIVE", "x"), ("BLOCKED", "missed"), ("ACTIVE", "y"),
+                        ("COMPLETED", "the scheduled run completed at X; delivery to the chat not verified")]}
+        state = {"v": 2, "jobs": {"a": {}, "d": {"held": "run in progress"}}, "unattributed_runs_24h": 1}
+        promises = [{"promise": True, "scheduled": True, "unbacked_promise": False},
+                    {"promise": True, "scheduled": False, "unbacked_promise": True}, {"unbacked_promise": False}]
+        s = co.summarize(goals, traces, state, promises, now)
+        self.assertEqual({k: s["one_time"][k] for k in ("kept_on_time", "kept_late", "failed", "missed_open",
+                                                       "cancelled", "open", "total")},
+                         {"kept_on_time": 1, "kept_late": 1, "failed": 1, "missed_open": 1, "cancelled": 1, "open": 1,
+                          "total": 6})
+        self.assertEqual(s["e7_rate"], 0.5)                                 # 2 kept / (2 + 1 failed + 1 missed)
+        self.assertEqual(s["e7_gate"], "BELOW_BAR")
+        self.assertEqual(s["delivery_evidence_on_kept"], {"no_error_recorded": 1, "not_verified": 1})
+        self.assertEqual(s["routine"], {"ACTIVE": 1, "total": 1})
+        self.assertEqual((s["sync"]["held"], s["sync"]["unattributed_runs_24h"]), (1, 1))
+        self.assertEqual((s["promises"]["unbacked_promise"], s["promises"]["turns_checked"]), (1, 3))
+        self.assertNotIn("SECRET", json.dumps(s))
+        dup = co.summarize(goals[:1] + [g("z", "COMPLETED", job="a")], {}, None, [], now)
+        self.assertEqual((dup["duplicate_goals_per_job"], dup["e7_gate"]), (1, "BELOW_BAR"))
+        self.assertIsNone(co.summarize([], {}, None, [], now)["e7_rate"])
+
+
 if __name__ == "__main__":
     unittest.main()
