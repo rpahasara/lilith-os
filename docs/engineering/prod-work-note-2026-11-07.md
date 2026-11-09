@@ -523,7 +523,17 @@ E-2/E-6 runs above (directional, 1 sample per arm).
 
 These can be met during normal use; no extra test ceremony is planned.
 
-## 3n. P-3 cognitive coordination, metacognition and appraisal (2026-11-08, in progress)
+## 3n. P-3 cognitive coordination, metacognition and appraisal (2026-11-08/09; substrate done, NOT completed)
+
+**Status (owner, 2026-11-09).** E-4 and E-5 findings accepted. P-3 is **not** complete:
+- **Done:** shared ephemeral TurnContext and typed StyleDirective (#383, live; behaviour-identical); per-turn style /
+  correction / appraisal / meta summary in the trace.
+- **Not met:** the E-4 (appraisal) and E-5 (recall-gap gate) behavioural promotion criteria. Both mechanisms stay in
+  **shadow** and are not promoted.
+- **Open research and engineering goals:** full cross-lane coordination (lanes still decide independently; TurnContext
+  is read by the renderer, not yet by the reasoning, planning and goal lanes) and genuine metacognitive control (no
+  control has yet shown a causal benefit).
+- No further work on tone-note wording only to move a benchmark score.
 
 Owner GO 2026-11-08 (Option A). References: R&D plan [04](../research/cognitive-rd-plan-2026-11/04-target-architecture.md)
 §2–§4, [05](../research/cognitive-rd-plan-2026-11/05-social-affect.md) §3,
@@ -697,6 +707,62 @@ nothing changes on PROD meanwhile, because appraisal is in shadow and renders no
 - If it is revisited, the candidate is the goal-context line alone, re-tested blind on good-news and neutral turns. The
   setback line mapping is dropped.
 - **The E-5 recall-gap gate stays in shadow** (never promoted).
+
+## 3o. P-4 episodic learning and consolidation: what can start on existing mechanisms (2026-11-09, planning)
+
+Owner GO 2026-11-09. References: R&D plan [06 §3](../research/cognitive-rd-plan-2026-11/06-metacognition-memory.md)
+(C-1..C-6), [07 §1](../research/cognitive-rd-plan-2026-11/07-goals-initiative-learning.md) (commitments),
+[10](../research/cognitive-rd-plan-2026-11/10-experiments.md) (E-7, E-8). Rules: one Lilith and one memory authority;
+no new memory database or infrastructure unless the existing design cannot support the behaviour; persistent-state
+changes go to an isolated or DEV environment first; read-only or shadow cognition may go directly to PROD.
+
+**What already exists (inspected).**
+
+| Mechanism | What it does today | P-4 use |
+| --- | --- | --- |
+| Nightly learning review (`hermes_scripts/owner_memory_review.py`, Hermes cron) | Reads 26 h of owner conversation (console, owner Telegram DM, verified Discord DM) plus the remembered, pending and rejected lists, and proposes memories | **The C-2 consolidation host.** It already proposes only through the owner-approval path |
+| Owner approval, LILITH-OS-first (#340) | Approved memory goes to the World Model before the USER.md / MEMORY.md projections | The only way anything learned becomes durable |
+| L18 learning events (#341) | PROPOSED / REJECTED / APPROVED / IMPORTED / SUPERSEDED / RETRACTED, append-only, idempotent | Provenance; the approval-fatigue metric (proposed vs approved, rejected or ignored) |
+| World Model owner memory (#339) | Approved beliefs with evidence and supersession | Durable facts, typed preferences and boundaries, and approved autobiographical facts ("passed the CKA on …") |
+| Goals store (Slice 8) | Goals with lifecycle state and `updatedAt`; `GET /os/goals` is read-only | Verified outcomes: goals that reached COMPLETED / FAILED / BLOCKED |
+| Router trace (`decisions.log`, P-1, P-3 shadow) | Per-turn metadata: durable correction routed, appraisal setback / progress / goal-related, recall gap; no text | **The minimum P-3 → P-4 interface:** cues for which moments mattered, already produced in shadow |
+
+**P-3 dependency.** P-4 needs only the trace metadata that P-3 already writes in shadow. That metadata is read offline
+as cues for consolidation; it never changes replies. No new cognitive module is needed.
+
+**Gap against the roadmap.** C-1 asks for durable per-turn episode records (a new Core API table inside FORGET scope).
+The existing design does **not** hold a durable episode index: transcripts in `state.db` and the bounded trace serve
+that role for about a day. This is **deferred**. For now, episodes are assembled at review time from the transcript and
+trace, and what deserves to last becomes an **approved owner memory** (a dated event fact), which keeps one memory
+authority. A durable episode store is reconsidered only if E-8 ("when / what happened") shows the approved-fact route is
+insufficient. It would need a privacy and FORGET review first.
+
+**Focused tasks, in order.**
+1. **P4-1 Consolidation context v2** (C-2 first slice; read-only; proposal-only). Status: source + 4 tests done; not installed. The nightly review
+   context gains:
+   - wording guidance: typed `Preference/Boundary (scope):` (closes P-2 open item 3); dated event facts for
+     achievements and setbacks; at most 3 proposals per night;
+   - a fictional-scenario rule: test or fictional scenarios are never proposed as real facts; a clarification may
+     become a boundary;
+   - *notable moments*: times of owner turns where the trace saw a durable correction, a reported setback or progress,
+     or a tracked goal (kinds only);
+   - *goal changes*: tracked goals that changed state in the window (a verified outcome is a fact, not a feeling).
+
+   Nothing new is stored; proposals still need owner approval. Installation is outside the pipeline, through the
+   existing install tool with backup and rollback, after a counts-only dry run on PROD and owner GO.
+2. **P4-2 Approval-fatigue metric** (C-2 gate; read-only). Proposed vs approved / rejected / ignored per week from L18
+   events plus pending files, added to the trace summary. Kill: >50% rejected or ignored, then tighten.
+3. **P4-3 Reappraisal through supersession** (C-4). The replace / supersede path exists (SUPERSEDED events). Verify it
+   once live (also P-2 open item 1). The review proposes a replacement when a new statement contradicts a remembered
+   one, keeping both lineages.
+4. **P4-4 Commitments** (07 §1, E-7). Explicit promises ("remind me…", "I'll check on…") as typed goals. This is a
+   persistent change, so DEV first. Design before code.
+5. **P4-5 Outcome reinforcement** (C-3). Verified goal outcomes adjust priority, not truth. Needs goal writes, so DEV
+   first, after P4-4.
+6. **Deferred:** the durable episode store (C-1), autobiographical canonical families (C-5) and the Slice 15A worker
+   restart (C-6; needs OAuth, so after the migration).
+
+**Measures.** E-7 (commitments), E-8 (episodic recall without fabrication); approval fatigue (<50% rejected or ignored).
 
 ## 4. Feature readiness vs. remaining work
 
