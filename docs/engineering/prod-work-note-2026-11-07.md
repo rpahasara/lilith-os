@@ -919,6 +919,8 @@ the **creation**, not the reminder. The scheduler's own records show the actual 
   ships with the next script install.
 - **Result: PASS for the commitment lifecycle** (created → active → scheduled execution → completed, with no
   unattributed runs). Delivery: no error recorded; receipt not independently verified.
+- **Owner confirmation (2026-11-09):** the reminder **arrived**. Receipt is now confirmed by the owner, separately
+  from the scheduler's evidence.
 
 **P4-4b Unbacked-promise check (shadow).** New `lilith_router/promise_guard.py`; `promise_guard_mode: shadow`. At turn
 end, the turn record gains four booleans:
@@ -951,7 +953,14 @@ through the Goals API. Delete `~/.hermes/commitments/sync.json` to start fresh.
 Roadmap C-3: verified outcomes adjust *priority and attention*, not truth. Built on what exists: commitment and goal
 outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval, and the Executive focus.
 
-1. **P4-5a E-7 reading** (read-only). Tool: `scripts/cognitive_eval/commitment_outcomes.py` (counts only; goal outcomes from the goal trace; delivery evidence from the sync's own reasons; promise flags from the turn trace). A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
+1. **P4-5a E-7 reading** (read-only). Tool: `scripts/cognitive_eval/commitment_outcomes.py` (counts only; goal outcomes from the goal trace; delivery evidence from the sync's own reasons; promise flags from the turn trace). Merged in #396.
+   - **Baseline on PROD, 2026-11-09** (counts only): 1 one-time commitment, kept on time; E-7 rate 1.0; 0 duplicates;
+     gate PASS **at n = 1**. That makes it a functional check, not a statistic.
+   - Delivery evidence `not_verified`: it completed before the precise wording was installed, and the owner has
+     confirmed receipt. 0 held; 0 unattributed runs; 0 routine commitments.
+   - Promise flags: 0 turns checked yet (no owner turns since the shadow check was deployed).
+   - **Next reading:** after a week of normal use. Report kept / missed / failed with denominators and the
+     unbacked-promise rate. A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
    missed (BLOCKED, or terminal after a block), cancelled, held. Per week, with the sync's `unattributed_runs_24h` and
    the promise check's `unbacked_promise` rate. E-7 bar: ≥ 90% kept or acknowledged, 0 duplicates.
 2. **P4-5b Commitment outcomes in the nightly review.** The review lists them separately from life goals: "commitments
