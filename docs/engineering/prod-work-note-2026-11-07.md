@@ -784,7 +784,7 @@ insufficient. It would need a privacy and FORGET review first.
 
 **Measures.** E-7 (commitments), E-8 (episodic recall without fabrication); approval fatigue (<50% rejected or ignored).
 
-## 3p. P4-4 Commitments: design and first slice (2026-11-09; source + tests, DEV next)
+## 3p. P4-4 Commitments: design and first slice (2026-11-09; DEV PASS, PROD pending owner GO)
 
 Owner GO 2026-11-09: cognitive coordination and long-term agent behaviour, **not** a reminders app. One Lilith, one
 authoritative state, no new commitments database.
@@ -855,9 +855,26 @@ deterministic script, run every few minutes as a no-agent Hermes cron job (the s
 - **No Core API change.** Generic goal types have no completion gate, and the sync supplies the evidence as the
   transition reason.
 
+**DEV test, 2026-11-09: PASS** (`lilith-dev-01`; `p3tx/deployer/p44_dev_test.py`). The PR's script ran against
+DEV's **real Goals API and database**, with synthetic scheduler files in a throwaway Hermes home: no real job was
+created and nothing was delivered.
+
+| Synthetic job | Path | Final |
+| --- | --- | --- |
+| overdue, never run | created → BLOCKED ("missed") → run record completed → unblock → COMPLETED (revision 4) | COMPLETED |
+| run failed | created → ACTIVE → FAILED | FAILED |
+| removed before it ran | created → ACTIVE → CANCELLED | CANCELLED |
+| non-owner origin | not tracked | — |
+
+- A third pass made no changes (idempotent).
+- All goals are `commitment.once`, source `SCHEDULED`, with the scheduler deadline and a `hermes.cron` target.
+- DEV's real `cron/executions.db` has the same columns the sync reads. DEV has no live jobs to compare field names
+  with; they are known from PROD.
+- Three terminal `TEST_ONLY P4-4 DEV …` goals remain on DEV as history.
+
 **Next.**
-1. **DEV:** install the script plus a no-agent cron job on `lilith-dev-01`; schedule one synthetic one-time job and one
-   synthetic job that is removed before it runs; verify the goals and their traces. Persistent state, so DEV first.
+1. **PROD install** (owner GO): the script beside the review scripts, plus one silent no-agent Hermes cron job every
+   5 minutes (like the snapshot job), with backup and rollback.
 2. **PROD:** with owner GO, after DEV passes.
 3. **Unbacked-promise guard (shadow):** at turn end, flag a reply that promises a future action ("I'll remind you",
    "I'll check in tomorrow") when no `cronjob` create happened in that turn. Count first; choose a control only from
