@@ -3,27 +3,37 @@
 
 The full agent already has Hermes' scheduler (the `cronjob` tool): when the owner asks "remind me at 6 to call mum" or
 "check the release notes tomorrow and tell me", the agent creates a job that Hermes' scheduler fires and delivers back
-to the same chat. Until now that commitment lived only in Hermes' jobs.json, invisible to LILITH OS's Goals, the
-Executive focus and the nightly review, and nothing noticed when one was missed.
-
-This silent no-agent cron script (same pattern as owner_memory_snapshot.py) makes each such job a typed goal:
+to the same chat. This silent no-agent cron script makes each such job a typed goal:
 
     commitment.once      a one-time reminder or follow-up        PENDING -> ACTIVE -> COMPLETED | FAILED | CANCELLED
     commitment.routine   a recurring one ("every Monday ...")   ACTIVE until removed (CANCELLED)
 
 Evidence only, never inferred:
-- created and accepted by the scheduler (job present, `next_run_at` set)  -> goal created and activated;
-- the scheduler's own run record (cron/executions.db) says completed      -> COMPLETED ("honoured");
+- accepted by the scheduler (job present, `next_run_at` set)              -> goal created and activated;
+- the scheduler's run record (cron/executions.db) says completed          -> COMPLETED. This means the scheduled run
+  finished; it does NOT prove the message reached the owner (Hermes deletes a one-time job after its run, and with it
+  any delivery error). The reason says so; a delivery error seen on a still-present job is reported as FAILED;
 - it says failed                                                           -> FAILED;
-- due more than GRACE ago, still not run                                   -> BLOCKED ("missed"); a later run resolves it;
-- paused / resumed by the owner                                            -> SUSPENDED / ACTIVE;
-- the job is gone and the scheduler never ran it                           -> CANCELLED ("removed before it ran").
-Hermes deletes a one-time job right after its run, so "gone" alone never means cancelled: the run record decides.
+- due more than GRACE ago, job still present and not run                   -> BLOCKED ("missed"); a later run resolves it;
+- paused / resumed                                                         -> SUSPENDED / ACTIVE;
+- the job disappeared BEFORE its due time and the scheduler has no record of any run -> CANCELLED.
+
+Fail-safe (owner review 2026-11-09): nothing is ever concluded from missing evidence.
+- jobs.json missing, unreadable or malformed -> the whole pass stops; nothing is written (an empty scheduler is only
+  ever a jobs.json that parses);
+- executions.db unreadable, a run still in progress, or inconsistent evidence (gone after its due time with no run
+  record) -> that commitment is HELD unchanged and reported;
+- sync.json unreadable or malformed -> the pass stops and the file is left untouched; sync.json missing -> the mapping
+  is rebuilt from the Goals API (the authoritative record) before anything new is created.
+
+Coverage limit: this polls. A one-time job created and executed between two passes never appears in jobs.json and
+cannot be attributed to a channel, so it is not tracked. Run it every minute; each pass reports how many scheduler runs
+in the last 24 h belong to no tracked or present job (`unattributed_runs_24h`), so the gap is visible, never hidden.
 
 Only jobs created from an owner channel (console, owner Telegram DM, verified Discord DM; the router's owner rule)
 are commitments. System jobs (scripts / no-agent) are skipped. Nothing is sent, scheduled or deleted here; the only
-writes are the Goals API (loopback, controlled create / transition with a reason in the goal trace) and this script's
-own state file. Prints nothing on success; one line per change with --verbose (ids and states, never job text).
+writes are the Goals API (loopback; controlled create / transition with a reason in the goal trace) and this script's
+own state file. Prints nothing on success; one JSON line per event with --verbose (ids and states, never job text).
 
 Rollback: disable this cron job; the goals stay as an accurate history and can be cancelled through the Goals API.
 """
@@ -41,8 +51,10 @@ from pathlib import Path
 HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 API = os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765")
 STATE = "commitments/sync.json"
+STATE_VERSION = 2
 GRACE_S = 30 * 60
 TITLE_MAX = 160
+TERMINAL = ("COMPLETED", "FAILED", "CANCELLED")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
@@ -53,6 +65,10 @@ except Exception:                                                  # pragma: no 
 
     def owner_discord_dms(home):
         return set()
+
+
+class SyncAborted(Exception):
+    """A precondition failed; the pass stops and writes nothing."""
 
 
 def _ts(value):
@@ -76,33 +92,41 @@ def _iso(ts):
 # ---------------------------------------------------------------------------------------------- reading ---
 
 def load_jobs(home: Path) -> dict:
+    """The scheduler's jobs by id. Raises SyncAborted unless jobs.json exists and parses into a job list."""
     try:
         d = json.loads((home / "cron" / "jobs.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    jobs = d.get("jobs", []) if isinstance(d, dict) else d
+    except (OSError, ValueError) as exc:
+        raise SyncAborted("jobs_unreadable:%s" % type(exc).__name__)
+    jobs = d.get("jobs") if isinstance(d, dict) else d
     if isinstance(jobs, dict):
         jobs = list(jobs.values())
+    if not isinstance(jobs, list):
+        raise SyncAborted("jobs_malformed")
     return {str(j["id"]): j for j in jobs if isinstance(j, dict) and j.get("id")}
 
 
-def runs(home: Path, job_id: str) -> list:
-    """The scheduler's own run records for a job: [(status, finished_ts)], oldest first. Read-only."""
+def load_runs(home: Path):
+    """All scheduler run records: {job_id: [(status, finished_ts, claimed_ts)]} oldest first, or None when the
+    executions database cannot be read (evidence unavailable)."""
+    path = home / "cron" / "executions.db"
+    if not path.exists():
+        return None
     try:
-        con = sqlite3.connect(f"file:{home / 'cron' / 'executions.db'}?mode=ro", uri=True, timeout=5)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            rows = con.execute("SELECT job_id, status, finished_at, claimed_at FROM executions "
+                               "ORDER BY coalesce(finished_at, claimed_at)").fetchall()
+        finally:
+            con.close()
     except sqlite3.Error:
-        return []
-    try:
-        rows = con.execute("SELECT status, finished_at FROM executions WHERE job_id=? AND status IN "
-                           "('completed', 'failed') ORDER BY coalesce(finished_at, claimed_at)", (job_id,)).fetchall()
-    except sqlite3.Error:
-        rows = []
-    finally:
-        con.close()
-    return [(s, _ts(f)) for s, f in rows]
+        return None
+    out = {}
+    for jid, status, finished, claimed in rows:
+        out.setdefault(str(jid), []).append((str(status), _ts(finished), _ts(claimed)))
+    return out
 
 
-def owner_origin(job: dict, telegram_ids: set, discord_dms: set) -> str | None:
+def owner_origin(job: dict, telegram_ids: set, discord_dms: set):
     """The owner channel a job was created from, or None (not a commitment)."""
     o = job.get("origin") or {}
     platform, chat = str(o.get("platform") or ""), str(o.get("chat_id") or "")
@@ -127,24 +151,40 @@ def one_shot(job: dict) -> bool:
 
 # -------------------------------------------------------------------------------------- the decision ---
 
-def desired(entry: dict, job: dict | None, job_runs: list, now: float) -> tuple[str, str] | None:
-    """(target lifecycle, reason) for a tracked commitment, or None to leave it. Pure; evidence only."""
+HOLD = "HOLD"
+
+
+def desired(entry: dict, job, job_runs, now: float):
+    """(target lifecycle | HOLD, reason). Pure; evidence only. `job_runs` None = execution evidence unavailable."""
     created = entry.get("created_ts") or 0
-    after = [(s, f) for s, f in job_runs if f is None or f >= created - 60]
+    due = entry.get("due_ts")
     if entry.get("once"):
-        if after:
-            status, finished = after[-1]
-            if status == "completed":
-                return "COMPLETED", "honoured: the scheduler completed the run at %s" % (_iso(finished) or "unknown")
-            return "FAILED", "the scheduler run failed at %s" % (_iso(finished) or "unknown")
-        if job is None:
-            return "CANCELLED", "removed before it ran"
-        if job.get("state") == "paused" or job.get("enabled") is False:
-            return "SUSPENDED", "paused"
-        due = entry.get("due_ts")
-        if due and now - due > GRACE_S:
-            return "BLOCKED", "missed: due %s and not run by the scheduler" % _iso(due)
-        return "ACTIVE", "accepted by the scheduler"
+        if job_runs is not None:
+            mine = [r for r in job_runs if (r[2] or r[1] or 0) >= created - 60]
+            finished = [r for r in mine if r[0] in ("completed", "failed")]
+            if finished:
+                status, fin, _ = finished[-1]
+                if status == "failed":
+                    return "FAILED", "the scheduler run failed at %s" % (_iso(fin) or "unknown")
+                if job is not None and job.get("last_delivery_error"):
+                    return "FAILED", "run completed at %s but delivery failed" % (_iso(fin) or "unknown")
+                return "COMPLETED", ("the scheduled run completed at %s; delivery to the chat not verified"
+                                     % (_iso(fin) or "unknown"))
+            if any(r[0] in ("claimed", "running") for r in mine):
+                return (HOLD, "run in progress") if job is None else ("ACTIVE", "run in progress")
+            if any(r[0] == "unknown" for r in mine):
+                return HOLD, "run outcome unknown in the scheduler record"
+        if job is not None:
+            if job.get("state") == "paused" or job.get("enabled") is False:
+                return "SUSPENDED", "paused"
+            if due and now - due > GRACE_S:
+                return "BLOCKED", "missed: due %s and not run by the scheduler" % _iso(due)
+            return "ACTIVE", "accepted by the scheduler"
+        if job_runs is None:
+            return HOLD, "job gone and execution evidence unavailable"
+        if due and now < due:
+            return "CANCELLED", "removed before it was due (no run recorded)"
+        return HOLD, "job gone after its due time with no run record (inconsistent evidence)"
     if job is None:
         return "CANCELLED", "routine removed"
     if job.get("state") == "paused" or job.get("enabled") is False:
@@ -190,18 +230,41 @@ def create_goal(job: dict, channel: str, once: bool) -> dict:
     return out.get("goal", out)
 
 
-def transition(goal_id: str, action: str, reason: str, job_id: str, step: int) -> dict:
+def transition(goal_id: str, action: str, reason: str, job_id: str, revision) -> dict:
+    # keyed by the goal's current revision: unique per move, and stable across a state rebuild (a reused
+    # operationId would be taken by the Core API as a replay of an earlier move)
     out = _api("POST", "/os/goals/%s/transition" % goal_id,
                {"action": action, "reason": reason, "correlationId": "commit-" + job_id,
-                "operationId": "commit-%s-%s-%d" % (job_id, action, step)})
+                "operationId": "commit-%s-%s-r%s" % (job_id, action, revision)})
     return out.get("goal", out)
 
 
-def _read_state(home: Path) -> dict:
+def _read_state(home: Path):
+    """(state, existed). Raises SyncAborted for an unreadable or malformed file, which is left untouched."""
+    path = home / STATE
+    if not path.exists():
+        return {"v": STATE_VERSION, "jobs": {}}, False
     try:
-        return json.loads((home / STATE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SyncAborted("state_unreadable:%s" % type(exc).__name__)
+    if not (isinstance(state, dict) and state.get("v") == STATE_VERSION and isinstance(state.get("jobs"), dict)):
+        raise SyncAborted("state_malformed")
+    return state, True
+
+
+def rebuild_state() -> dict:
+    """The job -> goal mapping from the authoritative Goals store (used when sync.json is missing)."""
+    jobs = {}
+    for gtype in ("commitment.once", "commitment.routine"):
+        for g in _api("GET", "/os/goals?type=%s&limit=200" % gtype).get("goals", []):
+            tgt = g.get("target") or {}
+            if tgt.get("type") != "hermes.cron" or not tgt.get("id"):
+                continue
+            jobs[str(tgt["id"])] = {"goal": g["goalId"], "once": gtype == "commitment.once",
+                                    "created_ts": _ts(g.get("createdAt")), "due_ts": _ts(g.get("deadline")),
+                                    "status": g.get("lifecycleState"), "rev": g.get("revision")}
+    return {"v": STATE_VERSION, "jobs": jobs}
 
 
 def _write_state(home: Path, state: dict) -> None:
@@ -212,17 +275,24 @@ def _write_state(home: Path, state: dict) -> None:
     os.replace(tmp, path)
 
 
-def sync(home: Path = HOME, now: float | None = None, api=None) -> list:
-    """One pass. Returns change records (ids, types, states; no job text). `api` overrides the HTTP layer in tests."""
+def sync(home: Path = HOME, now=None, api=None) -> list:
+    """One pass. Returns event records (ids, types, states; no job text). `api` overrides the HTTP layer in tests.
+    Raises SyncAborted (nothing written) when the scheduler's job list or the state file cannot be trusted."""
     global _api
     if api is not None:
         _api = api
     now = dt.datetime.now(dt.timezone.utc).timestamp() if now is None else now
-    state, changes = _read_state(home), []
+    state, existed = _read_state(home)                      # before anything else: never overwrite a bad file
     jobs = load_jobs(home)
+    all_runs = load_runs(home)
+    events = []
+    if not existed:
+        state = rebuild_state()
+        events.append({"event": "state_rebuilt", "tracked": len(state["jobs"])})
+    tracked = state["jobs"]
     tg, dc = owner_ids(home), owner_discord_dms(home)
     for jid, job in jobs.items():                          # new commitments the scheduler has accepted
-        if jid in state or not is_agent_job(job) or not job.get("next_run_at"):
+        if jid in tracked or not is_agent_job(job) or not job.get("next_run_at"):
             continue
         channel = owner_origin(job, tg, dc)
         if channel is None:
@@ -231,42 +301,57 @@ def sync(home: Path = HOME, now: float | None = None, api=None) -> list:
         try:
             goal = create_goal(job, channel, once)
         except (urllib.error.HTTPError, KeyError, ValueError) as exc:
-            changes.append({"job": jid, "event": "create_refused", "error": type(exc).__name__})
+            events.append({"job": jid, "event": "create_refused", "error": type(exc).__name__})
             continue
-        state[jid] = {"goal": goal["goalId"], "once": once, "created_ts": _ts(job.get("created_at")) or now,
-                      "due_ts": _ts(job.get("next_run_at")) if once else None, "status": goal.get("lifecycleState"),
-                      "step": 0}
-        changes.append({"job": jid, "goal": goal["goalId"], "event": "created", "type": "once" if once else "routine"})
-    for jid, entry in state.items():
-        if entry.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
+        tracked[jid] = {"goal": goal["goalId"], "once": once, "created_ts": _ts(job.get("created_at")) or now,
+                        "due_ts": _ts(job.get("next_run_at")) if once else None,
+                        "status": goal.get("lifecycleState"), "rev": goal.get("revision")}
+        events.append({"job": jid, "goal": goal["goalId"], "event": "created", "type": "once" if once else "routine"})
+    for jid, entry in tracked.items():
+        if entry.get("status") in TERMINAL:
             continue
-        target = desired(entry, jobs.get(jid), runs(home, jid), now)
-        if target is None or target[0] == entry.get("status"):
+        job_runs = None if all_runs is None else all_runs.get(jid, [])
+        target, reason = desired(entry, jobs.get(jid), job_runs, now)
+        if target == HOLD:
+            if entry.get("held") != reason:
+                entry["held"] = reason
+                events.append({"job": jid, "goal": entry["goal"], "event": "held", "reason": reason})
+            continue
+        entry.pop("held", None)
+        if target == entry.get("status"):
             continue
         try:
-            for action in PATH.get((entry.get("status"), target[0]), []):
-                entry["step"] = int(entry.get("step") or 0) + 1
-                goal = transition(entry["goal"], action, target[1], jid, entry["step"])
+            for action in PATH.get((entry.get("status"), target), []):
+                goal = transition(entry["goal"], action, reason, jid, entry.get("rev"))
                 entry["status"] = goal.get("lifecycleState", entry["status"])
+                entry["rev"] = goal.get("revision", entry.get("rev"))
         except (urllib.error.HTTPError, KeyError, ValueError) as exc:
-            changes.append({"job": jid, "goal": entry["goal"], "event": "transition_refused",
-                            "error": type(exc).__name__})
+            events.append({"job": jid, "goal": entry["goal"], "event": "transition_refused",
+                           "error": type(exc).__name__})
             continue
-        changes.append({"job": jid, "goal": entry["goal"], "event": target[0].lower()})
+        events.append({"job": jid, "goal": entry["goal"], "event": target.lower()})
+    if all_runs is not None:                               # the polling gap, made visible
+        known = set(tracked) | set(jobs)
+        recent = {j for j, rs in all_runs.items() if j not in known
+                  and any((r[1] or r[2] or 0) >= now - 86400 for r in rs)}
+        state["unattributed_runs_24h"] = len(recent)
     _write_state(home, state)
-    return changes
+    return events
 
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     try:
-        changes = sync()
+        events = sync()
+    except SyncAborted as exc:
+        print("commitment_sync ABORTED (nothing written): %s" % exc)
+        return 2
     except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
         print("commitment_sync FAILED: %s" % type(exc).__name__)
         return 1
     if "--verbose" in argv:
-        for c in changes:
-            print(json.dumps(c, sort_keys=True))
+        for e in events:
+            print(json.dumps(e, sort_keys=True))
     return 0
 
 
