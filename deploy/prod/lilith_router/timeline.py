@@ -6,14 +6,19 @@ and a replaced entry stays as SUPERSEDED with the time it stopped being current.
 model answers when / order / "what was it before" questions correctly only when that information is in front of it,
 and honestly says it does not know otherwise.
 
-On an owner turn that asks about time, order or change, this renders a compact timeline from those records:
+On an owner QUESTION about their own past (when / order / how long ago / before-after / "did I ever" / "do I still"),
+this renders a compact list from those records:
 
-    - learned 2026-09-02: <approved text>
-    - no longer current since 2026-10-20: <superseded text>
+    - stored 2026-09-02: <approved text>
+    - replaced 2026-10-20 (an earlier stored belief, not necessarily ever true): <superseded text>
 
-"learned" is when the owner told Lilith (the approval), not necessarily when it happened; an event date is used only
-when the approved text itself states one. Nothing is inferred, re-dated or changed; the records stay authoritative.
-Read-only; owner turns only; deterministic; no model call.
+Semantics (owner review 2026-11-09):
+- a "stored" date is when the memory was recorded, never when an event happened, and never evidence of the order in
+  which real-world events occurred; only a date written inside an entry dates an event;
+- a replaced entry is what Lilith previously had stored. It may have been true then, mistaken, fictional or corrected;
+  it is never presented as a past fact unless a current entry says so.
+Entries are listed in their stored order only. Nothing is inferred, re-dated or changed; the records stay
+authoritative. Read-only; owner turns only; deterministic; no model call.
 """
 
 from __future__ import annotations
@@ -25,20 +30,35 @@ import time
 import urllib.request
 from typing import Callable, List, Optional, Tuple
 
+# A question about the OWNER'S OWN past: time, order, elapsed time, a past state, or whether something still holds.
+# Bare words ("when", "before", "after", "ever", "still", "since") in statements, plans, how-to or questions about
+# anything else never match (owner review 2026-11-09: a broad cue would route ordinary turns to the full agent).
 TEMPORAL_RE = re.compile(
-    r"\bwhen\b|\bwhat\s+(?:came|happened)\s+first\b|\bwhich\s+(?:came|happened)\s+first\b|\bbefore\b|\bafter\b|"
-    r"\bago\b|\bhow\s+long\b|\bused\s+to\b|\bpreviously\b|\bever\b|\bback\s+then\b|\bat\s+the\s+time\b|\bsince\b|"
-    r"\bfirst\s+time\b|\blast\s+time\b|\bstill\b|\banymore\b|\bchanged?\b|\bmoved\b|\bearlier\b|\bthat\s+time\b",
+    r"\bwhen\s+(?:did|was|were|have|had)\s+(?:i|we|my)\b|"
+    r"\bwhen\s+did\s+you\s+(?:first\s+)?(?:learn|hear|find\s+out)\b|"
+    r"\b(?:what|which)\s+(?:came|happened)\s+first\b|"
+    r"\bhow\s+long\s+(?:ago|since|have\s+i|had\s+i|has\s+it\s+been\s+since|did\s+i)\b|"
+    r"\bhow\s+many\s+(?:days|weeks|months|years)\s+(?:ago|since)\b|"
+    r"\b(?:did|have|had)\s+i\s+ever\b|"
+    r"\b(?:where|what|who|how)\s+(?:was|were|did)\s+(?:i|we|my)\b[^?.!]{0,60}?"
+    r"\b(?:before|back\s+then|at\s+the\s+time|used\s+to|previously|when\s+i)\b|"
+    r"\bwhat\s+did\s+i\s+use\s+to\b|\bdid\s+i\s+use\s+to\b|"
+    r"\b(?:do|am|is|are)\s+(?:i|my|we)\b[^?.!]{0,40}?\bstill\b|"
+    r"\b(?:before|after)\s+i\s+(?:started|moved|joined|left|passed|failed|quit|got|finished|began)\b",
     re.IGNORECASE)
+_QUESTION_RE = re.compile(r"\?|^\s*(?:when|what|which|how|where|who|did|do|have|had|was|were|am|is|are)\b", re.I)
 MAX_ENTRIES = 14
 MAX_CHARS = 1600
-HEADER = ("[What you know about them, with when you learned it. \"learned\" is when they told you, not necessarily "
-          "when it happened; use an event date only if the entry itself states one. An entry marked \"no longer "
-          "current\" was true before and has been replaced. Never invent a date or an order you can't see here.]")
+HEADER = ("[Your stored memories about them, in the order they were stored. A \"stored\" date is when the memory "
+          "was recorded: never when anything happened, and never a reason to say which real event came first. Only "
+          "a date written inside an entry dates an event. A \"replaced\" entry is something you previously had "
+          "stored; it may have been mistaken, fictional or corrected, so never present it as what was true unless a "
+          "current entry says so. If the dates you need aren't written in an entry, say you don't know.]")
 
 
 def temporal(message: str) -> bool:
-    return bool(TEMPORAL_RE.search(message or ""))
+    text = message or ""
+    return bool(_QUESTION_RE.search(text) and TEMPORAL_RE.search(text))
 
 
 def _day(value) -> Optional[str]:
@@ -68,10 +88,11 @@ def render(entries, now: Optional[float] = None) -> Optional[str]:
         text = " ".join(str(e["text"]).split())[:240]
         if e.get("lifecycle_state") == "SUPERSEDED":
             since = _day(e.get("updated_at"))
-            rows.append((since or "", "- no longer current%s: %s" % (" since " + since if since else "", text)))
+            rows.append((since or "", "- replaced%s (an earlier stored belief, not necessarily ever true): %s"
+                         % (" " + since if since else "", text)))
         else:
             learned = _learned(e)
-            rows.append((learned or "", "- %s%s" % ("learned %s: " % learned if learned else "undated: ", text)))
+            rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text)))
     if not rows:
         return None
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last

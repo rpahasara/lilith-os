@@ -1067,6 +1067,25 @@ state, elapsed time, ever lived elsewhere) and 3 controls (current state, outcom
   echo notes.
 - 5 tests. Rollback: `off`. The same module rendered arm C, so the evaluated text is the shipped text.
 
+**Owner review of the timeline (2026-11-09), fixed before any promotion; still shadow.**
+1. **A replaced memory is not a past fact.** It may have been mistaken, fictional or corrected. Lines now read
+   "replaced <date> (an earlier stored belief, not necessarily ever true): …". The header says never to present it as
+   what was true unless a current entry says so. The earlier wording "no longer current … was true before" was wrong.
+2. **A stored date is never an event date.** Lines now read "stored <date>" (not "learned"). The header says it is
+   never when anything happened and never a reason to say which real event came first; only a date written inside an
+   entry dates an event, otherwise say you don't know. Arm C's one over-inference (learned order taken as event order)
+   is the failure this wording targets. Its effect is **not re-measured yet**.
+3. **Trigger too broad.** Any message containing "when / before / after / ever / still / since / changed / moved"
+   matched, so ordinary owner turns ("I'll message you when I get home", "before we start, explain X") would have gone
+   to the full agent once live. It now needs a **question about the owner's own past**: when did I / we, what or
+   which came first, how long ago or since, did I ever, where or what was I … before / back then, do I still,
+   before or after I started / moved / …. Tests: 11 owner-past questions match; 15 statements, plans, how-to and
+   general questions do not (including "which was first, the chicken or the egg?").
+
+**Shadow counts (since the P-3 deploy, 2026-11-08 19:01Z → 2026-11-09 ~12:00Z): 1 owner turn** (the reminder
+request), 0 timeline, commitments, recall-gap or appraisal firings, 0 unbacked promises. Too little traffic to judge
+anything. The practical owner test is the next evidence.
+
 **Remaining P-4 memory-intelligence gaps (honest list).**
 1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1); its
    effect on real proposals is not measured yet.
