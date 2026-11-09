@@ -112,18 +112,38 @@ def adjust_lines(lines: Sequence[str], signals: Sequence[AppraisalSignal], *, fo
     return tuple(keys[:pos] + ["difficulty"] + keys[pos:])
 
 
-GOAL_NOTE = ("[This touches a goal they're tracking: \"{title}\" (status: {state}). Connect to it only if it fits; "
-             "don't recite it.]")
+GOAL_NOTE = ("[This connects to something they're working toward: {topic}. Mention it only if it fits, in your own "
+             "words; never quote it, and never mention ids, numbers or tracking labels.]")
+
+# Internal bookkeeping never reaches the reply model (E-4 blind review 2026-11-09: a reply quoted "Application 12").
+_FOLLOW_UP_RE = re.compile(r"^\s*follow\s+up\s+on\s+application\s+\S+\s*[—–:-]\s*", re.IGNORECASE)
+_INTERNAL_ID_RE = re.compile(
+    r"\b(?:application|app|goal|task|ticket|draft|item)\s*#?\s*[0-9a-f-]{1,36}\b|#\s*\d+|"
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:g|om|madm)[._][0-9a-z]{4,}\b",
+    re.IGNORECASE)
+
+
+def goal_topic(title: str) -> Optional[str]:
+    """A plain-language topic for a goal title, with internal ids and tracking labels removed."""
+    text = " ".join(str(title or "").split())
+    if re.fullmatch(r"follow\s+up\s+on\s+application\s+\S+", text, re.IGNORECASE):
+        return "a job application they're following up on"
+    m = _FOLLOW_UP_RE.match(text)
+    if m:
+        rest = text[m.end():]
+        text = ("their application for " + rest) if rest else ""
+    text = _INTERNAL_ID_RE.sub("", text)
+    text = " ".join(re.sub(r"\(\s*\)|\s+([,.;:])", r"\1", text).split()).strip(" -—–:,")
+    if not re.search(r"[A-Za-z]{3,}", text):
+        return None
+    return text[:120]
 
 
 def goal_note(goals: Sequence[dict]) -> Optional[str]:
     if not goals:
         return None
-    g = goals[0]
-    title = " ".join(str(g.get("title") or "").split())[:120]
-    if not title:
-        return None
-    return GOAL_NOTE.format(title=title, state=str(g.get("lifecycleState") or "unknown").lower())
+    topic = goal_topic(goals[0].get("title"))
+    return GOAL_NOTE.format(topic=topic) if topic else None
 
 
 # ------------------------------------------------------------------------------------------ the goal source ---

@@ -61,9 +61,21 @@ class SignalTests(unittest.TestCase):
         for lines in (adj(("playful",), setback, focused=False), adj((), setback, focused=False)):
             self.assertTrue(set(lines) <= set(sc.TONE_LINES))
 
+    def test_goal_line_never_exposes_internal_labels(self):
+        for title, want in (("Follow up on application 12 - Senior Data Engineer at Acme",
+                             "their application for Senior Data Engineer at Acme"),
+                            ("Follow up on application 9", "a job application they're following up on"),
+                            ("Pass the CKA exam", "Pass the CKA exam"), ("Learn Rust (app 5)", "Learn Rust")):
+            self.assertEqual(self.ap.goal_topic(title), want, title)
+        note = self.ap.goal_note([{"goalId": "g_abcd1234", "title": "Follow up on application 12 - Data Engineer at Acme",
+                                   "lifecycleState": "ACTIVE"}])
+        for leak in ("application 12", "12", "g_abcd1234", "ACTIVE", "active"):
+            self.assertNotIn(leak, note)
+        self.assertIsNone(self.ap.goal_note([{"title": "#4"}]))
+
     def test_goal_note_is_bounded(self):
         note = self.ap.goal_note([{"title": "x" * 500, "lifecycleState": "ACTIVE"}])
-        self.assertLess(len(note), 260)
+        self.assertLess(len(note), 300)
         self.assertIsNone(self.ap.goal_note([]))
 
     def test_goal_source_fails_open_and_caches(self):
@@ -109,6 +121,7 @@ class WiringTests(unittest.TestCase):
         self.assertIn(sc.TONE_LINES["mixed"], hint)
         self.assertNotIn(sc.TONE_LINES["playful"], hint)
         self.assertIn("Data Engineer at Acme", hint)
+        self.assertNotIn("application 12", hint)
         self.assertIn("Data Engineer at Acme", self.gi._tc.lean_suffix(ctx))
         rec = self.records()[-1]
         self.assertEqual((rec["lane"], rec["signals"], rec["goal_refs"]), ("appraisal", ["setback", "goal"], ["g2"]))

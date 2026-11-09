@@ -656,6 +656,48 @@ profile, 1 sample per arm, hard-capped; 18 calls, about 50K tokens in total).
 
 
 
+**E-4 blind owner rating (2026-11-09).** The 8 existing reply pairs were rated, one per scenario: 4 fast-path pairs and
+4 full-agent pairs. They were reused as generated, with no new model calls. Pair order and A/B side were randomised and
+the key was held separately until all 8 verdicts were in. Choices: A, B, Tie, Both bad. The owner first checked that
+"Sam" is defined in the synthetic profile; it is, so it is not an invented detail.
+
+| Pair | Scenario | Path | Winner | Appraisal changed the input? | Owner's reason (summary) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | didn't get the job at Acme | agent | baseline | yes (difficulty line, goal line) | — |
+| 2 | studying for the CKA, wish me luck | agent | **appraisal** | yes (goal line) | — |
+| 3 | rejected by Acme, sarcastic | lean | baseline | yes (goal line) | — |
+| 4 | bombed the interview 😂 | lean | baseline | yes (mixed line) | — |
+| 5 | failed the CKA mock | lean | **appraisal** | yes (mixed line, goal line) | the other reply over-analysed Sam and invented a past struggle ("again") |
+| 6 | conference talk rejected | agent | baseline | **no** (same lines, no goal): sampling noise | cheekier, no over-analysis |
+| 7 | got an interview at Acme | lean | **appraisal** | yes (goal line) | connects to Sam's career goals and offers prep |
+| 8 | passed the CKA | agent | **appraisal**, narrowly | yes (goal line) | both excellent; a Tie would be reasonable |
+
+**Counts:** appraisal 4, baseline 4, ties 0, both bad 0, out of 8 (50%).
+
+**Against the E-4 criteria (R&D plan 10):** pass needs ≥60% wins with no rise in over-inference. **Not met.** The
+overall result also meets the "no difference" kill criterion.
+
+**What the split suggests (directional, not a decision basis):**
+- On setbacks, the owner preferred the baseline 4 of 5 (one of those, pair 6, was noise). Mapping a setback onto the
+  warmer `difficulty` / `mixed` line was not preferred over Lilith's own cheeky handling.
+- On good news and neutral turns, appraisal won 3 of 3, and pair 7's stated reason was the goal connection. The
+  goal-context line (G-WIDEN) may be useful on its own, but 3 pairs is too few to act on.
+
+**Limitations:** 8 pairs, 1 sample each; one rater; two reply paths mixed; synthetic scenarios; pair 6 carries no
+appraisal signal.
+
+**Goal-label leak fixed (code only, in shadow).** The goal line no longer passes the stored goal title through.
+`goal_topic()` turns it into a plain topic ("Follow up on application 12 - Senior Data Engineer at Acme" becomes
+"their application for Senior Data Engineer at Acme"). It removes ids, numbers, tracking labels and the lifecycle state,
+and the note tells the model never to quote it or mention ids. Tests cover this. It ships with the next router deploy;
+nothing changes on PROD meanwhile, because appraisal is in shadow and renders nothing.
+
+**Decisions:**
+- **Appraisal stays in shadow.** It is not promoted, and it is not enabled automatically.
+- If it is revisited, the candidate is the goal-context line alone, re-tested blind on good-news and neutral turns. The
+  setback line mapping is dropped.
+- **The E-5 recall-gap gate stays in shadow** (never promoted).
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
