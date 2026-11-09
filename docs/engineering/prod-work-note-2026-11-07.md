@@ -617,8 +617,43 @@ is not yet measured.
 The only visible gain is goal connection on good news, at about +50 tokens; one reply recited an
 internal label. **Neutral, with a small goal-context benefit**; E-4's pass bar (≥60% blind wins) is not shown.
 
-**Fast (Groq) path: pending.** Today's evaluation cap (~50K Groq tokens/day) was used by the P-2 lean runs (≈44.5K), so
-the lean arms run after 00:00Z: E-5 A/B on 4 gaps + 2 grounded, E-4 A/B on 4 scenarios, 1 sample each (≈35K).
+**Fast (Groq Qwen) path, 2026-11-09 00:05–00:41Z** (after the daily evaluation cap reset; lean reply builder, synthetic
+profile, 1 sample per arm, hard-capped; 18 calls, about 50K tokens in total).
+
+| E-5 recall gap (lean) | A (no gate) | B (G-ASK note) |
+| --- | --- | --- |
+| Invented personal facts on 4 gap scenarios (read by hand) | **0/4** | **0/4** |
+| Grounded control answered (Miso) | 1/1 | 1/1 |
+| **The note's own text echoed into the reply** | — | **1/4** (it opened by quoting the note word for word) |
+| Persona slips ("I'm an AI…") | 0/4 | 1/4 |
+| Mean tokens / latency | 2,713 / 0.6 s | 2,780 / 0.5 s |
+
+| E-4 appraisal (lean) | A (deployed tone note) | B (A + appraisal) |
+| --- | --- | --- |
+| Setback acknowledged (3) | 2/3 | 2/3 |
+| Forced cheer on a setback | 0/3 | 0/3 |
+| Reading by hand | jokier on the setbacks ("send virtual flowers or wine") | warmer and steadier ("take a breath"; a mock is for finding gaps) |
+| Good news connected to the tracked goal | named the company itself | general praise from the profile; the goal line was not used |
+| Mean tokens / latency | 2,798 / 0.6 s | 2,824 / 0.5 s |
+
+**Reading.**
+- **Metacognition (recall gap).** On both paths the reply models already refused to invent the missing facts (0/12 on the
+  agent, 0/4 on the lean path, without the gate). The gate added no measurable safety and two kinds of harm: a uniform
+  opener on the agent path and a verbatim echo of the note on the lean path (N-46, N-48). Its kill criterion (no error
+  drop) is met on this evidence.
+- **Appraisal.** No harm and no forced cheer in either arm; on the lean path the setback replies read somewhat warmer and
+  steadier with appraisal, and on the agent path good news linked more often to the tracked goal. These are 1–2 samples
+  per cell, read by me rather than blind-rated by the owner, so the E-4 pass bar (≥60% blind wins) is not shown.
+
+**Live-mode recommendations (owner decision).**
+- **Metacognition: do not promote.** Keep `metacognition_mode: shadow` to measure how often the signal fires on real
+  owner turns (zero cost), and revisit only if real traffic shows invented personal facts. If it is ever revisited, the
+  control must change first: no fixed note text on the lean path (it gets echoed), and phrasing that does not dictate the
+  opener.
+- **Appraisal: keep shadow; promotion candidate.** Promote only after a small blind owner rating of the existing paired
+  replies (`blind.py`; no new model calls) shows a preference, or after real-traffic shadow logs show the signal firing
+  sensibly. If promoted, the goal line should not expose internal labels (one agent reply quoted "Application 12").
+
 
 
 ## 4. Feature readiness vs. remaining work
