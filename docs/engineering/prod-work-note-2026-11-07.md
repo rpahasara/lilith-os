@@ -1109,6 +1109,41 @@ anything. The practical owner test is the next evidence.
 - **Recommendation:** P-5 design work can start on paper. Any initiative message waits for those readings, per the
   roadmap's evidence gates.
 
+## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
+
+Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan
+[07 §2](../research/cognitive-rd-plan-2026-11/07-goals-initiative-learning.md) (proposal-first, owner-gated
+initiative; IA-06/13/14/23/24/25/37; GC-25/45), [10](../research/cognitive-rd-plan-2026-11/10-experiments.md) E-9.
+
+**What P-4 already provides (built, evidence-gated):**
+- **A real executor:** Hermes' scheduler (`cronjob`), delivering to the originating owner chat.
+- **An authoritative record:** commitments as typed goals with run evidence, missed detection and an E-7 reader.
+- **Honesty checks:** the unbacked-promise flag; delivery wording that never claims receipt.
+- **Outcome visibility:** the nightly review's commitments section; missed-commitment attention (shadow).
+- **Restraint signals:** approval fatigue (rejected or ignored proposals).
+
+**Initiative = one more kind of evidence-triggered, owner-scoped commitment, not a new agent.**
+
+| Piece | Design | Reuses |
+| --- | --- | --- |
+| Triggers (evidence only, IA-06) | a commitment due or missed; a tracked goal's deadline approaching or passed; a meeting-prep or morning-brief slot (existing timers) | Goals store, commitment goals, systemd timers |
+| Eligibility gate (IA-13/14/24/25) | owner channel only (Telegram DM); quiet hours; at most 1–2 a day; a cooldown per trigger; an immediate stop on "not now" / "stop", recorded as an owner boundary through the existing approval path | P-2 typed boundaries, owner approval |
+| Decision | deterministic: trigger + gate, then **propose** (shadow: log "would have checked in", with trigger ids) | P-1 trace |
+| Message | composed by the normal reply path with TurnContext (one identity, no separate persona); delivered by a one-time scheduler job, so the run is recorded and mirrored as a commitment | Hermes cron, commitment sync |
+| Outcome | owner reply, "not now", or ignored → E-9 (veto rate, usefulness, ignored rate) | trace, nightly review |
+
+**Excluded:** affect-, drive- or "missing you"-driven initiative (AP-25, IA-21); self-created goals (GC-25); any
+external action beyond messaging the owner; hidden schedulers (every initiative is a visible scheduler job and a
+goal).
+
+**Gates before even a shadow initiative evaluator:**
+- a week of E-7 and approval-fatigue readings;
+- real shadow counts for unbacked promises and missed commitments;
+- event-dated consolidation (§3r gap 1);
+- an owner decision on quiet hours and the daily cap.
+
+**Live initiative needs:** E-9 shadow evidence plus an explicit owner GO.
+
 ## 4. Feature readiness vs. remaining work
 
 | Area | Current classification | Remaining action |
