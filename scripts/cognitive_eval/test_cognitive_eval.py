@@ -196,5 +196,36 @@ class P3EvalTests(unittest.TestCase):
         self.assertGreaterEqual(changed, 6)
 
 
+class ApprovalFatigueTests(unittest.TestCase):
+    """P-4 P4-2: proposals grouped by id across L18 kinds and pending files; counts only."""
+
+    def test_outcomes_rates_and_gate(self):
+        import approval_fatigue as af
+        now = 1_800_000_000.0
+        day = 86400
+        ev = [
+            {"kind": "PROPOSED", "proposal_id": "p1", "at": now - 3 * day, "source": "hermes", "text": "SECRET-1"},
+            {"kind": "APPROVED", "proposal_id": "p1", "at": now - 2 * day},
+            {"kind": "APPROVED", "proposal_id": "p1", "at": now - 2 * day},          # second item, same proposal
+            {"kind": "APPROVED", "proposal_id": "p2", "at": "2027-01-15T08:00:00Z"},  # fast approval: no PROPOSED
+            {"kind": "PROPOSED", "proposal_id": "p3", "at": now - 4 * day, "source": "hermes"},
+            {"kind": "REJECTED", "proposal_id": "p3", "at": now - 4 * day},
+            {"kind": "PROPOSED", "proposal_id": "p4", "at": now - 20 * day, "source": "some free text"},  # gone
+            {"kind": "PROPOSED", "proposal_id": "p5", "at": now - 10 * day, "source": "hermes"},  # pending > 7 d
+            {"kind": "PROPOSED", "proposal_id": "p6", "at": now - 1 * day, "source": "hermes"},   # pending, young
+            {"kind": "IMPORTED", "proposal_id": None, "at": now},
+            {"kind": "SUPERSEDED", "proposal_id": "p1", "at": now}]
+        props = af.classify(ev, [("p5", None), ("p6", now - day)], now)
+        got = {k: v["outcome"] for k, v in props.items()}
+        self.assertEqual(got, {"p1": "approved", "p2": "approved", "p3": "rejected", "p4": "ignored",
+                               "p5": "ignored", "p6": "pending"})
+        self.assertEqual(props["p4"]["source"], "other")                       # free text never passes through
+        s = af.summarize(props, now)
+        self.assertEqual(s["total"]["fatigue_rate"], 0.6)                       # (1 rejected + 2 ignored) / 5
+        self.assertEqual(s["gate"], "TIGHTEN")
+        self.assertNotIn("SECRET", json.dumps(s))
+        self.assertEqual(af.summarize({}, now)["total"]["fatigue_rate"], None)
+
+
 if __name__ == "__main__":
     unittest.main()
