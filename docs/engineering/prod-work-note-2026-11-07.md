@@ -963,7 +963,24 @@ outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval,
      unbacked-promise rate. A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
    missed (BLOCKED, or terminal after a block), cancelled, held. Per week, with the sync's `unattributed_runs_24h` and
    the promise check's `unbacked_promise` rate. E-7 bar: ≥ 90% kept or acknowledged, 0 duplicates.
-2. **P4-5b Commitment outcomes in the nightly review.** The review lists them separately from life goals: "commitments
+2. **P4-5b Commitment outcomes in the nightly review.** *Implemented 2026-11-09 (owner GO).* The review context now has
+   two separate sections:
+   - **THEIR TRACKED GOAL OUTCOMES** lists life goals only; `commitment.*` goals are excluded.
+   - **LILITH'S OWN COMMITMENTS** is presented as scheduler evidence and her responsibilities, explicitly **not**
+     memories about the owner:
+     - an unresolved commitment (missed now, or failed in the last 7 days) is listed with its due time and the
+       recorded reason;
+     - a kept commitment is **only counted** ("ran as scheduled; whether each reached them is not verified");
+     - if the Goals store can't be read, the section says to say nothing about commitments.
+
+   The guidance adds: never propose commitments as memories; an unresolved one is Lilith's to own; never claim it was
+   delivered. Read-only and proposal-safe. 2 new tests (22 in the review suite).
+
+   **Finding (to fix in P4-5c):** the router's appraisal `goal` signal (shadow) matches **all** ACTIVE goals,
+   including Lilith's own commitments, so a message mentioning a reminder's topic could be tagged "touches a goal they
+   track". Harmless in shadow, but wrong; commitments must be excluded from the owner's-goal relevance.
+
+   Original plan: The review lists them separately from life goals: "commitments
    Lilith kept / missed". A missed commitment is something to acknowledge and own in conversation; a routine reminder
    that was kept is not a memory to propose. Read-only change to `owner_memory_review.py`; installed through the
    existing review installer.
