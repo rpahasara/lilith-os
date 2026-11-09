@@ -69,6 +69,17 @@ class TimelineTests(unittest.TestCase):
                   "I started at Acme when I moved"):                       # a statement, not a question
             self.assertFalse(self.tl.temporal(m), m)
 
+    def test_came_first_only_about_the_owners_history(self):
+        for m in ("what came first, starting at Acme or my failed CKA attempt?", "my move or my new job, which came first?",
+                  "which happened first: I told you my real name or asked for the three-section reviews?",
+                  "which came first for us, the reminder or the review?",
+                  "what came first, my sister visiting or the interview?"):
+            self.assertTrue(self.tl.temporal(m), m)
+        for m in ("which came first, the chicken or the egg?", "what happened first in WW2?",
+                  "which came first, Unix or Linux?", "what came first, the book or the film?",
+                  "which happened first, the moon landing or Woodstock?", "which came first in the race?"):
+            self.assertFalse(self.tl.temporal(m), m)
+
     def turn(self, mode, message, owner=True, focused=False):
         gi = self.gi
         ctx = gi._tc.begin("telegram_owner_dm" if owner else "public", owner)
