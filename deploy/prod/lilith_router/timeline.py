@@ -36,7 +36,6 @@ from typing import Callable, List, Optional, Tuple
 TEMPORAL_RE = re.compile(
     r"\bwhen\s+(?:did|was|were|have|had)\s+(?:i|we|my)\b|"
     r"\bwhen\s+did\s+you\s+(?:first\s+)?(?:learn|hear|find\s+out)\b|"
-    r"\b(?:what|which)\s+(?:came|happened)\s+first\b|"
     r"\bhow\s+long\s+(?:ago|since|have\s+i|had\s+i|has\s+it\s+been\s+since|did\s+i)\b|"
     r"\bhow\s+many\s+(?:days|weeks|months|years)\s+(?:ago|since)\b|"
     r"\b(?:did|have|had)\s+i\s+ever\b|"
@@ -46,6 +45,10 @@ TEMPORAL_RE = re.compile(
     r"\b(?:do|am|is|are)\s+(?:i|my|we)\b[^?.!]{0,40}?\bstill\b|"
     r"\b(?:before|after)\s+i\s+(?:started|moved|joined|left|passed|failed|quit|got|finished|began)\b",
     re.IGNORECASE)
+# "What / which came first" only about the owner's own history: the same question must refer to them (owner review
+# of #401: "which came first, the chicken or the egg?", "what happened first in WW2?" must not match).
+_FIRST_RE = re.compile(r"\b(?:what|which)\s+(?:came|happened)\s+first\b|\b(?:came|happened)\s+first\s*\?", re.I)
+_OWNER_REF_RE = re.compile(r"\b(?:i|i['’](?:d|ve|m)|me|my|mine|we|our|us)\b", re.I)
 _QUESTION_RE = re.compile(r"\?|^\s*(?:when|what|which|how|where|who|did|do|have|had|was|were|am|is|are)\b", re.I)
 MAX_ENTRIES = 14
 MAX_CHARS = 1600
@@ -58,7 +61,9 @@ HEADER = ("[Your stored memories about them, in the order they were stored. A \"
 
 def temporal(message: str) -> bool:
     text = message or ""
-    return bool(_QUESTION_RE.search(text) and TEMPORAL_RE.search(text))
+    if not _QUESTION_RE.search(text):
+        return False
+    return bool(TEMPORAL_RE.search(text) or (_FIRST_RE.search(text) and _OWNER_REF_RE.search(text)))
 
 
 def _day(value) -> Optional[str]:
