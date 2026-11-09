@@ -158,7 +158,7 @@ def timeline_text(ctx: TurnContext) -> Optional[str]:
     if not (ctx.owner and ctx.timeline):
         return None
     from . import timeline as tl
-    return tl.render(list(ctx.timeline))
+    return tl.render(list(ctx.timeline), can_search=True)    # rendered on the full-agent path only
 
 
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:

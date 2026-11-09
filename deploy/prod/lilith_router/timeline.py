@@ -59,6 +59,15 @@ HEADER = ("[Your stored memories about them, in the order they were stored. A \"
           "current entry says so. If the dates you need aren't written in an entry, say you don't know.]")
 
 
+# The full agent can search its past conversations, which hold what the owner said at the time (event-level
+# evidence). Offline routing-vs-timeline evaluation 2026-11-09: with HEADER's "say you don't know" the agent stopped
+# searching and answered 6/14 temporal questions; with this wording it searched first and answered 14/14 (the agent
+# without any note: 12/14). Paths that cannot search keep HEADER.
+AGENT_HEADER = HEADER[:-1].rsplit(" If the dates you need", 1)[0] + (
+    " For when something happened, what came first or how long ago, check your past conversations with them first, "
+    "and prefer what they said at the time over any stored date; only if nothing turns up, say you don't know.]")
+
+
 def temporal(message: str) -> bool:
     text = message or ""
     if not _QUESTION_RE.search(text):
@@ -84,8 +93,10 @@ def _learned(entry: dict) -> Optional[str]:
     return None                                         # imports and undated records stay undated: never invented
 
 
-def render(entries, now: Optional[float] = None) -> Optional[str]:
-    """The timeline note from owner-memory records (GET /os/owner-memory?include_superseded=1), or None."""
+def render(entries, now: Optional[float] = None, can_search: bool = False) -> Optional[str]:
+    """The timeline note from owner-memory records (GET /os/owner-memory?include_superseded=1), or None.
+    `can_search`: the reader can search past conversations (the full agent), so it is told to look there first."""
+    header = AGENT_HEADER if can_search else HEADER
     rows: List[Tuple[str, str]] = []
     for e in entries or ():
         if not isinstance(e, dict) or not str(e.get("text") or "").strip():
@@ -101,13 +112,13 @@ def render(entries, now: Optional[float] = None) -> Optional[str]:
     if not rows:
         return None
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last
-    lines, size = [], len(HEADER)
+    lines, size = [], len(header)
     for _, line in rows[-MAX_ENTRIES:]:
         if size + len(line) + 1 > MAX_CHARS:
             break
         lines.append(line)
         size += len(line) + 1
-    return HEADER + "\n" + "\n".join(lines)
+    return header + "\n" + "\n".join(lines)
 
 
 class OwnerMemorySource:

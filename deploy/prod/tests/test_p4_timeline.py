@@ -52,6 +52,20 @@ class TimelineTests(unittest.TestCase):
         big = [rec("x" * 230, "2026-09-%02dT00:00:00Z" % (i % 28 + 1)) for i in range(40)]
         self.assertLessEqual(len(self.tl.render(big)), self.tl.MAX_CHARS + 1)
 
+    def test_agent_path_wording_searches_before_unknown(self):
+        agent = self.tl.render(RECORDS, can_search=True)
+        lean = self.tl.render(RECORDS)
+        self.assertIn("check your past conversations with them first", agent)
+        self.assertIn("prefer what they said at the time over any stored date", agent)
+        self.assertNotIn("check your past conversations", lean)
+        for note in (agent, lean):                                    # the semantics stay in both
+            self.assertIn("never when anything happened", note)
+            self.assertIn("may have been mistaken, fictional or corrected", note)
+        self.assertEqual(agent.splitlines()[1:], lean.splitlines()[1:])
+        ctx = self.gi._tc.begin("telegram_owner_dm", True)
+        ctx.timeline = tuple(RECORDS)
+        self.assertIn("check your past conversations", self.gi._tc.agent_hint(ctx))
+
     def test_temporal_cue_is_narrow(self):
         for m in ("when did I start at Acme?", "what came first, starting at Acme or my failed CKA attempt?",
                   "how long ago did I pass the CKA?", "where was I living when I started at Acme?",
