@@ -951,7 +951,7 @@ through the Goals API. Delete `~/.hermes/commitments/sync.json` to start fresh.
 Roadmap C-3: verified outcomes adjust *priority and attention*, not truth. Built on what exists: commitment and goal
 outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval, and the Executive focus.
 
-1. **P4-5a E-7 reading** (read-only). A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
+1. **P4-5a E-7 reading** (read-only). Tool: `scripts/cognitive_eval/commitment_outcomes.py` (counts only; goal outcomes from the goal trace; delivery evidence from the sync's own reasons; promise flags from the turn trace). A counts-only reader over `commitment.*` goals: kept (COMPLETED), failed,
    missed (BLOCKED, or terminal after a block), cancelled, held. Per week, with the sync's `unattributed_runs_24h` and
    the promise check's `unbacked_promise` rate. E-7 bar: ≥ 90% kept or acknowledged, 0 duplicates.
 2. **P4-5b Commitment outcomes in the nightly review.** The review lists them separately from life goals: "commitments
