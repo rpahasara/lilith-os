@@ -470,7 +470,10 @@ def _apply_timeline(cfg, message: str) -> None:
     tctx = _tc.current()
     try:
         mode = cfg.timeline_mode
-        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()) or tctx.focused:
+        # no technical-turn exclusion: the trigger already needs a question about the owner's OWN past, and such a
+        # question about a technical topic ("when did I start learning Kubernetes?") is still about their history
+        # (baseline 2026-11-09: Q2 skipped only because the topic was technical)
+        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()):
             return
         if not _timeline.temporal(message):
             return

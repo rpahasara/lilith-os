@@ -107,8 +107,11 @@ class TimelineTests(unittest.TestCase):
         self.assertIn('if not why and tctx.timeline:\n                why = "timeline"', text)
 
     def test_not_on_non_owner_focused_non_temporal_or_off(self):
-        for kw, msg, mode in (({"owner": False}, "when did I move?", "live"), ({"focused": True}, "when did I move?", "live"),
-                              ({}, "which city do I live in?", "live"), ({}, "when did I move?", "off")):
+        self.assertTrue(self.turn("live", "When did I start learning Kubernetes?", focused=True).timeline)   # technical ok
+        self.log.unlink()
+        for kw, msg, mode in (({"owner": False}, "when did I move?", "live"),
+                              ({}, "which city do I live in?", "live"), ({}, "when did I move?", "off"),
+                              ({"focused": True}, "how do I restart a kubernetes pod?", "live")):
             self.assertEqual(self.turn(mode, msg, **kw).timeline, (), (kw, msg, mode))
         self.assertEqual(self.records(), [])
 
