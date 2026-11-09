@@ -69,6 +69,8 @@ class TurnContext:
     appraisal_live: bool = False                 # appraisal switch: live renders the goal line, shadow only traces
     responsibility: Tuple[Any, ...] = ()         # P4-5c: LILITH's unresolved commitments to own (live only)
     timeline: Tuple[Any, ...] = ()               # P-4 E-8: owner-memory records for the dated timeline (live only)
+    timeline_note: Optional[str] = None          # the note rendered ONCE for the agent (header + size bounds applied)
+    timeline_ids: Tuple[Any, ...] = ()           # the record ids of exactly that note's lines (audit; None = no id)
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -81,6 +83,7 @@ class TurnContext:
             out["responsibility"] = len(self.responsibility)
         if self.timeline:
             out["timeline"] = len(self.timeline)
+            out["timeline_included"] = len(self.timeline_ids)
         if self.appraisal:
             out["appraisal"] = [getattr(a, "kind", str(a)) for a in self.appraisal]
             out["appraisal_refs"] = list(self.style.appraisal_refs)
@@ -155,10 +158,9 @@ def responsibility_text(ctx: TurnContext) -> Optional[str]:
 
 def timeline_text(ctx: TurnContext) -> Optional[str]:
     """P-4 E-8: the dated approved-memory timeline on a time / order / change question (live; full agent only)."""
-    if not (ctx.owner and ctx.timeline):
+    if not (ctx.owner and ctx.timeline and ctx.timeline_note):
         return None
-    from . import timeline as tl
-    return tl.render(list(ctx.timeline))
+    return ctx.timeline_note                     # the exact note whose ids were logged; never re-rendered
 
 
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:

@@ -52,6 +52,91 @@ class TimelineTests(unittest.TestCase):
         big = [rec("x" * 230, "2026-09-%02dT00:00:00Z" % (i % 28 + 1)) for i in range(40)]
         self.assertLessEqual(len(self.tl.render(big)), self.tl.MAX_CHARS + 1)
 
+    def test_agent_path_wording_searches_before_unknown(self):
+        agent = self.tl.render(RECORDS, can_search=True)
+        lean = self.tl.render(RECORDS)
+        self.assertIn("check your past conversations with them first", agent)
+        self.assertIn("prefer what they said at the time over any stored date", agent)
+        self.assertNotIn("check your past conversations", lean)
+        for note in (agent, lean):                                    # the semantics stay in both
+            self.assertIn("never when anything happened", note)
+            self.assertIn("may have been mistaken, fictional or corrected", note)
+        self.assertEqual(agent.splitlines()[1:], lean.splitlines()[1:])
+        ctx = self.turn("live", "when did I move to Manchester?")
+        self.assertIn("check your past conversations", self.gi._tc.agent_hint(ctx))
+
+    # -- integrated #406 + #407: one render produces the agent's note and its audit ids --------------------------
+
+    def test_logged_ids_are_exactly_the_agent_notes_lines(self):
+        recs = [rec("Lives in Leeds.", "2026-08-15T10:00:00Z", "SUPERSEDED", "2026-10-20T18:00:00+00:00"),
+                rec("Works at Acme.", "2026-09-02T17:00:00Z"), rec("Lives in Manchester.", "2026-10-20T18:00:00Z")]
+        for i, r in enumerate(recs):
+            r["entry_id"] = "om_%d" % i
+        self.gi._OWNER_MEMORY = self.tl.OwnerMemorySource(fetch=lambda: recs)
+        ctx = self.turn("live", "when did I move to Manchester?")
+        hint = self.gi._tc.agent_hint(ctx)
+        self.assertIn(ctx.timeline_note, hint)                              # the stored note itself, not a re-render
+        self.assertEqual(ctx.timeline_note, self.tl.render(recs, can_search=True))
+        logged = self.records()[-1]
+        self.assertEqual(logged["included_ids"], ["om_1", "om_0", "om_2"])  # rendered order: stored date
+        self.assertEqual(list(ctx.timeline_ids), logged["included_ids"])
+        self.assertEqual(len(ctx.timeline_note.splitlines()) - 1, logged["included"])
+
+    def test_truncation_boundary_uses_the_agent_header(self):
+        line_len = len("- stored 2026-09-01: ") + 230 + 1
+        n_lean = (self.tl.MAX_CHARS - len(self.tl.HEADER)) // line_len
+        n_agent = (self.tl.MAX_CHARS - len(self.tl.AGENT_HEADER)) // line_len
+        self.assertLess(n_agent, n_lean)                                    # the boundary really differs
+        recs = [rec("x" * 230, "2026-09-%02dT00:00:00Z" % (i + 1)) for i in range(12)]
+        for i, r in enumerate(recs):
+            r["entry_id"] = "om_t%02d" % i
+        self.gi._OWNER_MEMORY = self.tl.OwnerMemorySource(fetch=lambda: recs)
+        ctx = self.turn("live", "when did I start?")
+        logged = self.records()[-1]
+        self.assertEqual(logged["included"], n_agent)
+        self.assertEqual(len(ctx.timeline_ids), n_agent)
+        self.assertEqual(len(ctx.timeline_note.splitlines()) - 1, n_agent)
+        self.assertLessEqual(len(ctx.timeline_note), self.tl.MAX_CHARS + 1)
+        lean_note, lean_ids = self.tl.render_with_ids(recs)
+        self.assertEqual(len(lean_ids), n_lean)                             # a lean render would NOT match the log
+
+    def test_missing_ids_are_counted_not_invented(self):
+        recs = [rec("A.", "2026-09-01T00:00:00Z"), rec("B.", "2026-09-02T00:00:00Z")]
+        recs[0]["entry_id"] = None
+        recs[1]["entry_id"] = "om_b"
+        self.gi._OWNER_MEMORY = self.tl.OwnerMemorySource(fetch=lambda: recs)
+        ctx = self.turn("live", "when did I start?")
+        logged = self.records()[-1]
+        self.assertEqual((logged["included"], logged["included_ids"], logged["missing_ids"]), (2, ["om_b"], 1))
+        self.assertEqual(ctx.timeline_ids, (None, "om_b"))
+
+    def test_shadow_logs_ids_but_injects_nothing(self):
+        ctx = self.turn("shadow", "when did I move?")
+        self.assertIsNone(ctx.timeline_note)
+        self.assertEqual(ctx.timeline_ids, ())
+        self.assertIsNone(self.gi._tc.agent_hint(ctx))
+        rec_ = self.records()[-1]
+        self.assertEqual((rec_["applied"], rec_["included"]), (False, 4))
+
+    def test_owner_memory_is_only_read(self):
+        seen = []
+
+        class Resp:
+            def read(self): return json.dumps({"entries": RECORDS}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def urlopen(req, timeout=None):
+            seen.append(req)
+            return Resp()
+        src = self.tl.OwnerMemorySource(api="http://127.0.0.1:8765")
+        with mock.patch.object(self.tl.urllib.request, "urlopen", side_effect=urlopen):
+            self.assertEqual(len(src.current()), 4)
+        self.assertEqual(seen, ["http://127.0.0.1:8765/os/owner-memory?include_superseded=1"])   # a plain GET, no body
+        text = (ROOT / "deploy/prod/lilith_router/timeline.py").read_text(encoding="utf-8")
+        for verb in ("POST", "PUT", "PATCH", "DELETE", "method="):
+            self.assertNotIn(verb, text)
+
     def test_temporal_cue_is_narrow(self):
         for m in ("when did I start at Acme?", "what came first, starting at Acme or my failed CKA attempt?",
                   "how long ago did I pass the CKA?", "where was I living when I started at Acme?",
