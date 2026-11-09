@@ -763,7 +763,7 @@ insufficient. It would need a privacy and FORGET review first.
 
    Nothing new is stored; proposals still need owner approval. Installation is outside the pipeline, through the
    existing install tool with backup and rollback, after a counts-only dry run on PROD and owner GO.
-2. **P4-2 Approval-fatigue metric** (C-2 gate; read-only). Proposed vs approved / rejected / ignored per week from L18
+2. **P4-2 Approval-fatigue metric** (C-2 gate; read-only). Tool: `scripts/cognitive_eval/approval_fatigue.py` (counts only; proposals grouped by id across L18 PROPOSED / APPROVED / REJECTED plus pending files; ignored = pending over 7 days or gone undecided). Proposed vs approved / rejected / ignored per week from L18
    events plus pending files, added to the trace summary. Kill: >50% rejected or ignored, then tighten.
 3. **P4-3 Reappraisal through supersession** (C-4). The replace / supersede path exists (SUPERSEDED events). Verify it
    once live (also P-2 open item 1). The review proposes a replacement when a new statement contradicts a remembered
