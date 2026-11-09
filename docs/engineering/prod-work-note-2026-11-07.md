@@ -1086,6 +1086,57 @@ state, elapsed time, ever lived elsewhere) and 3 controls (current state, outcom
 request), 0 timeline, commitments, recall-gap or appraisal firings, 0 unbacked promises. Too little traffic to judge
 anything. The practical owner test is the next evidence.
 
+**Practical owner temporal-recall test: shadow baseline vs a 30-minute live window (2026-11-09, owner GO).**
+
+**Preparation.**
+- #403 narrowed the ordering cue to the owner's own history.
+- The baseline showed Q2 skipped only because its topic was technical. #404 removed that exclusion for the timeline;
+  how-to questions still never match.
+- The on-host revert was rehearsed: a root `systemd-run` timer armed at 13:16:36Z and fired at 13:17:01Z.
+
+**Live window.**
+- Only `timeline_mode` was edited on PROD's `router.yaml` (re-read every turn; no restart), from 13:17:27Z.
+- Backup `20261109T131727Z`; the parse and all other settings were verified identical; a 30-minute root revert timer
+  was armed.
+- **Restored manually** after the round: the hash equals main (`cfa652eddcf7`), the router reads shadow and enabled,
+  0 timers remain, and the auto-revert never had to fire.
+
+**Trace** (metadata only; owner's Telegram DM; baseline 13:00–13:02Z, live 13:32–13:35Z, with Q3 repeated in the live
+round). Live turns are mapped to questions by order; message text was not read.
+
+| Q | Baseline: trigger / path | Live: timeline / path / calls / time | Owner's reading (baseline → live) | Evidence check | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| 1 three-section reviews: when? | fired (shadow) / **fast path** | applied (11 records) / agent / 3 calls / 18.6 s | no date → 6 Nov 19:31Z (01:01 local), quoted the preference, separated conversation time from stored date | an owner Telegram message exists at **19:31:35Z** on 6 Nov; its approval was 19:37:52Z, so the approval time was **not** used | **PASS** |
+| 2 Kubernetes start | **did not fire** (technical) / agent | applied / agent / 2 calls / 8.6 s | unknown, with 26 Aug as evidence → the same | answer unchanged; no stored event date exists | **PASS** (no change; the baseline was already sound) |
+| 3 real name vs reviews: which first? | fired / **fast path** (unsupported claim) | applied / agent / 2 calls / 9.6 s; repeat: 1 call / 4.2 s | "real name first" with no evidence → name 23:57 local (18:27Z) before the review request 01:01 (19:31Z), from conversation timestamps; the repeat gave the same | owner Telegram messages exist at **18:27:22Z** and **19:31:35Z**; the order is consistent with those and with the approval order | **PASS** for the timestamps and order; the content of those two messages was not inspected |
+| 4 name before correction | fired / agent (elevated the superseded name to past fact) | applied / agent / 1 call / 3.6 s | "earlier primary name" → "an earlier stored belief, not proof it was ever your real or formal name" | wording matches the timeline semantics (#401); **same path in both rounds** | **PASS** |
+| 5 CKA pass | fired / agent | applied / agent / 1 call / 3.8 s | no record → no record, nothing invented | — | **PASS** (no change) |
+
+**Integrity during the window.**
+- Owner memory changed: 0. L18 events: 0. `lilith.db` not modified.
+- Canonical `cognitive_memory.db`: last written 2026-11-06 16:25, hash unchanged; its `-wal` (0 bytes) and `-shm`
+  were touched by a read.
+- Fallbacks 0, guard rewrites 0, unbacked promises 0.
+
+**Attribution (causal vs observational).**
+- **Q4** took the full-agent path in both rounds, so its change from treating the superseded name as past fact to
+  treating it as an earlier stored belief is the cleanest evidence that the **timeline note** itself changes behaviour.
+  That rests on a single question.
+- **Q1 and Q3** moved from the fast path to the agent **and** gained the note. Their exact times came from the
+  conversation records (the agent's search; 2–3 calls) rather than the note, which holds dates only. So these gains
+  come from **both** the routing and the note's rule against using stored order as event order. The two are not
+  separable with this data.
+- **Q2 and Q5** did not change.
+
+**Costs and limits.**
+- Live temporal turns cost 77K–214K input tokens (full-agent context plus search results) and 3.6–18.6 s, against a
+  fast-path baseline for Q1 and Q3.
+- n = 6 turns from one owner on one day; the turn-to-question mapping is by order; injection is shown by the turn
+  record (`timeline: 11` on every live turn), not by logging the prompt text (by design).
+
+**Decision:** stays **shadow**; no permanent live mode; P-5 not started. The evidence is favourable, but this is one
+practical round.
+
 **Remaining P-4 memory-intelligence gaps (honest list).**
 1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1); its
    effect on real proposals is not measured yet.
