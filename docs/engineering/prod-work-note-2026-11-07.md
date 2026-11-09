@@ -784,7 +784,7 @@ insufficient. It would need a privacy and FORGET review first.
 
 **Measures.** E-7 (commitments), E-8 (episodic recall without fabrication); approval fatigue (<50% rejected or ignored).
 
-## 3p. P4-4 Commitments: design and first slice (2026-11-09; DEV PASS, PROD pending owner GO)
+## 3p. P4-4 Commitments: design and first slice (2026-11-09; review fixes DEV PASS; PROD install next)
 
 Owner GO 2026-11-09: cognitive coordination and long-term agent behaviour, **not** a reminders app. One Lilith, one
 authoritative state, no new commitments database.
@@ -872,9 +872,25 @@ created and nothing was delivered.
   with; they are known from PROD.
 - Three terminal `TEST_ONLY P4-4 DEV …` goals remain on DEV as history.
 
+**Owner review of #393 (2026-11-09): five reliability issues, fixed before any PROD install.**
+
+| # | Issue | Fix |
+| --- | --- | --- |
+| 1 | `jobs.json` missing, unreadable or invalid read as "no jobs", which could cancel valid commitments | The pass **aborts and writes nothing**. Only a `jobs.json` that parses into a job list counts as a verified (possibly empty) scheduler |
+| 2 | Unreadable `executions.db` read as "no runs", so a deleted one-time job looked cancelled | Missing, unreadable or corrupt evidence, a run still in progress, a status `unknown`, or a job gone **after** its due time with no run record: the commitment is **held** unchanged and reported once. CANCELLED only when the job vanished **before** its due time and the readable record shows no run |
+| 3 | A corrupt `sync.json` was silently replaced, losing the job-to-goal mapping | Unreadable or malformed state **aborts, and the file is left untouched**. A missing state is **rebuilt from the Goals API** (the authoritative record) before anything is created: no duplicate goals. Transitions are keyed by the goal's revision, so they stay correct after a rebuild |
+| 4 | One-time jobs created and executed between two polls are never seen | Documented as a coverage limit, and made visible: each pass records `unattributed_runs_24h` (scheduler runs that belong to no tracked or present job). Install cadence is every **minute**, not 5 |
+| 5 | A completed run was read as a delivered reminder | COMPLETED now means the scheduled run completed, and its reason says "delivery to the chat not verified" (Hermes deletes a one-time job, and its delivery error, after the run). A delivery error still visible on the job is FAILED |
+
+- **Tests:** 16 unit tests, 9 of them regression cases for exactly these failures, plus the integration test against
+  the real Goals API.
+- **DEV re-run** (fixed branch, `lilith-dev-01`, real DEV Goals DB): the same lifecycle results; a corrupt `jobs.json`
+  **aborted with the state byte-for-byte unchanged**; with no state file, the mapping was rebuilt from DEV's Goals API
+  (it found the 3 earlier test goals) without creating duplicates.
+
 **Next.**
-1. **PROD install** (owner GO): the script beside the review scripts, plus one silent no-agent Hermes cron job every
-   5 minutes (like the snapshot job), with backup and rollback.
+1. **PROD install** (owner GO, given after these fixes): the script beside the review scripts, plus one silent no-agent
+   Hermes cron job **every minute**, with backup and rollback. Then one harmless real owner reminder end to end.
 2. **PROD:** with owner GO, after DEV passes.
 3. **Unbacked-promise guard (shadow):** at turn end, flag a reply that promises a future action ("I'll remind you",
    "I'll check in tomorrow") when no `cronjob` create happened in that turn. Count first; choose a control only from
