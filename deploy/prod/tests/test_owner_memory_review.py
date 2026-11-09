@@ -5,6 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 os.environ["LILITH_OS_API_URL"] = "http://127.0.0.1:9"     # never reach a real Core API (a local tunnel may be PROD)
 
@@ -163,6 +164,69 @@ class DiscordOwnerDmTests(ReviewContextTests):
                     {"schemaVersion": 1, "enabled": True, "ownerTelegramUserIds": [OWNER], "ownerDiscordDms": pairs}),
                     encoding="ascii")
                 self.assertNotIn("DISCORD-OWNER", OMR.main(self.home, now=NOW))
+
+
+class ConsolidationContextTests(unittest.TestCase):
+    """P-4 P4-1: moments from the router trace (flags only), verified goal outcomes, and proposal guidance."""
+    setUp = ReviewContextTests.setUp
+    tearDown = ReviewContextTests.tearDown
+
+    def write_log(self, records):
+        (self.home / "lilith_router" / "decisions.log").write_text(
+            "\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    def test_owner_lines_are_tagged_from_trace_flags_only(self):
+        self.write_log([
+            {"ts": NOW - 3598, "lane": "appraisal", "signals": ["progress", "goal"], "goal_refs": ["g1"],
+             "note": "TRACE-TEXT-NEVER"},
+            {"ts": NOW - 195, "lane": "social_preferences", "durable_correction": True},
+            {"ts": NOW - 40 * 3600, "lane": "appraisal", "signals": ["setback"]},            # outside the window
+            {"ts": NOW - 50, "lane": "metacognition", "recall_gap": False},
+            "not json"])
+        out = OMR.main(self.home, now=NOW)
+        self.assertIn("OWNER: I started learning the violin this week [moment: they reported progress or an "
+                      "achievement; touches a goal they track]", out)
+        self.assertIn("console: my sister's name is Asha [moment: a correction about how LILITH should behave]", out)
+        self.assertNotIn("setback", out.split("=== OWNER CONVERSATION")[1])
+        self.assertNotIn("TRACE-TEXT-NEVER", out)
+        self.assertNotIn("nothing remembered", out)                                    # recall_gap False: no tag
+
+    def test_moments_link_only_to_a_recent_owner_line(self):
+        self.write_log([{"ts": NOW - 3600 + 400, "lane": "appraisal", "signals": ["setback"]}])  # 400 s after: too late
+        self.assertNotIn("[moment:", OMR.main(self.home, now=NOW).split("=== OWNER CONVERSATION")[1])
+
+    def test_guidance_and_goal_outcomes(self):
+        goals = {"goals": [
+            {"goalId": "g1", "title": "Follow up on application 12 - Data Engineer at Acme", "lifecycleState": "COMPLETED",
+             "completedAt": "2026-11-09T10:00:00Z"},
+            {"goalId": "g2", "title": "Pass the CKA exam", "lifecycleState": "ACTIVE", "updatedAt": NOW},
+            {"goalId": "g3", "title": "Old goal", "lifecycleState": "FAILED", "failedAt": NOW - 90 * 3600}]}
+
+        class Resp:
+            def __init__(self, body): self.body = body
+            def read(self): return json.dumps(self.body).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        now = 1_762_700_000.0                                                              # 2025-11-09T14:53Z
+        goals["goals"][0]["completedAt"] = now - 3600
+        goals["goals"][2]["failedAt"] = now - 90 * 3600                                  # outside the 26 h window
+        with unittest.mock.patch.object(OMR.urllib.request, "urlopen", return_value=Resp(goals)):
+            lines = OMR.goal_outcomes(now - OMR.REVIEW_HOURS * 3600)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("their application for Data Engineer at Acme: completed on", lines[0])
+        self.assertNotIn("12", lines[0].split(":")[0])
+        self.assertNotIn("g1", lines[0])
+        out = OMR.main(self.home, now=NOW)
+        self.assertIn("=== HOW TO PROPOSE ===", out)
+        self.assertIn('"Preference (scope): ..."', out)
+        self.assertIn("never store the scenario itself as true", out)
+        self.assertIn("=== TRACKED GOAL OUTCOMES", out)
+
+    def test_goal_api_down_and_log_missing_fail_open(self):
+        out = OMR.main(self.home, now=NOW)                                               # API is 127.0.0.1:9
+        self.assertIn("(none)", out.split("=== TRACKED GOAL OUTCOMES")[1])
+        self.assertNotIn("[moment:", out.split("=== OWNER CONVERSATION")[1])
 
 
 if __name__ == "__main__":

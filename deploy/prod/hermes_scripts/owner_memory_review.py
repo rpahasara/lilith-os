@@ -9,15 +9,25 @@ what is already
 remembered, what is already waiting for approval and what the owner already rejected, so the review never proposes
 the same thing twice. Nothing from any other chat is read. Prints NO_NEW_OWNER_CONVERSATION when there is nothing new.
 
+P-4 (consolidation context v2, 2026-11-09): the review also sees WHICH moments mattered, from evidence LILITH already
+has, never from a mood: an owner line is tagged when LILITH's own router trace (metadata only, owner turns) saw a durable
+correction, a reported setback or progress, a tracked goal, or a question she could not ground; and tracked goals that
+reached an outcome in the window are listed from the Goals store (read-only GET /os/goals). Plus wording guidance:
+typed preferences / boundaries, dated event facts, fictional or test scenarios are never facts, at most 3 proposals.
+Nothing new is stored; every proposal still needs the owner's approval.
+
 Rejections leave no trace in Hermes (/memory reject deletes the pending file), so `snapshot()` (run every few minutes
 by the silent no-agent cron job owner_memory_snapshot.py) records every pending proposal in SEEN; a recorded proposal
 that is no longer pending and whose text is not in USER.md / MEMORY.md was rejected. The read is also a snapshot, so
 it is the one place that writes (only SEEN, under ~/.hermes/memory-review/).
 """
+import datetime as _dt
 import glob
 import json
 import os
+import re
 import sqlite3
+import urllib.request
 import sys
 import time
 from pathlib import Path
@@ -64,7 +74,112 @@ def owner_sessions(con: sqlite3.Connection, ids: set, discord_dms: set = frozens
     return out
 
 
-def conversation(con: sqlite3.Connection, sessions: list, since: float) -> list:
+# -- P-4: moments that mattered (router trace, metadata only) ------------------------------------------------------
+MOMENT_LINK_S = 180          # a trace record belongs to the owner line it follows by at most this many seconds
+
+
+def moments(home: Path, since: float) -> list:
+    """(timestamp, label) for owner turns where LILITH's own router trace saw something worth learning from. Reads
+    only allow-listed flags of decisions.log (owner-turn lanes); never text. Missing or unreadable log: none."""
+    out = []
+    for name in ("decisions.log.1", "decisions.log"):
+        try:
+            lines = (home / "lilith_router" / name).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for ln in lines:
+            try:
+                r = json.loads(ln)
+                ts = float(r.get("ts") or 0)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if ts < since:
+                continue
+            lane = r.get("lane")
+            if lane == "social_preferences" and r.get("durable_correction"):
+                out.append((ts, "a correction about how LILITH should behave"))
+            elif lane == "appraisal":
+                sig = r.get("signals") or []
+                if "setback" in sig:
+                    out.append((ts, "they reported a setback"))
+                if "progress" in sig:
+                    out.append((ts, "they reported progress or an achievement"))
+                if "goal" in sig:
+                    out.append((ts, "touches a goal they track"))
+            elif lane == "metacognition" and r.get("recall_gap"):
+                out.append((ts, "LILITH had nothing remembered about what they asked"))
+    return sorted(out)
+
+
+def _when(value):
+    """Epoch seconds from an ISO-8601 string or a number, or None."""
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        d = _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (d if d.tzinfo else d.replace(tzinfo=_dt.timezone.utc)).timestamp()
+    except ValueError:
+        return None
+
+
+_FOLLOW_UP = re.compile(r"^\s*follow\s+up\s+on\s+application\s+\S+\s*[\u2014\u2013:-]?\s*", re.I)
+_IDS = re.compile(r"\b(?:application|app|goal|task|ticket|draft)\s*#?\s*[0-9a-f-]{1,36}\b|#\s*\d+", re.I)
+
+
+def _goal_topic(title) -> str:
+    """Plain topic without internal ids or tracking labels (same rule as the router's appraisal.goal_topic)."""
+    text = " ".join(str(title or "").split())
+    m = _FOLLOW_UP.match(text)
+    if m:
+        rest = text[m.end():]
+        text = ("their application for " + rest) if rest else "a job application they're following up on"
+    text = " ".join(_IDS.sub("", text).split()).strip(" -:,\u2014\u2013")
+    return text[:120] if re.search(r"[A-Za-z]{3,}", text) else ""
+
+
+OUTCOME_FIELDS = (("COMPLETED", "completedAt", "completed"), ("FAILED", "failedAt", "failed"),
+                  ("CANCELLED", "cancelledAt", "cancelled"), ("BLOCKED", "blockedAt", "became blocked"))
+
+
+def goal_outcomes(since: float) -> list:
+    """Tracked goals that reached an outcome in the window (read-only GET /os/goals). Fail-open: none."""
+    try:
+        with urllib.request.urlopen(API + "/os/goals?limit=200", timeout=5) as resp:
+            goals = json.loads(resp.read().decode("utf-8")).get("goals", [])
+    except Exception:
+        return []
+    out = []
+    for g in goals if isinstance(goals, list) else []:
+        if not isinstance(g, dict):
+            continue
+        for state, field, verb in OUTCOME_FIELDS:
+            at = _when(g.get(field))
+            if g.get("lifecycleState") == state and at is not None and at >= since:
+                topic = _goal_topic(g.get("title"))
+                if topic:
+                    day = _dt.datetime.fromtimestamp(at, _dt.timezone.utc).strftime("%Y-%m-%d")
+                    out.append(f"- {topic}: {verb} on {day} (recorded in their tracked goals)")
+    return out[:10]
+
+
+GUIDANCE = """\
+- Propose at most 3 items, the ones most worth keeping. Fewer is fine; nothing is fine.
+- A lasting preference or boundary about how LILITH talks or behaves: word it "Preference (scope): ..." or
+  "Boundary (scope): ...", scope = global, casual, technical or topic: <word>.
+- An achievement, setback or outcome worth remembering: a short dated fact in plain words ("On 2026-11-09 he passed
+  ..."). Never record a mood or how LILITH felt about it.
+- A fictional, hypothetical or test scenario is never a real fact about them. If they clarified that something was only
+  a test or made up, you may propose a boundary to treat it that way; never store the scenario itself as true.
+- If a new statement contradicts something already remembered, propose replacing that entry, not adding a second one.
+- Lines tagged [moment: ...] are where LILITH's own signals saw something notable. They are hints, not proof: read
+  the conversation itself before proposing anything."""
+
+
+def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at: list = ()) -> list:
     if not sessions:
         return []
     cols = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
@@ -74,6 +189,15 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float) -> list:
         f"SELECT role, content, timestamp FROM messages WHERE session_id IN ({marks}) AND timestamp >= ?"
         f" AND role IN ('user', 'assistant'){active} ORDER BY timestamp, id", (*sessions, since)).fetchall()
     seen, lines = set(), []
+    marks_at = list(marks_at or ())
+    owner_ts = [ts for role, content, ts in rows if role == "user" and isinstance(content, str) and content.strip()]
+    tags = {}
+    for mts, label in marks_at:                # each moment goes to the latest owner line at or before it
+        prior = [t for t in owner_ts if t <= mts + 5 and mts - t <= MOMENT_LINK_S]
+        if prior:
+            tags.setdefault(max(prior), [])
+            if label not in tags[max(prior)]:
+                tags[max(prior)].append(label)
     for role, content, ts in rows:
         if not isinstance(content, str) or not content.strip():
             continue
@@ -84,7 +208,8 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float) -> list:
         text = " ".join(content.split())
         if len(text) > PER_MESSAGE:
             text = text[:PER_MESSAGE] + " ..."
-        lines.append(f"{'OWNER' if role == 'user' else 'LILITH'}: {text}")
+        tag = (" [moment: " + "; ".join(tags[ts]) + "]") if role == "user" and ts in tags else ""
+        lines.append(f"{'OWNER' if role == 'user' else 'LILITH'}: {text}{tag}")
     return lines
 
 
@@ -219,9 +344,10 @@ def main(home: Path = HOME, now: float = None) -> str:
         con = sqlite3.connect(f"file:{home / 'state.db'}?mode=ro", uri=True, timeout=10)
     except sqlite3.Error:
         return "NO_NEW_OWNER_CONVERSATION"
+    since = now - REVIEW_HOURS * 3600
     try:
-        lines = conversation(con, owner_sessions(con, owner_ids(home), owner_discord_dms(home)),
-                             now - REVIEW_HOURS * 3600)
+        lines = conversation(con, owner_sessions(con, owner_ids(home), owner_discord_dms(home)), since,
+                             moments(home, since))
     finally:
         con.close()
     if not any(l.startswith("OWNER: ") for l in lines):
@@ -239,6 +365,9 @@ def main(home: Path = HOME, now: float = None) -> str:
         "=== REJECTED BY THE OWNER (never propose these again) ===", "\n".join(rejected(home)) or "(none)", "",
         "=== ALSO STORED ELSEWHERE (never propose) ===",
         "- the project codename and the relationship-origin statement (canonical memory)", "",
+        "=== HOW TO PROPOSE ===", GUIDANCE, "",
+        f"=== TRACKED GOAL OUTCOMES, last {REVIEW_HOURS} h (verified in their goals; propose a dated fact only if "
+        "it matters to them) ===", "\n".join(goal_outcomes(since)) or "(none)", "",
         f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM) ===",
         *body,
     ])
