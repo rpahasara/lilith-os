@@ -772,10 +772,10 @@ insufficient. It would need a privacy and FORGET review first.
    - **Next reading:** after a week of the P4-1 review context, to see whether the guidance changes the
      approve / reject mix. Proposed vs approved / rejected / ignored per week from L18
    events plus pending files, added to the trace summary. Kill: >50% rejected or ignored, then tighten.
-3. **P4-3 Reappraisal through supersession** (C-4). The replace / supersede path exists (SUPERSEDED events). Verify it
+3. **P4-3 Reappraisal through supersession** (C-4). *Deferred (owner 2026-11-09):* checked only when a genuine preference or memory change happens; no memories are invented for testing. The supersession machinery already exists. The replace / supersede path exists (SUPERSEDED events). Verify it
    once live (also P-2 open item 1). The review proposes a replacement when a new statement contradicts a remembered
    one, keeping both lineages.
-4. **P4-4 Commitments** (07 §1, E-7). Explicit promises ("remind me…", "I'll check on…") as typed goals. This is a
+4. **P4-4 Commitments** (07 §1, E-7). Design and first slice: §3p. Explicit promises ("remind me…", "I'll check on…") as typed goals. This is a
    persistent change, so DEV first. Design before code.
 5. **P4-5 Outcome reinforcement** (C-3). Verified goal outcomes adjust priority, not truth. Needs goal writes, so DEV
    first, after P4-4.
@@ -783,6 +783,106 @@ insufficient. It would need a privacy and FORGET review first.
    restart (C-6; needs OAuth, so after the migration).
 
 **Measures.** E-7 (commitments), E-8 (episodic recall without fabrication); approval fatigue (<50% rejected or ignored).
+
+## 3p. P4-4 Commitments: design and first slice (2026-11-09; DEV PASS, PROD pending owner GO)
+
+Owner GO 2026-11-09: cognitive coordination and long-term agent behaviour, **not** a reminders app. One Lilith, one
+authoritative state, no new commitments database.
+
+**Inspected first (read-only):**
+- **Goals store (Slice 8).** Free `type`, `deadline`, `target`, parent and linked tasks, sources including `SCHEDULED`,
+  a validated FSM (activate / block / unblock / suspend / resume / complete / fail / cancel / reopen) with a `reason`
+  in the goal trace, idempotent `operationId`, evidence gates on completion, Executive focus, and the Goals lane
+  grounding goal-status questions.
+- **Task store (Slice 3).** Durable tasks; a goal can link them.
+- **Planning, Motivation.** Proposal-only and turn-only. No persistence of promises.
+- **L18.** The memory-learning stream, not commitments.
+- **Scheduling (the important finding).** The full agent already has Hermes' **`cronjob` tool** enabled on the console,
+  Telegram and Discord. It creates real one-time or recurring jobs that Hermes' scheduler fires and delivers back to
+  the originating chat.
+  - Each run is recorded in `cron/executions.db` (`completed` / `failed`, `finished_at`).
+  - **A one-time job is deleted from `jobs.json` right after its run**, so its disappearance is not a cancellation.
+  - "remind / schedule / timer" messages already skip the fast path and go to the agent (`social_lean._ACTION_RE`).
+  - PROD has only the 2 memory-review jobs today; no reminder has ever been scheduled.
+  - systemd timers (morning brief, meeting prep, Gmail and career watchers) are separate system automations, not
+    commitments.
+
+**The gap is cognitive, not mechanical.** A scheduled promise lives only in Hermes' job file, invisible to LILITH OS's
+Goals, the Executive focus and the nightly review. A missed one goes unnoticed. And nothing stops Lilith from saying
+"I'll check on you tomorrow" with no scheduler behind it.
+
+**What counts as what.**
+
+| Kind | Example | Handling |
+| --- | --- | --- |
+| Casual statement | "I should really clean my room" | nothing |
+| Owner intention | "I'm applying to Acme next week" | not a commitment. The nightly review may propose a dated fact; "track this as a goal" uses the existing Goals lane |
+| Scheduled reminder (owner request) | "remind me at 6 to call mum" | the agent's `cronjob` tool. **Authorization:** the owner's explicit request on a verified owner channel, delivered only back to that chat |
+| Actionable follow-up | "check the release notes tomorrow and tell me" | the same tool, with an agent run at fire time, in Lilith's normal voice and context (one identity) |
+| Lilith's own promise | "I'll check in on you tomorrow" | a commitment **only if** a scheduler accepted it. Otherwise it is an unbacked promise (guard below) |
+| An action beyond messaging the owner | "email Bob tomorrow" | out of scope. The existing approval and policy path applies; a reminder to the owner is all this covers |
+
+**Rules.**
+1. **No claim without a scheduler.** Lilith may say a reminder or follow-up is scheduled only when the `cronjob` tool
+   returned an accepted job in that turn.
+2. **LILITH OS is the authoritative record.** Each owner-channel scheduler job becomes a typed goal: `commitment.once`
+   or `commitment.routine`, source `SCHEDULED`, target `{type: hermes.cron, id: <job>}`, deadline = the scheduler's
+   own fire time (never invented). Hermes stays the executor.
+3. **Progress and outcomes come from evidence only.**
+   - The scheduler's run record `completed` makes the goal COMPLETED ("honoured").
+   - `failed` makes it FAILED.
+   - Due more than 30 minutes ago and not run makes it **BLOCKED ("missed")**; a later run resolves it.
+   - Paused or resumed makes it SUSPENDED or ACTIVE.
+   - Gone from the job file with no run record makes it CANCELLED.
+4. **Missed commitments are noticed.** They are visible to the Goals lane (goal-status answers), the Executive focus and
+   the nightly review (P4-1 lists goals that became blocked, failed or completed).
+5. **Learning from outcomes.** Outcomes become the E-7 measure (honoured or acknowledged vs missed) and, later, priority
+   evidence (P4-5). Proposals to remember anything still go through owner approval.
+
+**First slice (this PR): the commitment sync.** `deploy/prod/hermes_scripts/commitment_sync.py` is a silent
+deterministic script, run every few minutes as a no-agent Hermes cron job (the same pattern as
+`owner_memory_snapshot.py`):
+- It mirrors owner-channel agent jobs into goals and applies the evidence rules above. It uses the router's owner rule;
+  system and script jobs and non-owner origins are skipped.
+- It never sends, schedules or deletes anything. Its only writes are the Goals API (loopback, controlled create and
+  transitions with reasons) and its own state file `~/.hermes/commitments/sync.json`. No job prompt text is copied; the
+  goal title is the job's short name.
+- **Tests:** 7 unit tests (`deploy/prod/tests/test_commitment_sync.py`): honoured after auto-delete; missed then
+  resolved; failed; cancelled only when gone without a run; pause / resume / routine; owner channels and agent jobs
+  only; idempotent; one refused transition does not stop the pass.
+  Plus 1 integration test against the **real** Goals API in-process (`services/core-api/tests/test_commitment_goals.py`):
+  create, activate, block (missed), unblock, complete, idempotent.
+- **No Core API change.** Generic goal types have no completion gate, and the sync supplies the evidence as the
+  transition reason.
+
+**DEV test, 2026-11-09: PASS** (`lilith-dev-01`; `p3tx/deployer/p44_dev_test.py`). The PR's script ran against
+DEV's **real Goals API and database**, with synthetic scheduler files in a throwaway Hermes home: no real job was
+created and nothing was delivered.
+
+| Synthetic job | Path | Final |
+| --- | --- | --- |
+| overdue, never run | created → BLOCKED ("missed") → run record completed → unblock → COMPLETED (revision 4) | COMPLETED |
+| run failed | created → ACTIVE → FAILED | FAILED |
+| removed before it ran | created → ACTIVE → CANCELLED | CANCELLED |
+| non-owner origin | not tracked | — |
+
+- A third pass made no changes (idempotent).
+- All goals are `commitment.once`, source `SCHEDULED`, with the scheduler deadline and a `hermes.cron` target.
+- DEV's real `cron/executions.db` has the same columns the sync reads. DEV has no live jobs to compare field names
+  with; they are known from PROD.
+- Three terminal `TEST_ONLY P4-4 DEV …` goals remain on DEV as history.
+
+**Next.**
+1. **PROD install** (owner GO): the script beside the review scripts, plus one silent no-agent Hermes cron job every
+   5 minutes (like the snapshot job), with backup and rollback.
+2. **PROD:** with owner GO, after DEV passes.
+3. **Unbacked-promise guard (shadow):** at turn end, flag a reply that promises a future action ("I'll remind you",
+   "I'll check in tomorrow") when no `cronjob` create happened in that turn. Count first; choose a control only from
+   evidence.
+4. **E-7 reading:** honoured / missed / failed counts from `commitment.*` goals.
+
+**Rollback:** disable or remove the sync cron job. Goals already created stay as accurate history and can be cancelled
+through the Goals API. Delete `~/.hermes/commitments/sync.json` to start fresh.
 
 ## 4. Feature readiness vs. remaining work
 
