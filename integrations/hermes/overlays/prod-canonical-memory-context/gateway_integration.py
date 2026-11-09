@@ -482,9 +482,10 @@ def _apply_timeline(cfg, message: str) -> None:
             return
         if mode == "live":
             tctx.timeline = tuple(entries)
+        _note, included = _timeline.render_with_ids(entries)      # audit: which records the note carries (ids only)
         _append_log(cfg, {"lane": "timeline", "mode": mode, "entries": len(entries),
                           "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
-                          "applied": mode == "live"})
+                          "included_ids": included, "applied": mode == "live"})
     except Exception:
         tctx.timeline = ()
         logger.debug("lilith_router: timeline failed (none)", exc_info=True)

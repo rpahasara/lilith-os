@@ -86,7 +86,13 @@ def _learned(entry: dict) -> Optional[str]:
 
 def render(entries, now: Optional[float] = None) -> Optional[str]:
     """The timeline note from owner-memory records (GET /os/owner-memory?include_superseded=1), or None."""
-    rows: List[Tuple[str, str]] = []
+    return render_with_ids(entries)[0]
+
+
+def render_with_ids(entries) -> Tuple[Optional[str], List[str]]:
+    """(note, the entry ids actually included, in rendered order). The ids are opaque record keys for an audit
+    trail of what the model was given; never memory text."""
+    rows: List[Tuple[str, str, str]] = []
     for e in entries or ():
         if not isinstance(e, dict) or not str(e.get("text") or "").strip():
             continue
@@ -94,20 +100,22 @@ def render(entries, now: Optional[float] = None) -> Optional[str]:
         if e.get("lifecycle_state") == "SUPERSEDED":
             since = _day(e.get("updated_at"))
             rows.append((since or "", "- replaced%s (an earlier stored belief, not necessarily ever true): %s"
-                         % (" " + since if since else "", text)))
+                         % (" " + since if since else "", text), str(e.get("entry_id") or "")))
         else:
             learned = _learned(e)
-            rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text)))
+            rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text),
+                         str(e.get("entry_id") or "")))
     if not rows:
-        return None
+        return None, []
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last
-    lines, size = [], len(HEADER)
-    for _, line in rows[-MAX_ENTRIES:]:
+    lines, ids, size = [], [], len(HEADER)
+    for _, line, eid in rows[-MAX_ENTRIES:]:
         if size + len(line) + 1 > MAX_CHARS:
             break
         lines.append(line)
+        ids.append(eid)
         size += len(line) + 1
-    return HEADER + "\n" + "\n".join(lines)
+    return HEADER + "\n" + "\n".join(lines), ids
 
 
 class OwnerMemorySource:

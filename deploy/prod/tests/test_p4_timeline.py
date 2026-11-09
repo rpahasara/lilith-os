@@ -100,6 +100,10 @@ class TimelineTests(unittest.TestCase):
         rec_ = self.records()[-1]
         self.assertEqual((rec_["lane"], rec_["entries"], rec_["superseded"], rec_["applied"]), ("timeline", 4, 1, True))
         self.assertNotIn("Leeds", json.dumps(rec_))
+        self.assertEqual(rec_["included_ids"], ["om_x"] * 4)                       # ids only, in rendered order
+        note, ids = self.tl.render_with_ids(RECORDS)
+        self.assertEqual(note, self.tl.render(RECORDS))
+        self.assertEqual(len(ids), len(note.splitlines()) - 1)
         shadow = self.turn("shadow", "when did I move?")
         self.assertIsNone(tc.agent_hint(shadow))
         self.assertFalse(self.records()[-1]["applied"])
