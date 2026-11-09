@@ -82,6 +82,8 @@ def related_goals(message: str, goals: Iterable[dict]) -> List[dict]:
     for g in goals or ():
         if not isinstance(g, dict) or str(g.get("lifecycleState") or "").upper() not in ACTIVE_STATES:
             continue
+        if str(g.get("type") or "").startswith("commitment."):
+            continue                                   # LILITH's own commitments are not the owner's goals (P4-5b)
         if _mc.covered(terms, str(g.get("title") or "")):
             out.append(g)
         if len(out) >= MAX_GOALS:

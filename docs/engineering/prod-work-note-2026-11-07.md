@@ -984,7 +984,29 @@ outcomes from the Goals store (P4-4), the nightly review (P4-1), owner approval,
    Lilith kept / missed". A missed commitment is something to acknowledge and own in conversation; a routine reminder
    that was kept is not a memory to propose. Read-only change to `owner_memory_review.py`; installed through the
    existing review installer.
-3. **P4-5c Attention from outcomes.** A missed commitment raises its own visibility through the Goals lane, so it is
+3. **P4-5c Attention from outcomes.** *P4-5c-1 implemented 2026-11-09 (shadow).* New `lilith_router/commitments.py`,
+   `commitments_mode: shadow`.
+   - On an owner turn, Lilith's unresolved commitments (`commitment.once` BLOCKED, or FAILED in the last 7 days; read
+     from the Goals store, 60 s cache, fail-open) are surfaced at most once per commitment per gateway process.
+   - **Live:** one short note in the **agent's** turn hint. It states what the scheduler recorded, says "own it
+     briefly, no excuses, never say it was sent, offer to set it up again", and moves that turn off the fast path. Why
+     the agent path: N-48 showed the fast model can echo note text verbatim, and the agent can reschedule with its own
+     tool.
+   - **Shadow:** logs `lane: commitments` (counts, goal ids, states; no titles).
+   - Same PR: the appraisal `goal` signal now **excludes** `commitment.*` goals (the P4-5b finding).
+   - 6 tests. Rollback: `off`. Live is an owner decision once shadow shows real cases.
+
+   **P4-5c-2: persistent acknowledgement (design; DEV first).** "Once per process" re-surfaces after a gateway
+   restart, and E-7 cannot yet count "acknowledged".
+   - **Proposal:** after a live note is carried on an agent turn that completed with a reply, transition a BLOCKED
+     commitment to CANCELLED with reason "missed; owned in conversation at <ts>". The E-7 reader then counts it as
+     `missed_acknowledged` (the roadmap's "honoured or acknowledged").
+   - **Limit:** a FAILED commitment is already terminal, and the Goals FSM has no typed "note" operation. Its
+     acknowledgement stays process-local unless a typed operation is added, which would be a Core API change (DEV
+     first).
+   - **Not before** the owner sees the shadow counts.
+
+   Original plan: A missed commitment raises its own visibility through the Goals lane, so it is
    surfaced and owned rather than silently dropped. This first uses the existing goal-status grounding (read-only).
    A priority change is a goal write, so DEV first, and only if the Goals FSM has a typed operation for it (no
    generic set).

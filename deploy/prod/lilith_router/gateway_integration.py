@@ -53,6 +53,7 @@ from . import turn_context as _tc
 from . import metacognition as _meta
 from . import appraisal as _appraisal
 from . import promise_guard as _promise_guard
+from . import commitments as _commitments
 from . import world_context as _world_context
 from .classifier import SOCIAL, WORK, classify
 from .state import STATE
@@ -430,6 +431,32 @@ def _apply_appraisal(cfg, message: str) -> None:
     except Exception:
         tctx.appraisal, tctx.goals, tctx.appraisal_live = (), (), False
         logger.debug("lilith_router: appraisal failed (none applied)", exc_info=True)
+
+
+_COMMITMENTS = _commitments.UnresolvedSource(os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765"))
+
+
+def _apply_commitments(cfg) -> None:
+    """P4-5c (owner turns only): an unresolved commitment of LILITH's (missed, or failed recently) is surfaced once
+    per gateway process. Live: the agent's turn hint carries it and the turn leaves the fast path. Shadow logs only.
+    Never raises; ids and counts only."""
+    tctx = _tc.current()
+    try:
+        mode = cfg.commitments_mode
+        if mode not in ("shadow", "live") or not (tctx.owner and _canonical_memory.owner_turn()):
+            return
+        items = _COMMITMENTS.pending()
+        if not items:
+            return
+        _COMMITMENTS.mark_surfaced(items)
+        if mode == "live":
+            tctx.responsibility = tuple(items[:2])
+        _append_log(cfg, {"lane": "commitments", "mode": mode, "unresolved": len(items),
+                          "goal_ids": [g.get("goalId") for g in items[:5]],
+                          "states": [g.get("lifecycleState") for g in items[:5]], "surfaced": mode == "live"})
+    except Exception:
+        tctx.responsibility = ()
+        logger.debug("lilith_router: commitments note failed (none)", exc_info=True)
 
 
 def _observe_social_cognition(cfg, platform: str, chat_id: str,
@@ -827,6 +854,7 @@ def _route_turn_impl(
     _apply_social_preferences(cfg, decision, message)
     _apply_metacognition(cfg, message)
     _apply_appraisal(cfg, message)
+    _apply_commitments(cfg)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending
@@ -1148,6 +1176,8 @@ def _route_turn_impl(
                 why = "durable_correction"           # P-2: the tool-capable agent may propose remembering it
             if not why and tctx.meta.get("applied") and tctx.meta.get("control") == "escalate":
                 why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
+            if not why and tctx.responsibility:
+                why = "responsibility"               # P4-5c: owning a missed commitment needs the full agent
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,

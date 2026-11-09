@@ -53,6 +53,10 @@ appraisal_mode: shadow
 # P-4 unbacked-promise check: off | shadow. Shadow adds four booleans to the turn-end record (promise, scheduling
 # claim, scheduler job created this turn, unbacked). Never changes a reply. Rollback: off.
 promise_guard_mode: shadow
+# P4-5c missed-commitment attention (owner turns only): off | shadow (log which would be surfaced) | live (the agent's
+# turn hint carries one short note to own it, once per commitment per process; the turn leaves the fast path).
+# Rollback: shadow or off.
+commitments_mode: shadow
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────
