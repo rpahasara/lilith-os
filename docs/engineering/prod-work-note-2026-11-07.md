@@ -738,7 +738,20 @@ authority. A durable episode store is reconsidered only if E-8 ("when / what hap
 insufficient. It would need a privacy and FORGET review first.
 
 **Focused tasks, in order.**
-1. **P4-1 Consolidation context v2** (C-2 first slice; read-only; proposal-only). Status: source + 4 tests done; not installed. The nightly review
+1. **P4-1 Consolidation context v2** (C-2 first slice; read-only; proposal-only). Status: **installed on PROD
+   2026-11-09 05:12Z** (owner GO). Merged in #389 (`11b273c`).
+   - **Install:** `~/.hermes/scripts/owner_memory_review.py`, sha256 `e07ffedf5334…`, outside the deploy pipeline
+     through `p3tx/deployer/review_install_p41.py` (hash-pinned to main). Backup
+     `/var/backups/lilith-review/20261109T051229Z`.
+   - **Dry run before install** (counts only, nothing written): 34 owner sessions, 11 owner lines in the window, 1 moment
+     tagged, 0 goal outcomes.
+   - **Post-install check** (counts only): owner sessions are 28 console, 5 Telegram DM and 1 verified Discord DM; the
+     other Discord session is excluded. 22 lines in the window (6 from the Discord DM). The guidance and outcomes
+     sections are present; 1 owner line tagged (the P-2 test correction).
+   - **Rollback:** `review_install_p41.py rollback 20261109T051229Z`.
+   - **Migration note:** the script is outside the pipeline; check its hash against main after the switch (as for the
+     earlier install).
+   - **Next:** watch the next nightly review's proposals (typed wording; no fictional facts; at most 3). The nightly review
    context gains:
    - wording guidance: typed `Preference/Boundary (scope):` (closes P-2 open item 3); dated event facts for
      achievements and setbacks; at most 3 proposals per night;
