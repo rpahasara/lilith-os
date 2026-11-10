@@ -1352,6 +1352,62 @@ Sequence, each step separately approved:
 3. Deploy #412.
 4. Counts-only measurement.
 
+**DEV rehearsal of Asia/Colombo (owner GO 2026-11-10, ref #412 @ b5e0947; 11:48–12:04Z; no PROD contact).**
+
+*Isolation and baseline.*
+- Host `lilith-dev-01`; driver hard-guarded to that hostname.
+- DEV Hermes: `hermes-gateway-dev`, home `~/.hermes-dev`, release `f293e72-…-e1`, Hermes 0.20.5. Console-only, no tools.
+- Baseline: no timezone, host UTC. `cron/jobs.json` = `{"jobs": []}`, so DEV has no nightly review and no jobs.
+- Backups of `config.yaml` (4a28709d…), `jobs.json` (ada86724…) and `critical.sha256` (459b7557…) taken first.
+
+*Live DEV not reconfigured.* DEV's pre-start verifier blocks it:
+- `config.yaml` is hash-pinned in `critical.sha256`;
+- `jobs.json` must be exactly `{"jobs": []}`;
+- compression is pinned off.
+
+Changing those integrity pins was not authorized. The rehearsal therefore ran DEV's own release code (`cron.jobs`, `hermes_time`, `agent.system_prompt`, `gateway.message_timestamps`) in an isolated `HERMES_HOME` under `/var/tmp`:
+- run as `nobody`, which is denied access to `~/.hermes-dev`;
+- simulated clock;
+- synthetic no-op jobs (`deliver: local`, never executed);
+- synthetic state.db;
+- Core API pointed at a dead port.
+
+*Results: 14/14 PASS.*
+
+| # | Check | Result |
+| --- | --- | --- |
+| S1 | Baseline review `30 16 * * *` | next 16:30Z |
+| S2 | Timezone only, expression unchanged | review fires 16:30Z on day 1, then **11:00Z** (16:30 Colombo). The drift is real; the schedule must change with the zone |
+| S3 | Zone + `update_job` → `0 22 * * *` at 11:55Z | next `22:00+05:30`; fires 16:30Z on 3 consecutive days; snapshot 319/319, sync 3186/3186 on time; no duplicates |
+| S4 | Same, applied at 17:00Z after the day's run | no double fire; 16:30Z daily |
+| S5 | Direct `jobs.json` edit while stopped (stale `next_run_at` 16:30+00:00) | 16:30Z daily; Hermes repaired the stored offset |
+| S6 | Unzoned one-shot `2026-11-11T20:00` | `20:00+05:30` = 14:30Z; fired once; job completed |
+| S6b | Zoned input | unaffected |
+| S7 | Agent date line (the release's own code) | 18:20Z → "Monday, November 09 (Asia/Colombo, +0530, UTC+05:30)"; 18:40Z → "Tuesday, November 10 …". UTC gives Monday for both |
+| S7b | Compaction date | follows the zone |
+| S8 | Stored message timestamps (epoch / aware / ISO-Z / naive) | identical under UTC and Colombo |
+| S9 | #412 review from `config.yaml` | Colombo markers, midnight split, `[also said on]`, relative line stays on its own day |
+| S9b | Review with no zone set | named UTC |
+| S10 | New process after downtime 16:00–16:20Z | review 16:30Z; one snapshot catch-up; no burst |
+| S11 | New process, down across 16:30Z | exactly one catch-up (16:45Z), then 16:30Z |
+
+*Regression tests on DEV (as `nobody`; pytest wheels on `PYTHONPATH` in the sandbox only; DEV venv untouched).*
+- #412 `test_owner_memory_review`: 34/34 with no zone, 34/34 with `HERMES_TIMEZONE=Asia/Colombo`.
+- Hermes `tests/test_timezone.py` + 9 scheduler suites: 243/243 with no zone, 243/243 under Colombo.
+- Full `tests/cron`: 878 passed, 5 skipped, 2 failed. The failures were in `test_media_send_timeout`, which passes 10/10 alone: order-dependent, not timezone-related.
+
+*Rollback.* Live `config.yaml`, `jobs.json` and `critical.sha256` are hash-identical to the backups. Gateway PID 442539, `NRestarts=0`, active since 2026-11-04 (never restarted). Sandbox, wheels and backups removed.
+
+*Defect found (pre-existing, DEV only).* `verify_release.py --pre-start` now fails with `GOAL_STORE_NOT_EMPTY`:
+- the F8 verifier requires an empty goal store (line 154), but DEV runs the Goals lane;
+- the gateway last passed the check at its 2026-11-04 start;
+- consequence: the next DEV gateway restart will fail pre-start. It needs its own fix.
+
+*Before any PROD proposal.*
+- Hash-compare PROD's `hermes_time.py`, `cron/jobs.py`, `agent/system_prompt.py` and `gateway/message_timestamps.py` with DEV's (read-only; needs authorization).
+- Change zone and schedule together while the gateway is stopped (S5), or zone then `update_job` (S3/S4).
+- Avoid a restart window spanning 16:30Z (S11).
+
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
 Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan
