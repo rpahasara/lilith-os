@@ -1,0 +1,25 @@
+{
+  "release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1",
+  "status": "CANDIDATE_NOT_INSTALLED",
+  "base_release": "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1",
+  "base_definition": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1/RELEASE-DELTA.json",
+  "note": "The e1 release with only the startup verifier's goal-store rule changed. w1's 'no goal row at all' becomes what it protects: every goal terminal, no arbitration trace, and a running Core API that provably cannot write on a focus read (LILITH_OS_FOCUS_READ_ONLY=1 in the unit and the live process, code that honours it, the same DB, and a real focus read that writes nothing). HERMES_HOME, router.yaml and every lilith_router module are unchanged.",
+  "members": {
+    "RELEASE_ID": {
+      "sha256": "c33363446fcdcb8776c1db052751f96505e592d7066ce201652a46e1eac02618",
+      "from": "fb9a650f26e78992d29521abad84437e9a71737eab210d2a23083c6ec2d16a52"
+    },
+    "bin/verify_release.py": {
+      "template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1/templates/bin/verify_release.py.tmpl",
+      "template_sha256": "ba814bdcacdc0882c57d9f84feff587ade40a459822a95291dda1f90e1591115",
+      "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1/templates/bin/verify_release.py.tmpl",
+      "base_template_sha256": "f1086cacc440d84850b30b033b23120e41f34919d2761ddb2e867761eb3b65d5",
+      "rendering": "the host token is carried over from the installed e1 verifier on the host; it never leaves the host"
+    }
+  },
+  "unchanged": {
+    "home/router.yaml": "be8c08d1c5e88e03306d33869239823bd61d367740a160a8133fd9353943e6f4",
+    "home/lilith_router/world_context.py": "f1ee561dec06a7cadd282bc2e9e1315e39dd78f9be163d373237f941d84d55b2",
+    "home/lilith_router/ethics.py": "d6a1c20b45557169a4fefa7b5d81907da0e0ae12519f8c63724900ac8ce47dbd"
+  }
+}
