@@ -1,11 +1,14 @@
 """PROD Hermes timezone operations for the Asia/Colombo migration (proposal; run only inside an authorized window).
 
-Run as the `lilith` user with PROD's own interpreter so Hermes' cron API is the one PROD runs (tz_window.sh pipes this
-file on stdin, so it can stay in a root-only directory):
-    HERMES_HOME=/home/lilith/.hermes /home/lilith/.hermes/hermes-agent/venv/bin/python -I - <command> < tz_ops.py
+Run as the `lilith` user with PROD's own interpreter, so Hermes' cron API is the one PROD runs. tz_window.sh installs
+this file root-owned and read-only in a fresh /run directory and runs:
+    HERMES_HOME=/home/lilith/.hermes /home/lilith/.hermes/hermes-agent/venv/bin/python -I <dir>/tz_ops.py <command>
+This process never writes any file except jobs.json through Hermes' own update_job (jobs-apply / jobs-revert); every
+other output goes to stdout for root to handle.
 
-Read-only commands: config-check, jobs-inspect, jobs-plan, datecheck.
-Writing commands (gateway STOPPED, inside the window): config-apply <src> <dst>, jobs-apply, jobs-revert.
+Read-only: config-check, config-render (new config on stdout), config-validate (candidate config on stdin), jobs-inspect,
+jobs-plan, jobs-evidence SINCE OFFSET, datecheck.
+Writing (gateway STOPPED, inside the window): jobs-apply, jobs-revert.
 Never prints job prompts, reminder text, chat ids or message content.
 """
 from __future__ import annotations
@@ -109,10 +112,25 @@ def main(argv: list[str]) -> None:
     if cmd == "config-check":
         _, tz = config_timezone((HOME / "config.yaml").read_text(encoding="utf-8"))
         print(json.dumps({"timezone": tz}))
-    elif cmd == "config-apply":
-        src, dst = Path(argv[1]), Path(argv[2])
-        dst.write_text(config_with_zone(src.read_text(encoding="utf-8")), encoding="utf-8")
-        print("CONFIG_APPLY_OK")
+    elif cmd == "config-render":                 # the new config.yaml on stdout; root writes it
+        sys.stdout.write(config_with_zone((HOME / "config.yaml").read_text(encoding="utf-8")))
+    elif cmd == "config-validate":               # stdin = candidate; it must be the live config plus exactly the zone
+        live, tz = config_timezone((HOME / "config.yaml").read_text(encoding="utf-8"))
+        cand, ctz = config_timezone(sys.stdin.read())
+        if tz is not None or ctz != ZONE or {k: v for k, v in cand.items() if k != "timezone"} != live:
+            die("candidate config is not the live config plus timezone: Asia/Colombo")
+        print("CONFIG_VALID")
+    elif cmd == "jobs-evidence":                 # the LIVE scheduler wrote times in the expected zone since SINCE
+        since = dt.datetime.fromisoformat(argv[1])
+        offset = dt.timedelta(hours=5, minutes=30) if argv[2] == "colombo" else dt.timedelta(0)
+        _, J = _jobs_api()
+        j = {x["id"]: x for x in J.load_jobs()}["5365cfb456d4"]
+        last = dt.datetime.fromisoformat(j["last_run_at"]) if j.get("last_run_at") else None
+        nxt = dt.datetime.fromisoformat(j["next_run_at"]) if j.get("next_run_at") else None
+        ok = bool(last and nxt and last >= since and nxt.utcoffset() == offset and j.get("last_status") == "ok")
+        print(json.dumps({"sync_last_run_at": j.get("last_run_at"), "sync_next_run_at": j.get("next_run_at"),
+                          "since": since.isoformat(), "want_offset": str(offset), "ok": ok}))
+        sys.exit(0 if ok else 1)
     elif cmd == "jobs-inspect":
         _, J = _jobs_api()
         jobs = J.load_jobs()
@@ -162,6 +180,7 @@ def main(argv: list[str]) -> None:
         print(json.dumps({"review": _summary(review), "next_run_utc": nxt.astimezone(UTC).isoformat(), "changed_fields": changed}))
         print("JOBS_APPLY_OK" if apply else "JOBS_REVERT_OK")
     elif cmd == "datecheck":                         # read-only: the zone and the agent's date line under the live config
+        os.environ.pop("HERMES_TIMEZONE", None)
         import inspect
         import textwrap
         ht, _ = _jobs_api()
@@ -174,7 +193,8 @@ def main(argv: list[str]) -> None:
         print(json.dumps({"zone": getattr(ht.get_timezone(), "key", None), "now": ht.now().isoformat(),
                           "date_line": ns["timestamp_line"]}))
     else:
-        die("usage: config-check | config-apply SRC DST | jobs-inspect | jobs-plan | jobs-apply | jobs-revert | datecheck")
+        die("usage: config-check | config-render | config-validate | jobs-inspect | jobs-plan | jobs-evidence SINCE "
+            "colombo|utc | jobs-apply | jobs-revert | datecheck")
 
 
 if __name__ == "__main__":

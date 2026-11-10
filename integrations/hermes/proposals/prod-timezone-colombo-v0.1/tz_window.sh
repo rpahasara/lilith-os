@@ -1,140 +1,253 @@
 #!/usr/bin/env bash
 # PROD Hermes Asia/Colombo migration (proposal; run only with the owner's explicit authorization). Root on lilith-01.
-#   sudo bash tz_window.sh precheck            read-only: every precondition, blackout windows, the planned instant
-#   sudo bash tz_window.sh change              precheck, backups, stop gateway, config + review schedule, start gateway
-#   sudo bash tz_window.sh verify [label]      read-only post-checks (run at +60 s and +10 min, and after the next review)
-#   sudo bash tz_window.sh rollback <backup>   stop gateway, restore config.yaml, review back to "30 16 * * *", start
-# The only writes: /root/tz-colombo-<ts>/ (backups), ~/.hermes/config.yaml (one appended line) and the review job's
-# schedule in ~/.hermes/cron/jobs.json (through Hermes' own update_job). No other job, reminder, memory, Core API,
-# router, unit or credential is touched. Failure: TZ_FAIL.
-set -Eeuo pipefail
+#   sudo bash tz_window.sh precheck                 read-only: every precondition, blackout windows, the planned instant
+#   sudo bash tz_window.sh change                   prepare (gateway running) -> stop -> config + review -> start + proof
+#   sudo bash tz_window.sh verify LABEL colombo|utc read-only post-checks V1-V7; exit 0 only if every check passes
+#   sudo bash tz_window.sh rollback BACKUP_DIR      stop -> exact config restore -> review back to UTC -> start + proof
+# Writes: /root/tz-colombo-<ts>/ (root 0700 backups, written by root only), ~/.hermes/config.yaml (one appended line,
+# installed by root as lilith:lilith 0600) and the review job's schedule in ~/.hermes/cron/jobs.json (Hermes' own
+# update_job, as lilith). Nothing else.
+# Exit codes: 0 done | 1 refused or failed, and the previous state is restored, verified and running (or nothing was
+# changed) | 3 TZ_ESCALATE: files could not be verified; the gateway is left STOPPED for a human.
+set -Euo pipefail
 umask 077
-MODE=${1:?usage: tz_window.sh precheck|change|verify [label]|rollback <backup-dir>}
+MODE=${1:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 H=/home/lilith/.hermes; S=$H/hermes-agent; PY=$S/venv/bin/python
-CFG=$H/config.yaml; JOBS=$H/cron/jobs.json
+CFG=$H/config.yaml; JOBS=$H/cron/jobs.json; GWLOG=$H/logs/gateway.log
 CONFIG_PRE_SHA=a6f340f2221130e4d9e142195ce86b8dab9721c0a67c2ca4359950ad39ec37e7   # 2026-11-10 inventory (no timezone key)
+PLATFORMS=(telegram discord lilith_os)
+STABLE_S=10; START_WAIT_S=90; PLATFORM_WAIT_S=120; EVIDENCE_WAIT_S=150
 declare -A SRC_SHA=(   # PROD Hermes 0.20.5 timezone-relevant sources, byte-identical to the DEV-rehearsed ones
   [hermes_time.py]=3f4ee146597bbb2dabf61ed0458b3e9c7f2dcb9dd89351652cd0fc6e8a7884c8
   [cron/jobs.py]=edf2469d61286ba7ec13ffabddfaef2a9b5e7f51b2ac08c3494eb5ea4aa7177b
   [agent/system_prompt.py]=1d1c1bfbfc3752576f8523bfc5029b8ab3a005a195b2abd10c85ccc9cd20164d
   [gateway/message_timestamps.py]=daa620ef95760d35154d8cf6f6ec6774ea1dbf6b390d101886359d57757fa222
 )
-die() { echo "TZ_FAIL $*" >&2; exit 1; }
-ok() { echo "PASS $*"; }
+now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
+say() { echo "$(now) $*"; }
+refuse() { echo "TZ_FAIL $* (nothing changed)" >&2; exit 1; }
+escalate() { echo "TZ_ESCALATE $* - gateway left STOPPED; do not start it until a human has checked the files" >&2; exit 3; }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
-ops() {   # [VAR=value ...] command [args]: tz_ops.py as lilith with PROD's interpreter; the script arrives on stdin
-  local envs=(); while [[ ${1:-} == *=* ]]; do envs+=("$1"); shift; done
-  runuser -u lilith -- env -i HOME=/home/lilith HERMES_HOME=$H PATH=/usr/bin:/bin "${envs[@]}" "$PY" -I - "$@" < "$HERE/tz_ops.py"
+
+# Offline rehearsal only (tests/rehearse_tz_window.sh). Honoured only inside private mount AND hostname namespaces with
+# /home and /root on overlays; anywhere else it is refused before anything runs.
+SIM=0
+if [[ -n ${TZ_SIM:-} ]]; then
+  [[ ${TZ_SIM} == 1 && $(readlink /proc/1/ns/mnt) != "$(readlink /proc/self/ns/mnt)" \
+     && $(readlink /proc/1/ns/uts) != "$(readlink /proc/self/ns/uts)" \
+     && $(stat -f -c %T /home) == overlayfs && $(stat -f -c %T /root) == overlayfs ]] || refuse "TZ_SIM outside a sandbox"
+  SIM=1; CONFIG_PRE_SHA=${TZ_SIM_CONFIG_SHA:?}; STABLE_S=2; PLATFORM_WAIT_S=30; EVIDENCE_WAIT_S=75
+fi
+inject() { [[ $SIM == 1 && ${TZ_SIM_FAIL_AT:-} == "$1" ]] && { echo "INJECTED_FAILURE at $1" >&2; return 1; }; return 0; }
+
+# tz_ops.py runs as lilith from a fresh root-owned, read-only copy that lilith can read but not change.
+OPSDIR=
+setup_ops() {
+  OPSDIR=$(mktemp -d /run/tz-colombo-ops.XXXXXX) || refuse "ops dir"
+  chmod 0755 "$OPSDIR"; install -o root -g root -m 0644 "$HERE/tz_ops.py" "$OPSDIR/tz_ops.py" || refuse "ops copy"
 }
+cleanup_ops() { [[ -n $OPSDIR && -f $OPSDIR/tz_ops.py ]] && unlink "$OPSDIR/tz_ops.py"; [[ -n $OPSDIR ]] && rmdir "$OPSDIR" 2>/dev/null; return 0; }
+trap cleanup_ops EXIT
+ops() {   # [VAR=value ...] command [args]; stdin is passed through
+  local envs=(); while [[ ${1:-} == *=* ]]; do envs+=("$1"); shift; done
+  runuser -u lilith -- env -i HOME=/home/lilith HERMES_HOME=$H PATH=/usr/bin:/bin "${envs[@]}" "$PY" -I "$OPSDIR/tz_ops.py" "$@"
+}
+gwp() { systemctl show hermes-gateway -p "$1" --value 2>/dev/null; }
 gw() { systemctl show hermes-gateway -p ActiveState -p SubState -p MainPID -p NRestarts | LC_ALL=C sort | paste -sd' '; }
 
-blackout() {   # refuse near the review (16:30Z), the morning brief (02:30Z) and any minute the scheduler is busy
-  local m=$((10#$(date -u +%H) * 60 + 10#$(date -u +%M)))
-  (( m >= 16 * 60 && m < 17 * 60 )) && die "inside the 16:00-17:00Z review blackout"
-  (( m >= 2 * 60 && m < 3 * 60 )) && die "inside the 02:00-03:00Z morning-brief blackout"
+blackout() {   # refuse near the review (16:30Z) and the morning brief (02:30Z)
+  local hm=$(date -u +%H:%M); [[ $SIM == 1 && -n ${TZ_SIM_CLOCK:-} ]] && hm=$TZ_SIM_CLOCK
+  local m=$((10#${hm%:*} * 60 + 10#${hm#*:}))
+  (( m >= 16 * 60 && m < 17 * 60 )) && refuse "inside the 16:00-17:00Z review blackout ($hm)"
+  (( m >= 2 * 60 && m < 3 * 60 )) && refuse "inside the 02:00-03:00Z morning-brief blackout ($hm)"
   return 0
 }
 
-precheck() {
-  [[ $(id -u) -eq 0 ]] || die "not root"
-  [[ $(hostname -s) == lilith-01 ]] || die "wrong host $(hostname -s)"
-  blackout; ok "outside blackout windows ($(date -u +%H:%MZ))"
-  local f; for f in "${!SRC_SHA[@]}"; do [[ $(sha "$S/$f") == "${SRC_SHA[$f]}" ]] || die "Hermes source $f changed"; done
-  ok "Hermes timezone sources = the DEV-rehearsed bytes"
-  [[ $(sha "$CFG") == "$CONFIG_PRE_SHA" ]] || die "config.yaml is not the inventoried a6f340f2 (re-plan)"
-  [[ $(stat -c '%U:%G %a' "$CFG") == "lilith:lilith 600" ]] || die "config.yaml owner/mode"
-  [[ $(ops config-check) == '{"timezone": null}' ]] || die "config.yaml already has a timezone"
-  ok "config.yaml a6f340f2, no timezone key"
-  [[ -z $(tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value hermes-gateway)/environ | grep -E '^(HERMES_TIMEZONE|TZ)=') ]] || die "gateway env already has a zone"
-  local inv; inv=$(ops jobs-inspect 2>&1) || { echo "$inv" | tail -2 >&2; die "job set differs from the inventory (re-plan)"; }
-  ok "job set = the three inventoried recurring jobs, nothing else enabled, all timestamps zone-aware"
-  local plan; plan=$(ops jobs-plan) || die "planned review instant"; echo "plan $plan"
-  [[ $plan == *'"same_instant": true'* ]] && ok "planned review instant stays 16:30Z" || die "plan"
-  [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] && ok "gateway $(gw)" || die "gateway not running"
-  local hb; hb=$(cat $H/cron/ticker_last_success); python3 -c "import time,sys; sys.exit(0 if time.time()-float(sys.argv[1]) < 180 else 1)" "$hb" \
-    && ok "scheduler ticked <180 s ago" || die "scheduler not ticking"
-  [[ $(systemctl is-active lilith-os-api) == active ]] && ok "Core API active" || die "Core API"
-  (( $(df -Pm $H | awk 'NR==2{print $4}') > 500 )) && ok "disk" || die "disk"
+precheck() {   # read-only
+  [[ $(id -u) -eq 0 ]] || refuse "not root"
+  [[ $(hostname -s) == lilith-01 ]] || refuse "wrong host $(hostname -s)"
+  blackout; echo "PASS outside blackout windows"
+  local f; for f in "${!SRC_SHA[@]}"; do [[ $(sha "$S/$f") == "${SRC_SHA[$f]}" ]] || refuse "Hermes source $f changed"; done
+  echo "PASS Hermes timezone sources = the DEV-rehearsed bytes"
+  [[ $(sha "$CFG") == "$CONFIG_PRE_SHA" ]] || refuse "config.yaml is not the inventoried one (re-plan)"
+  [[ $(stat -c '%U:%G %a' "$CFG") == "lilith:lilith 600" ]] || refuse "config.yaml owner/mode"
+  [[ $(ops config-check) == '{"timezone": null}' ]] || refuse "config.yaml already has a timezone"
+  echo "PASS config.yaml is the inventoried one, no timezone key"
+  [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] || refuse "gateway not running"
+  [[ -z $(tr '\0' '\n' < "/proc/$(gwp MainPID)/environ" | grep -E '^(HERMES_TIMEZONE|TZ)=') ]] || refuse "gateway started with a zone in its environment"
+  echo "PASS gateway $(gw)"
+  local inv; inv=$(ops jobs-inspect 2>&1) || { echo "$inv" | tail -2 >&2; refuse "job set differs from the inventory (re-plan)"; }
+  echo "PASS job set = the three inventoried recurring jobs, nothing else enabled, all timestamps zone-aware"
+  local plan; plan=$(ops jobs-plan) || refuse "planned review instant"
+  [[ $plan == *'"same_instant": true'* ]] || refuse "planned review instant"; echo "PASS plan $plan"
+  local ev; ev=$(ops jobs-evidence "$(date -u -d '-180 sec' +%Y-%m-%dT%H:%M:%S+00:00)" utc) || refuse "scheduler not ticking in UTC ($ev)"
+  echo "PASS live scheduler ticking in UTC $ev"
+  [[ $(systemctl is-active lilith-os-api) == active ]] || refuse "Core API not active"; echo "PASS Core API active"
+  (( $(df -Pm "$H" | awk 'NR==2{print $4}') > 500 )) || refuse "disk"; echo "PASS disk"
+  [[ -w /root && $(stat -c '%U %a' /root) == "root 700" ]] || refuse "/root not root 0700"
   echo "TZ_PRECHECK_PASS"
 }
 
-start_gw() {
-  systemctl start hermes-gateway
-  local i; for i in $(seq 90); do [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] && break; sleep 1; done
-  echo "T_ACTIVE $(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) gateway $(gw)"
-  [[ $(gw) == *"ActiveState=active"* ]] || die "gateway did not become active (see the runbook)"
+wait_stopped() { local i; for i in $(seq 60); do [[ $(gwp MainPID) == 0 ]] && return 0; sleep 1; done; return 1; }
+
+start_and_prove() {   # $1 colombo|utc. Success only with a running, stable gateway that logged this start's platforms
+  local zone=$1 t0 t0_log pid r0 i
+  t0=$(date -u +%Y-%m-%dT%H:%M:%S+00:00); t0_log=$(date -u '+%Y-%m-%d %H:%M:%S'); r0=$(gwp NRestarts)
+  say "start hermes-gateway"
+  systemctl start hermes-gateway || { echo "  start request refused" >&2; return 1; }
+  for i in $(seq $START_WAIT_S); do [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] && break; sleep 1; done
+  [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] || { echo "  not active/running: $(gw)" >&2; return 1; }
+  pid=$(gwp MainPID); sleep $STABLE_S
+  [[ $(gwp MainPID) == "$pid" && $(gwp NRestarts) == "$r0" && $(gw) == *"ActiveState=active"* ]] \
+    || { echo "  not stable: $(gw) (pid was $pid)" >&2; return 1; }
+  local seen=0; for i in $(seq $PLATFORM_WAIT_S); do
+    local since; since=$(awk -v t="$t0_log" 'substr($0,1,19) >= t' "$GWLOG" 2>/dev/null)
+    seen=1; for p in "${PLATFORMS[@]}"; do grep -q "✓ $p connected" <<< "$since" || seen=0; done
+    grep -q "Gateway running with ${#PLATFORMS[@]} platform(s)" <<< "$since" || seen=0
+    [[ $seen == 1 ]] && break; sleep 1
+  done
+  [[ $seen == 1 ]] || { echo "  no platform evidence from this start (since $t0_log)" >&2; return 1; }
+  local ev; for i in $(seq $EVIDENCE_WAIT_S); do ev=$(ops jobs-evidence "$t0" "$zone") && break; sleep 1; done
+  ops jobs-evidence "$t0" "$zone" > /dev/null || { echo "  live scheduler shows no $zone times since start: $ev" >&2; return 1; }
+  [[ $(gwp MainPID) == "$pid" ]] || { echo "  restarted during proof" >&2; return 1; }
+  say "gateway proven: $(gw); platforms ${PLATFORMS[*]} connected since $t0_log; scheduler $ev"
+  return 0
 }
-stop_gw() {
-  echo "T_STOP $(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
-  systemctl stop hermes-gateway
-  local i; for i in $(seq 60); do [[ $(gw) == *"MainPID=0"* ]] && break; sleep 1; done
-  [[ $(gw) == *"MainPID=0"* ]] || die "gateway did not stop"
-  echo "T_STOPPED $(date -u +%Y-%m-%dT%H:%M:%S.%3NZ) gateway $(gw)"
+
+restore_exact() {   # $1 backup dir; both files back, byte-identical to the checksums recorded while stopped
+  local bk=$1
+  [[ -f $bk/SHA256SUMS && -f $bk/config.yaml && -f $bk/jobs.json ]] || return 1
+  (cd "$bk" && sha256sum -c --quiet --strict SHA256SUMS >/dev/null 2>&1) || return 1
+  [[ $SIM == 1 && ${TZ_SIM_CORRUPT_BACKUP:-} == 1 ]] && echo "TEST_ONLY corruption" >> "$bk/jobs.json"
+  install -o lilith -g lilith -m 0600 "$bk/config.yaml" "$CFG.tz-restore" && mv -f "$CFG.tz-restore" "$CFG" || return 1
+  install -o lilith -g lilith -m 0600 "$bk/jobs.json" "$JOBS.tz-restore" && mv -f "$JOBS.tz-restore" "$JOBS" || return 1
+  [[ $(sha "$CFG") == $(awk '$2=="config.yaml"{print $1}' "$bk/SHA256SUMS") \
+     && $(sha "$JOBS") == $(awk '$2=="jobs.json"{print $1}' "$bk/SHA256SUMS") ]] || return 1
+  return 0
+}
+
+recover_stopped() {   # gateway stopped, files possibly changed: exact restore, verify, then start on the old state
+  echo "TZ_FAIL during change: $1 - restoring $BK" >&2
+  wait_stopped || escalate "gateway not stopped during recovery"
+  restore_exact "$BK" || escalate "backup restore could not be verified"
+  echo "  restored config.yaml and jobs.json exactly (checksums verified)" >&2
+  start_and_prove utc || escalate "files restored, but the gateway did not come back healthy"
+  echo "TZ_FAIL_RECOVERED $1 (previous configuration restored, verified and running)" >&2
+  exit 1
+}
+
+rollback_files() {   # gateway stopped: exact config, review back to 30 16 UTC through Hermes; exact jobs as fallback
+  local bk=$1
+  [[ $(awk '$2=="config.yaml"{print $1}' "$bk/SHA256SUMS") == "$CONFIG_PRE_SHA" ]] || return 1
+  (cd "$bk" && sha256sum -c --quiet --strict SHA256SUMS >/dev/null 2>&1) || return 1
+  [[ $SIM == 1 && ${TZ_SIM_CORRUPT_BACKUP:-} == 1 ]] && echo "TEST_ONLY corruption" >> "$bk/config.yaml"
+  install -o lilith -g lilith -m 0600 "$bk/config.yaml" "$CFG.tz-restore" && mv -f "$CFG.tz-restore" "$CFG" || return 1
+  [[ $(sha "$CFG") == "$CONFIG_PRE_SHA" ]] || return 1
+  local out
+  if out=$( { inject jobs_revert && ops jobs-revert; } 2>&1) && grep -q '^JOBS_REVERT_OK' <<< "$out"; then
+    echo "$out" | tail -2
+  else
+    echo "  jobs-revert failed ($(tail -1 <<< "$out")); restoring jobs.json exactly from the backup" >&2
+    install -o lilith -g lilith -m 0600 "$bk/jobs.json" "$JOBS.tz-restore" && mv -f "$JOBS.tz-restore" "$JOBS" || return 1
+    [[ $(sha "$JOBS") == $(awk '$2=="jobs.json"{print $1}' "$bk/SHA256SUMS") ]] || return 1
+  fi
+  return 0
+}
+
+rollback_running() {   # after a start failure with the new configuration: the documented rollback, automatically
+  echo "TZ_FAIL after the change: $1 - rolling back" >&2
+  systemctl stop hermes-gateway; wait_stopped || escalate "gateway would not stop for rollback"
+  rollback_files "$BK" || escalate "rollback files could not be verified"
+  start_and_prove utc || escalate "rolled back, but the gateway did not come back healthy"
+  echo "TZ_FAIL_ROLLED_BACK $1 (previous configuration restored, verified and running)" >&2
+  exit 1
 }
 
 case $MODE in
-  precheck) precheck ;;
+  precheck)
+    setup_ops; precheck ;;
   change)
-    precheck
-    BK=/root/tz-colombo-$(date -u +%Y%m%dT%H%M%SZ); install -d -m 0700 "$BK"
-    cp -p "$CFG" "$BK/config.yaml"; [[ $(sha "$BK/config.yaml") == "$CONFIG_PRE_SHA" ]] || die "config backup"
-    stop_gw                                                       # from here on the scheduler does not write jobs.json
-    cp -p "$JOBS" "$BK/jobs.json"; (cd "$BK" && sha256sum config.yaml jobs.json > SHA256SUMS); echo "backup $BK"; cat "$BK/SHA256SUMS"
-    restore_and_restart() {                                       # any failure while stopped: exact restore, then start
-      echo "TZ_FAIL during change: restoring $BK and restarting" >&2
-      install -o lilith -g lilith -m 0600 "$BK/config.yaml" "$CFG.tz-restore" && mv -f "$CFG.tz-restore" "$CFG"
-      install -o lilith -g lilith -m 0600 "$BK/jobs.json" "$JOBS.tz-restore" && mv -f "$JOBS.tz-restore" "$JOBS"
-      [[ $(sha "$CFG") == "$(sed -n 's/  config.yaml$//p' "$BK/SHA256SUMS")" && $(sha "$JOBS") == "$(sed -n 's/  jobs.json$//p' "$BK/SHA256SUMS")" ]] \
-        && echo "restored exactly" >&2 || echo "RESTORE MISMATCH: do not start; escalate" >&2
-      systemctl start hermes-gateway; exit 1
-    }
-    trap restore_and_restart ERR
-    ops config-apply "$CFG" "$BK/config.new" >/dev/null
-    install -o lilith -g lilith -m 0600 "$BK/config.new" "$CFG.tz-new" && mv -f "$CFG.tz-new" "$CFG"
-    [[ $(ops config-check) == '{"timezone": "Asia/Colombo"}' ]] || false
-    echo "config.yaml $(sha "$CFG")"
-    ops HERMES_TIMEZONE=Asia/Colombo jobs-apply | tee "$BK/jobs-apply.out"
-    grep -q '^JOBS_APPLY_OK' "$BK/jobs-apply.out" || false
-    trap - ERR
-    start_gw
+    setup_ops; precheck
+    # -- prepare while the gateway runs: any failure here changes nothing
+    BK=/root/tz-colombo-$(date -u +%Y%m%dT%H%M%SZ)
+    install -d -o root -g root -m 0700 "$BK" || refuse "backup dir"
+    cp -p "$CFG" "$BK/config.yaml" && [[ $(sha "$BK/config.yaml") == "$CONFIG_PRE_SHA" ]] || refuse "config backup"
+    inject prepare || refuse "injected"
+    ops config-render > "$BK/config.new" || refuse "config render"
+    ops config-validate < "$BK/config.new" | grep -qx CONFIG_VALID || refuse "rendered config does not validate"
+    NEWSHA=$(sha "$BK/config.new"); say "prepared $BK (config.new $NEWSHA)"
+    # -- stop
+    say "stop hermes-gateway"
+    systemctl stop hermes-gateway; wait_stopped || refuse "gateway did not stop (check it is running again)"
+    J0=$(sha "$JOBS"); C0=$(sha "$CFG"); say "stopped $(gw)"
+    [[ $C0 == "$CONFIG_PRE_SHA" ]] || { start_and_prove utc || escalate "config changed under us and the gateway did not restart"; refuse "config.yaml changed during preparation"; }
+    # -- from here every step is checked; any failure restores exactly, verifies, and starts the old state
+    unchanged_restart() { [[ $(sha "$CFG") == "$C0" && $(sha "$JOBS") == "$J0" ]] || escalate "files changed but no verified backup exists"; \
+                          start_and_prove utc || escalate "nothing changed, but the gateway did not come back healthy"; \
+                          echo "TZ_FAIL_RECOVERED $1 (nothing was changed; gateway running)" >&2; exit 1; }
+    inject after_stop || unchanged_restart "injected after stop"
+    { inject backup_jobs && cp -p "$JOBS" "$BK/jobs.json"; } || unchanged_restart "jobs.json backup failed"
+    [[ $(sha "$BK/jobs.json") == "$J0" ]] || unchanged_restart "jobs.json backup does not match"
+    (cd "$BK" && printf '%s  config.yaml\n%s  jobs.json\n' "$C0" "$J0" > SHA256SUMS && sha256sum -c --quiet --strict SHA256SUMS) \
+      || unchanged_restart "backup checksums"
+    say "backups verified: config.yaml $C0, jobs.json $J0"
+    inject after_backup || recover_stopped "injected after backup"
+    install -o lilith -g lilith -m 0600 "$BK/config.new" "$CFG.tz-new" && mv -f "$CFG.tz-new" "$CFG" || recover_stopped "config install"
+    [[ $(sha "$CFG") == "$NEWSHA" && $(ops config-check) == '{"timezone": "Asia/Colombo"}' ]] || recover_stopped "config check"
+    inject after_config || recover_stopped "injected after config"
+    OUT=$( { inject jobs_apply && ops HERMES_TIMEZONE=Asia/Colombo jobs-apply; } 2>&1) && grep -q '^JOBS_APPLY_OK' <<< "$OUT" \
+      || recover_stopped "jobs-apply ($(tail -1 <<< "$OUT"))"
+    echo "$OUT" > "$BK/jobs-apply.out"; tail -2 <<< "$OUT"
+    inject after_jobs || recover_stopped "injected after jobs"
+    # -- start and prove; a failed start rolls back by the documented procedure
+    { inject start && start_and_prove colombo; } || rollback_running "gateway did not start healthy on the new configuration"
     echo "TZ_CHANGED backup=$BK"
     ;;
   verify)
-    L=${2:-check}
-    [[ $(hostname -s) == lilith-01 ]] || die "wrong host"
-    [[ $(gw) == *"ActiveState=active"*"SubState=running"* ]] && ok "V1 gateway $(gw)" || echo "FAIL V1 gateway $(gw)"
-    p=$(systemctl show -p MainPID --value hermes-gateway)
-    tr '\0' '\n' < /proc/$p/environ | grep -qx 'HERMES_TIMEZONE=Asia/Colombo' && ok "V2 gateway env HERMES_TIMEZONE=Asia/Colombo (bridged from config)" || echo "FAIL V2 gateway env"
-    [[ $(ops config-check) == '{"timezone": "Asia/Colombo"}' ]] && ok "V2 config.yaml timezone Asia/Colombo" || echo "FAIL V2 config"
-    ops datecheck | sed 's/^/V3 /'
-    ops jobs-inspect | "$PY" -I -c '
+    LABEL=${2:-check}; ZONE=${3:-colombo}; setup_ops; fail=0
+    v() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1; fi; }
+    [[ $(hostname -s) == lilith-01 ]] || refuse "wrong host"
+    v "V1 gateway active/running: $(gw)" '[[ $(gw) == *"ActiveState=active"*"SubState=running"* ]]'
+    want_tz=$([[ $ZONE == colombo ]] && echo '{"timezone": "Asia/Colombo"}' || echo '{"timezone": null}')
+    v "V2 config.yaml $want_tz" '[[ $(ops config-check) == "$want_tz" ]]'
+    START=$(date -u -d "$(gwp ActiveEnterTimestamp)" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null || echo 1970-01-01T00:00:00+00:00)
+    EV=$(ops jobs-evidence "$START" "$ZONE"); v "V2 live scheduler writes $ZONE times since this start: $EV" '[[ $EV == *"\"ok\": true"* ]]'
+    DC=$(ops datecheck); want_zone=$([[ $ZONE == colombo ]] && echo '"zone": "Asia/Colombo"' || echo '"zone": null')
+    v "V3 $DC" '[[ $DC == *"$want_zone"* ]]'
+    REV=$(ops jobs-inspect | "$PY" -I -c '
 import json, sys, datetime as dt
-j = {x["id"]: x for x in json.load(sys.stdin)}
-r = j["e161234245f3"]; n = dt.datetime.fromisoformat(r["next_run_at"])
-ok = r["expr"] == "0 22 * * *" and n.utcoffset() == dt.timedelta(hours=5, minutes=30) and (n.astimezone(dt.timezone.utc).hour, n.astimezone(dt.timezone.utc).minute) == (16, 30)
-print(("PASS" if ok else "FAIL") + " V4 review", r["expr"], r["next_run_at"], "=", n.astimezone(dt.timezone.utc).isoformat())
-now = dt.datetime.now(dt.timezone.utc)
-for jid, name in (("5365cfb456d4", "commitment-sync"), ("f56407e4cef8", "snapshot")):
-    last = dt.datetime.fromisoformat(j[jid]["last_run_at"]); age = (now - last).total_seconds()
-    lim = 150 if jid == "5365cfb456d4" else 700
-    print(("PASS" if age < lim and j[jid]["last_status"] == "ok" else "FAIL"), "V5", name, "last", j[jid]["last_run_at"], j[jid]["last_status"], "next", j[jid]["next_run_at"])'
-    hb=$(cat $H/cron/ticker_last_success); python3 -c "import time,sys; a=time.time()-float(sys.argv[1]); print(('PASS' if a < 180 else 'FAIL'), 'V5 scheduler ticked', round(a), 's ago')" "$hb"
-    grep -aE "Gateway running with|✓ (telegram|discord|lilith_os) (connected|reconnected)" $H/logs/gateway.log 2>/dev/null | tail -4 | sed 's/^/V6 /'
-    [[ $(systemctl is-active lilith-os-api) == active ]] && ok "V7 Core API active" || echo "FAIL V7 Core API"
-    echo "TZ_VERIFY_DONE $L $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+r = {x["id"]: x for x in json.load(sys.stdin)}["e161234245f3"]; n = dt.datetime.fromisoformat(r["next_run_at"]); u = n.astimezone(dt.timezone.utc)
+print(r["expr"], r["next_run_at"], u.isoformat(), n.utcoffset() == (dt.timedelta(hours=5, minutes=30) if sys.argv[1] == "colombo" else dt.timedelta(0)) and (u.hour, u.minute) == (16, 30))' "$ZONE")
+    want_expr=$([[ $ZONE == colombo ]] && echo "0 22 * * *" || echo "30 16 * * *")
+    v "V4 review $REV" '[[ $REV == "$want_expr "* && $REV == *" True" ]]'
+    SNAP=$(ops jobs-inspect | "$PY" -I -c '
+import json, sys, datetime as dt
+j = {x["id"]: x for x in json.load(sys.stdin)}; now = dt.datetime.now(dt.timezone.utc)
+s = j["f56407e4cef8"]; c = j["5365cfb456d4"]
+ok = all(x["last_status"] == "ok" for x in (s, c)) and (now - dt.datetime.fromisoformat(c["last_run_at"])).total_seconds() < 150 \
+     and (now - dt.datetime.fromisoformat(s["last_run_at"])).total_seconds() < 700
+print("sync", c["last_run_at"], "snapshot", s["last_run_at"], ok)')
+    v "V5 jobs on time: $SNAP" '[[ $SNAP == *" True" ]]'
+    LOGSINCE=$(date -u -d "$(gwp ActiveEnterTimestamp)" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo 9999)
+    SINCE=$(awk -v t="$LOGSINCE" 'substr($0,1,19) >= t' "$GWLOG" 2>/dev/null)
+    platforms_since() { local p; for p in "${PLATFORMS[@]}"; do grep -q "✓ $p connected" <<< "$SINCE" || return 1; done
+                        grep -q "Gateway running with ${#PLATFORMS[@]} platform(s)" <<< "$SINCE"; }
+    v "V6 platforms connected since this start ($LOGSINCE)" 'platforms_since'
+    v "V7 Core API active" '[[ $(systemctl is-active lilith-os-api) == active ]]'
+    echo "TZ_VERIFY $LABEL $ZONE $([[ $fail == 0 ]] && echo PASS || echo FAIL) $(now)"
+    exit $fail
     ;;
   rollback)
-    BK=${2:?backup dir}; [[ -f $BK/config.yaml && -f $BK/SHA256SUMS ]] || die "backup dir"
-    [[ $(hostname -s) == lilith-01 ]] || die "wrong host"
-    blackout
-    stop_gw
-    install -o lilith -g lilith -m 0600 "$BK/config.yaml" "$CFG.tz-restore" && mv -f "$CFG.tz-restore" "$CFG"
-    [[ $(sha "$CFG") == "$CONFIG_PRE_SHA" ]] || die "config restore mismatch (gateway left stopped; escalate)"
-    ops jobs-revert | tee "$BK/jobs-revert.out"
-    grep -q '^JOBS_REVERT_OK' "$BK/jobs-revert.out" || die "review revert failed (gateway left stopped; escalate)"
-    start_gw
-    echo "TZ_ROLLED_BACK (config a6f340f2 restored; review 30 16 * * * UTC; other jobs untouched)"
+    BK=${2:-}; [[ -n $BK && -f $BK/SHA256SUMS && -f $BK/config.yaml && -f $BK/jobs.json ]] || refuse "backup dir"
+    [[ $(id -u) -eq 0 && $(hostname -s) == lilith-01 ]] || refuse "root on lilith-01 only"
+    setup_ops; blackout
+    [[ $(ops config-check) == '{"timezone": "Asia/Colombo"}' ]] || refuse "nothing to roll back (config has no Asia/Colombo)"
+    (cd "$BK" && sha256sum -c --quiet --strict SHA256SUMS >/dev/null 2>&1) || refuse "backup checksums do not verify"
+    say "stop hermes-gateway"; systemctl stop hermes-gateway; wait_stopped || refuse "gateway did not stop"
+    rollback_files "$BK" || escalate "rollback files could not be verified"
+    start_and_prove utc || escalate "rolled back, but the gateway did not come back healthy"
+    echo "TZ_ROLLED_BACK (config.yaml restored exactly; review 30 16 * * * UTC, next 16:30Z; other jobs untouched)"
     ;;
-  *) die "unknown mode $MODE" ;;
+  *) echo "usage: tz_window.sh precheck | change | verify LABEL colombo|utc | rollback BACKUP_DIR" >&2; exit 2 ;;
 esac
