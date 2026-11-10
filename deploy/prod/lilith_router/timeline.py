@@ -78,10 +78,30 @@ _RECORD_LEVEL_RE = re.compile(
     r"\bwhat\s+did\s+you\s+(?:have|keep|write)\s+(?:down\s+)?(?:about|for)\b", re.IGNORECASE)
 
 
+# Event chronology about the OWNER (owner review of #410): when they did something, what came first, how long ago,
+# where/what they were or did then, at the time / back then. Any of these makes a question event-level even when it
+# also says "stored", "saved" or "before I corrected" ("what did you have stored, and when did I actually move?").
+# "When was my X stored?" is not here: it asks for a storage date, which the record answers.
+_EVENT_CUE_RE = re.compile(
+    r"\bwhen\s+(?:did|was|were|have|had)\s+(?:i|we)\b|"
+    r"\bwhen\s+did\s+you\s+(?:first\s+)?(?:learn|hear|find\s+out)\b|"
+    r"\bhow\s+long\s+(?:ago|since|have\s+i|had\s+i|has\s+it\s+been\s+since|did\s+i)\b|"
+    r"\bhow\s+many\s+(?:days|weeks|months|years)\s+(?:ago|since)\b|"
+    r"\b(?:what|which)\s+(?:came|happened)\s+first\b|\b(?:came|happened)\s+first\b|"
+    r"\b(?:what|which)\s+(?:year|month|week|day|date)\b[^?.!]{0,40}?\b(?:did|was|were)\s+(?:i|we)\b|"
+    r"\b(?:where|what|who)\s+(?:was|were|did)\s+(?:i|we)\b|"
+    r"\b(?:did|have|had)\s+i\s+ever\b|\bused\s+to\b|\bat\s+the\s+time\b|\bback\s+then\b|"
+    r"\b(?:before|after)\s+i\s+(?:started|moved|joined|left|passed|failed|quit|got|finished|began)\b",
+    re.IGNORECASE)
+
+
 def needs_conversation(message: str) -> bool:
-    """A temporal owner question that only conversation evidence can answer (event-level), as opposed to one about
-    what is stored (record-level)."""
-    return temporal(message) and not _RECORD_LEVEL_RE.search(message or "")
+    """A temporal owner question that only conversation evidence can answer (event-level), as opposed to one only
+    about what is stored (record-level). Mixed questions that ask for event chronology are event-level."""
+    text = message or ""
+    if not temporal(text):
+        return False
+    return not _RECORD_LEVEL_RE.search(text) or bool(_EVENT_CUE_RE.search(text))
 
 
 def temporal(message: str) -> bool:
