@@ -1,0 +1,535 @@
+"""F8 DEV Hermes release/config gate. Read-only. Exit 0 = PASS; anything else refuses the gateway start.
+
+Runs as root from ExecStartPre (`+`, outside the sandbox) with the release venv's interpreter in -I mode, and by hand
+at the install gates. It never prints secret values.
+
+  --pre-start   integrity of the critical code set + ownership + config/env pins (fast; every start)
+  --full        additionally the complete release manifest (slow; install and health gates)
+"""
+from __future__ import annotations
+
+import ast
+import hashlib
+import json
+import os
+import re
+import shlex
+import sqlite3
+import stat
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import yaml  # from the release venv (PyYAML, locked)
+
+BASE = Path("/opt/hermes-gateway-dev")
+HH = Path("/home/lilith/.hermes-dev")
+ETC = Path("/etc/hermes-gateway-dev")
+LANES_OFF = ("cognitive_enabled", "goals_enabled", "reasoning_enabled", "workspace_enabled", "motivation_enabled",
+             "planning_enabled", "ethics_enabled", "social_cognition_enabled", "memory_consolidation_enabled",
+             "canonical_ltm_enabled")
+REQUIRED_DENY = {"terminal", "code_execution", "file", "web", "search", "browser", "computer_use", "desktop_ui",
+                 "delegation", "cronjob", "skills", "memory", "session_search", "kanban", "project", "coding",
+                 "debugging", "homeassistant", "discord", "discord_admin", "spotify"}
+ENV_ALLOWED = {"LILITH_OS_PORT", "LILITH_OS_TOKEN"}
+# F8r3: no provider key anywhere in the gateway's reach. The Groq key exists only in the provider gate's root-only
+# credentials file (LoadCredential); provider.env must not exist at all.
+GATE_ETC = Path("/etc/hermes-provider-gate-dev")
+GATE_CONFIG = {
+    "listen_host": "127.0.0.1", "listen_port": 9911, "upstream_host": "api.groq.com", "upstream_port": 443,
+    "local_path": "/openai/v1/chat/completions", "upstream_path": "/openai/v1/chat/completions",
+    "allowed_models": ["openai/gpt-oss-120b"], "client_token": "__LILITH_GATE_CLIENT_TOKEN__",
+}
+RO_STUBS = ("skills", "optional-skills", "optional-mcps", "hooks", "scripts", "bin", "node", "node_modules")
+# f9c2-cog1: the governed unified-cognition adapter (integrations/hermes/overlays/dev-unified-cognition) and the
+# recovered PROD Working Memory it runs, at their reviewed digests.
+WORLD_CONTEXT_ADAPTER_SHA256 = "f1ee561dec06a7cadd282bc2e9e1315e39dd78f9be163d373237f941d84d55b2"
+WORKSPACE_SHA256 = "d79f67e1c761d6d98e689074d7e101e97fcc3b23cecfeba551cf2aaefd5ec597"   # counts-only trace: no candidate id reaches the decision log
+MOTIVATION_SHA256 = "fd6c11898bce7c40d374713e270c1d3b9a6823e456f3efd70ec3e21d27a2fe42"   # counts-only trace: no goal id or condition text reaches the decision log
+PLANNING_SHA256 = "4c74337d76fdd76947c21fb654b4463f6acd1a39db3670737427cf9fb0647e5b"   # counts-only trace: no goal id, application or stable plan id reaches the decision log
+ETHICS_SHA256 = "d6a1c20b45557169a4fefa7b5d81907da0e0ae12519f8c63724900ac8ce47dbd"   # the resolution text and vocabulary scan fixes; deterministic, no model call
+ETHICS_PRINCIPLES_SHA256 = "178990e53404518b937627fccc0d8dd590a49f061116681a11eadc338b713b63"   # the four declared principles, unchanged
+PROD_WORKING_MEMORY_SHA256 = "46b8187e3f6f2ac72c920de9dab12fd9c2841551f6c2aa7c20fd91941e3f0104"
+# f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1: exactly seven lanes, Slice 7.2 World Model, Slice 8 Goals/Executive, Slice 9 Reasoning, Slice 10
+# Global Workspace, Slice 11 Motivation, Slice 12 Planning and Slice 13 Ethics, are on, each explicitly in shadow, for lilith_os only. Every other lane off; the router itself in shadow;
+# only keys the router actually reads.
+SHADOW_LANES = {"cognitive_enabled": "cognitive_mode", "goals_enabled": "goals_mode", "reasoning_enabled": "reasoning_mode",
+                "workspace_enabled": "workspace_mode", "motivation_enabled": "motivation_mode", "planning_enabled": "planning_mode",
+                "ethics_enabled": "ethics_mode"}
+# Workspace shadow reads /os/drafts, /os/goals and /os/goals/focus. On a DB without the drafts table the first read runs the
+# Core API's DDL, so w1 refuses to start until the separately approved bootstrap gate has created the schema.
+# gv1 (replaces w1's "no goal row at all"): a focus read writes an arbitration trace only when its winner changes, and its
+# only candidates are ACTIVE or PENDING goals (Core API `_arbitrate`); the Core API never writes it when it runs with
+# LILITH_OS_FOCUS_READ_ONLY=1. So the shadow lane stays write-free when: every goal is terminal, no arbitration trace has
+# ever been written, and the running Core API provably has the flag, runs code that honours it, reads this same DB, and a
+# real focus read writes nothing. Anything that cannot be established refuses the start. Only states, kinds and counts
+# are read (mode=ro); no title, description or other goal text.
+GOAL_DB = Path("/home/lilith/.hermes/lilith-os-dev/data/lilith-dev.db")
+GOAL_SCHEMA = {
+    "goal": ("goal_id", "schema_version", "type", "title", "description", "source", "owner", "lifecycle_state",
+             "priority", "parent_goal_id", "linked_task_ids", "target_json", "target_key", "deadline", "blocked_reason",
+             "blocked_by_json", "resume_conditions", "created_at", "updated_at", "started_at", "blocked_at",
+             "suspended_at", "completed_at", "cancelled_at", "failed_at", "provenance_json", "revision",
+             "last_operation_id"),
+    "goal_trace": ("id", "correlation_id", "goal_id", "at", "kind", "prior_state", "new_state", "action", "reason",
+                   "source", "arbitration_winner", "arbitration_alternatives_json", "priority_inputs_json"),
+    "drafts": ("draft_id", "schema_version", "kind", "status", "target_type", "target_id", "subject", "body", "content_hash",
+               "idempotency_key", "task_id", "step_id", "created_at", "updated_at"),
+}
+GOAL_TERMINAL_STATES = ("CANCELLED", "COMPLETED", "FAILED")      # never focus candidates. "reopen" can return one to PENDING
+# while the gateway runs: this start-time check refuses that at the next start, and in between the Core API flag below keeps
+# every focus read write-free (the same start-only limit w1 recorded for its empty-store check).
+GOAL_CANDIDATE_STATES = ("ACTIVE", "PENDING")                     # what `_arbitrate` ranks
+GOAL_TRACE_KINDS = ("transition",)                                # every other kind refuses; "arbitration" is a focus write
+CORE_API_UNIT = "lilith-os-api-dev.service"
+CORE_API_FOCUS_URL = "http://127.0.0.1:8765/os/goals/focus"      # the origin the adapter reads (world_context API_BASE)
+CORE_API_ROOT = Path("/home/lilith/.hermes/lilith-os-dev")        # api-venv/ and releases/<sha>/app.py
+FOCUS_FLAG = "LILITH_OS_FOCUS_READ_ONLY"
+CORE_API_WAIT_S = 20.0                                            # the gateway has no ordering on the Core API at boot
+SYSTEMCTL = "/usr/bin/systemctl"
+ROUTER_KEYS = frozenset({
+    "enabled", "mode", "live_channels", "groq_model", "groq_provider", "hermes_model", "hermes_provider",
+    "recent_turns", "log_path", "cognitive_enabled", "cognitive_mode", "cognitive_channels", "cognitive_draft_dedup",
+    "goals_enabled", "goals_mode", "reasoning_enabled", "reasoning_mode", "workspace_enabled", "workspace_mode",
+    "workspace_capacity", "motivation_enabled", "motivation_mode", "planning_enabled", "planning_mode",
+    "planning_max_steps", "ethics_enabled", "ethics_mode", "ethics_max_concerns", "ethics_max_tensions",
+    "social_cognition_enabled", "social_cognition_mode", "memory_consolidation_enabled", "memory_consolidation_mode",
+    "canonical_ltm_enabled",
+})
+
+failures: list[str] = []
+
+
+def fail(msg: str) -> None:
+    failures.append(msg)
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def check_manifest(manifest: Path, root: Path) -> None:
+    if not manifest.is_file():
+        return fail(f"MANIFEST_MISSING {manifest}")
+    n = 0
+    for line in manifest.read_text().splitlines():
+        digest, rel = line.split("  ", 1)
+        p = root / rel
+        n += 1
+        if not p.is_file() or p.is_symlink() or sha256(p) != digest:
+            fail(f"HASH_MISMATCH {p}")
+    if n == 0:
+        fail(f"MANIFEST_EMPTY {manifest}")
+
+
+def root_owned_readonly(path: Path, *, recurse: bool) -> None:
+    paths = [path] + (list(path.rglob("*")) if recurse and path.is_dir() else [])
+    for p in paths:
+        st = p.lstat()
+        if st.st_uid != 0:
+            fail(f"NOT_ROOT_OWNED {p}")
+        if not stat.S_ISLNK(st.st_mode) and st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            fail(f"GROUP_OR_OTHER_WRITABLE {p}")
+
+
+def check_secret_file(path: Path, *, mode: int, allowed: set[str], group_ok: bool) -> dict:
+    if not path.is_file() or path.is_symlink():
+        fail(f"MISSING {path}")
+        return {}
+    st = path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != mode:
+        fail(f"BAD_OWNER_OR_MODE {path} (want root {oct(mode)})")
+    if not group_ok and st.st_gid != 0:
+        fail(f"BAD_GROUP {path}")
+    values = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        if key not in allowed:
+            fail(f"FORBIDDEN_KEY {path}:{key}")
+        values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def _label(value) -> str:
+    """A state or kind for a failure line: plain identifiers only, never free text."""
+    s = "NULL" if value is None else str(value)
+    return s if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,39}", s) else "<non-identifier>"
+
+
+def _trace_counts(conn) -> tuple[int, int]:
+    total = conn.execute('SELECT COUNT(*) FROM "goal_trace"').fetchone()[0]
+    arb = conn.execute('SELECT COUNT(*) FROM "goal_trace" WHERE kind = ?', ("arbitration",)).fetchone()[0]
+    return total, arb
+
+
+def check_cognition_schema() -> bool:
+    """The goal, goal_trace and drafts tables exist with exactly their columns; every goal is terminal; the trace holds
+    transitions only. Read-only (mode=ro), states, kinds and counts only. True when nothing here refused."""
+    before = len(failures)
+    if not GOAL_DB.is_file() or GOAL_DB.is_symlink():
+        fail("GOAL_DB_MISSING")
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{GOAL_DB}?mode=ro", uri=True, timeout=5.0)
+        try:
+            for table, columns in GOAL_SCHEMA.items():
+                got = tuple(r[1] for r in conn.execute(f'PRAGMA table_info("{table}")'))
+                if not got:
+                    fail(f"COGNITION_SCHEMA_NOT_BOOTSTRAPPED {table}")
+                elif got != columns:
+                    fail(f"COGNITION_SCHEMA_MISMATCH {table}")
+            if len(failures) == before:
+                rows = conn.execute('SELECT lifecycle_state, COUNT(*) FROM "goal" GROUP BY lifecycle_state').fetchall()
+                for state, n in sorted(rows, key=lambda r: str(r[0])):
+                    if state in GOAL_CANDIDATE_STATES:
+                        fail(f"GOAL_FOCUS_CANDIDATE {state} {n}")
+                    elif state not in GOAL_TERMINAL_STATES:
+                        fail(f"GOAL_STATE_NOT_TERMINAL {_label(state)} {n}")
+                rows = conn.execute('SELECT kind, COUNT(*) FROM "goal_trace" GROUP BY kind').fetchall()
+                for kind, n in sorted(rows, key=lambda r: str(r[0])):
+                    if kind == "arbitration":
+                        fail(f"GOAL_ARBITRATION_TRACE_PRESENT {n}")
+                    elif kind not in GOAL_TRACE_KINDS:
+                        fail(f"GOAL_TRACE_KIND_UNKNOWN {_label(kind)} {n}")
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        fail("GOAL_DB_UNREADABLE")
+    return len(failures) == before
+
+
+# -- gv1: the running Core API must not write on a focus read ------------------------------------------------------
+def _unit_show() -> dict:
+    """systemctl show of the Core API unit: ActiveState, MainPID, Environment (unit + drop-ins). {} if unavailable."""
+    try:
+        r = subprocess.run([SYSTEMCTL, "show", CORE_API_UNIT, "-p", "ActiveState", "-p", "MainPID", "-p", "Environment"],
+                           capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if r.returncode != 0:
+        return {}
+    return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
+
+
+def _proc(pid: int, name: str) -> bytes:
+    return Path(f"/proc/{pid}/{name}").read_bytes()
+
+
+def _proc_link(pid: int, name: str) -> Path:
+    return Path(os.readlink(f"/proc/{pid}/{name}"))
+
+
+def _proc_start_epoch(pid: int) -> float:
+    """Process start time (epoch seconds) from /proc/<pid>/stat and the boot time in /proc/stat."""
+    stat_line = _proc(pid, "stat").decode("ascii", "replace")
+    ticks = int(stat_line.rsplit(")", 1)[1].split()[19])
+    boot = next(int(l.split()[1]) for l in Path("/proc/stat").read_text().splitlines() if l.startswith("btime "))
+    return boot + ticks / os.sysconf("SC_CLK_TCK")
+
+
+def _http_get(url: str, timeout: float) -> tuple[int, bytes]:
+    req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(1 << 20)
+    except urllib.error.HTTPError as e:
+        return e.code, b""
+
+
+def _is_flag_test(node) -> bool:
+    """`<os>.getenv("LILITH_OS_FOCUS_READ_ONLY") != "1"` (or os.environ.get), exactly."""
+    if not (isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.NotEq)
+            and isinstance(node.comparators[0], ast.Constant) and node.comparators[0].value == "1"):
+        return False
+    call = node.left
+    if not (isinstance(call, ast.Call) and len(call.args) == 1 and not call.keywords
+            and isinstance(call.args[0], ast.Constant) and call.args[0].value == FOCUS_FLAG):
+        return False
+    f = call.func
+    return (isinstance(f, ast.Attribute) and f.attr == "getenv" and isinstance(f.value, ast.Name)
+            and f.value.id in ("os", "_os")) or (
+           isinstance(f, ast.Attribute) and f.attr == "get" and isinstance(f.value, ast.Attribute)
+            and f.value.attr == "environ" and isinstance(f.value.value, ast.Name) and f.value.value.id in ("os", "_os"))
+
+
+def focus_guard_problems(source: str) -> list[str]:
+    """The Core API source writes an arbitration trace only from `_record_focus_trace`, which only `goal_focus` calls,
+    and only under the exact flag test. Anything else is a problem (fail closed)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return ["FOCUS_GUARD_UNPARSEABLE"]
+    problems, guarded = [], 0
+
+    def calls_to(node, name):
+        return [n for n in ast.walk(node) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name]
+
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    if "goal_focus" not in funcs or "_record_focus_trace" not in funcs:
+        return ["FOCUS_GUARD_NOT_FOUND"]
+    for fname, fn in funcs.items():
+        for call in calls_to(fn, "_record_focus_trace"):
+            if fname != "goal_focus":
+                problems.append("FOCUS_TRACE_CALLED_ELSEWHERE")
+    for n in ast.walk(funcs["goal_focus"]):
+        if isinstance(n, ast.If) and _is_flag_test(n.test):
+            guarded += len(calls_to(ast.Module(body=n.body, type_ignores=[]), "_record_focus_trace"))
+            if calls_to(ast.Module(body=n.orelse, type_ignores=[]), "_record_focus_trace"):
+                problems.append("FOCUS_GUARD_MISSING")
+    total = len(calls_to(funcs["goal_focus"], "_record_focus_trace"))
+    if total == 0 or guarded != total:
+        problems.append("FOCUS_GUARD_MISSING")
+    for call in calls_to(tree, "_goal_trace_insert"):          # any other writer of an arbitration trace
+        if any(isinstance(a, ast.Constant) and a.value == "arbitration" for a in call.args):
+            owner = next((f for f, fn in funcs.items() if call in list(ast.walk(fn))), None)
+            if owner != "_record_focus_trace":
+                problems.append("ARBITRATION_WRITER_UNEXPECTED")
+    return sorted(set(problems))
+
+
+def check_focus_read_only() -> None:
+    """The running Core API cannot write on a focus read: running, flag in the unit and in the live process, the code it
+    runs honours the flag, it reads GOAL_DB, and a real focus read changes no trace row. Fail closed throughout."""
+    deadline = time.monotonic() + CORE_API_WAIT_S
+    show = _unit_show()
+    while not (show.get("ActiveState") == "active" and show.get("MainPID", "0").isdigit() and int(show["MainPID"]) > 0):
+        if time.monotonic() >= deadline:
+            return fail(f"CORE_API_NOT_RUNNING {_label(show.get('ActiveState') or 'unknown')}")
+        time.sleep(1.0)
+        show = _unit_show()
+    pid = int(show["MainPID"])
+    try:
+        unit_env = shlex.split(show.get("Environment", ""))
+    except ValueError:
+        unit_env = []
+    if f"{FOCUS_FLAG}=1" not in unit_env:
+        fail("FOCUS_READ_ONLY_NOT_PERSISTENT")                  # a restart of the Core API would drop it
+    try:
+        env = dict(e.split(b"=", 1) for e in _proc(pid, "environ").split(b"\0") if b"=" in e)
+        argv = [a.decode("utf-8", "replace") for a in _proc(pid, "cmdline").split(b"\0") if a]
+        cwd = _proc_link(pid, "cwd")
+        started = _proc_start_epoch(pid)
+    except (OSError, ValueError, IndexError, StopIteration):
+        return fail("CORE_API_RUNTIME_UNREADABLE")
+    if env.get(FOCUS_FLAG.encode()) != b"1":
+        fail("FOCUS_READ_ONLY_NOT_IN_EFFECT")
+    if env.get(b"LILITH_DB_PATH", b"").decode("utf-8", "replace") != str(GOAL_DB):
+        fail("CORE_API_DB_MISMATCH")
+    releases = CORE_API_ROOT / "releases"
+    if ("app:app" not in argv or len(argv) < 2 or Path(argv[1]) != CORE_API_ROOT / "api-venv" / "bin" / "uvicorn"
+            or cwd.parent != releases):
+        return fail("CORE_API_IDENTITY")
+    app_py = cwd / "app.py"
+    try:
+        st = app_py.lstat()
+        if not stat.S_ISREG(st.st_mode):
+            return fail("CORE_API_CODE_UNREADABLE")
+        if st.st_mtime > started + 1.0:
+            fail("CORE_API_CODE_CHANGED_SINCE_START")           # the process may be running other code
+        problems = focus_guard_problems(app_py.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return fail("CORE_API_CODE_UNREADABLE")
+    for p in problems:
+        fail(p)
+    if failures:
+        return None                                             # no probe unless two independent guards already hold
+    try:
+        conn = sqlite3.connect(f"file:{GOAL_DB}?mode=ro", uri=True, timeout=5.0)
+        try:
+            before = _trace_counts(conn)
+            status, body = 0, b""
+            while True:
+                try:
+                    status, body = _http_get(CORE_API_FOCUS_URL, timeout=5.0)
+                    break
+                except (urllib.error.URLError, OSError):
+                    if time.monotonic() >= deadline:
+                        return fail("CORE_API_UNREACHABLE")
+                    time.sleep(1.0)
+            after = _trace_counts(conn)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return fail("GOAL_DB_UNREADABLE")
+    if status != 200:
+        return fail(f"CORE_API_FOCUS_STATUS {int(status)}")
+    try:
+        doc = json.loads(body)
+        winner = (doc.get("arbitration") or {}).get("winner")
+        if doc.get("focus") is not None or winner is not None:
+            fail("FOCUS_HAS_WINNER")                            # the API sees a candidate this verifier did not
+    except (ValueError, AttributeError):
+        fail("CORE_API_FOCUS_UNPARSEABLE")
+    if after != before:
+        fail("FOCUS_READ_WROTE_TRACE")
+
+
+def main(argv: list[str]) -> int:
+    full = "--full" in argv
+    current = (BASE / "current").resolve()
+    if current.parent != BASE / "releases":
+        fail(f"CURRENT_NOT_A_RELEASE {current}")
+
+    # 1. Code integrity: critical set every start; complete release manifest at the gates.
+    check_manifest(ETC / "critical.sha256", Path("/"))
+    if full:
+        check_manifest(current / "RELEASE.sha256", current)
+    root_owned_readonly(current, recurse=full)
+    for rel in ("lilith_router", "plugins", *RO_STUBS):
+        p = HH / rel
+        if not p.is_dir() or p.is_symlink():
+            fail(f"MISSING_DIR {p}")
+        else:
+            root_owned_readonly(p, recurse=True)
+
+    # 2. Hermes config pins.
+    cfg_path = HH / "config.yaml"
+    st = cfg_path.lstat()
+    if st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o640:
+        fail("BAD_OWNER_OR_MODE config.yaml")
+    cfg = yaml.safe_load(cfg_path.read_text()) or {}
+    if (cfg.get("platform_toolsets") or {}).get("lilith_os") != []:
+        fail("TOOLSET_PIN platform_toolsets.lilith_os != []")
+    missing = REQUIRED_DENY - set((cfg.get("agent") or {}).get("disabled_toolsets") or [])
+    if missing:
+        fail(f"DENYLIST_MISSING {sorted(missing)}")
+    if (cfg.get("security") or {}).get("allow_lazy_installs") is not False:
+        fail("LAZY_INSTALLS_NOT_DISABLED")
+    if (cfg.get("security") or {}).get("tirith_enabled") is not False:
+        fail("TIRITH_AUTO_DOWNLOAD_NOT_DISABLED")
+    jobs = HH / "cron" / "jobs.json"
+    if not jobs.is_file() or jobs.is_symlink() or jobs.lstat().st_uid != 0 or jobs.read_text().strip() != '{"jobs": []}':
+        fail("CRON_JOBS_NOT_PINNED_EMPTY")
+    mem = cfg.get("memory") or {}
+    if mem.get("memory_enabled") is not False or mem.get("user_profile_enabled") is not False:
+        fail("HERMES_MEMORY_NOT_DISABLED")
+    if (cfg.get("plugins") or {}).get("enabled") != ["lilith_os"]:
+        fail("PLUGINS_ENABLED != [lilith_os]")
+    for key in ("mcp_servers", "hooks", "cron_jobs", "terminal", "toolsets"):
+        if cfg.get(key):
+            fail(f"FORBIDDEN_CONFIG {key}")
+    if (cfg.get("auxiliary") or {}).get("background_review", {}).get("enabled") is not False:
+        fail("BACKGROUND_REVIEW_ON")
+    if (cfg.get("curator") or {}).get("enabled") is not False or (cfg.get("cron") or {}).get("allow_agent_scheduling") is not False:
+        fail("CURATOR_OR_AGENT_CRON_ON")
+    kanban = cfg.get("kanban") or {}
+    if kanban.get("dispatch_in_gateway") is not False or kanban.get("review_dispatch") is not False:
+        fail("KANBAN_DISPATCH_ON")
+    # F8r3 provider path: Groq gpt-oss-120b through the local gate only; bounded calls; no background model calls.
+    model = cfg.get("model") or {}
+    want = {"provider": "custom", "default": "openai/gpt-oss-120b", "base_url": "http://127.0.0.1:9911/openai/v1",
+            "api_key": "__LILITH_GATE_CLIENT_TOKEN__", "api_mode": "chat_completions"}
+    for k, v in want.items():
+        if model.get(k) != v:
+            fail(f"MODEL_PIN {k}")
+    if not (0 < int(model.get("max_tokens") or 0) <= 1024) or not model.get("context_length"):
+        fail("MODEL_LIMITS")
+    agent = cfg.get("agent") or {}
+    if agent.get("api_max_retries") != 1 or (agent.get("empty_response_guard") or {}).get("enabled") is not False:
+        fail("RETRIES_NOT_BOUNDED")
+    if (cfg.get("auxiliary") or {}).get("title_generation", {}).get("enabled") is not False:
+        fail("TITLE_GENERATION_ON")
+    if (cfg.get("compression") or {}).get("enabled") is not False:
+        fail("COMPRESSION_ON")
+    if cfg.get("fallback_providers") or cfg.get("fallback_model"):
+        fail("FALLBACK_CONFIGURED")
+    if not (1 <= int(cfg.get("max_concurrent_sessions") or 0) <= 8):
+        fail("SESSION_CAP")
+    if (cfg.get("logging") or {}).get("level") not in ("INFO", "WARNING"):
+        fail("LOGGING_LEVEL")
+    gate = cfg.get("lilith_os") or {}
+    if not gate.get("allow_admin_from") or "operator" in gate.get("allow_admin_from") or gate.get("user_allowed_commands"):
+        fail("SLASH_GATING_OFF")
+
+    # 3. Router: every cognitive lane off; Router V2 only in shadow or live for lilith_os.
+    rpath = HH / "lilith_router" / "router.yaml"
+    router = yaml.safe_load(rpath.read_text()) or {}
+    for key in sorted(set(router) - ROUTER_KEYS):
+        fail(f"ROUTER_KEY_UNKNOWN {key}")
+    for lane in LANES_OFF:
+        if lane in SHADOW_LANES:
+            if router.get(lane) is not True:
+                fail(f"SHADOW_LANE_NOT_ON {lane}")
+            if router.get(SHADOW_LANES[lane]) != "shadow":
+                fail(f"SHADOW_LANE_NOT_SHADOW {SHADOW_LANES[lane]}")
+        elif router.get(lane) is not False:
+            fail(f"LANE_NOT_OFF {lane}")
+    if router.get("cognitive_channels") != ["lilith_os"]:
+        fail("SHADOW_LANE_CHANNELS cognitive_channels")
+    for key, value in router.items():
+        if key.endswith("_mode") and value != "shadow":
+            fail(f"LANE_MODE_NOT_SHADOW {key}")
+    if router.get("mode") != "shadow":
+        fail("ROUTER_MODE_NOT_SHADOW")
+    if router.get("mode") not in ("shadow", "live") or router.get("live_channels") != ["lilith_os"]:
+        fail("ROUTER_SCOPE")
+    if not str(router.get("log_path", "")).startswith(str(HH / "logs") + "/"):
+        fail("DECISIONS_LOG_OUTSIDE_STATE_LOGS")
+    # f9c2-cog1: world_context is the governed adapter beside the recovered PROD module, both pinned; still only
+    # acceptable while every lane above is off.
+    for name, digest, code in (("world_context.py", WORLD_CONTEXT_ADAPTER_SHA256, "WORLD_CONTEXT_NOT_THE_COG1_ADAPTER"),
+                               ("_prod_world_context.py", PROD_WORKING_MEMORY_SHA256, "PROD_WORKING_MEMORY_NOT_PINNED"),
+                               ("workspace.py", WORKSPACE_SHA256, "WORKSPACE_NOT_PINNED"),
+                               ("motivation.py", MOTIVATION_SHA256, "MOTIVATION_NOT_PINNED"),
+                               ("planning.py", PLANNING_SHA256, "PLANNING_NOT_PINNED"),
+                               ("ethics.py", ETHICS_SHA256, "ETHICS_NOT_PINNED"),
+                               ("ethics_principles.py", ETHICS_PRINCIPLES_SHA256, "ETHICS_PRINCIPLES_NOT_PINNED")):
+        p = HH / "lilith_router" / name
+        if not p.is_file() or p.is_symlink() or sha256(p) != digest:
+            fail(code)
+
+    # f9c2-cog1-wm1-g1-r1-w1: no Workspace read may create a table or write a focus trace.
+    # gv1: terminal goals are allowed; the running Core API must provably not write on a focus read.
+    if check_cognition_schema():
+        check_focus_read_only()
+
+    # 4. Secrets: the console .env holds the port + DEV token only; provider.env holds at most the D-1 key.
+    env = check_secret_file(HH / ".env", mode=0o640, allowed=ENV_ALLOWED, group_ok=True)
+    if env:
+        if env.get("LILITH_OS_PORT") != "9901":
+            fail("CONSOLE_PORT != 9901")
+        if not re.fullmatch(r"[0-9a-f]{64}", env.get("LILITH_OS_TOKEN", "")):
+            fail("CONSOLE_TOKEN_NOT_64_HEX")
+    if (ETC / "provider.env").exists():
+        fail("PROVIDER_ENV_PRESENT (F8r3 keeps no provider key in the gateway's reach)")
+    # 5. Provider gate: exact pinned policy fields, root-only credentials, key never readable by the gateway uid.
+    try:
+        gcfg = json.loads((GATE_ETC / "gate.json").read_text())
+        for k, v in GATE_CONFIG.items():
+            if gcfg.get(k) != v:
+                fail(f"GATE_PIN {k}")
+        if not (0 < int(gcfg["max_output_tokens"]) <= 1024) or int(gcfg["budget_requests"]) > 50:
+            fail("GATE_LIMITS")
+    except (OSError, ValueError, KeyError):
+        fail("GATE_CONFIG_UNREADABLE")
+    cdir = GATE_ETC / "credentials"
+    if not cdir.is_dir() or cdir.lstat().st_uid != 0 or stat.S_IMODE(cdir.lstat().st_mode) != 0o700:
+        fail("GATE_CREDENTIALS_DIR")
+    for f in cdir.glob("*") if cdir.is_dir() else []:
+        if f.name != "groq-api-key" or f.lstat().st_uid != 0 or stat.S_IMODE(f.lstat().st_mode) != 0o600:
+            fail(f"GATE_CREDENTIAL_FILE {f.name}")
+    for forbidden in ("auth.json", ".anthropic_oauth.json", "honcho.json", "slack_tokens.json", "SOUL.md.prod",
+                      "groq.env"):
+        if (HH / forbidden).exists():
+            fail(f"FORBIDDEN_FILE {forbidden}")
+
+    if failures:
+        for f in failures:
+            print("F8_VERIFY_FAIL", f)
+        return 1
+    print("F8_VERIFY_PASS", "full" if full else "pre-start", current.name)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
