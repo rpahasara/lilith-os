@@ -1331,6 +1331,27 @@ no new store, no approval change.
 - **Measure after a separately approved deploy:** count the next real proposals by date kind (event-dated / told-on /
   undated), counts only, and check none carries the run date as an event date.
 
+**Asia/Colombo plan (owner asked for a plan 2026-11-10; nothing changed).** Read-only PROD source check: Hermes'
+`timezone` is Hermes-wide, not review-only. It changes:
+- the agent's "Conversation started" date and zone;
+- compaction summary times;
+- how naive one-shot times ("remind me at 20:00") are anchored;
+- the wall clock **cron expressions** are evaluated against.
+
+The nightly review is `30 16 * * *` (16:30Z = 22:00 Colombo). Under Asia/Colombo it would fire at 16:30 Colombo
+unless it is re-expressed as `0 22 * * *`. The every-minute commitment sync and the 10-minute snapshot are unaffected.
+Hermes repairs stored `next_run_at` offsets itself (`_timezone_offset_mismatch` / `_stored_wall_clock_is_future`).
+`config.yaml` is host state, not managed by this repo. Message storage stays epoch.
+
+Sequence, each step separately approved:
+1. DEV rehearsal.
+2. PROD change: back up `config.yaml` and `cron/jobs.json`; set `timezone: Asia/Colombo` and the review to
+   `0 22 * * *`; restart the gateway in a quiet window.
+   - Verify the review `next_run_at` = the same 16:30Z instant.
+   - Rollback: restore both files and restart.
+3. Deploy #412.
+4. Counts-only measurement.
+
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
 Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan
