@@ -18,6 +18,10 @@ hostname lilith-01
 W=$(mktemp -d /tmp/tzreh.XXXXXX)
 for d in etc home root opt; do mkdir -p "$W/ov/$d/u" "$W/ov/$d/w"; mount -t overlay overlay -o "lowerdir=/$d,upperdir=$W/ov/$d/u,workdir=$W/ov/$d/w" "/$d"; done
 mount -t tmpfs -o mode=0755 tmpfs /run
+# PROD's host clock is Etc/UTC; with no Hermes timezone, Hermes falls back to the host zone, so the sandbox must match.
+ln -sfn /usr/share/zoneinfo/Etc/UTC /etc/localtime; echo Etc/UTC > /etc/timezone
+[[ $(date +%Z) == UTC ]] || { echo "SETUP_FAIL host zone"; exit 2; }
+chown root:root /root; chmod 0700 /root          # Ubuntu's default, as on PROD (checked read-only there)
 FAILS=0; OUT=; RC=0
 pass() { echo "PASS $*"; }; fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1"; echo "$OUT" | tail -8 | sed 's/^/    > /'; fi; }
@@ -78,14 +82,15 @@ import yaml
 tz = (yaml.safe_load(open(H + "/config.yaml")) or {}).get("timezone")
 if tz:
     os.environ["HERMES_TIMEZONE"] = tz.strip()            # as run.py bridges config.yaml -> env (in-process)
-if tz and os.environ.get("SIM_GW_CRASH_IF_ZONE"):
+FLAG = lambda n: os.path.exists("/run/tzsim/" + n)          # test switches, set by the rehearsal
+if tz and FLAG("crash_if_zone"):
     sys.exit(1)
 import cron.jobs as J
 log = open(H + "/logs/gateway.log", "a")
 def L(m):
     log.write(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S,%f")[:23] + " INFO gateway.run: " + m + "\n"); log.flush()
 time.sleep(1)
-if not (tz and os.environ.get("SIM_GW_NO_PLATFORMS_IF_ZONE")) and not os.environ.get("SIM_GW_NO_PLATFORMS"):
+if not (tz and FLAG("no_platforms_if_zone")) and not FLAG("no_platforms"):
     for p in ("telegram", "discord", "lilith_os"):
         L(f"✓ {p} connected (profile: default)")
     L("Gateway running with 3 platform(s)")
@@ -98,7 +103,7 @@ cat > /opt/tzsim/systemctl <<'SH'
 #!/bin/bash
 D=/run/tzsim; U=; V=0; PROPS=(); CMD=$1; shift
 while [ $# -gt 0 ]; do case $1 in -p) PROPS+=("$2"); shift 2;; --value) V=1; shift;; *) U=${1%.service}; shift;; esac; done
-alive() { [ -s $D/gw.pid ] && kill -0 "$(cat $D/gw.pid)" 2>/dev/null; }
+alive() { P0=$(cat $D/gw.pid 2>/dev/null); [ -n "$P0" ] && [ "$P0" -gt 0 ] 2>/dev/null && kill -0 "$P0" 2>/dev/null; }   # never pid 0
 case "$CMD $U" in
   "show hermes-gateway")
     if alive; then A=active; Sb=running; P=$(cat $D/gw.pid); elif [ -e $D/gw.started ]; then A=failed; Sb=failed; P=0; else A=inactive; Sb=dead; P=0; fi
@@ -110,7 +115,7 @@ case "$CMD $U" in
     setsid runuser -u lilith -- env -i HOME=/home/lilith HERMES_HOME=/home/lilith/.hermes PATH=/usr/bin:/bin \
       ${SIM_GW_CRASH_IF_ZONE:+SIM_GW_CRASH_IF_ZONE=1} ${SIM_GW_NO_PLATFORMS_IF_ZONE:+SIM_GW_NO_PLATFORMS_IF_ZONE=1} ${SIM_GW_NO_PLATFORMS:+SIM_GW_NO_PLATFORMS=1} \
       /home/lilith/.hermes/hermes-agent/venv/bin/python -I /opt/tzsim/fakegw.py >/dev/null 2>&1 < /dev/null &
-    sleep 1; P=$(pgrep -u lilith -f fakegw.py | head -1); echo "${P:-0}" > $D/gw.pid; exit 0 ;;
+    sleep 1; P=$(pgrep -u lilith -f "^/home/lilith/.hermes/hermes-agent/venv/bin/python -I /opt/tzsim/fakegw.py" | head -1); echo "${P:-0}" > $D/gw.pid; exit 0 ;;
   "stop hermes-gateway")
     pkill -u lilith -f fakegw.py 2>/dev/null; for i in $(seq 50); do pgrep -u lilith -f fakegw.py >/dev/null || break; sleep 0.1; done
     : > $D/gw.pid; rm -f $D/gw.started; exit 0 ;;
@@ -132,10 +137,16 @@ r = d["e161234245f3"]; n = dt.datetime.fromisoformat(r["next_run_at"])
 c = d["5365cfb456d4"]["next_run_at"]
 print(r["schedule"]["expr"], n.utcoffset(), n.astimezone(dt.timezone.utc).strftime("%H:%M"), d["f56407e4cef8"]["schedule"]["expr"], d["5365cfb456d4"]["schedule"]["expr"],
       "sync_offset", dt.datetime.fromisoformat(c).utcoffset(), "once_enabled", d["7e481025f885"]["enabled"], len(d))'; }
-UTC_STATE="30 16 * * * 0:00:00 16:30 */10 * * * * * * * * sync_offset 0:00:00 once_enabled False 4"
-COL_STATE="0 22 * * * 5:30:00 16:30 */10 * * * * * * * * sync_offset 5:30:00 once_enabled False 4"
+UTC_STATE="30 16 * * * 0:00:00 16:30 */10 * * * * * * * * * sync_offset 0:00:00 once_enabled False 4"
+COL_STATE="0 22 * * * 5:30:00 16:30 */10 * * * * * * * * * sync_offset 5:30:00 once_enabled False 4"
 gw_running() { [[ $($SC show hermes-gateway -p ActiveState --value) == active ]]; }
-wait_sync() { for i in $(seq 80); do [[ $(jobsinfo) == *"sync_offset $1"* ]] && return 0; sleep 1; done; return 1; }
+synced() {   # the live scheduler really ran commitment sync in the last 150 s, writing times with offset $1
+  runuser -u lilith -- python3 -I -c '
+import json, sys, datetime as dt
+c = {j["id"]: j for j in json.load(open("/home/lilith/.hermes/cron/jobs.json"))["jobs"]}["5365cfb456d4"]
+ok = c.get("last_run_at") and (dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(c["last_run_at"])).total_seconds() < 150      and str(dt.datetime.fromisoformat(c["next_run_at"]).utcoffset()) == sys.argv[1]
+sys.exit(0 if ok else 1)' "$1"; }
+wait_sync() { for i in $(seq 360); do synced "$1" && return 0; sleep 1; done; return 1; }
 baseline() {   # back to the pristine UTC state with a healthy gateway (used after an escalation)
   $SC stop hermes-gateway
   install -o lilith -g lilith -m 0600 "$W/config.yaml" "$H/config.yaml"
@@ -145,7 +156,8 @@ baseline() {   # back to the pristine UTC state with a healthy gateway (used aft
 utc_ok() { [[ $(cfgsha) == "$PRE" && $(jobsinfo) == "$UTC_STATE" ]] && gw_running; }
 bkdir() { ls -1d /root/tz-colombo-* 2>/dev/null | tail -1; }
 
-$SC start hermes-gateway; wait_sync 0:00:00 || { echo "SETUP_FAIL scheduler"; exit 2; }; sleep 3
+$SC start hermes-gateway; wait_sync 0:00:00 || { echo "SETUP_FAIL scheduler"; jobsinfo; pgrep -af fakegw; ls -la /run/tzsim; cat /run/tzsim/gw.pid; tail -5 $H/logs/gateway.log;
+  runuser -u lilith -- env -i HOME=/home/lilith HERMES_HOME=$H PATH=/usr/bin:/bin timeout 8 $PY -I /opt/tzsim/fakegw.py; echo "fakegw rc=$?"; exit 2; }; sleep 3
 cp -p "$H/cron/jobs.json" "$W/jobs.baseline"
 check "setup: PROD-shaped host, lilith-owned ~/.hermes, gateway running, scheduler ticking in UTC" \
   '[[ $(stat -c "%U %a" $H) == "lilith 700" && $(stat -c "%U %a" $H/config.yaml) == "lilith 600" && $(stat -c "%U %a" $H/cron/jobs.json) == "lilith 600" ]] && utc_ok'
@@ -155,7 +167,8 @@ install -d -o root -g root -m 0700 /root/tz-colombo-permtest
 run runuser -u lilith -- touch /root/tz-colombo-permtest/x
 check "permission: lilith cannot write a root 0700 backup dir (the old design's failure)" '[[ $RC -ne 0 && $OUT == *"ermission denied"* ]]'
 rmdir /root/tz-colombo-permtest
-run runuser -u lilith -- bash "$TW" precheck
+install -d -m 0755 /opt/tzsim/prop; install -m 0644 "$PROP"/tz_window.sh "$PROP"/tz_ops.py /opt/tzsim/prop/
+run runuser -u lilith -- bash /opt/tzsim/prop/tz_window.sh precheck
 check "permission: the script refuses to run as lilith" '[[ $RC -ne 0 && $OUT == *"not root"* ]] && utc_ok'
 
 # --- precheck ------------------------------------------------------------------------------------------------------------
@@ -186,9 +199,9 @@ for at in after_backup after_config jobs_apply after_jobs; do
 done
 run env TZ_SIM_FAIL_AT=start bash "$TW" change
 check "change: start step fails -> documented rollback, proven in UTC" '[[ $RC -eq 1 && $OUT == *"TZ_FAIL_ROLLED_BACK"* ]] && utc_ok'
-run env SIM_GW_CRASH_IF_ZONE=1 bash "$TW" change
-check "change: gateway dies on the new config (systemctl accepted the start) -> rollback, proven in UTC" '[[ $RC -eq 1 && $OUT == *"not active/running"* && $OUT == *"TZ_FAIL_ROLLED_BACK"* ]] && utc_ok'
-run env SIM_GW_NO_PLATFORMS_IF_ZONE=1 bash "$TW" change
+touch /run/tzsim/crash_if_zone; run bash "$TW" change; rm -f /run/tzsim/crash_if_zone
+check "change: gateway dies on the new config (systemctl accepted the start) -> rollback, proven in UTC" '[[ $RC -eq 1 && ( $OUT == *"not active/running"* || $OUT == *"not stable"* ) && $OUT != *"no platform evidence"* && $OUT == *"TZ_FAIL_ROLLED_BACK"* ]] && utc_ok'
+touch /run/tzsim/no_platforms_if_zone; run bash "$TW" change; rm -f /run/tzsim/no_platforms_if_zone
 check "change: running but no platform evidence from this start -> rollback, proven in UTC" '[[ $RC -eq 1 && $OUT == *"no platform evidence"* && $OUT == *"TZ_FAIL_ROLLED_BACK"* ]] && utc_ok'
 run env TZ_SIM_FAIL_AT=after_config TZ_SIM_CORRUPT_BACKUP=1 bash "$TW" change
 check "change: backup cannot be verified during recovery -> TZ_ESCALATE, exit 3, gateway left STOPPED" '[[ $RC -eq 3 && $OUT == *"TZ_ESCALATE"* ]] && ! gw_running'
@@ -206,7 +219,7 @@ run bash "$TW" verify h60 colombo; check "verify colombo PASS, exit 0" '[[ $RC -
 run bash "$TW" verify wrong utc; check "verify utc on the changed host FAILs with a nonzero exit" '[[ $RC -ne 0 && $OUT == *"TZ_VERIFY wrong utc FAIL"* ]]'
 $SC stop hermes-gateway; run bash "$TW" verify down colombo
 check "verify with the gateway down: V1 FAIL, nonzero" '[[ $RC -ne 0 && $OUT == *"FAIL V1"* ]]'
-SIM_GW_NO_PLATFORMS=1 $SC start hermes-gateway; sleep 5; run bash "$TW" verify noplat colombo
+touch /run/tzsim/no_platforms; $SC start hermes-gateway; sleep 5; run bash "$TW" verify noplat colombo; rm -f /run/tzsim/no_platforms
 check "verify after a start that logged no platforms: V6 FAIL (older starts' lines do not count), nonzero" '[[ $RC -ne 0 && $OUT == *"FAIL V6"* ]]'
 $SC stop hermes-gateway; $SC start hermes-gateway; wait_sync 5:30:00; sleep 3
 run bash "$TW" verify restart colombo; check "after a plain restart the zone and the 16:30Z review persist (verify PASS)" '[[ $RC -eq 0 && $(jobsinfo) == "$COL_STATE" ]]'

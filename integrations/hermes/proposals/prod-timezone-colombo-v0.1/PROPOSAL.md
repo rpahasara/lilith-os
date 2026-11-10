@@ -77,6 +77,7 @@ Sri Lanka has no daylight saving: +05:30 all year, so 22:00 Colombo is 16:30Z ev
     the 2026-11-10 review ran once at 16:30:56Z (status ok), next 2026-11-11 16:30Z;
   - nothing was written (`config.yaml` unchanged); temporary files were under `/run` and removed.
 - **Offline:** `test_tz_ops.py` 10/10 (config append, refusals, job-set guard, the 16:30Z instant, no DST).
+- **End-to-end rehearsal** of the real scripts with root/lilith ownership: see below.
 
 ## Change window
 
@@ -99,54 +100,87 @@ Root on `lilith-01`, from Git at the merge of this proposal. Copy `tz_ops.py` an
 directory and check their SHA-256 against the PR.
 
 ```bash
-bash tz_window.sh precheck      # read-only; must end TZ_PRECHECK_PASS
-bash tz_window.sh change        # precheck again, backups, stop, config + review, start; ends TZ_CHANGED backup=/root/tz-colombo-<ts>
-bash tz_window.sh verify h60    # at +60 s
-bash tz_window.sh verify h600   # at +10 min
-bash tz_window.sh verify review # after the next 16:30Z review
+bash tz_window.sh precheck            # read-only; must end TZ_PRECHECK_PASS
+bash tz_window.sh change              # prepare -> stop -> config + review -> start + proof; ends TZ_CHANGED backup=/root/tz-colombo-<ts>
+bash tz_window.sh verify h60 colombo  # at +60 s   (exit 0 only if V1-V7 all pass)
+bash tz_window.sh verify h600 colombo # at +10 min
+bash tz_window.sh verify review colombo   # after the next 16:30Z review, plus the review's last_run_at
 ```
 
+**Exit codes:**
+
+| Code | Meaning |
+| --- | --- |
+| `0` | done |
+| `1` | refused or failed, with nothing changed, or the previous state restored, verified and **running** (`TZ_FAIL`, `TZ_FAIL_RECOVERED`, `TZ_FAIL_ROLLED_BACK`) |
+| `3` | `TZ_ESCALATE`: files could not be verified, so the gateway is **left stopped** for a human |
+
 **`change`, step by step:**
-1. **Precheck** (refuses on any difference):
-   - host;
-   - outside blackout;
+
+1. **Precheck**, read-only; any difference refuses:
+   - root, on `lilith-01`, outside the blackouts;
+   - host zone UTC (with no Hermes zone, Hermes uses the host zone; the "before" state assumes PROD's `Etc/UTC`);
    - the four source hashes;
-   - `config.yaml` = `a6f340f2…`, `lilith:lilith 0600`, no `timezone` key, no zone in the gateway environment;
-   - the job set is exactly the inventory (three enabled recurring jobs; nothing else enabled; all timestamps zone-aware);
+   - `config.yaml` = `a6f340f2…`, `lilith:lilith 0600`, no `timezone` key;
+   - the gateway is running and was started with no zone in its environment;
+   - the job set is exactly the inventory (three enabled recurring jobs, nothing else enabled, all timestamps
+     zone-aware);
    - `jobs-plan` gives 16:30Z;
-   - gateway running;
-   - scheduler ticked under 180 s ago;
-   - Core API active;
-   - disk.
-2. **Backup:** `config.yaml` to `/root/tz-colombo-<ts>/` (0700), hash-checked against `a6f340f2…`.
-3. **Stop** the gateway, so the scheduler stops writing `jobs.json`. Then back up `jobs.json` and write `SHA256SUMS`.
-4. **Config:** append `timezone: Asia/Colombo` through `tz_ops.py config-apply`:
-   - it refuses an existing key, and refuses if any other key would change;
-   - it is installed atomically as `lilith:lilith 0600`;
-   - re-read: `{"timezone": "Asia/Colombo"}`.
-5. **Review schedule:** `tz_ops.py jobs-apply` (as `lilith`, `HERMES_TIMEZONE=Asia/Colombo`) calls Hermes' own
-   `update_job(e161234245f3, {"schedule": "0 22 * * *"})`. That is the rehearsed S3/S4 path. It then asserts:
+   - the live scheduler ran commitment sync in the last 180 s, in UTC;
+   - Core API active; disk; `/root` root 0700.
+2. **Prepare, with the gateway still running.** A failure here changes nothing.
+   - Create the backup directory `/root/tz-colombo-<ts>` (root 0700). Only root writes there.
+   - Back up `config.yaml` (root 0600) and hash-check it against `a6f340f2…`.
+   - `tz_ops.py config-render` (as `lilith`, read-only) prints the new config to stdout; **root** writes
+     `config.new`.
+   - `config-validate` reads `config.new` on stdin and proves it is the live config plus exactly
+     `timezone: Asia/Colombo`.
+
+   `tz_ops.py` runs from a fresh `/run/tz-colombo-ops.*` directory, root-owned 0755 with the file 0644: `lilith` can
+   read it but not change it. It is removed on exit.
+3. **Stop** the gateway, and wait until MainPID is 0. If it does not stop: refuse; nothing changed. Then record the
+   checksums of `config.yaml` and `jobs.json`.
+4. **Back up `jobs.json`** (root 0600), compare it with the recorded checksum, and write and check `SHA256SUMS`.
+   - If this fails, nothing has been modified: confirm both files still have their recorded checksums, start the
+     gateway, and prove it. **`TZ_FAIL_RECOVERED`**, exit 1.
+5. **Install the config**: `config.new` → `config.yaml` (`lilith:lilith 0600`, atomic), then confirm the checksum and
+   `{"timezone": "Asia/Colombo"}`.
+6. **Move the review**: `tz_ops.py jobs-apply` (as `lilith`, `HERMES_TIMEZONE=Asia/Colombo`) calls Hermes' own
+   `update_job(e161234245f3, {"schedule": "0 22 * * *"})`. It asserts:
    - `expr` = `0 22 * * *`;
-   - `next_run_at` offset is `+05:30`, and its instant is the next 16:30Z;
-   - **every other job is identical** to before.
-6. **Any failure in steps 4–5:** both files are restored **exactly** from the backup (hash-checked), then the gateway
-   restarts on the old configuration.
-7. **Start** the gateway and wait for active/running (up to 90 s).
+   - next run at `+05:30`, on the next 16:30Z;
+   - every other job identical.
+7. **Any failure in steps 5–6:** restore both files exactly from the backup, verify their checksums, start the gateway
+   and prove it. **`TZ_FAIL_RECOVERED`**, exit 1.
+   - If the restore cannot be verified: **`TZ_ESCALATE`**, exit 3, gateway left stopped.
+8. **Start, and prove it.** `systemctl` accepting the start is never enough. All of these must hold:
+   - active/running within 90 s;
+   - the same MainPID and no extra restart after 10 s;
+   - `✓ telegram connected`, `✓ discord connected`, `✓ lilith_os connected` and `Gateway running with 3 platform(s)`
+     logged **after this start's timestamp**;
+   - the **live scheduler** has run commitment sync since this start and written its next run at `+05:30`. This is the
+     only direct evidence of the zone the running gateway uses: Hermes sets `HERMES_TIMEZONE` inside the process, so
+     `/proc/<pid>/environ` never shows it.
+
+   If the proof fails, the **documented rollback** runs automatically: stop, exact config restore, review back to UTC,
+   start, prove it in UTC. **`TZ_FAIL_ROLLED_BACK`**, exit 1. If the rollback cannot be verified: **`TZ_ESCALATE`**,
+   exit 3.
 
 ## Post-change checks and failure criteria
 
-`tz_window.sh verify`, at +60 s, at +10 min, and after the next review:
+`tz_window.sh verify LABEL colombo`, at +60 s, at +10 min, and after the next review. It **exits nonzero if any check
+fails**.
 
 | # | Pass | Failure response |
 | --- | --- | --- |
-| V1 | gateway active/running, `NRestarts` 0 | rollback |
-| V2 | gateway environment `HERMES_TIMEZONE=Asia/Colombo` (bridged); `config.yaml` timezone Asia/Colombo | rollback |
+| V1 | gateway active/running | rollback |
+| V2 | `config.yaml` timezone Asia/Colombo; the live scheduler has run commitment sync since the current start and written its next run at `+05:30` (polls up to 150 s) | rollback |
 | V3 | `datecheck`: zone Asia/Colombo; date line `(Asia/Colombo, +0530, UTC+05:30)` | rollback |
 | V4 | review `0 22 * * *`, next run `…T22:00:00+05:30` = `…T16:30:00Z` | rollback |
-| V5 | commitment sync ran under 150 s ago, `ok`; snapshot under 700 s ago, `ok`; scheduler heartbeat under 180 s | investigate, then rollback |
-| V6 | gateway log `✓ telegram connected` and the other platforms; `Gateway running with N platform(s)` | investigate (platform outage is not zone-related) |
+| V5 | commitment sync under 150 s ago and snapshot under 700 s ago, both `ok` | investigate, then rollback |
+| V6 | `✓ telegram/discord/lilith_os connected` and `Gateway running with 3 platform(s)` **after the current start** (systemd `ActiveEnterTimestamp`); an earlier start's lines never count | investigate (not zone-related) |
 | V7 | Core API active (untouched) | investigate |
-| Next review | executes once at 16:30Z (`last_run_at` ≈ 16:30Z, status ok), not at 11:00Z, not twice | rollback if it ran at the wrong time |
+| Next review | runs once at 16:30Z (`last_run_at` ≈ 16:30Z, ok), not at 11:00Z, not twice | rollback |
 
 ## Rollback (idempotent; outside the blackouts)
 
@@ -154,15 +188,77 @@ bash tz_window.sh verify review # after the next 16:30Z review
 bash tz_window.sh rollback /root/tz-colombo-<ts>
 ```
 
-It does the following:
-1. Stops the gateway.
-2. Restores `config.yaml` exactly (hash `a6f340f2…`).
-3. Runs `tz_ops.py jobs-revert`: Hermes' `update_job` sets the review back to `30 16 * * *` in UTC, asserts next run
-   16:30Z, and asserts every other job is unchanged.
-4. Starts the gateway.
+1. **Refuses unless** the config holds Asia/Colombo and the backup's `SHA256SUMS` verifies.
+2. **Stop** the gateway.
+3. **Restore `config.yaml` exactly** (hash `a6f340f2…`).
+4. **Move the review back:** `tz_ops.py jobs-revert` (Hermes' `update_job` → `30 16 * * *` in UTC; asserts next run
+   16:30Z and every other job unchanged). The scheduler's live counters are kept. If `jobs-revert` fails, `jobs.json` is
+   restored exactly from the backup (checksum-verified) instead.
+5. **Start and prove**, in UTC.
 
-The scheduler's live counters in `jobs.json` are kept, so the file is not restored wholesale after the change. The exact
-file restore is used only inside `change`, while nothing has run.
+Any unverifiable step → **`TZ_ESCALATE`**, exit 3, gateway left stopped.
+
+**Known Hermes behaviour on rollback:** a recurring job whose stored next run carries the old `+05:30` offset with a
+still-future wall clock is recomputed rather than fired (`cron.jobs._stored_wall_clock_is_future`). So commitment sync
+skips one minute, and the snapshot may skip one 10-minute occurrence. The proof allows 150 s for this. The review is set
+explicitly in both directions and never skips. The forward change does not hit this: the old `+00:00` wall clocks are
+in the past under Colombo.
+
+## End-to-end rehearsal
+
+`rehearse_tz_window.sh` runs the real `tz_window.sh` and `tz_ops.py` end to end:
+- **Sandbox:** WSL Ubuntu 24.04 as root, in private mount **and** hostname namespaces with the hostname `lilith-01`;
+  overlays on `/etc /home /root /opt`; a fresh `/run`; host zone `Etc/UTC` and `/root` 0700, as on PROD.
+- **Hermes:** DEV's Hermes 0.20.5 release, whose timezone and scheduler sources are byte-identical to PROD's.
+- **Ownership:** a real `lilith` user owns `~/.hermes` with PROD's modes.
+- **Jobs:** PROD's job IDs, created through Hermes' own `create_job`.
+- **Gateway stand-in:** bridges `config.yaml`'s zone as `run.py` does, logs platform connections in gateway.run's
+  format, and runs Hermes' real scheduler loop. Nothing is executed or delivered.
+- **`systemctl` stand-in:** bind-mounted inside the namespace.
+
+Cases:
+- **Permissions:** `lilith` cannot write the root 0700 backup directory (the original defect); the script refuses to
+  run as `lilith`.
+- **Precheck refusals:** blackouts (16:20, 02:10), a changed `config.yaml`, an extra enabled reminder, the Core API
+  down, the gateway down.
+- **An injected failure at every boundary:**
+  - while preparing → nothing changed, gateway never stopped (same PID);
+  - after stop, and on `jobs.json` backup failure → nothing modified, restart proven;
+  - after backup, after config, at `jobs-apply`, after jobs → exact restore verified, restart proven;
+  - at start → rollback, proven in UTC;
+  - **a gateway that dies on the new config after systemd accepted the start** → rollback, proven in UTC;
+  - **running but no platform evidence from this start** → rollback;
+  - **an unverifiable backup during recovery** → `TZ_ESCALATE`, exit 3, gateway left stopped.
+- **Backups:** every backup directory is root 0700 with root 0600 files, unreadable to `lilith`; no ops directories
+  left in `/run`.
+- **Success:**
+  - `TZ_CHANGED`, with the gateway proven in the new zone;
+  - `config.yaml` = the original plus one line, `lilith` 0600;
+  - review `0 22 * * *` at `+05:30` = 16:30Z; snapshot and sync unchanged; the live scheduler writes `+05:30`; the
+    completed reminder untouched.
+- **`verify`:**
+  - passes `colombo`;
+  - **fails with a nonzero exit** for `utc`, with the gateway down (V1), and after a start that logged no platforms
+    (V6, an earlier start's lines do not count);
+  - after a plain restart, the zone and the 16:30Z review persist.
+- **A second `change` refuses.**
+- **Rollback:**
+  - refuses inside the blackout;
+  - an unverifiable restore → `TZ_ESCALATE`;
+  - `jobs-revert` failing → exact `jobs.json` fallback, proven in UTC;
+  - the documented path → config byte-identical to the original, review `30 16` UTC = 16:30Z, `verify utc` passes;
+  - change again → rollback again.
+
+**Result (2026-11-10, these exact bytes):** **40/40 PASS, `REHEARSAL_RESULT PASS`**.
+- Script hashes: `tz_window.sh` `d632029f…`, `tz_ops.py` `0bb16caa…`, `rehearse_tz_window.sh` `672febb0…`.
+- The rehearsal also corrected several assumptions:
+  - V2 must use live-scheduler evidence, not `/proc` environ;
+  - backups must be root-owned (`cp -p` kept `lilith`);
+  - rollback must allow for Hermes' one-occurrence skip after a zone change;
+  - with no Hermes zone, Hermes uses the **host** zone, so the precheck pins PROD's host to UTC.
+
+**PROD read-only `precheck` with these bytes** (2026-11-10 18:47Z): **`TZ_PRECHECK_PASS`** (host UTC, `/root` 0700,
+live scheduler in UTC). `config.yaml` and the gateway PID were unchanged; temporary files removed.
 
 ## Not in this change
 
@@ -173,9 +269,20 @@ file restore is used only inside `change`, while nothing has run.
 
 ## Recommendation
 
-**GO**, subject to the window rules above and a `precheck` that ends `TZ_PRECHECK_PASS` immediately before `change`.
+**GO**, subject to the window rules and a `precheck` that ends `TZ_PRECHECK_PASS` immediately before `change`.
+
 Basis:
-- the change is two edits, both rehearsed on byte-identical code;
-- the only scheduled work whose wall clock matters (the review) keeps its instant;
-- there is nothing timezone-less to reinterpret;
-- rollback is mechanical.
+- two edits, rehearsed end to end on byte-identical Hermes code with PROD's ownership model;
+- every failure path restores and proves the previous state, or stops for a human;
+- the only wall-clock job keeps 16:30Z;
+- nothing timezone-less to reinterpret.
+
+Remaining risks for the owner:
+1. **About 20 s of messaging downtime** for the restart (about 2 min if a recovery or rollback runs).
+2. **Rollback skips about one minute of commitment sync** and possibly one snapshot occurrence (Hermes behaviour,
+   harmless).
+3. **The rehearsal's gateway is a stand-in.** It runs Hermes' real scheduler and config bridge, but not the real
+   messaging gateway. Platform reconnection on PROD is proven live by step 8 and V6, and a failure there rolls back
+   automatically.
+4. **A `TZ_ESCALATE` leaves Hermes messaging down until a human acts.** It happens only if a backup or restore cannot be
+   verified.

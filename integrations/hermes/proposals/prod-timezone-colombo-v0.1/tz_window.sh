@@ -17,7 +17,11 @@ H=/home/lilith/.hermes; S=$H/hermes-agent; PY=$S/venv/bin/python
 CFG=$H/config.yaml; JOBS=$H/cron/jobs.json; GWLOG=$H/logs/gateway.log
 CONFIG_PRE_SHA=a6f340f2221130e4d9e142195ce86b8dab9721c0a67c2ca4359950ad39ec37e7   # 2026-11-10 inventory (no timezone key)
 PLATFORMS=(telegram discord lilith_os)
-STABLE_S=10; START_WAIT_S=90; PLATFORM_WAIT_S=120; EVIDENCE_WAIT_S=150
+STABLE_S=10; START_WAIT_S=90; PLATFORM_WAIT_S=120
+# After a zone change Hermes recomputes (does not fire) a recurring job whose stored next run carries the old offset
+# but a still-future wall clock (cron.jobs._stored_wall_clock_is_future). Going back to UTC this skips one minute of
+# commitment sync, so the first UTC run can be ~2 min after the start; 150 s covers it.
+EVIDENCE_WAIT_S=150
 declare -A SRC_SHA=(   # PROD Hermes 0.20.5 timezone-relevant sources, byte-identical to the DEV-rehearsed ones
   [hermes_time.py]=3f4ee146597bbb2dabf61ed0458b3e9c7f2dcb9dd89351652cd0fc6e8a7884c8
   [cron/jobs.py]=edf2469d61286ba7ec13ffabddfaef2a9b5e7f51b2ac08c3494eb5ea4aa7177b
@@ -37,7 +41,7 @@ if [[ -n ${TZ_SIM:-} ]]; then
   [[ ${TZ_SIM} == 1 && $(readlink /proc/1/ns/mnt) != "$(readlink /proc/self/ns/mnt)" \
      && $(readlink /proc/1/ns/uts) != "$(readlink /proc/self/ns/uts)" \
      && $(stat -f -c %T /home) == overlayfs && $(stat -f -c %T /root) == overlayfs ]] || refuse "TZ_SIM outside a sandbox"
-  SIM=1; CONFIG_PRE_SHA=${TZ_SIM_CONFIG_SHA:?}; STABLE_S=2; PLATFORM_WAIT_S=30; EVIDENCE_WAIT_S=75
+  SIM=1; CONFIG_PRE_SHA=${TZ_SIM_CONFIG_SHA:?}; STABLE_S=2; PLATFORM_WAIT_S=30
 fi
 inject() { [[ $SIM == 1 && ${TZ_SIM_FAIL_AT:-} == "$1" ]] && { echo "INJECTED_FAILURE at $1" >&2; return 1; }; return 0; }
 
@@ -68,6 +72,8 @@ precheck() {   # read-only
   [[ $(id -u) -eq 0 ]] || refuse "not root"
   [[ $(hostname -s) == lilith-01 ]] || refuse "wrong host $(hostname -s)"
   blackout; echo "PASS outside blackout windows"
+  # Without a Hermes timezone, Hermes uses the host zone; the "before" state (review 16:30Z) assumes PROD's Etc/UTC.
+  [[ $(date +%Z) == UTC && $(date +%z) == +0000 ]] || refuse "host zone is not UTC ($(date +%Z))"; echo "PASS host zone UTC"
   local f; for f in "${!SRC_SHA[@]}"; do [[ $(sha "$S/$f") == "${SRC_SHA[$f]}" ]] || refuse "Hermes source $f changed"; done
   echo "PASS Hermes timezone sources = the DEV-rehearsed bytes"
   [[ $(sha "$CFG") == "$CONFIG_PRE_SHA" ]] || refuse "config.yaml is not the inventoried one (re-plan)"
@@ -164,6 +170,7 @@ rollback_running() {   # after a start failure with the new configuration: the d
   exit 1
 }
 
+[[ $(id -u) -eq 0 ]] || refuse "not root"
 case $MODE in
   precheck)
     setup_ops; precheck ;;
@@ -172,7 +179,7 @@ case $MODE in
     # -- prepare while the gateway runs: any failure here changes nothing
     BK=/root/tz-colombo-$(date -u +%Y%m%dT%H%M%SZ)
     install -d -o root -g root -m 0700 "$BK" || refuse "backup dir"
-    cp -p "$CFG" "$BK/config.yaml" && [[ $(sha "$BK/config.yaml") == "$CONFIG_PRE_SHA" ]] || refuse "config backup"
+    cp -p "$CFG" "$BK/config.yaml" && chown root:root "$BK/config.yaml" && chmod 0600 "$BK/config.yaml"       && [[ $(sha "$BK/config.yaml") == "$CONFIG_PRE_SHA" ]] || refuse "config backup"
     inject prepare || refuse "injected"
     ops config-render > "$BK/config.new" || refuse "config render"
     ops config-validate < "$BK/config.new" | grep -qx CONFIG_VALID || refuse "rendered config does not validate"
@@ -187,7 +194,7 @@ case $MODE in
                           start_and_prove utc || escalate "nothing changed, but the gateway did not come back healthy"; \
                           echo "TZ_FAIL_RECOVERED $1 (nothing was changed; gateway running)" >&2; exit 1; }
     inject after_stop || unchanged_restart "injected after stop"
-    { inject backup_jobs && cp -p "$JOBS" "$BK/jobs.json"; } || unchanged_restart "jobs.json backup failed"
+    { inject backup_jobs && cp -p "$JOBS" "$BK/jobs.json" && chown root:root "$BK/jobs.json" && chmod 0600 "$BK/jobs.json"; }       || unchanged_restart "jobs.json backup failed"
     [[ $(sha "$BK/jobs.json") == "$J0" ]] || unchanged_restart "jobs.json backup does not match"
     (cd "$BK" && printf '%s  config.yaml\n%s  jobs.json\n' "$C0" "$J0" > SHA256SUMS && sha256sum -c --quiet --strict SHA256SUMS) \
       || unchanged_restart "backup checksums"
@@ -212,7 +219,8 @@ case $MODE in
     want_tz=$([[ $ZONE == colombo ]] && echo '{"timezone": "Asia/Colombo"}' || echo '{"timezone": null}')
     v "V2 config.yaml $want_tz" '[[ $(ops config-check) == "$want_tz" ]]'
     START=$(date -u -d "$(gwp ActiveEnterTimestamp)" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null || echo 1970-01-01T00:00:00+00:00)
-    EV=$(ops jobs-evidence "$START" "$ZONE"); v "V2 live scheduler writes $ZONE times since this start: $EV" '[[ $EV == *"\"ok\": true"* ]]'
+    for i in $(seq $EVIDENCE_WAIT_S); do EV=$(ops jobs-evidence "$START" "$ZONE") && break; sleep 1; done
+    v "V2 live scheduler writes $ZONE times since this start: $EV" '[[ $EV == *"\"ok\": true"* ]]'
     DC=$(ops datecheck); want_zone=$([[ $ZONE == colombo ]] && echo '"zone": "Asia/Colombo"' || echo '"zone": null')
     v "V3 $DC" '[[ $DC == *"$want_zone"* ]]'
     REV=$(ops jobs-inspect | "$PY" -I -c '
