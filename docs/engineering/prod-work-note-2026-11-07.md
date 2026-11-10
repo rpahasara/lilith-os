@@ -1137,6 +1137,61 @@ round). Live turns are mapped to questions by order; message text was not read.
 **Decision:** stays **shadow**; no permanent live mode; P-5 not started. The evidence is favourable, but this is one
 practical round.
 
+**Routing vs timeline: five-arm offline evaluation (2026-11-09/10).** The owner asked to isolate what improves
+temporal answers without forcing the full agent everywhere.
+
+**Setup.**
+- Synthetic fixtures only: `scripts/cognitive_eval/scenarios/p4_tl_routing_*` (#408).
+- Stored memories with approval dates, plus a synthetic conversation history in Hermes' own schema. The agent's real
+  `session_search` tool read a throwaway `state.db`, with SessionDB pinned to it so real transcripts were unreachable.
+- The fixtures include traps where stored order is not event order: Kubernetes began 26 Aug but was stored 30 Oct;
+  Acme began 2 Sep and was stored 3 Sep; the CKA was passed 4 Nov and stored 5 Nov.
+- Also a replaced nickname that was never true, an unknown history question, fiction, and two controls.
+- Agent arms ran 2 samples on the ChatGPT-plan model; fast-path arms ran 1 sample on Groq within the daily eval cap.
+
+**Results** on the 6 temporal questions shared by all arms (Acme start, Kubernetes vs Acme, days since the pass,
+replaced nickname, city at the CKA fail, unknown history), plus fiction and a general-history control, read by hand:
+
+| Arm | Correct | Honest "don't know" | **Unsupported claims** | Tokens / latency per turn |
+| --- | --- | --- | --- | --- |
+| A fast path (today) | 1/6 | 3 | **2** ("passed in August, about 3 months ago"; "living in Manchester" when it was Leeds) | ~2.8K / 0.5 s |
+| D fast path + timeline | 2/6 (replaced nickname, unknown) | 3 | **1** (stale "Manchester") | ~3.1K / 0.5 s |
+| B agent + search | 10/12 | 2 | 0 | ~20–31K / ~6 s |
+| C agent + search + note as deployed | 5/12 | 7 | 0 | ~9.7K / ~2.9 s (it stopped searching) |
+| **C2 agent + search + agent-path note** | **12/12** | 0 | **0** | ~22–47K / ~8–11 s |
+
+- All arms answered fiction and the control correctly; no note was echoed on the fast path.
+- On B, C and C2's extra questions (when did I tell you about the move; current city), C2 was also 4/4.
+- No arm used a stored date as an event date.
+
+**Reading.**
+- **Event-level questions** (when it happened, what came first, how long ago, where I was then) need conversation
+  evidence. The fast path cannot answer them, with or without the timeline, and **today's fast path invented
+  answers**: a fabricated pass date and a stale city.
+- **Record-level questions** (what was stored, or stored before a correction) are answered by the fast path with the
+  timeline at about 3K tokens.
+- **The note's wording decides the agent path.** "Say you don't know" suppressed search (C < B; N-50). The
+  agent-path wording, search first and prefer what the owner said at the time, was best (C2).
+
+**Recommended P-4 routing: selective escalation** (implemented in #410, stacked on #409; not deployed):
+- non-temporal turns: unchanged (fast path);
+- record-level temporal questions: fast path plus the timeline (plain header);
+- event-level temporal questions: full agent with conversation search plus the agent-path timeline.
+- This does not save many tokens *within* temporal questions, because most are event-level. The saving is that every
+  other turn stays on the fast path. Correctness is not traded for tokens.
+
+**Integration of #406 + #407 (owner review).** In #409, one `render_with_ids(..., can_search)` call per turn produces
+both the note the agent gets and its audit ids. The hint uses that stored note, never a re-render. Regression tests
+cover: ids equal the note's lines; the truncation boundary (the longer agent header admits fewer lines, and the log
+follows it); missing ids counted, not invented; shadow logging ids without injecting; owner memory read with a plain
+GET only. #406 and #407 are closed as superseded.
+
+**Limits.**
+- Synthetic fixtures, small samples; the fast-path arms had 1 sample.
+- The agent's tool-call counter under-counts (token totals show retrieval more reliably).
+- The shipped agent wording drops C2's "if you can search them", since it only renders on the agent path.
+- Nothing is deployed; the timeline stays in shadow.
+
 **Remaining P-4 memory-intelligence gaps (honest list).**
 1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1); its
    effect on real proposals is not measured yet.
