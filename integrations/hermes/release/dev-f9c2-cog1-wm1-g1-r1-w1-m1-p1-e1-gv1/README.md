@@ -1,7 +1,7 @@
 # DEV release `f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1`: the startup verifier's goal rule, corrected
 
 **Status: INSTALLED on DEV 2026-11-10 15:25:35Z and verified (H1–H9 at +60 s and +10 min). See [INSTALL-20261110.md](INSTALL-20261110.md).**
-is a separate, owner-authorized window. No PROD component is involved.
+No PROD component is involved.
 
 ## Why
 
