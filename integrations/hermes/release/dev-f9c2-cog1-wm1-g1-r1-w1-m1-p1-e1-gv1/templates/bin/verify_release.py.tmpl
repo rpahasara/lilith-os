@@ -237,10 +237,13 @@ def _proc_start_epoch(pid: int) -> float:
     return boot + ticks / os.sysconf("SC_CLK_TCK")
 
 
+_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # loopback only: never an environment proxy
+
+
 def _http_get(url: str, timeout: float) -> tuple[int, bytes]:
     req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _NO_PROXY.open(req, timeout=timeout) as resp:
             return resp.status, resp.read(1 << 20)
     except urllib.error.HTTPError as e:
         return e.code, b""

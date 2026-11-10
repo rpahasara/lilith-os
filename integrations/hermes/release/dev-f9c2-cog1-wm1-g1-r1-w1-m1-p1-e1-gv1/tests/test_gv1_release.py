@@ -107,6 +107,23 @@ class ReleaseDefinitionTest(unittest.TestCase):
         for gone in ("put_router", "put_code", "rm -rf", "systemctl start", "systemctl restart", "DELETE", "UPDATE "):
             self.assertNotIn(gone, text, gone)                      # no home change, no deletion, no start
 
+    def test_stage_and_check_never_need_or_touch_the_gateway(self):
+        text = INSTALLER.read_text(encoding="utf-8")
+        cases = text[text.index("case ${MODE} in"):]
+        block = lambda mode: cases[cases.index(f"  {mode})"):cases.index(";;", cases.index(f"  {mode})"))]
+        for mode in ("stage", "check"):
+            self.assertNotIn("gateway_stopped", block(mode), mode)
+            self.assertNotIn("switch", block(mode).replace("safe to stop the gateway and switch", ""), mode)
+        stage_fn = text[text.index("stage() {"):text.index("switch() {")]
+        self.assertNotIn("switch_current", stage_fn)
+        self.assertNotIn("pin_critical", stage_fn)
+        for mode in ("switch", "install", "revert"):
+            self.assertIn("gateway_stopped", block(mode), mode)
+        sw = block("switch")
+        self.assertLess(sw.index("staged_ok"), sw.index("dry_run"))
+        self.assertLess(sw.index("dry_run"), sw.rindex("switch"))
+        self.assertNotRegex(text, r"\brm\b|\brmdir\b")                    # the installer deletes nothing
+
     def test_verifier_change_is_confined_to_the_goal_rule(self):
         a = E1_TEMPLATE.read_text(encoding="utf-8").splitlines()
         b = GV1_TEMPLATE.read_text(encoding="utf-8").splitlines()
@@ -356,6 +373,25 @@ class RuntimeCheckTest(unittest.TestCase):
             return 200, b'{"focus": null, "arbitration": {"winner": null}}'
         self.rt.http = writing_read
         self.assertEqual(self.codes(), ["FOCUS_READ_WROTE_TRACE"])
+
+    def test_the_focus_read_ignores_environment_proxies(self):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"focus": null}')
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        dead = "http://127.0.0.1:9"
+        with mock.patch.dict(os.environ, {"http_proxy": dead, "HTTP_PROXY": dead, "no_proxy": "", "NO_PROXY": ""}):
+            status, body = V._http_get(f"http://127.0.0.1:{srv.server_address[1]}/os/goals/focus", timeout=3)
+        self.assertEqual((status, body), (200, b'{"focus": null}'))
 
     def test_store_refusal_skips_the_focus_read(self):
         called = []

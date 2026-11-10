@@ -378,6 +378,59 @@ touch "${APIREL}/app.py"; sleep 2; dry_refuses "Core API code replaced after the
 touch -d '-1 min' "${APIREL}/app.py"
 check "goal rows back to DEV's shape after the refusals" '[[ $(goalrows) == "$ROWS0" ]]'
 
+# --- two-phase: stage and check while the gateway RUNS; only the switch needs it stopped ------------------------------
+RUNNING="active running 4242"
+GV_TREE() { [[ -d ${GVREL} ]] && tree_of "${GVREL}" || echo none; }
+api_start ""
+run env SIM_GW="$RUNNING" bash "${GVI}" stage "$GP"; NQ=$((NQ + 1))
+check "two-phase: stage with the gateway running still refuses an unsafe host (dry run), nothing shared changed" '[[ $RC -ne 0 && $OUT == *"refuses this host (dry run)"* && $OUT == *FOCUS_READ_ONLY_NOT_IN_EFFECT* && $(state) == "$BASELINE" && ! -e ${GVREL} && $(gquarantined) -eq '"$NQ"' ]]'
+api_start 1
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "two-phase: check before staging refuses" '[[ $RC -ne 0 && $OUT == *"is not staged"* && $(state) == "$BASELINE" ]]'
+run bash "${GVI}" switch "$GP"; check "two-phase: switch before staging refuses (gateway stopped, current stays e1)" '[[ $RC -ne 0 && $OUT == *"is not staged"* && $(state) == "$BASELINE" ]]'
+run env SIM_GW="$RUNNING" bash "${GVI}" stage "$GP"
+check "two-phase: stage succeeds with the gateway running" '[[ $RC -eq 0 && $OUT == *"GV1_STAGED"* && $OUT == *"gateway untouched"* ]]'
+check "  only the new release dir appeared: current, pins, HERMES_HOME, goal rows unchanged" '[[ $(state) == "$BASELINE" && $(homestate) == "$HOME0" && $(goalrows) == "$ROWS0" && $(readlink "${BASE}/current") == releases/f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1 && -d ${GVREL} ]]'
+STAGED_TREE=$(GV_TREE)
+run env SIM_GW="$RUNNING" bash "${GVI}" stage "$GP"; check "two-phase: a second stage refuses" '[[ $RC -ne 0 && $OUT == *"already staged"* && $(GV_TREE) == "$STAGED_TREE" ]]'
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"
+check "two-phase: check passes with the gateway running and changes nothing" '[[ $RC -eq 0 && $OUT == *"GV1_CHECK_PASS"* && $(state) == "$BASELINE" && $(GV_TREE) == "$STAGED_TREE" && $(goalrows) == "$ROWS0" ]]'
+run env SIM_GW="$RUNNING" bash "${GVI}" switch "$GP"
+check "two-phase: switch refuses while the gateway runs" '[[ $RC -ne 0 && $OUT == *"gateway not fully stopped"* && $(state) == "$BASELINE" ]]'
+# staged-release integrity: every later phase re-checks it
+chmod u+w "${GVREL}" "${GVREL}/RELEASE_ID"; cp "${GVREL}/RELEASE_ID" "$S/rid.bak"; echo "x" >> "${GVREL}/RELEASE_ID"; chmod a-w "${GVREL}/RELEASE_ID"; chmod 0555 "${GVREL}"
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "integrity: a changed staged file refuses check" '[[ $RC -ne 0 && $OUT == *"fails its RELEASE.sha256"* ]]'
+run bash "${GVI}" switch "$GP"; check "integrity: ... and switch (current stays e1)" '[[ $RC -ne 0 && $OUT == *"fails its RELEASE.sha256"* && $(state) == "$BASELINE" ]]'
+chmod u+w "${GVREL}" "${GVREL}/RELEASE_ID"; cp "$S/rid.bak" "${GVREL}/RELEASE_ID"; chmod a-w "${GVREL}/RELEASE_ID"; chmod 0555 "${GVREL}"
+chmod u+w "${GVREL}"; echo TEST_ONLY > "${GVREL}/extra"; chmod a-w "${GVREL}/extra"; chmod 0555 "${GVREL}"
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "integrity: an extra staged file refuses" '[[ $RC -ne 0 && $OUT == *"outside its manifest"* ]]'
+chmod u+w "${GVREL}"; unlink "${GVREL}/extra"; chmod 0555 "${GVREL}"
+chmod u+w "${GVREL}/bin" "${GVREL}/bin/verify_release.py" "${GVREL}" "${GVREL}/RELEASE.sha256"; cp "${GVREL}/bin/verify_release.py" "$S/v.bak"; cp "${GVREL}/RELEASE.sha256" "$S/m.bak"
+cp "${E1REL}/bin/verify_release.py" "${GVREL}/bin/verify_release.py"; (cd "${GVREL}" && find . -type f ! -name 'RELEASE.sha256*' -print | sed 's|^\./||' | LC_ALL=C sort | xargs -d '\n' sha256sum > RELEASE.sha256)
+chmod a-w "${GVREL}/bin/verify_release.py" "${GVREL}/RELEASE.sha256" "${GVREL}/bin"; chmod 0555 "${GVREL}"
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "integrity: the e1 verifier swapped in (manifest rebuilt to match) refuses" '[[ $RC -ne 0 && $OUT == *"differs from e1 beyond"* ]]'
+chmod u+w "${GVREL}/bin" "${GVREL}/bin/verify_release.py" "${GVREL}" "${GVREL}/RELEASE.sha256"; cp "$S/v.bak" "${GVREL}/bin/verify_release.py"; cp "$S/m.bak" "${GVREL}/RELEASE.sha256"
+chmod a-w "${GVREL}/bin/verify_release.py" "${GVREL}/RELEASE.sha256" "${GVREL}/bin"; chmod 0555 "${GVREL}"
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "integrity: restored staged release checks again" '[[ $RC -eq 0 && $OUT == *"GV1_CHECK_PASS"* && $(GV_TREE) == "$STAGED_TREE" ]]'
+# the live host changes after staging: check (running) and switch (stopped) both refuse, current stays e1
+sqlx "UPDATE goal SET lifecycle_state='PENDING' WHERE goal_id='g.test-only-1'"
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "after staging, a new candidate goal makes check refuse" '[[ $RC -ne 0 && $OUT == *"GOAL_FOCUS_CANDIDATE PENDING 1"* && $(state) == "$BASELINE" ]]'
+run bash "${GVI}" switch "$GP"; check "  and switch refuses; current stays e1, pins unchanged" '[[ $RC -ne 0 && $OUT == *"GOAL_FOCUS_CANDIDATE PENDING 1"* && $(state) == "$BASELINE" ]]'
+sqlx "UPDATE goal SET lifecycle_state='COMPLETED' WHERE goal_id='g.test-only-1'"
+# race: check passes, the Core API loses its flag before the switch
+run env SIM_GW="$RUNNING" F8_PROBE_AT=check_before_dry F8_PROBE_CMD=true bash "${GVI}" check "$GP"; check "race: check passes" '[[ $RC -eq 0 ]]'
+api_start ""
+run bash "${GVI}" switch "$GP"; check "race: the flag lost between check and switch makes switch refuse; current stays e1" '[[ $RC -ne 0 && $OUT == *FOCUS_READ_ONLY_NOT_IN_EFFECT* && $(state) == "$BASELINE" ]]'
+api_start 1
+# the whole two-phase sequence
+run env SIM_GW="$RUNNING" bash "${GVI}" check "$GP"; check "two-phase: check passes again (gateway running)" '[[ $RC -eq 0 ]]'
+run bash "${GVI}" switch "$GP"
+check "two-phase: switch succeeds once the gateway is stopped" '[[ $RC -eq 0 && $OUT == *"GV1_INSTALLED current=f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1"* ]]'
+check "  verify --full passes; HERMES_HOME and goal rows unchanged; the staged tree was used as checked" '[[ $(verify) == "F8_VERIFY_PASS full f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1" && $(homestate) == "$HOME0" && $(goalrows) == "$ROWS0" && $(GV_TREE) == "$STAGED_TREE" ]]'
+check "  pre-start (what the gateway start runs) passes" '[[ $(prestart) == "F8_VERIFY_PASS pre-start f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1" ]]'
+run env SIM_GW="$RUNNING" bash "${GVI}" stage "$GP"; check "after the switch, stage refuses" '[[ $RC -ne 0 && $OUT == *"current is not"* ]]'
+run bash "${GVI}" revert "$GP"; check "two-phase: revert returns to the e1 baseline" '[[ $RC -eq 0 && $OUT == *"GV1_REVERTED"* && $(state) == "$BASELINE" ]]'
+discard_gv
+
 # --- staging failure and automatic revert ---------------------------------------------------------------------------
 run env F8_FAIL_AT=staging bash "${GVI}" install "$GP"; NQ=$((NQ + 1))
 check "staging failure keeps the partial release under a new name, changes nothing else" '[[ $RC -ne 0 && $OUT == *"partial release kept"* && $(state) == "$BASELINE" && ! -e ${GVREL} && $(gquarantined) -eq '"$NQ"' ]]'

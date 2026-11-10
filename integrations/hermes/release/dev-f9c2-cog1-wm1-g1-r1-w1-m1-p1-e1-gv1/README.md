@@ -107,7 +107,7 @@ What each covers:
 
 | File | SHA-256 |
 | --- | --- |
-| `templates/bin/verify_release.py.tmpl` (gv1) | `2709d99d62ba105a6f6a99515ac04f045a8b29a58994ed254a4a66f256334125` |
+| `templates/bin/verify_release.py.tmpl` (gv1) | `ba814bdcacdc0882c57d9f84feff587ade40a459822a95291dda1f90e1591115` |
 | e1 template (`…-e1/templates/bin/verify_release.py.tmpl`) | `f1086cacc440d84850b30b033b23120e41f34919d2761ddb2e867761eb3b65d5` |
 | e1 router (`…-e1/home/router.yaml`, unchanged) | `be8c08d1c5e88e03306d33869239823bd61d367740a160a8133fd9353943e6f4` |
 | `RELEASE_ID` | `c33363446fcdcb8776c1db052751f96505e592d7066ce201652a46e1eac02618` |

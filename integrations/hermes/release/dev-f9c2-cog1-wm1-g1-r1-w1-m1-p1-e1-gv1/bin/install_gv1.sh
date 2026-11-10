@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 # e1-gv1 DEV install and revert (lilith-dev-01). Root only. Run from a root-owned 0700 payload directory holding exactly
 # the four PAYLOAD files below (from Git: this release's verifier template and RELEASE_ID, the e1 verifier template and
-# the e1 router):
-#   sudo bash install_gv1.sh install <payload-dir>   stage releases/<NEW_ID> beside e1 with the gv1 verifier, dry-run it
-#                                                     against the live host, switch current, re-pin, verify --full
-#   sudo bash install_gv1.sh revert  <payload-dir>   switch current back to e1, re-pin, check e1 is back as it was
+# the e1 router). Two phases, so the gateway keeps serving until the final switch:
+#   sudo bash install_gv1.sh stage  <payload-dir>   gateway may RUN. Build releases/<NEW_ID> beside e1 (only new files there),
+#                                                    dry-run its verifier against the live host. Nothing else changes.
+#   sudo bash install_gv1.sh check  <payload-dir>   gateway may RUN. Re-check the staged release's integrity and re-run the
+#                                                    dry run, immediately before stopping the gateway. Changes nothing.
+#   sudo bash install_gv1.sh switch <payload-dir>   gateway STOPPED. Same checks again, then switch current, re-pin,
+#                                                    verify --full. The gateway is NOT started here.
+#   sudo bash install_gv1.sh install <payload-dir>  gateway STOPPED. stage + switch in one run (as install_e1.sh).
+#   sudo bash install_gv1.sh revert <payload-dir>   gateway STOPPED. Switch current back to e1, re-pin, check e1 is back.
 # Adapted from install_e1.sh: same host, payload, gateway, FORGET-lock, staging, revert and simulation guards.
 # gv1 changes ONLY bin/verify_release.py (and RELEASE_ID): HERMES_HOME, router.yaml, every lilith_router module, units,
 # sudoers, the Core API, its DB, the goal store, broker, authority, witness, Privacy, memory, credentials and the provider
-# budget are untouched, and nothing is deleted. The gateway must be fully stopped first and is NOT started here.
+# budget are untouched, and nothing is deleted.
 # e1 today refuses with exactly "GOAL_STORE_NOT_EMPTY" (terminal TEST_ONLY goals from the 2026-11-09 P4-4 test); that one
-# refusal, and only that one, is accepted as the e1 baseline before install and after revert.
+# refusal, and only that one, is accepted as the e1 baseline. Consequence: once stopped, the gateway cannot start on e1
+# again, so a revert restores e1 but NOT service (see the release README's recovery runbook).
 # Failure: GV1_INSTALL_FAIL. A failed revert (GV1_REVERT_FAIL) can be re-run: every revert step is idempotent.
 set -Eeuo pipefail
 umask 022
-MODE=${1:?usage: install_gv1.sh install|revert <payload-dir>}
+MODE=${1:?usage: install_gv1.sh stage|check|switch|install|revert <payload-dir>}
 PAY=$(readlink -f "${2:?payload dir}")
 BASE=/opt/hermes-gateway-dev
 OLD_ID=f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1
@@ -23,12 +29,13 @@ OLD=${BASE}/releases/${OLD_ID}
 NEW=${BASE}/releases/${NEW_ID}
 HH=/home/lilith/.hermes-dev
 LR=${HH}/lilith_router
+CRITICAL=/etc/hermes-gateway-dev/critical.sha256
 FORGET=/var/lib/hermes-forget
 FORGET_LOCK=${FORGET}/state/.lock
 DEV_MACHINE_ID=ae929170e6fa4c8ab9cc7b9547238d9d
 # Payload pins (reviewed bytes in Git at the merge of this installer).
 declare -A PAYLOAD=(
-  [verify_release.gv1.py.tmpl]=2709d99d62ba105a6f6a99515ac04f045a8b29a58994ed254a4a66f256334125   # gv1 verifier
+  [verify_release.gv1.py.tmpl]=ba814bdcacdc0882c57d9f84feff587ade40a459822a95291dda1f90e1591115   # gv1 verifier
   [verify_release.e1.py.tmpl]=f1086cacc440d84850b30b033b23120e41f34919d2761ddb2e867761eb3b65d5   # installed e1 verifier
   [router.e1.yaml]=be8c08d1c5e88e03306d33869239823bd61d367740a160a8133fd9353943e6f4   # installed e1 router (unchanged by gv1)
   [RELEASE_ID]=c33363446fcdcb8776c1db052751f96505e592d7066ce201652a46e1eac02618   # release identity
@@ -97,13 +104,12 @@ home_is_e1() {   # gv1 changes nothing in HERMES_HOME: it must be exactly e1's
   [[ $(sha "${LR}/_prod_world_context.py") == "${PROD_WORKING_MEMORY_SHA}" ]] || die "installed PROD module differs"
 }
 
-preconditions() {
+preconditions() {   # every mode; the gateway-state rule is the caller's
   [[ $(id -u) -eq 0 ]] || die "not root"
   if [[ ${SIM} != 1 ]]; then [[ $(hostname) == lilith-dev-01 ]] || die "wrong host $(hostname)"; fi
   payload_ok
   [[ -d ${OLD} && ! -L ${OLD} ]] || die "${OLD_ID} release missing"
   home_is_e1
-  gateway_stopped
   take_forget_lock
   no_forget_pending
 }
@@ -116,6 +122,68 @@ e1_verdict() {   # the e1 verifier on the live host: PASS | GOAL_ONLY (exactly t
   else echo OTHER; fi
 }
 
+e1_baseline() {   # current is e1, pinned to e1, and e1 refuses for no reason other than the known one
+  [[ $(readlink -f "${BASE}/current") == "${OLD}" ]] || die "current is not ${OLD_ID}"
+  ! grep -q "  ${NEW#/}/" "${CRITICAL}" || die "the critical pins name ${NEW_ID}: finish or re-run the revert first"
+  E1_BEFORE=$(e1_verdict)
+  [[ ${E1_BEFORE} == PASS || ${E1_BEFORE} == GOAL_ONLY ]] || die "e1 verify --full refuses for another reason"
+}
+
+render_to() {   # $1 template, $2 output file, or "-" for the SHA-256 of the render only (nothing written)
+  # The template with the token of the installed e1 verifier; the token never leaves the host.
+  python3 -I - "${PAY}/verify_release.e1.py.tmpl" "${OLD}/bin/verify_release.py" "$1" "$2" <<'PY' || die "verifier render"
+import hashlib, os, sys
+PH = b"__LILITH_GATE_CLIENT_TOKEN__"
+base_t, base_r, new_t = (open(p, "rb").read() for p in sys.argv[1:4])
+out = sys.argv[4]
+head, rest = base_t.split(PH, 1)
+tail = rest.split(PH, 1)[0]
+if not base_r.startswith(head):
+    sys.exit("TEMPLATE_PREFIX")
+token = base_r[len(head):base_r.index(tail, len(head))] if tail else base_r[len(head):]
+if not token or PH in token or b"\n" in token or base_t.replace(PH, token) != base_r:
+    sys.exit("E1_RENDER_MISMATCH")
+rendered = new_t.replace(PH, token)
+if out == "-":
+    print(hashlib.sha256(rendered).hexdigest())
+    sys.exit(0)
+tmp = out + ".tmp"
+with open(tmp, "wb") as fh:
+    fh.write(rendered)
+os.chmod(tmp, 0o644)
+os.replace(tmp, out)
+PY
+}
+
+staged_ok() {   # the staged release is exactly e1 + the two gv1 members, read-only, root-owned, manifest intact
+  [[ -d ${NEW} && ! -L ${NEW} ]] || die "${NEW_ID} is not staged (run: install_gv1.sh stage)"
+  [[ $(stat -c '%U %a' "${NEW}") == "root 555" ]] || die "staged release is not root 0555"
+  [[ -z $(find "${NEW}" -mindepth 1 \( ! -user root -o -perm /0222 \) ! -type l -print -quit) ]] \
+    || die "staged release has a non-root or writable file"
+  (cd "${NEW}" && sha256sum -c --quiet --strict RELEASE.sha256 >/dev/null 2>&1) || die "staged release fails its RELEASE.sha256"
+  [[ $(cd "${NEW}" && find . -name __pycache__ -prune -o -type f ! -name 'RELEASE.sha256*' -print | wc -l) \
+     -eq $(wc -l < "${NEW}/RELEASE.sha256") ]] || die "staged release holds files outside its manifest"
+  [[ $(sha "${NEW}/RELEASE_ID") == "${PAYLOAD[RELEASE_ID]}" ]] || die "staged RELEASE_ID differs"
+  local d
+  d=$(diff <(LC_ALL=C sort -k2 "${OLD}/RELEASE.sha256") <(LC_ALL=C sort -k2 "${NEW}/RELEASE.sha256") | grep '^[<>]' \
+      | awk '{print $1, $3}' | LC_ALL=C sort | paste -sd' ') || true
+  [[ ${d} == "< RELEASE_ID < bin/verify_release.py > RELEASE_ID > bin/verify_release.py" ]] \
+    || die "staged release differs from e1 beyond RELEASE_ID and bin/verify_release.py (${d:-none})"
+  local want
+  want=$(render_to "${PAY}/verify_release.gv1.py.tmpl" -)
+  [[ -n ${want} && ${want} == $(sha "${NEW}/bin/verify_release.py") ]] \
+    || die "staged verifier is not the gv1 template with this host's token"
+}
+
+dry_run() {   # $1: the verifier to run. It judges the live host, still current=e1. One read-only focus read.
+  local out
+  out=$("${OLD}/venv/bin/python" -I -B "$1" --full 2>&1) || true
+  if [[ ${out} != "F8_VERIFY_PASS full ${OLD_ID}" ]]; then
+    printf '%s\n' "${out}" | sed 's/^/    /' >&2
+    die "the gv1 verifier refuses this host (dry run); nothing shared changed"
+  fi
+}
+
 verify_full() {   # the installed release's own gate: F8_VERIFY_PASS or nothing
   "${BASE}/current/venv/bin/python" -I -B "${BASE}/current/bin/verify_release.py" --full | tail -1 \
     | grep -qx "F8_VERIFY_PASS full $1"
@@ -123,6 +191,46 @@ verify_full() {   # the installed release's own gate: F8_VERIFY_PASS or nothing
 
 switch_current() {
   ln -sfn "releases/$1" "${BASE}/current.new" && mv -Tf "${BASE}/current.new" "${BASE}/current"
+}
+
+stage() {   # builds NEW beside e1; the only writes are under releases/ (NEW, or a quarantined partial on failure)
+  [[ ! -e ${NEW} && ! -e ${NEW}.new ]] || die "${NEW_ID} already staged"
+  avail_mb=$(df -Pm "${BASE}" | awk 'NR==2{print $4}'); used_mb=$(du -sm "${OLD}" | cut -f1)
+  (( avail_mb > used_mb + 512 )) || die "not enough space to stage ${NEW_ID}"
+  step "stage ${NEW_ID} beside ${OLD_ID}; render the gv1 verifier on this host (token stays on the host)"
+  PHASE=staging
+  STAGE=${NEW}.new
+  install -d -o root -g root -m 0700 "${STAGE}"
+  cp -a "${OLD}/." "${STAGE}/"
+  inject staging
+  render_to "${PAY}/verify_release.gv1.py.tmpl" "${STAGE}/bin/verify_release.py"
+  install -o root -g root -m 0644 "${PAY}/RELEASE_ID" "${STAGE}/RELEASE_ID"
+  (cd "${STAGE}" && find . -name __pycache__ -prune -o -type f ! -name 'RELEASE.sha256*' -print | sed 's|^\./||' \
+    | LC_ALL=C sort | xargs -r -d '\n' sha256sum) > "${STAGE}/RELEASE.sha256"
+  chown -R root:root "${STAGE}"; chmod -R a-w "${STAGE}"; chmod 0555 "${STAGE}"
+  inject staged
+  step "dry run: the staged gv1 verifier judges the live host (read-only; one focus read)"
+  dry_run "${STAGE}/bin/verify_release.py"
+  mv -T "${STAGE}" "${NEW}"
+  STAGE=
+  PHASE=preconditions
+  staged_ok
+}
+
+switch() {   # gateway stopped; NEW staged and checked
+  no_forget_pending
+  gateway_stopped
+  step "switch current to ${NEW_ID}; re-pin"
+  PHASE=home
+  inject after_home
+  switch_current "${NEW_ID}"
+  inject after_switch
+  bash "${NEW}/bin/pin_critical.sh" "${NEW}"
+  verify_full "${NEW_ID}" || { echo "GV1_INSTALL_FAIL gv1 verify --full" >&2; exit 1; }
+  home_is_e1
+  gateway_stopped
+  PHASE=done
+  echo "GV1_INSTALLED current=${NEW_ID} (gateway not started; e1 before: ${E1_BEFORE}; HERMES_HOME unchanged)"
 }
 
 revert() {   # idempotent; safe to re-run after a partial revert
@@ -165,76 +273,46 @@ trap on_exit EXIT
 trap 'exit 1' ERR
 
 case ${MODE} in
-  install)
-    step "preconditions"
+  stage)        # the gateway may keep running
+    step "preconditions (gateway may run)"
     preconditions
-    [[ $(readlink -f "${BASE}/current") == "${OLD}" ]] || die "current is not ${OLD_ID}"
-    [[ ! -e ${NEW} && ! -e ${NEW}.new ]] || die "${NEW_ID} already staged"
-    E1_BEFORE=$(e1_verdict)
-    [[ ${E1_BEFORE} == PASS || ${E1_BEFORE} == GOAL_ONLY ]] || die "e1 verify --full before install refuses for another reason"
-    avail_mb=$(df -Pm "${BASE}" | awk 'NR==2{print $4}'); used_mb=$(du -sm "${OLD}" | cut -f1)
-    (( avail_mb > used_mb + 512 )) || die "not enough space to stage ${NEW_ID}"
-
-    step "stage ${NEW_ID} beside ${OLD_ID}; render the gv1 verifier on this host (token stays on the host)"
-    PHASE=staging
-    STAGE=${NEW}.new
-    install -d -o root -g root -m 0700 "${STAGE}"
-    cp -a "${OLD}/." "${STAGE}/"
-    inject staging
-    python3 -I - "${PAY}/verify_release.e1.py.tmpl" "${OLD}/bin/verify_release.py" \
-      "${PAY}/verify_release.gv1.py.tmpl" "${STAGE}/bin/verify_release.py" <<'PY' || die "verifier render"
-import os, sys
-PH = b"__LILITH_GATE_CLIENT_TOKEN__"
-base_t, base_r, new_t = (open(p, "rb").read() for p in sys.argv[1:4])
-out = sys.argv[4]
-head, rest = base_t.split(PH, 1)
-tail = rest.split(PH, 1)[0]
-if not base_r.startswith(head):
-    sys.exit("TEMPLATE_PREFIX")
-token = base_r[len(head):base_r.index(tail, len(head))] if tail else base_r[len(head):]
-if not token or PH in token or b"\n" in token or base_t.replace(PH, token) != base_r:
-    sys.exit("E1_RENDER_MISMATCH")
-tmp = out + ".tmp"
-with open(tmp, "wb") as fh:
-    fh.write(new_t.replace(PH, token))
-os.chmod(tmp, 0o644)
-os.replace(tmp, out)
-PY
-    install -o root -g root -m 0644 "${PAY}/RELEASE_ID" "${STAGE}/RELEASE_ID"
-    (cd "${STAGE}" && find . -name __pycache__ -prune -o -type f ! -name 'RELEASE.sha256*' -print | sed 's|^\./||' \
-      | LC_ALL=C sort | xargs -r -d '\n' sha256sum) > "${STAGE}/RELEASE.sha256"
-    chown -R root:root "${STAGE}"; chmod -R a-w "${STAGE}"; chmod 0555 "${STAGE}"
-    inject staged
-    # Dry run: the staged gv1 verifier judges the live host (still e1-pinned) before anything shared changes. It reads
-    # the goal store read-only and makes one focus read, which the Core API answers without writing (checked).
-    DRY=$("${STAGE}/venv/bin/python" -I -B "${STAGE}/bin/verify_release.py" --full 2>&1) || true
-    if [[ ${DRY} != "F8_VERIFY_PASS full ${OLD_ID}" ]]; then
-      printf '%s\n' "${DRY}" | sed 's/^/    /' >&2
-      die "the gv1 verifier refuses this host (dry run); nothing shared changed"
-    fi
-    no_forget_pending
+    e1_baseline
+    stage
+    echo "GV1_STAGED ${NEW_ID} (dry run PASS; current still ${OLD_ID}; gateway untouched; e1 before: ${E1_BEFORE})"
+    ;;
+  check)        # the gateway may keep running; changes nothing
+    step "preconditions (gateway may run)"
+    preconditions
+    e1_baseline
+    staged_ok
+    inject check_before_dry
+    dry_run "${NEW}/bin/verify_release.py"
+    echo "GV1_CHECK_PASS ${NEW_ID} staged and verified; dry run PASS; safe to stop the gateway and switch"
+    ;;
+  switch)
+    step "preconditions (gateway stopped)"
+    preconditions
     gateway_stopped
-    mv -T "${STAGE}" "${NEW}"
-    STAGE=
-
-    step "switch current to ${NEW_ID}; re-pin"
-    PHASE=home
-    inject after_home
-    switch_current "${NEW_ID}"
-    inject after_switch
-    bash "${NEW}/bin/pin_critical.sh" "${NEW}"
-    verify_full "${NEW_ID}" || { echo "GV1_INSTALL_FAIL gv1 verify --full" >&2; exit 1; }
-    home_is_e1
+    e1_baseline
+    staged_ok
+    dry_run "${NEW}/bin/verify_release.py"
+    switch
+    ;;
+  install)
+    step "preconditions (gateway stopped)"
+    preconditions
     gateway_stopped
-    PHASE=done
-    echo "GV1_INSTALLED current=${NEW_ID} (gateway not started; e1 before: ${E1_BEFORE}; HERMES_HOME unchanged)"
+    e1_baseline
+    stage
+    switch
     ;;
   revert)
     step "preconditions"
     preconditions
+    gateway_stopped
     cur=$(readlink -f "${BASE}/current")
     [[ ${cur} == "${NEW}" || ${cur} == "${OLD}" ]] || die "current is neither ${NEW_ID} nor ${OLD_ID}"
-    if [[ ${cur} == "${OLD}" ]] && ! grep -q "  ${NEW#/}/" /etc/hermes-gateway-dev/critical.sha256; then
+    if [[ ${cur} == "${OLD}" ]] && ! grep -q "  ${NEW#/}/" "${CRITICAL}"; then
       # current is e1 AND the pins no longer name gv1 (a revert interrupted after the switch still has gv1 pins)
       v=$(e1_verdict)
       [[ ${v} == OTHER ]] || die "nothing to revert: ${OLD_ID} is current and pinned (e1 verifier: ${v})"

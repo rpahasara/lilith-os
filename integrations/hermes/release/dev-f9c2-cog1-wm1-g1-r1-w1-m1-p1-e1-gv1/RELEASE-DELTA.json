@@ -11,7 +11,7 @@
     },
     "bin/verify_release.py": {
       "template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1/templates/bin/verify_release.py.tmpl",
-      "template_sha256": "2709d99d62ba105a6f6a99515ac04f045a8b29a58994ed254a4a66f256334125",
+      "template_sha256": "ba814bdcacdc0882c57d9f84feff587ade40a459822a95291dda1f90e1591115",
       "base_template": "integrations/hermes/release/dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1/templates/bin/verify_release.py.tmpl",
       "base_template_sha256": "f1086cacc440d84850b30b033b23120e41f34919d2761ddb2e867761eb3b65d5",
       "rendering": "the host token is carried over from the installed e1 verifier on the host; it never leaves the host"
