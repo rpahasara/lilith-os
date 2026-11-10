@@ -20,6 +20,26 @@ try:
 except Exception:       # CI has no httpx
     TestClient = None
 
+GV1_TEMPLATE = (Path(__file__).resolve().parents[3] / "integrations" / "hermes" / "release"
+                / "dev-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1" / "templates" / "bin" / "verify_release.py.tmpl")
+
+
+class FocusGuardContract(unittest.TestCase):
+    """The DEV gateway's startup verifier (gv1) refuses to start unless this app's focus route writes its trace only under
+    LILITH_OS_FOCUS_READ_ONLY != "1", from goal_focus alone. Runs in CI (no httpx needed), so a refactor of the focus
+    route fails here, at review, instead of as a refused DEV gateway start after the next deploy."""
+
+    def test_app_py_satisfies_the_gv1_focus_guard(self):
+        import types
+        src = GV1_TEMPLATE.read_text(encoding="utf-8")
+        module = types.ModuleType("gv1_verifier")
+        with mock.patch.dict(sys.modules, {"yaml": sys.modules.get("yaml") or types.ModuleType("yaml")}):
+            exec(compile(src, str(GV1_TEMPLATE), "exec"), module.__dict__)
+        app_src = Path(app.__file__).read_text(encoding="utf-8")
+        self.assertEqual(module.focus_guard_problems(app_src), [])
+        self.assertEqual(module.focus_guard_problems(app_src.replace('_os.getenv("LILITH_OS_FOCUS_READ_ONLY") != "1"', "True")),
+                         ["FOCUS_GUARD_MISSING"])
+
 TERMINAL = ("COMPLETED", "COMPLETED", "FAILED", "FAILED", "CANCELLED", "CANCELLED")
 
 
