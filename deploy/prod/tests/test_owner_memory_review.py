@@ -389,6 +389,33 @@ class ConversationDateTests(unittest.TestCase):
             self.assertEqual(self.day_of(self.convo("Asia/Colombo"), "boundary"),
                              "--- said on 2026-11-09 (Monday), America/Los_Angeles ---")
 
+    def test_prod_after_the_2026_11_10_migration(self):
+        """PROD's real shape since 2026-11-10 19:04Z: `timezone: Asia/Colombo` appended at the end of a long config.yaml
+        (indented `timezone`-like keys elsewhere must not count), the gateway also exporting HERMES_TIMEZONE, and the
+        review running at 0 22 * * * Colombo = 16:30Z. A 26 h window then crosses Colombo midnight."""
+        cfg = ("model:\n  default: x\nplatforms:\n  telegram:\n    timezone: Europe/London   # nested: ignored\n"
+               "compression:\n  enabled: true\n_config_version: 7\ntimezone: Asia/Colombo\n")
+        (self.home / "config.yaml").write_text(cfg, encoding="utf-8")
+        self.assertEqual(OMR.review_timezone(self.home)[1], "Asia/Colombo")
+        run_at = utc("2026-11-11T16:30")                                  # 22:00 Wednesday in Colombo
+        self.db([("user", "TEST_ONLY I submitted the thesis today", utc("2026-11-10T18:20")),   # 23:50 Tue Colombo
+                 ("user", "TEST_ONLY back from the gym", utc("2026-11-10T18:40")),              # 00:10 Wed Colombo
+                 ("user", "TEST_ONLY my brother arrives tomorrow", utc("2026-11-11T16:00")),    # 21:30 Wed Colombo
+                 ("user", "TEST_ONLY too old", utc("2026-11-10T14:00"))])                       # outside 26 h
+        for env in ({}, {"HERMES_TIMEZONE": "Asia/Colombo"}):               # config only, and as the gateway exports it
+            with self.subTest(env=env), unittest.mock.patch.dict(os.environ, env):
+                lines = OMR.main(self.home, now=run_at).split("=== OWNER CONVERSATION")[1].splitlines()
+                self.assertIn("dates in Asia/Colombo", lines[0])
+                self.assertEqual([l for l in lines if l.startswith("--- said on ")],
+                                 ["--- said on 2026-11-10 (Tuesday), Asia/Colombo ---",
+                                  "--- said on 2026-11-11 (Wednesday), Asia/Colombo ---"])
+                self.assertEqual(self.day_of(lines, "submitted the thesis today"),
+                                 "--- said on 2026-11-10 (Tuesday), Asia/Colombo ---")   # "today" = Tue 10, not the run day
+                self.assertEqual(self.day_of(lines, "back from the gym"), "--- said on 2026-11-11 (Wednesday), Asia/Colombo ---")
+                self.assertEqual(self.day_of(lines, "brother arrives tomorrow"),
+                                 "--- said on 2026-11-11 (Wednesday), Asia/Colombo ---")
+                self.assertNotIn("too old", "\n".join(lines))
+
     def test_timezone_setting_fails_safe_to_named_utc(self):
         for cfg in ("timezone: Not/AZone\n", "agent:\n  timezone: Asia/Colombo\n", "timezone:\n", None):
             if cfg is None:
