@@ -381,7 +381,9 @@ class FullHostTest(unittest.TestCase):
         assert C.assemble_dev_cognition.assemble(home) == []
         (home / "router.yaml").unlink()
         lr = home / "lilith_router"
-        shutil.copy(E1_ROUTER, lr / "router.yaml")
+        router = yaml.safe_load(E1_ROUTER.read_text(encoding="utf-8"))
+        router["log_path"] = str(home / "logs" / Path(router["log_path"]).name)     # the fixture's own state logs
+        (lr / "router.yaml").write_text(yaml.safe_dump(router), encoding="utf-8")
         for src, name in ((O / "dev-ethics-hardening/lilith_router/world_context.py", "world_context.py"),
                           (O / "dev-ethics-hardening/lilith_router/ethics.py", "ethics.py"),
                           (REPO / "docs/architecture/slice-13/ethics_principles.py", "ethics_principles.py"),
