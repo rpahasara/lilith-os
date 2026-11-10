@@ -73,6 +73,8 @@ Sri Lanka has no daylight saving: +05:30 all year, so 22:00 Colombo is 16:30Z ev
   - `jobs-inspect` matched the inventory;
   - `datecheck` showed today's line `Conversation started: Tuesday, November 10, 2026 (UTC, UTC+00:00)`;
   - `precheck` refused inside the 16:00–17:00Z blackout, as designed;
+  - at 17:01Z, the full **`precheck` → `TZ_PRECHECK_PASS`**: planned review `2026-11-11T22:00:00+05:30` = `16:30:00Z`;
+    the 2026-11-10 review ran once at 16:30:56Z (status ok), next 2026-11-11 16:30Z;
   - nothing was written (`config.yaml` unchanged); temporary files were under `/run` and removed.
 - **Offline:** `test_tz_ops.py` 10/10 (config append, refusals, job-set guard, the 16:30Z instant, no DST).
 
@@ -86,8 +88,9 @@ Requirements:
 
 **Proposed:** any time outside the blackouts. 04:00–15:30Z is the widest gap.
 
-**Outage:** gateway stop to active is a few seconds, plus platform reconnects (Telegram, Discord, console), about 10–30 s
-based on PROD's 2026-11-09 restarts. Messages sent during it are delivered on reconnect. Commitment sync misses about one
+**Outage:** about 20 s. Gateway stop to active takes a few seconds, plus platform reconnects. Measured on PROD's
+2026-11-09 13:15:26Z restart: Telegram and Discord connected at +15 s, console at +16 s, "Gateway running with 3
+platform(s)" at +16 s. Messages sent during it are delivered on reconnect. Commitment sync misses about one
 minute and catches up once (S10).
 
 ## Exact procedure
