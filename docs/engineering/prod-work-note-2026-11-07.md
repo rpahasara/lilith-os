@@ -1446,7 +1446,8 @@ for PROD: PROD has cron jobs and `jobs.json` is writable there. The schedule cha
   - fail if the API unit lacks `LILITH_OS_FOCUS_READ_ONLY=1`;
   - add a release test with terminal-only goals.
 
-  Deleting the six TEST_ONLY goals would also clear it, but it erases recorded history and weakens nothing less.
+  Deleting the six TEST_ONLY goals would also clear it, but it erases recorded test history. The narrowed rule keeps
+  the same protection without deleting anything.
 
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
