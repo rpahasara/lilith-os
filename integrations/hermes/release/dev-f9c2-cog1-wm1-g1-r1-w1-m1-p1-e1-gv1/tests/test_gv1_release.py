@@ -412,6 +412,9 @@ class FullHostTest(unittest.TestCase):
         os.chmod(r / "etc-gate" / "credentials", 0o700)
         gate = (F9C2 / "templates" / "gate" / "gate.json.tmpl").read_text(encoding="utf-8")
         (r / "etc-gate" / "gate.json").write_text(gate.replace(C.PLACEHOLDER, C.TEST_TOKEN), encoding="utf-8")
+        for p in [r, *r.rglob("*")]:                     # as installed: nothing group/other writable
+            if not p.is_symlink():
+                os.chmod(p, p.stat().st_mode & ~0o022)
         self.db = make_store(self.tmp / "lilith-dev.db", goals=DEV_GOALS, traces=DEV_TRACES)
         self.rt = FakeRuntime(self.tmp, self.db)
 
