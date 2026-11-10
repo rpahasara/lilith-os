@@ -351,7 +351,7 @@ cp "${HH}/cron/jobs.json" "$S/jobs.bak"; chmod u+w "${HH}/cron/jobs.json"; print
 run bash "${GVI}" install "$GP"; check "refuses when e1 refuses for another reason too" '[[ $RC -ne 0 && $OUT == *"refuses for another reason"* ]]'
 cp "$S/jobs.bak" "${HH}/cron/jobs.json"; chmod 0644 "${HH}/cron/jobs.json"
 check "  restored" '[[ $(state) == "$BASELINE" ]]'
-run bash "${GVI}" revert "$GP"; check "revert refuses when e1 is current" '[[ $RC -ne 0 && $OUT == *"nothing to revert"* && $(state) == "$BASELINE" ]]'
+run bash "${GVI}" revert "$GP"; check "revert refuses when e1 is current and pinned" '[[ $RC -ne 0 && $OUT == *"nothing to revert"* && $(state) == "$BASELINE" ]]'
 
 # --- the dry run of the staged gv1 verifier refuses unsafe hosts before any shared change -----------------------------
 NQ=0
@@ -422,6 +422,7 @@ done
 run env SIM_GW="failed failed 0" bash "${GVI}" revert "$GP"
 check "revert succeeds with the gateway in failed/failed; e1 back exactly (GOAL_ONLY, as on DEV today)" '[[ $RC -eq 0 && $OUT == *"e1 verifier: GOAL_ONLY"* && $(state) == "$BASELINE" && $(homestate) == "$HOME0" && $(goalrows) == "$ROWS0" ]]'
 check "  gv1 release kept for inspection" '[[ -d ${GVREL} ]]'
+check "  the pins name e1 only" '[[ $(grep -c "f293e72-f9c2-cog1-wm1-g1-r1-w1-m1-p1-e1-gv1/" /etc/hermes-gateway-dev/critical.sha256) -eq 0 ]]'
 
 echo "SIM_RESULT $([[ ${FAILS} -eq 0 ]] && echo PASS || echo "FAIL (${FAILS})")"
 exit "${FAILS}"

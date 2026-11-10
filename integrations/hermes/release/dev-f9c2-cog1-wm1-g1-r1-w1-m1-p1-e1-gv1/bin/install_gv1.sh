@@ -234,9 +234,10 @@ PY
     preconditions
     cur=$(readlink -f "${BASE}/current")
     [[ ${cur} == "${NEW}" || ${cur} == "${OLD}" ]] || die "current is neither ${NEW_ID} nor ${OLD_ID}"
-    if [[ ${cur} == "${OLD}" ]]; then
+    if [[ ${cur} == "${OLD}" ]] && ! grep -q "  ${NEW#/}/" /etc/hermes-gateway-dev/critical.sha256; then
+      # current is e1 AND the pins no longer name gv1 (a revert interrupted after the switch still has gv1 pins)
       v=$(e1_verdict)
-      [[ ${v} == OTHER ]] || die "nothing to revert: ${OLD_ID} is current (e1 verifier: ${v})"
+      [[ ${v} == OTHER ]] || die "nothing to revert: ${OLD_ID} is current and pinned (e1 verifier: ${v})"
     fi
     revert
     ;;
