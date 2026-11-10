@@ -22,6 +22,12 @@ Variant keys (all optional; an empty variant is the baseline):
     appraisal       P-3: "router": the deployed appraisal module over the message and the SYNTHETIC "goals" (variant
                     plus scenario), applied to the deployed tone note lines and adding the goal line (needs
                     tone_note "deployed"; the agent arm then also carries the tone note as its turn hint)
+    timeline        P-4: "router": the deployed timeline note rendered from the spec's SYNTHETIC "timeline_records", only
+                    when the deployed trigger (timeline.temporal) fires for the message - as a live owner turn would
+    timeline_header P-4: candidate header text for the timeline note (offline comparison of wordings)
+    retrieval       P-4 (agent mode): "synthetic": the agent gets Hermes' own session_search tool over a throwaway
+                    state.db built from the spec's SYNTHETIC "synthetic_conversations" (real owner transcripts are never
+                    reachable: SessionDB is pinned to the synthetic file for the whole process)
     meta            P-3: "ask" | "escalate": the L16 recall-gap control, decided by the deployed metacognition module
                     with the synthetic profile as grounding, exactly as a live owner turn would (note only if it fires)
 
@@ -80,6 +86,69 @@ def style_parts(scn: dict, variant: dict, focused: bool):
     return tone, goal
 
 
+def timeline_note(scn: dict, variant: dict, spec: dict):
+    """P-4 arm: the router's timeline note for this scenario (deployed module, synthetic records), or None."""
+    if variant.get("timeline") != "router":
+        return None
+    from lilith_router import timeline as tl
+    if not tl.temporal(scn["message"]):
+        return None
+    header = variant.get("timeline_header")          # candidate wording, evaluated without touching the deployed one
+    saved = tl.HEADER
+    try:
+        if header:
+            tl.HEADER = header
+        return tl.render(spec.get("timeline_records") or [])
+    finally:
+        tl.HEADER = saved
+
+
+def synthetic_session_store(spec: dict) -> Path:
+    """A throwaway Hermes state.db with the spec's synthetic conversations (Hermes' own schema), timestamps set to
+    the scenario's dates; then every SessionDB in this process is pinned to it."""
+    import sqlite3
+    import tempfile
+    import hermes_state
+    path = Path(tempfile.mkdtemp(prefix="syn-sessions-")) / "state.db"
+    db = hermes_state.SessionDB(db_path=path)
+    for s in spec.get("synthetic_conversations") or []:
+        db.create_session(s["id"], s.get("source", "telegram"))
+        for role, content, _ts in s["messages"]:
+            db.append_message(s["id"], role, content)
+    close = getattr(db, "close", None)
+    if callable(close):
+        close()
+    con = sqlite3.connect(path)
+    for s in spec.get("synthetic_conversations") or []:
+        ids = [r[0] for r in con.execute("SELECT id FROM messages WHERE session_id=? ORDER BY id", (s["id"],))]
+        stamps = [_epoch(ts) for _, _, ts in s["messages"]]
+        for mid, ts in zip(ids, stamps):
+            con.execute("UPDATE messages SET timestamp=? WHERE id=?", (ts, mid))
+        cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
+        if "started_at" in cols and stamps:
+            con.execute("UPDATE sessions SET started_at=? WHERE id=?", (stamps[0], s["id"]))
+        if "ended_at" in cols and stamps:
+            con.execute("UPDATE sessions SET ended_at=? WHERE id=?", (stamps[-1], s["id"]))
+    con.commit()
+    con.close()
+    original = hermes_state.SessionDB
+
+    class _Synthetic(original):
+        def __init__(self, db_path=None, read_only=False, *a, **k):
+            super().__init__(db_path=path, read_only=read_only, *a, **k)
+    hermes_state.SessionDB = _Synthetic
+    return path
+
+
+def _epoch(value) -> float:
+    import datetime as _dt
+    return _dt.datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+
+
+def _tool_calls(messages) -> int:
+    return sum(len(m.get("tool_calls") or []) for m in messages or [] if isinstance(m, dict) and m.get("role") == "assistant")
+
+
 def meta_note(scn: dict, variant: dict, prof: str):
     """P-3 arm: the router's L16 note for this scenario, or None (no control, or the gate did not fire)."""
     control = variant.get("meta")
@@ -127,6 +196,9 @@ def lean_runner(spec):
             policy += "\n\n" + mnote                      # then the P-3 L16 note (turn_context.lean_suffix order)
         if goal:
             policy += "\n\n" + goal                       # then the P-3 appraisal goal line
+        tnote = timeline_note(scn, variant, spec)
+        if tnote:
+            policy += "\n\n" + tnote                      # P-4 arm D: the timeline on the lean path (experiment)
         if variant.get("system_suffix"):
             policy += "\n\n" + variant["system_suffix"]
         msg = (variant.get("message_prefix", "") + "\n\n" + scn["message"]) if variant.get("message_prefix") \
@@ -160,21 +232,29 @@ def agent_runner(spec):
     from gateway.run import _resolve_runtime_agent_kwargs_for_provider as res
     rt = res(spec.get("agent_provider", "openai-codex"))
     model = spec.get("agent_model", "gpt-5.6-sol")
+    store = None
+    if any(v.get("retrieval") == "synthetic" for v in spec["variants"].values()):
+        store = synthetic_session_store(spec)
 
     def run(scn, variant):
         prof, pref_note = preference_parts(scn, variant, sp, _focused(cl, scn))
         system = "\n\n".join(p for p in (prof, variant.get("system_suffix")) if p) or None
+        retrieval = variant.get("retrieval") == "synthetic" and store is not None
         a = AIAgent(model=model, **{k: rt[k] for k in ("provider", "base_url", "api_key", "api_mode") if k in rt},
-                    quiet_mode=True, verbose_logging=False, enabled_toolsets=[], skip_context_files=True,
-                    load_soul_identity=True, ephemeral_system_prompt=system, max_iterations=2, **extra)
+                    quiet_mode=True, verbose_logging=False,
+                    enabled_toolsets=["session_search"] if retrieval else [], skip_context_files=True,
+                    load_soul_identity=True, ephemeral_system_prompt=system,
+                    max_iterations=6 if retrieval else 2, **extra)
         tone, goal = style_parts(scn, variant, _focused(cl, scn))
         prefix = "\n\n".join(p for p in (variant.get("message_prefix"), tone, pref_note, meta_note(scn, variant, prof),
-                                          goal) if p)                               # the router's turn hint
+                                          goal, timeline_note(scn, variant, spec)) if p)  # the router's turn hint
         msg = (prefix + "\n\n" + scn["message"]) if prefix else scn["message"]
         t0 = time.monotonic()
         r = a.run_conversation(msg, conversation_history=[{"role": x, "content": y} for x, y in scn.get("history", [])])
         toks = int(getattr(a, "session_prompt_tokens", 0) or 0) + int(getattr(a, "session_completion_tokens", 0) or 0)
-        return (r.get("final_response") or "").strip(), toks, int((time.monotonic() - t0) * 1000)
+        n_hist = len(scn.get("history", [])) + 1
+        calls = _tool_calls((r.get("messages") or [])[n_hist:])
+        return (r.get("final_response") or "").strip(), toks, int((time.monotonic() - t0) * 1000), calls
     return run
 
 
@@ -183,16 +263,19 @@ def replay(spec: dict, run) -> list:
     for scn in spec["scenarios"]:
         rec = {"id": scn["id"], "replies": {}, "tokens": {}, "latency_ms": {}}
         for name, variant in spec["variants"].items():
-            for k in ("replies", "tokens", "latency_ms"):
-                rec[k][name] = []
+            for k in ("replies", "tokens", "latency_ms", "tool_calls"):
+                rec.setdefault(k, {})[name] = []
             for _ in range(int(spec.get("samples", 2))):
                 if used >= budget:
                     rec["replies"][name].append(None)
                     continue
                 try:
-                    text, toks, ms = run(scn, variant)
+                    res = run(scn, variant)
+                    text, toks, ms = res[:3]
+                    rec["tool_calls"][name].append(res[3] if len(res) > 3 else 0)
                 except Exception as exc:
                     text, toks, ms = "<<ERROR %s %s>>" % (type(exc).__name__, getattr(exc, "status_code", "")), 0, 0
+                    rec["tool_calls"][name].append(0)
                 used += toks
                 rec["replies"][name].append(text)
                 rec["tokens"][name].append(toks)

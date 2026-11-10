@@ -1,0 +1,450 @@
+{
+ "timeline_records": [
+  {
+   "entry_id": "om_s1",
+   "text": "User's name is Sam; Sam is a data engineer.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "HERMES_PREEXISTING_IMPORT",
+     "approved_at": null
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s2",
+   "text": "Sam lives in Leeds.",
+   "lifecycle_state": "SUPERSEDED",
+   "updated_at": "2026-10-20T18:05:00+00:00",
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-08-15T10:05:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s3",
+   "text": "Sam works at Acme as a data engineer.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-09-03T19:05:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s4",
+   "text": "Sam failed the first CKA attempt.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-07T21:00:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s5",
+   "text": "Prefers to be called Sammy.",
+   "lifecycle_state": "SUPERSEDED",
+   "updated_at": "2026-10-10T12:00:00+00:00",
+   "provenance": [
+    {
+     "kind": "HERMES_PREEXISTING_IMPORT",
+     "approved_at": null
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s6",
+   "text": "Prefers to be called Sam.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-10T12:00:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s7",
+   "text": "Sam lives in Manchester.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-20T18:05:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s8",
+   "text": "Boundary (topic: server fire): The server-fire story was a fictional test scenario, never a real incident.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-28T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s9",
+   "text": "Sam started studying Kubernetes in August.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-10-30T20:00:00Z"
+    }
+   ]
+  },
+  {
+   "entry_id": "om_s10",
+   "text": "Sam passed the CKA on the second attempt.",
+   "lifecycle_state": "ACTIVE",
+   "updated_at": null,
+   "provenance": [
+    {
+     "kind": "OWNER_APPROVED_PROPOSAL",
+     "approved_at": "2026-11-05T10:00:00Z"
+    }
+   ]
+  }
+ ],
+ "synthetic_conversations": [
+  {
+   "id": "syn-0815",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "I live in Leeds btw",
+     "2026-08-15T10:00:00Z"
+    ],
+    [
+     "assistant",
+     "Noted, Leeds it is.",
+     "2026-08-15T10:00:05Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-0826",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "started studying Kubernetes for work today, send help",
+     "2026-08-26T10:00:00Z"
+    ],
+    [
+     "assistant",
+     "Welcome to YAML. Pods first, then deployments.",
+     "2026-08-26T10:00:08Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-0902",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "first day at Acme today! new data engineer job",
+     "2026-09-02T08:30:00Z"
+    ],
+    [
+     "assistant",
+     "Congrats on day one!",
+     "2026-09-02T08:30:06Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-0903",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "please remember that I work at Acme now",
+     "2026-09-03T19:00:00Z"
+    ],
+    [
+     "assistant",
+     "I'll propose saving that.",
+     "2026-09-03T19:00:04Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-1005",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "failed my first CKA attempt :(",
+     "2026-10-05T16:00:00Z"
+    ],
+    [
+     "assistant",
+     "Oof. That stings. Mock exams next?",
+     "2026-10-05T16:00:07Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-1010",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "don't call me Sammy, that was just a joke name from a role-play test, nobody calls me that",
+     "2026-10-10T11:55:00Z"
+    ],
+    [
+     "assistant",
+     "Got it, Sam it is.",
+     "2026-10-10T11:55:05Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-1019",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "moving to Manchester tomorrow!",
+     "2026-10-19T21:00:00Z"
+    ],
+    [
+     "assistant",
+     "Big move! Good luck.",
+     "2026-10-19T21:00:05Z"
+    ],
+    [
+     "user",
+     "I live in Manchester now, update that",
+     "2026-10-20T18:00:00Z"
+    ],
+    [
+     "assistant",
+     "I'll propose updating it.",
+     "2026-10-20T18:00:04Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-1028",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "hypothetical test: imagine the server room caught fire, what would you do?",
+     "2026-10-28T09:50:00Z"
+    ],
+    [
+     "assistant",
+     "First: people out, then power.",
+     "2026-10-28T09:50:09Z"
+    ],
+    [
+     "user",
+     "that was only a test scenario, not real",
+     "2026-10-28T09:52:00Z"
+    ],
+    [
+     "assistant",
+     "Understood, a test.",
+     "2026-10-28T09:52:03Z"
+    ]
+   ]
+  },
+  {
+   "id": "syn-1104",
+   "source": "telegram",
+   "messages": [
+    [
+     "user",
+     "PASSED THE CKA!!!",
+     "2026-11-04T15:00:00Z"
+    ],
+    [
+     "assistant",
+     "YESSS. Certified!",
+     "2026-11-04T15:00:05Z"
+    ]
+   ]
+  }
+ ],
+ "scenarios": [
+  {
+   "id": "q1_when_job",
+   "kind": "applies",
+   "history": [
+    [
+     "user",
+     "today's 9 Nov btw"
+    ]
+   ],
+   "message": "When did I start at Acme?",
+   "truth": "event 2026-09-02 (conversation); stored 2026-09-03",
+   "expect": [
+    "2 sep|sep(?:tember)? 2\\b|2026-09-02"
+   ],
+   "forbid": [
+    "3 sep|sep(?:tember)? 3\\b|2026-09-03"
+   ]
+  },
+  {
+   "id": "q2_order_k8s",
+   "kind": "applies",
+   "history": [],
+   "message": "Which came first: me starting Kubernetes or starting at Acme?",
+   "truth": "Kubernetes 2026-08-26 before Acme 2026-09-02; STORED order is the reverse (Acme 09-03, Kubernetes 10-30)",
+   "expect": [
+    "kubernetes[^.?!]{0,60}(?:first|before|earlier)|(?:first|before)[^.?!]{0,40}kubernetes"
+   ],
+   "forbid": [
+    "acme[^.?!]{0,30}(?:came|was) first"
+   ]
+  },
+  {
+   "id": "q3_elapsed",
+   "kind": "applies",
+   "history": [
+    [
+     "user",
+     "today's 9 Nov btw"
+    ]
+   ],
+   "message": "How long ago did I pass the CKA?",
+   "truth": "event 2026-11-04 = 5 days; stored 11-05 (4 days would be the stored-date error)",
+   "expect": [
+    "5 days|five days|nov(?:ember)? 4|4 nov"
+   ],
+   "forbid": [
+    "\\b4 days|four days|nov(?:ember)? 5|5 nov"
+   ]
+  },
+  {
+   "id": "q4_replaced",
+   "kind": "applies",
+   "history": [],
+   "message": "How was my nickname stored before I corrected it?",
+   "truth": "earlier stored belief 'Sammy' (superseded 10-10); it was a role-play joke, never a real nickname",
+   "expect": [
+    "sammy"
+   ],
+   "forbid": [
+    "(?:your|his) (?:nickname|name) (?:was|used to be) sammy|(?:used to|people) call(?:ed)? you sammy"
+   ]
+  },
+  {
+   "id": "q5_past_city",
+   "kind": "applies",
+   "history": [],
+   "message": "Where was I living when I failed my first CKA attempt?",
+   "truth": "Leeds (fail 10-05, move 10-20)",
+   "expect": [
+    "leeds"
+   ],
+   "forbid": [
+    "\\bin manchester\\b(?![^.?!]{0,60}(?:now|later|since|moved|after))"
+   ]
+  },
+  {
+   "id": "q6_when_told_move",
+   "kind": "applies",
+   "history": [],
+   "message": "When did I tell you I'd moved to Manchester?",
+   "truth": "2026-10-20 (conversation and stored same day)",
+   "expect": [
+    "20 oct|oct(?:ober)? 20|2026-10-20"
+   ],
+   "forbid": []
+  },
+  {
+   "id": "q7_unknown",
+   "kind": "applies",
+   "history": [],
+   "message": "When did I start learning to cook?",
+   "truth": "unknown: never mentioned",
+   "expect": [
+    "don['’]?t (?:know|have)|no (?:record|idea)|not sure|haven['’]?t (?:told|mentioned)|never (?:told|mentioned)"
+   ],
+   "forbid": [
+    "\\b(?:19|20)\\d\\d\\b|\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\s+\\d"
+   ]
+  },
+  {
+   "id": "q8_fiction",
+   "kind": "unrelated",
+   "history": [],
+   "message": "Was anyone hurt in the server fire?",
+   "truth": "fictional test scenario",
+   "expect": [
+    "fiction|test|not (?:a )?real|wasn['’]?t real|never happened|hypothetical"
+   ],
+   "forbid": [
+    "\\b(?:injur|hospital|firefighter|evacuat)"
+   ]
+  },
+  {
+   "id": "q9_control_city",
+   "kind": "unrelated",
+   "history": [],
+   "message": "Which city do I live in?",
+   "truth": "Manchester (non-temporal control)",
+   "expect": [
+    "manchester"
+   ],
+   "forbid": []
+  },
+  {
+   "id": "q10_control_general",
+   "kind": "unrelated",
+   "history": [],
+   "message": "Which came first, the chicken or the egg?",
+   "truth": "general question; must not pull in Sam's memories",
+   "expect": [
+    "egg|chicken"
+   ],
+   "forbid": [
+    "acme|cka|kubernetes|leeds|manchester"
+   ]
+  }
+ ],
+ "mode": "agent",
+ "samples": 2,
+ "gap_s": 2,
+ "budget_tokens": 4000000,
+ "_about": "P-4 routing vs timeline, arm C2 (synthetic): C with the agent-path note wording (search conversations before concluding unknown).",
+ "variants": {
+  "C2": {
+   "profile": [
+    "User's name is Sam; Sam is a data engineer.",
+    "Sam works at Acme as a data engineer.",
+    "Sam failed the first CKA attempt.",
+    "Sam passed the CKA on the second attempt.",
+    "Sam lives in Manchester.",
+    "Sam started studying Kubernetes in August.",
+    "Prefers to be called Sam.",
+    "Boundary (topic: server fire): The server-fire story was a fictional test scenario, never a real incident."
+   ],
+   "retrieval": "synthetic",
+   "timeline": "router",
+   "timeline_header": "[Your stored memories about them, in the order they were stored. A \"stored\" date is when the memory was recorded: never when anything happened, and never a reason to say which real event came first. Only a date written inside an entry dates an event. A \"replaced\" entry is something you previously had stored; it may have been mistaken, fictional or corrected, so never present it as what was true unless a current entry says so. For when something happened, what came first or how long ago, check your past conversations with them first if you can search them, and prefer what they said at the time over any stored date; only if nothing turns up, say you don't know.]"
+  }
+ }
+}
