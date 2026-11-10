@@ -1408,6 +1408,46 @@ Changing those integrity pins was not authorized. The rehearsal therefore ran DE
 - Change zone and schedule together while the gateway is stopped (S5), or zone then `update_job` (S3/S4).
 - Avoid a restart window spanning 16:30Z (S11).
 
+**DEV↔PROD source identity and the DEV verifier (owner GO 2026-11-10; read-only on both).**
+
+| File | DEV (`f293e72-…-e1` release) | PROD (`~/.hermes/hermes-agent`) | Result |
+| --- | --- | --- | --- |
+| `hermes_time.py` | `3f4ee146…` | `3f4ee146…` | MATCH |
+| `cron/jobs.py` | `edf2469d…` | `edf2469d…` | MATCH |
+| `agent/system_prompt.py` | `1d1c1bfb…` | `1d1c1bfb…` | MATCH |
+| `gateway/message_timestamps.py` | `daa620ef…` | `daa620ef…` | MATCH |
+| Hermes version | 0.20.5 (pyproject, `__version__`, dist) | 0.20.5 | MATCH |
+| Python | 3.11.16 | 3.11.16 | MATCH |
+
+The DEV rehearsal (S1–S11) exercised byte-identical timezone and scheduler code to PROD. One remaining difference matters
+for PROD: PROD has cron jobs and `jobs.json` is writable there. The schedule change must happen with the zone change
+(S2 shows the drift otherwise).
+
+*`GOAL_STORE_NOT_EMPTY` on DEV: literal rule stale, intended invariant intact.*
+- **The rule.** w1 (`f634039`, 2026-10-30) added `count(goal) == 0` to the pre-start verifier; m1, p1 and e1 carried it
+  unchanged. Stated reason (w1 README / INSTALL-PLAN): a `GET /os/goals/focus` read with a goal present writes an
+  arbitration trace, so the Workspace shadow lane would not be write-free. g2 was accepted "on an empty store only".
+- **What is in the store.** 6 goals, all `commitment.once`, source `SCHEDULED`, terminal (2 COMPLETED, 2 FAILED,
+  2 CANCELLED). They were created 2026-11-09 05:50:11Z and 06:33:44Z from `127.0.0.1` inside owner-account SSH sessions,
+  with operation prefix `commit-t1794…`. That is the P4-4 commitment-sync DEV test (§ above: "terminal `TEST_ONLY P4-4
+  DEV` goals remain on DEV as history"; there are six, from two runs). No DEV component wrote them. 20 `goal_trace` rows,
+  all `transition`.
+- **Why the invariant still holds.**
+  - `_arbitrate` considers only ACTIVE/PENDING goals, and there are 0.
+  - `_record_focus_trace` writes only when the winner changes; with no candidates the winner stays `None`.
+  - DEV's Core API runs with `LILITH_OS_FOCUS_READ_ONLY=1`, so focus reads never write.
+  - 0 arbitration traces exist.
+- **Consequence.** The verifier is stricter than its purpose and blocks the next DEV gateway start (last good start
+  2026-11-04 08:32Z, before the test goals).
+- **Proposed fix (not done; needs separate authorization: new DEV release package, verifier pin, gateway restart).**
+  Replace `count(goal) == 0` with what the rule protects:
+  - fail on any ACTIVE/PENDING goal;
+  - fail on any `arbitration` trace;
+  - fail if the API unit lacks `LILITH_OS_FOCUS_READ_ONLY=1`;
+  - add a release test with terminal-only goals.
+
+  Deleting the six TEST_ONLY goals would also clear it, but it erases recorded history and weakens nothing less.
+
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
 Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan
