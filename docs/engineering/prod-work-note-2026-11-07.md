@@ -1299,6 +1299,38 @@ Measure it with a counts-only check of the next real proposals (dated as event, 
 further change. A structured event-date field would be a schema change (out of scope; schema v4 is not touched) and is
 not justified by n = 0.
 
+**Built (owner GO 2026-11-10; PR "P4-1 conversation dates"; NOT deployed).** `owner_memory_review.py` only; no schema,
+no new store, no approval change.
+- **Said-on markers.** The OWNER CONVERSATION section starts each local day with `--- said on 2026-11-09 (Monday),
+  <zone> ---`, from the `messages.timestamp` already selected. The weekday lets the reviewer resolve "last Tuesday".
+  If the window is truncated, the kept lines keep their day marker.
+- **Timezone.** Hermes' own setting: `HERMES_TIMEZONE`, else top-level `timezone:` in `config.yaml`. Otherwise, or if
+  the zone is unknown, UTC. The zone is always named. **PROD today has no Hermes timezone set** (host clock UTC), so
+  markers will read UTC until the owner sets one. That is a separate PROD config change: Hermes uses the same setting
+  elsewhere, so it needs its own review.
+- **Repeated lines.** A line repeated on a later day stays under its FIRST day and is tagged `[also said on <date>]`.
+  It is never moved to the later day. Compaction re-inserts look the same, so a relative word on such a line counts as
+  ambiguous.
+- **Guidance: four dates kept apart.**
+  1. "On <date>" only when they said when it happened, with today / yesterday / last <weekday> resolved against THAT
+     line's said-on date.
+  2. "Told LILITH on <said-on date>" otherwise.
+  3. Vague or ambiguous timing keeps their words and adds only the told date; never invent a day.
+  4. Never an event date: the run ("Conversation started") date, or any stored, approval, replacement or goal-marked
+     date.
+
+  Plans, corrections, past facts and hypotheticals keep their kind. The old example "On 2026-11-09 he passed ..." is
+  gone.
+- **Goal outcomes** now read "marked completed in their tracked goals on <date> (<zone>); that is when it was marked,
+  not necessarily when it happened".
+- **Kept as before:** the owner-only filtering, read-only access (apart from the existing SEEN snapshot),
+  NO_NEW_OWNER_CONVERSATION, every proposal still staged for approval, and canonical items never proposed.
+- **Tests:** 12 new: midnight crossing, several days, truncation, "yesterday" tied to its line, timezone boundary with
+  env precedence, fail-safe UTC, undated and ambiguous events, never-event dates, repeated lines on different days,
+  plans/corrections/fiction, other chats adding no dates, and assistant-only staying silent.
+- **Measure after a separately approved deploy:** count the next real proposals by date kind (event-dated / told-on /
+  undated), counts only, and check none carries the run date as an event date.
+
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
 Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan

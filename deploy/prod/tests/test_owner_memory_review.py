@@ -214,7 +214,9 @@ class ConsolidationContextTests(unittest.TestCase):
         with unittest.mock.patch.object(OMR.urllib.request, "urlopen", return_value=Resp(goals)):
             lines = OMR.goal_outcomes(now - OMR.REVIEW_HOURS * 3600)
         self.assertEqual(len(lines), 1)
-        self.assertIn("their application for Data Engineer at Acme: completed on", lines[0])
+        self.assertIn("their application for Data Engineer at Acme: marked completed in their tracked goals on",
+                      lines[0])
+        self.assertIn("not necessarily when it happened", lines[0])                 # marked time != event time
         self.assertNotIn("12", lines[0].split(":")[0])
         self.assertNotIn("g1", lines[0])
         out = OMR.main(self.home, now=NOW)
@@ -282,6 +284,175 @@ class CommitmentSectionTests(unittest.TestCase):
         out = OMR.main(self.home, now=NOW)                               # API is 127.0.0.1:9
         mine = out.split("=== LILITH'S OWN COMMITMENTS")[1].split("=== OWNER CONVERSATION")[0]
         self.assertIn("commitment records unavailable", mine)
+
+
+def utc(text):
+    """Epoch seconds for an ISO UTC time ('2026-11-09T18:20')."""
+    return OMR._dt.datetime.fromisoformat(text).replace(tzinfo=OMR._dt.timezone.utc).timestamp()
+
+
+REVIEW_AT = utc("2026-11-10T16:30")                    # the nightly run (Tuesday); never a said-on or event date
+
+
+class ConversationDateTests(unittest.TestCase):
+    """P4-1 conversation dates: each owner-local day is marked with when its lines were said; the guidance keeps the
+    event date, the told date, unknown dates and never-event dates (run, approval, replacement) apart."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        (self.home / "lilith_router").mkdir()
+        (self.home / "lilith_router" / "canonical_memory.json").write_text(
+            json.dumps({"schemaVersion": 1, "enabled": True, "ownerTelegramUserIds": [OWNER]}), encoding="ascii")
+        self.env = unittest.mock.patch.dict(os.environ, {"HERMES_TIMEZONE": ""})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def db(self, rows, extra_sessions=()):
+        con = sqlite3.connect(self.home / "state.db")
+        con.executescript("""
+            CREATE TABLE sessions (id TEXT, source TEXT, user_id TEXT, chat_id TEXT, chat_type TEXT);
+            CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+                                   timestamp REAL, active INTEGER);""")
+        con.executemany("INSERT INTO sessions VALUES (?,?,?,?,?)",
+                        [("dm", "telegram", OWNER, OWNER, "dm"), *extra_sessions])
+        con.executemany("INSERT INTO messages (session_id, role, content, timestamp, active) VALUES (?,?,?,?,1)",
+                        [(r[0], r[1], r[2], r[3]) if len(r) == 4 else ("dm", *r) for r in rows])
+        con.commit()
+        con.close()
+
+    def convo(self, tz=None):
+        if tz:
+            (self.home / "config.yaml").write_text(f"model: x\ntimezone: {tz}  # owner\n", encoding="utf-8")
+        out = OMR.main(self.home, now=REVIEW_AT)
+        return out.split("=== OWNER CONVERSATION")[1].splitlines()[1:]
+
+    def day_of(self, lines, needle):
+        """The said-on marker a line sits under."""
+        marker = None
+        for line in lines:
+            if line.startswith("--- said on "):
+                marker = line
+            elif needle in line:
+                return marker
+        raise AssertionError(needle)
+
+    def test_conversation_crossing_local_midnight(self):
+        self.db([("user", "heading to bed soon", utc("2026-11-09T18:20")),        # 23:50 Monday in Colombo
+                 ("assistant", "sleep well", utc("2026-11-09T18:21")),
+                 ("user", "actually still up, I finished the Helm chart", utc("2026-11-09T18:40"))])  # 00:10 Tue
+        lines = self.convo("Asia/Colombo")
+        self.assertEqual(self.day_of(lines, "heading to bed"), "--- said on 2026-11-09 (Monday), Asia/Colombo ---")
+        self.assertEqual(self.day_of(lines, "sleep well"), "--- said on 2026-11-09 (Monday), Asia/Colombo ---")
+        self.assertEqual(self.day_of(lines, "Helm chart"), "--- said on 2026-11-10 (Tuesday), Asia/Colombo ---")
+        self.assertEqual([l for l in lines if l.startswith("---")][-1], "--- said on 2026-11-10 (Tuesday), "
+                                                                          "Asia/Colombo ---")
+
+    def test_multiple_dates_in_one_review_each_marked_once_in_order(self):
+        self.db([("user", "first day line", utc("2026-11-09T17:00")), ("user", "first day again", utc("2026-11-09T17:05")),
+                 ("user", "second day line", utc("2026-11-10T09:00")), ("assistant", "reply", utc("2026-11-10T09:01"))])
+        lines = self.convo()
+        markers = [l for l in lines if l.startswith("--- said on ")]
+        self.assertEqual(markers, ["--- said on 2026-11-09 (Monday), UTC ---", "--- said on 2026-11-10 (Tuesday), UTC ---"])
+        self.assertEqual(lines[0], markers[0])                                   # no undated line before a marker
+        self.assertLess(lines.index(markers[0]), lines.index("OWNER: first day again"))
+        self.assertLess(lines.index("OWNER: first day again"), lines.index(markers[1]))
+
+    def test_truncated_window_keeps_the_date_of_the_kept_lines(self):
+        self.db([("user", "x" * 600 + " %d" % i, utc("2026-11-09T17:00") + i) for i in range(30)])
+        with unittest.mock.patch.object(OMR, "TOTAL", 2000):
+            lines = self.convo()
+        self.assertEqual(lines[0], "--- said on 2026-11-09 (Monday), UTC ---")
+        self.assertNotIn(" 0", lines[1][-3:])                                    # the oldest lines were the ones cut
+
+    def test_relative_date_is_tied_to_the_line_it_was_said_on_not_the_run(self):
+        self.db([("user", "I passed the CKA yesterday", utc("2026-11-09T18:20"))])  # Monday 23:50 Colombo
+        lines = self.convo("Asia/Colombo")
+        self.assertEqual(self.day_of(lines, "passed the CKA yesterday"),
+                         "--- said on 2026-11-09 (Monday), Asia/Colombo ---")   # yesterday = Sunday 8 Nov
+        utc_lines = self.convo("UTC")
+        self.assertEqual(self.day_of(utc_lines, "passed the CKA yesterday"), "--- said on 2026-11-09 (Monday), UTC ---")
+        g = OMR.GUIDANCE
+        self.assertIn("Resolve today / yesterday / last <weekday> against the said-on date of THAT line", g)
+        self.assertIn("never against today's date", g)
+        self.assertNotIn("2026-11-10", "\n".join(lines))                         # run day: no line was said then
+
+    def test_timezone_boundary_changes_the_said_on_day(self):
+        self.db([("user", "boundary line", utc("2026-11-09T18:40"))])            # 18:40 UTC = 00:10 Tue Colombo
+        self.assertEqual(self.day_of(self.convo("UTC"), "boundary"), "--- said on 2026-11-09 (Monday), UTC ---")
+        self.assertEqual(self.day_of(self.convo("Asia/Colombo"), "boundary"),
+                         "--- said on 2026-11-10 (Tuesday), Asia/Colombo ---")
+        with unittest.mock.patch.dict(os.environ, {"HERMES_TIMEZONE": "America/Los_Angeles"}):  # env wins
+            self.assertEqual(self.day_of(self.convo("Asia/Colombo"), "boundary"),
+                             "--- said on 2026-11-09 (Monday), America/Los_Angeles ---")
+
+    def test_timezone_setting_fails_safe_to_named_utc(self):
+        for cfg in ("timezone: Not/AZone\n", "agent:\n  timezone: Asia/Colombo\n", "timezone:\n", None):
+            if cfg is None:
+                (self.home / "config.yaml").unlink(missing_ok=True)
+            else:
+                (self.home / "config.yaml").write_text(cfg, encoding="utf-8")
+            self.assertEqual(OMR.review_timezone(self.home)[1], "UTC", cfg)
+        (self.home / "config.yaml").write_text('timezone: "Asia/Colombo"\n', encoding="utf-8")
+        self.assertEqual(OMR.review_timezone(self.home)[1], "Asia/Colombo")
+
+    def test_ambiguous_and_undated_events_are_never_given_a_day(self):
+        self.db([("user", "I got the offer the other day", utc("2026-11-10T09:00")),
+                 ("user", "I moved to Manchester", utc("2026-11-10T09:05"))])
+        out = OMR.main(self.home, now=REVIEW_AT)
+        g = OMR.GUIDANCE
+        self.assertIn('write "On <date>, ..." ONLY when they said when it happened', g)
+        self.assertIn('write "Told LILITH on\n    <said-on date>: ..." That is when they said it, not when it happened', g)
+        for vague in ('"recently"', '"the other day"', '"last week"', '"a while ago"'):
+            self.assertIn(vague, g)
+        self.assertIn("Never\n    invent or guess a day.", g)
+        self.assertNotIn("On 2026-11-09 he passed", out)                         # the old example invited the run date
+        self.assertIn("I moved to Manchester", out)
+
+    def test_never_an_event_date_run_approval_replacement_or_goal_marked(self):
+        g = OMR.GUIDANCE
+        self.assertIn('the date this review runs (the "Conversation started" date), and any stored, approval,\n'
+                      "    replacement or goal-marked date", g)
+
+    def test_repeated_line_on_another_day_stays_on_its_first_day_and_is_noted(self):
+        self.db([("user", "I passed yesterday", utc("2026-11-09T17:00")),
+                 ("user", "I passed yesterday", utc("2026-11-09T17:01")),          # same-day re-insert: silent
+                 ("user", "I passed yesterday", utc("2026-11-10T09:00")),          # next day: noted, not moved
+                 ("assistant", "congrats", utc("2026-11-09T17:02")), ("assistant", "congrats", utc("2026-11-10T09:01"))])
+        lines = self.convo()
+        owner = [l for l in lines if l.startswith("OWNER: ")]
+        self.assertEqual(owner, ["OWNER: I passed yesterday [also said on 2026-11-10]"])
+        self.assertEqual(self.day_of(lines, "I passed yesterday"), "--- said on 2026-11-09 (Monday), UTC ---")
+        self.assertEqual([l for l in lines if l.startswith("--- said on ")], ["--- said on 2026-11-09 (Monday), UTC ---"])
+        self.assertIn("relative word sits on a line marked [also said on ...]", OMR.GUIDANCE)
+
+    def test_plans_corrections_history_and_fiction_keep_their_meaning(self):
+        g = OMR.GUIDANCE
+        self.assertIn('a plan or intention stays a plan ("plans to ..."), never done', g)
+        self.assertIn("a correction\n  replaces the entry it corrects", g)
+        self.assertIn('a past fact stays past ("used to ...")', g)
+        self.assertIn("a wish, guess or hypothetical stays one", g)
+        self.assertIn("A fictional, hypothetical or test scenario is never a real fact about them", g)
+        self.assertIn("never store the scenario itself as true", g)
+
+    def test_other_chats_add_no_dates_and_nothing_is_written(self):
+        self.db([("user", "owner line", utc("2026-11-10T09:00")),
+                 ("grp", "user", "GROUP LINE", utc("2026-11-09T12:00")), ("x", "user", "OTHER LINE", utc("2026-11-09T12:00"))],
+                extra_sessions=[("grp", "telegram", OWNER, "-1001", "group"), ("x", "telegram", "42", "42", "dm")])
+        before = sorted(str(p) for p in self.home.rglob("*"))
+        lines = self.convo()
+        self.assertEqual([l for l in lines if l.startswith("--- said on ")], ["--- said on 2026-11-10 (Tuesday), UTC ---"])
+        self.assertNotIn("GROUP LINE", "\n".join(lines))
+        self.assertNotIn("OTHER LINE", "\n".join(lines))
+        after = sorted(str(p) for p in self.home.rglob("*") if "memory-review" not in str(p))
+        self.assertEqual(before, after)                                          # read-only (beyond SEEN snapshot)
+
+    def test_only_assistant_lines_is_still_silent(self):
+        self.db([("assistant", "hello?", utc("2026-11-10T09:00"))])
+        self.assertEqual(OMR.main(self.home, now=REVIEW_AT), "NO_NEW_OWNER_CONVERSATION")
 
 
 if __name__ == "__main__":
