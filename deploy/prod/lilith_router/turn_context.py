@@ -71,6 +71,7 @@ class TurnContext:
     timeline: Tuple[Any, ...] = ()               # P-4 E-8: owner-memory records for the dated timeline (live only)
     timeline_note: Optional[str] = None          # the note rendered ONCE for the agent (header + size bounds applied)
     timeline_ids: Tuple[Any, ...] = ()           # the record ids of exactly that note's lines (audit; None = no id)
+    timeline_escalate: bool = False              # event-level question: full agent with search; else fast path is fine
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -182,5 +183,6 @@ def lean_suffix(ctx: TurnContext) -> str:
     (A durable correction never reaches the lean path: it routes to the agent.)"""
     if not ctx.owner:
         return ""
-    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx), goal_text(ctx))
-                   if p)
+    record_level = None if ctx.timeline_escalate else timeline_text(ctx)   # record-level timeline only (eval arm D)
+    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx), goal_text(ctx),
+                                       record_level) if p)

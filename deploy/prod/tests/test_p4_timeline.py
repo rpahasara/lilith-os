@@ -137,6 +137,31 @@ class TimelineTests(unittest.TestCase):
         for verb in ("POST", "PUT", "PATCH", "DELETE", "method="):
             self.assertNotIn(verb, text)
 
+    def test_selective_escalation_record_vs_event_level(self):
+        for m in ("How was my nickname stored before I corrected it?", "How was my city stored before I corrected it?",
+                  "how was my name stored before I corrected it?"):
+            self.assertTrue(self.tl.temporal(m), m)
+            self.assertFalse(self.tl.needs_conversation(m), m)
+        for m in ("When did I start at Acme?", "Which came first: me starting Kubernetes or starting at Acme?",
+                  "How long ago did I pass the CKA?", "Where was I living when I failed my first CKA attempt?",
+                  "When did I tell you I'd moved to Manchester?", "When did I start learning to cook?"):
+            self.assertTrue(self.tl.needs_conversation(m), m)
+        self.assertFalse(self.tl.needs_conversation("which city do I live in?"))
+
+    def test_record_level_stays_fast_with_the_plain_header(self):
+        tc = self.gi._tc
+        ctx = self.turn("live", "How was my name stored before I corrected it?")
+        self.assertFalse(ctx.timeline_escalate)
+        self.assertIn("replaced 2026-10-20", tc.lean_suffix(ctx))            # the fast path gets the record timeline
+        self.assertNotIn("check your past conversations", ctx.timeline_note)
+        self.assertFalse(self.records()[-1]["escalate"])
+        ev = self.turn("live", "when did I move to Manchester?")
+        self.assertTrue(ev.timeline_escalate)
+        self.assertEqual(tc.lean_suffix(ev), "")                              # event-level never on the fast path
+        self.assertIn("check your past conversations", tc.agent_hint(ev))
+        text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
+        self.assertIn('if not why and tctx.timeline and tctx.timeline_escalate:\n                why = "timeline"', text)
+
     def test_temporal_cue_is_narrow(self):
         for m in ("when did I start at Acme?", "what came first, starting at Acme or my failed CKA attempt?",
                   "how long ago did I pass the CKA?", "where was I living when I started at Acme?",
@@ -193,7 +218,7 @@ class TimelineTests(unittest.TestCase):
         self.assertIsNone(tc.agent_hint(shadow))
         self.assertFalse(self.records()[-1]["applied"])
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('if not why and tctx.timeline:\n                why = "timeline"', text)
+        self.assertIn('if not why and tctx.timeline and tctx.timeline_escalate:\n                why = "timeline"', text)
 
     def test_not_on_non_owner_focused_non_temporal_or_off(self):
         self.assertTrue(self.turn("live", "When did I start learning Kubernetes?", focused=True).timeline)   # technical ok

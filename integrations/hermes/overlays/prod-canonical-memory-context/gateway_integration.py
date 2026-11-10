@@ -482,16 +482,19 @@ def _apply_timeline(cfg, message: str) -> None:
             return
         # ONE render per turn: the note the agent gets and the audit ids come from the same call (agent-path header,
         # same size bounds), so the trace describes exactly what the model was given.
-        note, included = _timeline.render_with_ids(entries, can_search=True)
+        escalate = _timeline.needs_conversation(message)      # event-level: full agent with conversation search
+        note, included = _timeline.render_with_ids(entries, can_search=escalate)
         if mode == "live" and note:
             tctx.timeline = tuple(entries)
             tctx.timeline_note, tctx.timeline_ids = note, tuple(included)
+            tctx.timeline_escalate = escalate
         _append_log(cfg, {"lane": "timeline", "mode": mode, "entries": len(entries),
                           "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
                           "included": len(included), "included_ids": [i for i in included if i],
-                          "missing_ids": sum(1 for i in included if not i), "applied": bool(mode == "live" and note)})
+                          "missing_ids": sum(1 for i in included if not i), "escalate": escalate,
+                          "applied": bool(mode == "live" and note)})
     except Exception:
-        tctx.timeline, tctx.timeline_note, tctx.timeline_ids = (), None, ()
+        tctx.timeline, tctx.timeline_note, tctx.timeline_ids, tctx.timeline_escalate = (), None, (), False
         logger.debug("lilith_router: timeline failed (none)", exc_info=True)
 
 
@@ -1215,8 +1218,8 @@ def _route_turn_impl(
                 why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
             if not why and tctx.responsibility:
                 why = "responsibility"               # P4-5c: owning a missed commitment needs the full agent
-            if not why and tctx.timeline:
-                why = "timeline"                     # P-4 E-8: dated memory goes to the full agent only (N-48)
+            if not why and tctx.timeline and tctx.timeline_escalate:
+                why = "timeline"                     # P-4: event-level time question -> full agent with search
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,

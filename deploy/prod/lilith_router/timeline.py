@@ -68,6 +68,22 @@ AGENT_HEADER = HEADER[:-1].rsplit(" If the dates you need", 1)[0] + (
     "and prefer what they said at the time over any stored date; only if nothing turns up, say you don't know.]")
 
 
+# Selective escalation (routing-vs-timeline evaluation, 2026-11-10). A RECORD-level question asks what Lilith has or
+# had stored ("how was my name stored before I corrected it?"): the records answer it, so the fast path with the
+# timeline suffices (arm D). Every other temporal question is EVENT-level (when it happened, what came first, how long
+# ago, where I was then): only conversation evidence answers it, so it escalates to the full agent with search (arm C2
+# 12/12; the fast path with or without the timeline stated stale or invented facts there).
+_RECORD_LEVEL_RE = re.compile(
+    r"\b(?:stored|saved|on\s+file|in\s+your\s+(?:memory|notes))\b|\bbefore\s+i\s+corrected\b|"
+    r"\bwhat\s+did\s+you\s+(?:have|keep|write)\s+(?:down\s+)?(?:about|for)\b", re.IGNORECASE)
+
+
+def needs_conversation(message: str) -> bool:
+    """A temporal owner question that only conversation evidence can answer (event-level), as opposed to one about
+    what is stored (record-level)."""
+    return temporal(message) and not _RECORD_LEVEL_RE.search(message or "")
+
+
 def temporal(message: str) -> bool:
     text = message or ""
     if not _QUESTION_RE.search(text):
