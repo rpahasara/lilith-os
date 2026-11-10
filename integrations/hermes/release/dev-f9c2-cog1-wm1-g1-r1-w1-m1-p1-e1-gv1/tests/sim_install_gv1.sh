@@ -242,7 +242,7 @@ for i, st in enumerate(("COMPLETED", "COMPLETED", "FAILED", "FAILED", "CANCELLED
     c.execute("INSERT INTO goal (goal_id, schema_version, type, title, source, owner, lifecycle_state, priority, created_at, updated_at, revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
               (f"g.test-only-{i}", 1, "commitment.once", "TEST_ONLY", "SCHEDULED", "user", st, "NORMAL", "a", "a", 3))
 for i in range(20):
-    c.execute("INSERT INTO goal_trace (correlation_id, goal_id, at, kind, source) VALUES (?,?,?,?,?)", (f"c{i}", f"g.test-only-{i % 6}", "a", "transition", "SCHEDULED"))
+    c.execute("INSERT INTO goal_trace (correlation_id, goal_id, at, kind, reason, source) VALUES (?,?,?,?,?,?)", (f"c{i}", f"g.test-only-{i % 6}", "a", "transition", "TEST_ONLY", "SCHEDULED"))
 c.commit()
 PY
 check "DEV state reproduced: e1 refuses with exactly GOAL_STORE_NOT_EMPTY" '[[ $(verify) == "F8_VERIFY_FAIL GOAL_STORE_NOT_EMPTY" && $("${BASE}/current/venv/bin/python" -I -B "${BASE}/current/bin/verify_release.py" --full 2>&1 | wc -l) -eq 1 ]]'
@@ -263,7 +263,7 @@ class H(BaseHTTPRequestHandler):
         winner = cands[0][0] if cands else None
         last = c.execute("SELECT arbitration_winner FROM goal_trace WHERE kind='arbitration' ORDER BY id DESC LIMIT 1").fetchone()
         if os.environ.get("LILITH_OS_FOCUS_READ_ONLY") != "1" and winner != (last[0] if last else None):
-            c.execute("INSERT INTO goal_trace (correlation_id, at, kind, arbitration_winner) VALUES ('g_arb','a','arbitration',?)", (winner,))
+            c.execute("INSERT INTO goal_trace (correlation_id, at, kind, reason, arbitration_winner) VALUES ('g_arb','a','arbitration','focus',?)", (winner,))
             c.commit()
         c.close()
         body = json.dumps({"focus": None if winner is None else {"goalId": winner}, "arbitration": {"winner": winner}}).encode()
@@ -369,7 +369,7 @@ sqlx "UPDATE goal SET lifecycle_state='ACTIVE' WHERE goal_id='g.test-only-0'"; d
 sqlx "UPDATE goal SET lifecycle_state='PENDING' WHERE goal_id='g.test-only-0'"; dry_refuses "a PENDING goal" "GOAL_FOCUS_CANDIDATE PENDING 1"
 sqlx "UPDATE goal SET lifecycle_state='ARCHIVED' WHERE goal_id='g.test-only-0'"; dry_refuses "an unknown state" "GOAL_STATE_NOT_TERMINAL ARCHIVED 1"
 sqlx "UPDATE goal SET lifecycle_state='COMPLETED' WHERE goal_id='g.test-only-0'"
-sqlx "INSERT INTO goal_trace (correlation_id, at, kind) VALUES ('g_arb_old','a','arbitration')"; dry_refuses "an existing arbitration trace" GOAL_ARBITRATION_TRACE_PRESENT
+sqlx "INSERT INTO goal_trace (correlation_id, at, kind, reason) VALUES ('g_arb_old','a','arbitration','TEST_ONLY')"; dry_refuses "an existing arbitration trace" GOAL_ARBITRATION_TRACE_PRESENT
 sqlx "DELETE FROM goal_trace WHERE correlation_id='g_arb_old'"
 cp "${APIREL}/app.py" "$S/app.bak"; sed -i 's/if _os.getenv("LILITH_OS_FOCUS_READ_ONLY") != "1":/if True:/' "${APIREL}/app.py"; touch -d '-1 min' "${APIREL}/app.py"
 dry_refuses "Core API code that ignores the flag" FOCUS_GUARD_MISSING
