@@ -1192,9 +1192,36 @@ GET only. #406 and #407 are closed as superseded.
 - The shipped agent wording drops C2's "if you can search them", since it only renders on the agent path.
 - Nothing is deployed; the timeline stays in shadow.
 
+**Owner review of #410: two routing edge cases, fixed before merge (2026-11-10).**
+1. **Mixed record/event questions escalate.** If a question asks for event chronology, it is event-level, even when it
+   also says "stored", "saved" or "before I corrected". Examples: "what did you have stored, and when did I actually
+   move?", "which came first: me starting Kubernetes or the date you saved it?". Event chronology means when I did
+   it, what came first, how long ago, where I was then, back then / at the time.
+   - Record-only questions stay on the fast path: "how was my name stored before I corrected it?", "when was my city
+     stored?".
+2. **The agent never gets the suppressing wording.** Every temporal turn renders the agent's search-compatible note.
+   The plain "say you don't know" header goes only to the fast path, for record-level questions. A record-level
+   question can reach the agent through another gate: a durable correction, a recall gap, an unresolved commitment,
+   an action intent, a technical route, or a failed lean call. In every case it gets the agent note.
+   - Audit: the lane record logs the ids of both notes, each from its own single render. The turn record names the
+     note actually delivered (`agent` | `lean`) with exactly its ids. Delivery is recorded only when the reply was
+     given that note: a ready reply records none, and a lean failure re-records it as `agent`.
+
+Tests cover:
+- positive and negative mixed cases;
+- every gate, with agent wording and stored ≠ event semantics kept;
+- gate order and its logged reason;
+- both id sets at a truncation boundary where they differ;
+- routed turns: lean success → plain note, `lean` ids; lean failure → agent note, `agent` ids; event-level never
+  calls the lean model; shadow routes exactly as before.
+
+Hermes' provider fallback inside an agent turn resends the same message, which already carries the hint (`run.py`
+wraps it before the agent call).
+
 **Remaining P-4 memory-intelligence gaps (honest list).**
-1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1); its
-   effect on real proposals is not measured yet.
+1. **Event dates at consolidation.** Proposals should carry the event's own date. The guidance exists (P4-1). Since
+   the install there have been 0 proposals, so its effect is unmeasured, and the review input lacks conversation dates
+   (§3r-1; proposed fix not implemented).
 2. **Learned order ≠ event order.** One C reply conflated them. If live traffic shows it, add a line rather than a
    mechanism.
 3. **Reappraisal (C-4).** Supersession works, but nothing proposes a replacement when a new statement contradicts a
@@ -1214,6 +1241,63 @@ GET only. #406 and #407 are closed as superseded.
   - P4-5c-2 deferred by owner decision.
 - **Recommendation:** P-5 design work can start on paper. Any initiative message waits for those readings, per the
   roadmap's evidence gates.
+
+## 3r-1. P4-1 event-dated consolidation: metadata-first assessment (2026-11-10, read-only)
+
+**Method.** PROD, read-only, metadata only (`p41_event_date_coverage.py`).
+- Read: field names, lifecycle states, provenance kinds, timestamps and counts.
+- Not read: any memory, proposal or message text. The text-derived figure below is the 2026-11-09 E-8 inventory's,
+  not re-measured.
+
+**Four kinds of time, kept apart:**
+
+| Time | Where it exists | What it means |
+| --- | --- | --- |
+| Approval | provenance `approved_at` / `recorded_at`; L18 APPROVED `at` | when the owner approved storing it (the timeline's "stored" date) |
+| Supersession | `updated_at` of a SUPERSEDED entry; L18 SUPERSEDED `at` | when a stored belief was replaced |
+| Proposal | L18 PROPOSED `at`; pending file time | when the review proposed it |
+| Conversation | `state.db` `messages.timestamp` | when the owner said it |
+| **Event** | **no structured field in owner memory, provenance or L18** | only free text inside an entry |
+
+Goals are the exception: `startedAt`, `completedAt`, `failedAt` and so on are system-observed lifecycle times. They
+record when a goal was marked, not necessarily when the real event happened.
+
+**Coverage.**
+- Owner memory: 11 entries (10 active, 1 superseded).
+  - 5 have an approval date (latest 2026-11-08); 6 are imports with no date and render "stored (undated)".
+  - Event-dated: 1 of 11 entry texts contained a date (E-8 inventory, 2026-11-09; whether it is an event date was not
+    checked).
+- **Since the P4-1 install** (2026-11-09 05:12Z):
+  - the nightly review ran once (16:30Z, status ok);
+  - 0 proposals created, 0 approved, 0 rejected, 0 superseded, 0 pending;
+  - owner conversation: 15 owner rows in 4 sessions;
+  - 1 non-reminder goal completed (approximate filter).
+
+**Evidence limitations.**
+- **n = 0.** The P4-1 dated-fact guidance has produced no proposal yet, so its effect on event-date capture can't be
+  measured. One review on a quiet day is no evidence for or against it.
+- Event-date presence is free text only. Coverage can't be measured from metadata. A VM-side counts-only text check
+  (text never printed) would need a separate owner OK; it was not run.
+- **Structural gap (from the source, not from data).** The review prompt shows the owner's lines without their
+  conversation dates. Its 26-hour window crosses a date boundary. Hermes gives the review agent only the run date
+  ("Conversation started: …").
+  - So the reviewer can't resolve "yesterday" or "last Tuesday" to a date.
+  - Its one date, the run date, is neither the conversation date nor the event date. The guidance's example
+    ("On 2026-11-09 he passed …") invites using it anyway.
+
+**Smallest justified improvement (proposed; not implemented, not installed).** Show the conversation date in the
+review input, and say what each date means. Two small, read-only changes to `owner_memory_review.py`; no schema, no new
+store:
+1. Mark each date change in the OWNER CONVERSATION section (`--- said on 2026-11-09 (UTC) ---`), from the
+   `messages.timestamp` already selected.
+2. Revise the guidance line:
+   - write an event date only when they said when it happened, resolving "yesterday" against the date it was said;
+   - otherwise write "told LILITH on <date>", which is true;
+   - never present the review date or a storage date as the event date.
+
+Measure it with a counts-only check of the next real proposals (dated as event, as "told on", or undated) before any
+further change. A structured event-date field would be a schema change (out of scope; schema v4 is not touched) and is
+not justified by n = 0.
 
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
