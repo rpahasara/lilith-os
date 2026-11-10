@@ -480,13 +480,18 @@ def _apply_timeline(cfg, message: str) -> None:
         entries = _OWNER_MEMORY.current()
         if not entries:
             return
-        if mode == "live":
+        # ONE render per turn: the note the agent gets and the audit ids come from the same call (agent-path header,
+        # same size bounds), so the trace describes exactly what the model was given.
+        note, included = _timeline.render_with_ids(entries, can_search=True)
+        if mode == "live" and note:
             tctx.timeline = tuple(entries)
+            tctx.timeline_note, tctx.timeline_ids = note, tuple(included)
         _append_log(cfg, {"lane": "timeline", "mode": mode, "entries": len(entries),
                           "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
-                          "applied": mode == "live"})
+                          "included": len(included), "included_ids": [i for i in included if i],
+                          "missing_ids": sum(1 for i in included if not i), "applied": bool(mode == "live" and note)})
     except Exception:
-        tctx.timeline = ()
+        tctx.timeline, tctx.timeline_note, tctx.timeline_ids = (), None, ()
         logger.debug("lilith_router: timeline failed (none)", exc_info=True)
 
 

@@ -59,6 +59,15 @@ HEADER = ("[Your stored memories about them, in the order they were stored. A \"
           "current entry says so. If the dates you need aren't written in an entry, say you don't know.]")
 
 
+# The full agent can search its past conversations, which hold what the owner said at the time (event-level
+# evidence). Offline routing-vs-timeline evaluation 2026-11-09: with HEADER's "say you don't know" the agent stopped
+# searching and answered 6/14 temporal questions; with this wording it searched first and answered 14/14 (the agent
+# without any note: 12/14). Paths that cannot search keep HEADER.
+AGENT_HEADER = HEADER[:-1].rsplit(" If the dates you need", 1)[0] + (
+    " For when something happened, what came first or how long ago, check your past conversations with them first, "
+    "and prefer what they said at the time over any stored date; only if nothing turns up, say you don't know.]")
+
+
 def temporal(message: str) -> bool:
     text = message or ""
     if not _QUESTION_RE.search(text):
@@ -84,9 +93,18 @@ def _learned(entry: dict) -> Optional[str]:
     return None                                         # imports and undated records stay undated: never invented
 
 
-def render(entries, now: Optional[float] = None) -> Optional[str]:
-    """The timeline note from owner-memory records (GET /os/owner-memory?include_superseded=1), or None."""
-    rows: List[Tuple[str, str]] = []
+def render(entries, now: Optional[float] = None, can_search: bool = False) -> Optional[str]:
+    """The timeline note from owner-memory records (GET /os/owner-memory?include_superseded=1), or None.
+    `can_search`: the reader can search past conversations (the full agent), so it is told to look there first."""
+    return render_with_ids(entries, can_search=can_search)[0]
+
+
+def render_with_ids(entries, can_search: bool = False) -> Tuple[Optional[str], List[Optional[str]]]:
+    """(note, the entry id of every rendered line, in order; None where a record had no id). The SAME call produces
+    the note and its audit ids, so the ids always describe exactly what the reader got (its header and size bounds).
+    Ids are opaque record keys; never memory text."""
+    header = AGENT_HEADER if can_search else HEADER
+    rows: List[Tuple[str, str, Optional[str]]] = []
     for e in entries or ():
         if not isinstance(e, dict) or not str(e.get("text") or "").strip():
             continue
@@ -94,20 +112,22 @@ def render(entries, now: Optional[float] = None) -> Optional[str]:
         if e.get("lifecycle_state") == "SUPERSEDED":
             since = _day(e.get("updated_at"))
             rows.append((since or "", "- replaced%s (an earlier stored belief, not necessarily ever true): %s"
-                         % (" " + since if since else "", text)))
+                         % (" " + since if since else "", text), (str(e["entry_id"]) if e.get("entry_id") else None)))
         else:
             learned = _learned(e)
-            rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text)))
+            rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text),
+                         (str(e["entry_id"]) if e.get("entry_id") else None)))
     if not rows:
-        return None
+        return None, []
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last
-    lines, size = [], len(HEADER)
-    for _, line in rows[-MAX_ENTRIES:]:
+    lines, ids, size = [], [], len(header)
+    for _, line, eid in rows[-MAX_ENTRIES:]:
         if size + len(line) + 1 > MAX_CHARS:
             break
         lines.append(line)
+        ids.append(eid)
         size += len(line) + 1
-    return HEADER + "\n" + "\n".join(lines)
+    return header + "\n" + "\n".join(lines), ids
 
 
 class OwnerMemorySource:
