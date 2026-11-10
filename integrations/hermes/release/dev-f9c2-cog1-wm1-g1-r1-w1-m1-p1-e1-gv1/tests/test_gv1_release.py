@@ -509,6 +509,7 @@ class RealProcessTest(unittest.TestCase):
         env = {"PATH": "/usr/bin:/bin", "LILITH_DB_PATH": str(self.db), **env_extra}
         p = subprocess.Popen([sys.executable, str(self.root / "api-venv/bin/uvicorn"), "app:app", "--port", "0"],
                              cwd=self.rel, env=env, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(p.stdout.close)
         self.addCleanup(p.wait)
         self.addCleanup(p.kill)
         port = int(p.stdout.readline())
