@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -137,6 +138,106 @@ class TimelineTests(unittest.TestCase):
         for verb in ("POST", "PUT", "PATCH", "DELETE", "method="):
             self.assertNotIn(verb, text)
 
+    def test_selective_escalation_record_vs_event_level(self):
+        for m in ("How was my nickname stored before I corrected it?", "How was my city stored before I corrected it?",
+                  "how was my name stored before I corrected it?"):
+            self.assertTrue(self.tl.temporal(m), m)
+            self.assertFalse(self.tl.needs_conversation(m), m)
+        for m in ("When did I start at Acme?", "Which came first: me starting Kubernetes or starting at Acme?",
+                  "How long ago did I pass the CKA?", "Where was I living when I failed my first CKA attempt?",
+                  "When did I tell you I'd moved to Manchester?", "When did I start learning to cook?"):
+            self.assertTrue(self.tl.needs_conversation(m), m)
+        self.assertFalse(self.tl.needs_conversation("which city do I live in?"))
+
+    def test_record_level_stays_fast_with_the_plain_header(self):
+        tc = self.gi._tc
+        ctx = self.turn("live", "How was my name stored before I corrected it?")
+        self.assertFalse(ctx.timeline_escalate)
+        self.assertIn("replaced 2026-10-20", tc.lean_suffix(ctx))            # the fast path gets the record timeline
+        self.assertNotIn("check your past conversations", tc.lean_suffix(ctx))
+        self.assertFalse(self.records()[-1]["escalate"])
+        ev = self.turn("live", "when did I move to Manchester?")
+        self.assertTrue(ev.timeline_escalate)
+        self.assertEqual(tc.lean_suffix(ev), "")                              # event-level never on the fast path
+        self.assertIn("check your past conversations", tc.agent_hint(ev))
+        text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
+        self.assertIn('if not why and tctx.timeline and tctx.timeline_escalate:\n        why = "timeline"', text)
+
+    def test_mixed_record_and_event_questions_escalate(self):
+        # owner review of #410: a record term never keeps an event-chronology question on the fast path
+        for m in ("What did you have stored about my city before I corrected it, and when did I actually move?",
+                  "How was my job stored before I corrected it, and how long ago did I start there?",
+                  "Which came first: me starting Kubernetes or the date you saved it?",
+                  "Where was I living when I failed the CKA, according to what you saved?",
+                  "How many days since I passed the CKA, going by what's on file?",
+                  "When did I tell you about Acme, and how was it stored?",
+                  "Did I ever live in Leeds, or was that just what you had stored?",
+                  "What was my nickname stored as back then, before I corrected it?",
+                  "how was my city stored before I moved?"):
+            self.assertTrue(self.tl.temporal(m), m)
+            self.assertTrue(self.tl.needs_conversation(m), m)
+        # record-only questions (what is or was stored, and when it was stored) stay on the fast path
+        for m in ("How was my nickname stored before I corrected it?", "How was my city stored before I corrected it?",
+                  "When was my city stored?", "what was my job saved as before I corrected it?",
+                  "how was my name kept in your memory before I corrected it?"):
+            self.assertTrue(self.tl.temporal(m), m)
+            self.assertFalse(self.tl.needs_conversation(m), m)
+
+    def test_every_gate_to_the_agent_gets_search_compatible_wording(self):
+        gi, tc = self.gi, self.gi._tc
+        q = "How was my name stored before I corrected it?"                   # record-level
+        searching = "check your past conversations with them first"
+        suppressing = "If the dates you need aren't written in an entry, say you don't know."
+        self.assertIn(suppressing, self.tl.HEADER)
+        cases = {"durable_correction": lambda c: setattr(c, "correction", True),
+                 "recall_gap": lambda c: c.meta.update({"applied": True, "control": "escalate"}),
+                 "responsibility": lambda c: setattr(c, "responsibility", ({"title": "water", "state": "BLOCKED"},)),
+                 "action_intent": None}
+        for why, arm in cases.items():
+            ctx = self.turn("live", q)
+            self.assertFalse(ctx.timeline_escalate)
+            if arm:
+                arm(ctx)
+                self.assertEqual(gi._lean_skip_reason(q, ctx), why)
+            else:                                                               # skip_reason's own gate
+                self.assertEqual(gi._lean_skip_reason("remind me tomorrow: how was my name stored before?", ctx),
+                                 "action_intent")
+            hint = tc.agent_hint(ctx)
+            self.assertIn(searching, hint, why)
+            self.assertNotIn(suppressing, hint, why)
+            self.assertIn(self.tl.HEADER.split(" If the dates")[0], hint)         # stored != event semantics kept
+        ctx = self.turn("live", q)
+        self.assertEqual(gi._lean_skip_reason(q, ctx), "")                       # alone it stays fast
+        self.assertNotIn(searching, tc.lean_suffix(ctx))
+        ev = self.turn("live", "when did I move to Manchester?")
+        self.assertEqual(gi._lean_skip_reason("when did I move to Manchester?", ev), "timeline")
+        ev.correction = True                                                    # an earlier gate names the reason
+        self.assertEqual(gi._lean_skip_reason("when did I move to Manchester?", ev), "durable_correction")
+
+    def test_record_level_logs_both_notes_ids_and_the_delivered_one(self):
+        recs = [rec("x" * 230, "2026-09-%02dT00:00:00Z" % (i + 1)) for i in range(12)]
+        for i, r in enumerate(recs):
+            r["entry_id"] = "om_t%02d" % i
+        self.gi._OWNER_MEMORY = self.tl.OwnerMemorySource(fetch=lambda: recs)
+        ctx = self.turn("live", "How was my name stored before I corrected it?")
+        logged = self.records()[-1]
+        agent_note, agent_ids = self.tl.render_with_ids(recs, can_search=True)
+        lean_note, lean_ids = self.tl.render_with_ids(recs)
+        self.assertNotEqual(len(agent_ids), len(lean_ids))                     # the truncation boundaries differ
+        self.assertEqual((ctx.timeline_note, ctx.timeline_lean_note), (agent_note, lean_note))
+        self.assertEqual((logged["included_ids"], logged["lean_included_ids"]), (agent_ids, lean_ids))
+        self.assertIsNone(ctx.summary().get("timeline_delivered"))             # nothing delivered yet
+        out = self.gi._with_social_note({"combined_ephemeral": "x"})            # e.g. the lean call failed
+        self.assertIn(agent_note, out["turn_hint"])
+        self.assertEqual((ctx.summary()["timeline_delivered"], ctx.summary()["timeline_delivered_ids"]),
+                         ("agent", agent_ids))
+        ready = self.turn("live", "How was my name stored before I corrected it?")
+        self.gi._with_social_note({"final_response": "ready"})                 # a ready reply carries no note
+        self.assertIsNone(ready.summary().get("timeline_delivered"))
+        ev = self.turn("live", "when did I start?")
+        self.assertNotIn("lean_included_ids", self.records()[-1])              # event-level: no fast-path note
+        self.assertIsNone(ev.timeline_lean_note)
+
     def test_temporal_cue_is_narrow(self):
         for m in ("when did I start at Acme?", "what came first, starting at Acme or my failed CKA attempt?",
                   "how long ago did I pass the CKA?", "where was I living when I started at Acme?",
@@ -193,7 +294,7 @@ class TimelineTests(unittest.TestCase):
         self.assertIsNone(tc.agent_hint(shadow))
         self.assertFalse(self.records()[-1]["applied"])
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('if not why and tctx.timeline:\n                why = "timeline"', text)
+        self.assertIn('if not why and tctx.timeline and tctx.timeline_escalate:\n        why = "timeline"', text)
 
     def test_not_on_non_owner_focused_non_temporal_or_off(self):
         self.assertTrue(self.turn("live", "When did I start learning Kubernetes?", focused=True).timeline)   # technical ok
@@ -210,6 +311,77 @@ class TimelineTests(unittest.TestCase):
         cfg = self.gi._config
         with mock.patch.object(cfg, "CONFIG_PATH", ROOT / "deploy/prod/lilith_router/router.yaml"):
             self.assertEqual(cfg.load().timeline_mode, "shadow")
+
+
+class RoutedTurnTests(unittest.TestCase):
+    """The real route: lean success, lean failure (fallback to the agent), event-level escalation, shadow."""
+
+    def setUp(self):
+        from test_owner_memory import OWNER, SETTINGS, src
+        from test_social_tone_live import FakeCfg
+        self.tmp, self.gi = load_router()
+        self.log = Path(self.tmp) / "decisions.log"
+        self.owner, self.settings, self.src = OWNER, SETTINGS, src
+        recs = [dict(r, entry_id="om_%d" % i) for i, r in enumerate(RECORDS)]
+        self.ids = ["om_2", "om_1", "om_3", "om_0"]                             # rendered (stored-date) order
+        self.gi._OWNER_MEMORY = self.gi._timeline.OwnerMemorySource(fetch=lambda: recs)
+
+        class Cfg(FakeCfg):
+            timeline_mode = "live"
+        self.Cfg = Cfg
+
+    def tearDown(self):
+        self.gi._tc.begin()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def route(self, message, lean_text="hey", mode="live"):
+        gi, seen = self.gi, {}
+        self.Cfg.timeline_mode = mode
+        gi._config.load = lambda: self.Cfg(self.log, live=True)
+        gi._canonical_memory.load_settings = lambda home, **kw: self.settings
+        gi._canonical_memory.turn_note = lambda *a, **kw: None
+        gi._platform_name = lambda s: "telegram"
+        gi._groq_runtime = lambda runner, cfg: ({"api_key": "k"}, "")
+
+        def reply(**kw):
+            seen.update(kw)
+            return (lean_text, "") if lean_text else (None, "lean_error")
+        gi._social_lean.reply = reply
+        ctx = types.SimpleNamespace(source=self.src(user_id=self.owner, chat_id=self.owner, chat_type="dm"),
+                                    message=message, session_key="k:" + message[:12])
+        out = gi.route_turn(runner=None, ctx=ctx, model="m", runtime_kwargs={}, turn_route={}, combined_ephemeral="")
+        return out, seen, gi._tc.current()
+
+    def test_record_level_lean_success_gets_the_plain_note(self):
+        out, seen, ctx = self.route("hehe how was my name stored before I corrected it?")
+        if "final_response" not in out:
+            self.skipTest("classifier sent this message off the social path")
+        self.assertIn(self.gi._timeline.HEADER, seen["policy"])
+        self.assertNotIn("check your past conversations", seen["policy"])
+        s = ctx.summary()
+        self.assertEqual((s["timeline_delivered"], s["timeline_delivered_ids"]), ("lean", self.ids))
+
+    def test_record_level_lean_failure_falls_back_with_search_wording(self):
+        out, seen, ctx = self.route("hehe how was my name stored before I corrected it?", lean_text=None)
+        self.assertNotIn("final_response", out)
+        self.assertIn(self.gi._timeline.AGENT_HEADER, out["turn_hint"])
+        self.assertNotIn(self.gi._timeline.HEADER, out["turn_hint"])
+        self.assertEqual(ctx.summary()["timeline_delivered"], "agent")
+        self.assertEqual(ctx.summary()["timeline_delivered_ids"], self.ids)
+
+    def test_event_level_never_takes_the_lean_call(self):
+        out, seen, ctx = self.route("hehe when did I move to Manchester?")
+        self.assertEqual(seen, {})                                              # lean reply never called
+        self.assertIn(self.gi._timeline.AGENT_HEADER, out["turn_hint"])
+        self.assertEqual(ctx.summary()["timeline_delivered"], "agent")
+
+    def test_shadow_routes_exactly_as_before(self):
+        out, seen, ctx = self.route("hehe when did I move to Manchester?", mode="shadow")
+        self.assertNotIn("timeline", json.dumps(out.get("turn_hint") or ""))
+        self.assertNotIn("check your past conversations", json.dumps(out))
+        self.assertIsNone(ctx.summary().get("timeline_delivered"))
+        rec_ = [json.loads(l) for l in self.log.read_text(encoding="utf-8").splitlines() if '"timeline"' in l][-1]
+        self.assertEqual((rec_["mode"], rec_["applied"], rec_["escalate"]), ("shadow", False, True))
 
 
 if __name__ == "__main__":

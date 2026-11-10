@@ -74,7 +74,7 @@ class CommitmentAttentionTests(unittest.TestCase):
         self.assertEqual(again.responsibility, ())
         self.assertIsNone(tc.responsibility_text(again))
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('if not why and tctx.responsibility:\n                why = "responsibility"', text)
+        self.assertIn('if not why and tctx.responsibility:\n        why = "responsibility"', text)
 
     def test_shadow_logs_only_and_non_owner_gets_nothing(self):
         ctx = self.turn("shadow")

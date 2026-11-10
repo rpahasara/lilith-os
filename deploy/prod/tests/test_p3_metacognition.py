@@ -113,7 +113,7 @@ class GateWiringTests(unittest.TestCase):
         self.assertEqual(ctx.meta["control"], "escalate")
         self.assertIn(self.gi._meta.ESCALATE_NOTE, self.gi._tc.agent_hint(ctx))
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('tctx.meta.get("control") == "escalate":\n                why = "recall_gap"', text)
+        self.assertIn('tctx.meta.get("control") == "escalate":\n        why = "recall_gap"', text)
 
     def test_failure_is_fail_open(self):
         self.gi._social_lean.profile = mock.Mock(side_effect=OSError("boom"))

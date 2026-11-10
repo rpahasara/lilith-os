@@ -463,6 +463,21 @@ def _apply_commitments(cfg) -> None:
 _OWNER_MEMORY = _timeline.OwnerMemorySource(os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765"))
 
 
+def _lean_skip_reason(message: str, tctx) -> str:
+    """Why a social turn must leave the lean (tool-less) path for the full agent, or ''. Every gate sends the turn to
+    the same full agent; the first that fires names the logged reason."""
+    why = _social_lean.skip_reason(message)
+    if not why and tctx.correction:
+        why = "durable_correction"           # P-2: the tool-capable agent may propose remembering it
+    if not why and tctx.meta.get("applied") and tctx.meta.get("control") == "escalate":
+        why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
+    if not why and tctx.responsibility:
+        why = "responsibility"               # P4-5c: owning a missed commitment needs the full agent
+    if not why and tctx.timeline and tctx.timeline_escalate:
+        why = "timeline"                     # P-4: event-level time question -> full agent with search
+    return why
+
+
 def _apply_timeline(cfg, message: str) -> None:
     """P-4 E-8 (owner turns only): a question about time, order or change gets the dated timeline of approved memory
     (approval = "learned" date; superseded entries as "no longer current"). Live: the agent's turn hint carries it and
@@ -480,18 +495,29 @@ def _apply_timeline(cfg, message: str) -> None:
         entries = _OWNER_MEMORY.current()
         if not entries:
             return
-        # ONE render per turn: the note the agent gets and the audit ids come from the same call (agent-path header,
-        # same size bounds), so the trace describes exactly what the model was given.
+        # Each note and its audit ids come from ONE render call (header + size bounds), so a trace always describes
+        # exactly what a model was given. The agent's note (search-compatible) is rendered on every temporal turn,
+        # because ANY gate may send the turn to the agent; the fast path's plain-header note only for record-level.
+        escalate = _timeline.needs_conversation(message)      # event-level: full agent with conversation search
         note, included = _timeline.render_with_ids(entries, can_search=True)
+        lean_note, lean_ids = (None, []) if escalate else _timeline.render_with_ids(entries, can_search=False)
         if mode == "live" and note:
             tctx.timeline = tuple(entries)
             tctx.timeline_note, tctx.timeline_ids = note, tuple(included)
-        _append_log(cfg, {"lane": "timeline", "mode": mode, "entries": len(entries),
-                          "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
-                          "included": len(included), "included_ids": [i for i in included if i],
-                          "missing_ids": sum(1 for i in included if not i), "applied": bool(mode == "live" and note)})
+            tctx.timeline_lean_note, tctx.timeline_lean_ids = lean_note, tuple(lean_ids)
+            tctx.timeline_escalate = escalate
+        rec = {"lane": "timeline", "mode": mode, "entries": len(entries),
+               "superseded": sum(1 for e in entries if e.get("lifecycle_state") == "SUPERSEDED"),
+               "included": len(included), "included_ids": [i for i in included if i],
+               "missing_ids": sum(1 for i in included if not i), "escalate": escalate,
+               "applied": bool(mode == "live" and note)}
+        if lean_note:
+            rec.update({"lean_included": len(lean_ids), "lean_included_ids": [i for i in lean_ids if i],
+                        "lean_missing_ids": sum(1 for i in lean_ids if not i)})
+        _append_log(cfg, rec)
     except Exception:
-        tctx.timeline, tctx.timeline_note, tctx.timeline_ids = (), None, ()
+        tctx.timeline, tctx.timeline_note, tctx.timeline_ids, tctx.timeline_escalate = (), None, (), False
+        tctx.timeline_lean_note, tctx.timeline_lean_ids, tctx.timeline_delivered = None, (), None
         logger.debug("lilith_router: timeline failed (none)", exc_info=True)
 
 
@@ -792,6 +818,8 @@ def _with_social_note(out: dict) -> dict:
     hint = _tc.agent_hint(tctx, status) if _canonical_memory.owner_turn() else None
     if hint and "final_response" not in out:
         out["turn_hint"] = hint
+        if tctx.timeline_note and tctx.timeline_note in hint:
+            tctx.timeline_delivered = "agent"        # the agent got the search-compatible note (its ids are logged)
     return out
 
 
@@ -1208,15 +1236,7 @@ def _route_turn_impl(
             # Groq Free cannot take the full ~23K-token agent request, so casual
             # turns go through one lean, tool-less call; everything else (and any
             # lean failure) takes the native model with the social policy.
-            why = _social_lean.skip_reason(message)
-            if not why and tctx.correction:
-                why = "durable_correction"           # P-2: the tool-capable agent may propose remembering it
-            if not why and tctx.meta.get("applied") and tctx.meta.get("control") == "escalate":
-                why = "recall_gap"                   # P-3 G-ESCALATE: the agent can search its own memory
-            if not why and tctx.responsibility:
-                why = "responsibility"               # P4-5c: owning a missed commitment needs the full agent
-            if not why and tctx.timeline:
-                why = "timeline"                     # P-4 E-8: dated memory goes to the full agent only (N-48)
+            why = _lean_skip_reason(message, tctx)
             if not why:
                 text, why = _social_lean.reply(
                     runner=runner, cfg=cfg, home=_config._hermes_home(), session_key=session_key,
@@ -1225,6 +1245,8 @@ def _route_turn_impl(
                                                     if _canonical_memory.current_note() else "")
                     + _tc.lean_suffix(tctx))      # P-3: one renderer (tone lines, approved preferences)
                 if text:
+                    if _tc.lean_timeline_text(tctx):
+                        tctx.timeline_delivered = "lean"   # record-level: the fast path got the plain-header note
                     _note_social_route(cfg, platform, chat_id, "groq_lean")
                     return {"final_response": text, "mode": SOCIAL}
             return native_with_policy("lean:" + why)

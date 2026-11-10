@@ -71,6 +71,10 @@ class TurnContext:
     timeline: Tuple[Any, ...] = ()               # P-4 E-8: owner-memory records for the dated timeline (live only)
     timeline_note: Optional[str] = None          # the note rendered ONCE for the agent (header + size bounds applied)
     timeline_ids: Tuple[Any, ...] = ()           # the record ids of exactly that note's lines (audit; None = no id)
+    timeline_escalate: bool = False              # event-level question: full agent with search; else fast path is fine
+    timeline_lean_note: Optional[str] = None     # record-level only: the plain-header note for the fast path
+    timeline_lean_ids: Tuple[Any, ...] = ()      # the record ids of exactly that note's lines
+    timeline_delivered: Optional[str] = None     # which note the reply was actually given: "agent" | "lean"
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -84,6 +88,11 @@ class TurnContext:
         if self.timeline:
             out["timeline"] = len(self.timeline)
             out["timeline_included"] = len(self.timeline_ids)
+        if self.timeline_delivered:              # the note the model actually got, and its record ids (no text)
+            ids = self.timeline_ids if self.timeline_delivered == "agent" else self.timeline_lean_ids
+            out["timeline_delivered"] = self.timeline_delivered
+            out["timeline_delivered_ids"] = [i for i in ids if i]
+            out["timeline_delivered_missing"] = sum(1 for i in ids if not i)
         if self.appraisal:
             out["appraisal"] = [getattr(a, "kind", str(a)) for a in self.appraisal]
             out["appraisal_refs"] = list(self.style.appraisal_refs)
@@ -157,10 +166,20 @@ def responsibility_text(ctx: TurnContext) -> Optional[str]:
 
 
 def timeline_text(ctx: TurnContext) -> Optional[str]:
-    """P-4 E-8: the dated approved-memory timeline on a time / order / change question (live; full agent only)."""
+    """P-4 E-8: the dated approved-memory timeline for the FULL AGENT (live). Always the search-compatible wording,
+    whichever gate sent the turn there: a record-level question that reaches the agent through another gate (a
+    correction, a recall gap, a commitment, a technical route, a lean failure) must not be told "say you don't know"
+    before it searches (N-50)."""
     if not (ctx.owner and ctx.timeline and ctx.timeline_note):
         return None
     return ctx.timeline_note                     # the exact note whose ids were logged; never re-rendered
+
+
+def lean_timeline_text(ctx: TurnContext) -> Optional[str]:
+    """The fast path's timeline: record-level questions only (eval arm D), with the plain header."""
+    if not (ctx.owner and ctx.timeline and not ctx.timeline_escalate and ctx.timeline_lean_note):
+        return None
+    return ctx.timeline_lean_note
 
 
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
@@ -182,5 +201,5 @@ def lean_suffix(ctx: TurnContext) -> str:
     (A durable correction never reaches the lean path: it routes to the agent.)"""
     if not ctx.owner:
         return ""
-    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx), goal_text(ctx))
-                   if p)
+    return "".join("\n\n" + p for p in (tone_text(ctx), preference_text(ctx), meta_text(ctx), goal_text(ctx),
+                                       lean_timeline_text(ctx)) if p)

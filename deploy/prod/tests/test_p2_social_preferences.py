@@ -230,7 +230,7 @@ class RouterIntegrationTests(unittest.TestCase):
 
     def test_lean_path_skips_durable_corrections_and_carries_the_note(self):
         text = (ROOT / "deploy/prod/lilith_router/gateway_integration.py").read_text(encoding="utf-8")
-        self.assertIn('if not why and tctx.correction:\n                why = "durable_correction"', text)
+        self.assertIn('if not why and tctx.correction:\n        why = "durable_correction"', text)
         self.assertIn('+ _tc.lean_suffix(tctx))', text)
 
 
