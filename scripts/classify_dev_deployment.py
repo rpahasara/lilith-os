@@ -145,14 +145,17 @@ FRONTEND_SOURCE_EXTENSIONS = (".ts", ".tsx", ".css")
 FRONTEND_ROADMAP_DIR = "docs/roadmap/"
 # Next.js server-side code runs with the Core API service credentials and the owner-capture gate. It never reaches
 # DEV either, but it is the web app's privileged boundary, so it stays on the full path: any `api` route segment under
-# src/app, any route/middleware/proxy/instrumentation entry point, and the server-only modules those routes import.
+# src/app, any route/middleware/proxy/instrumentation entry point, and the listed modules that either run on the
+# server or load privileged code. scripts/test_classify_dev_deployment.py (server_boundary_violations) fails CI if any
+# server-reachable module, server action, secret-env reader or importer of privileged code is not excluded here.
 FRONTEND_SERVER_SEGMENT = "api"
 FRONTEND_SERVER_FILENAMES = frozenset({
     "route.ts", "route.tsx", "middleware.ts", "proxy.ts", "instrumentation.ts", "instrumentation-client.ts",
 })
 FRONTEND_SERVER_PATHS = frozenset({
-    "src/lib/core-api-credentials.ts",
-    "src/lib/conversation/owner-capture-auth.ts",
+    "src/lib/core-api-credentials.ts",                 # Core API service tokens
+    "src/lib/conversation/owner-capture-auth.ts",      # owner-capture gate
+    "src/lib/conversation/self-test.ts",               # loads the conversation server routes to test that gate
 })
 
 
@@ -186,7 +189,7 @@ PINNED_CANDIDATE_BLOBS = {
     "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py": "bd4891da82f25842676f382043f4c9336b8d0425",
     "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py": "1061fca0074268d147796e1aaec712edebe25280",
     "docs/architecture/ci-contracts-runner-amendment-20261105.md": "aa5322142f043c25d63cb97c4ce453011a107e66",
-    "docs/architecture/dev-deploy-classifier-frontend-only.md": "0bf4ef07ded09a386f576eca31b1339785b3af35",
+    "docs/architecture/dev-deploy-classifier-frontend-only.md": "c8daba40c4114f74828c67ccbfb3f644f1d23489",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,

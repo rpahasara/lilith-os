@@ -1,6 +1,7 @@
 """Regression and bypass checks for the protected-main DEV gate classifier."""
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,84 @@ from scripts import classify_dev_deployment as gate
 
 def changed(path, status="M", old="100644", new="100644"):
     return path, status, old, new
+
+
+# ---------------------------------------------------------------- Next.js server-boundary guard
+# The classifier is path-based. This structural guard (run by CI on every PR, before deploy-dev can run) keeps the
+# frontend lane honest: every module that runs or reaches privileged code on the Next.js server must be outside it.
+_SPEC = re.compile(
+    r"""(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']""")  # import/export-from, side-effect, dynamic, require
+_NON_LITERAL_LOAD = re.compile(r"""\b(?:import|require)\s*\(\s*(?!["'])""")
+_SERVER_DIRECTIVE = re.compile(r"""["']use server["']""")
+_SERVER_PACKAGES = ("server-only", "next/headers", "next/cache")  # server-only APIs (next/server types are also used by tests)
+_SECRET_ENV = re.compile(r"process\.env\.(?!NEXT_PUBLIC_|NODE_ENV\b)[A-Za-z_]")
+_SUFFIXES = ("", ".ts", ".tsx", ".js", ".mjs", "/index.ts", "/index.tsx", "/index.js")
+
+
+def server_boundary_violations(root):
+    """Return (module, reason) pairs for privileged Next.js server modules the frontend lane would admit."""
+    src = root / "src"
+    files = sorted(p for p in src.rglob("*") if p.is_file() and p.suffix in (".ts", ".tsx", ".js", ".mjs"))
+    text = {p: p.read_text(encoding="utf-8") for p in files}
+    rel = {p: p.relative_to(root).as_posix() for p in files}
+
+    def resolve(owner, spec):
+        if spec.startswith("@/"):
+            base = src / spec[2:]
+        elif spec.startswith((".", "/")):
+            base = owner.parent / spec
+        else:
+            return None  # package
+        for suffix in _SUFFIXES:
+            candidate = Path(os.path.normpath(str(base) + suffix))
+            if candidate.is_file():
+                return candidate
+        return "unresolved"
+
+    imports, packages, problems = {}, {}, []
+    for path in files:
+        imports[path], packages[path] = set(), set()
+        for spec in _SPEC.findall(text[path]):
+            target = resolve(path, spec)
+            if target is None:
+                packages[path].add(spec)
+            elif target == "unresolved":
+                problems.append((rel[path], f"unresolved import {spec!r}"))
+            else:
+                imports[path].add(target)
+
+    # Code that RUNS on the Next.js server: entry points, server actions, server-only API users.
+    server_roots = {
+        p for p in files
+        if p.name in gate.FRONTEND_SERVER_FILENAMES
+        or _SERVER_DIRECTIVE.search(text[p])
+        or packages[p].intersection(_SERVER_PACKAGES)
+    }
+    # Code that TOUCHES privileged material: the listed server modules, secret env readers, and the server roots.
+    privileged = server_roots | {p for p in files if rel[p] in gate.FRONTEND_SERVER_PATHS or _SECRET_ENV.search(text[p])}
+
+    server_side = set(server_roots)                 # forward: everything server code loads (static, re-export,
+    pending = list(server_roots)                    # side-effect, literal dynamic import, require)
+    while pending:
+        for target in imports[pending.pop()]:
+            if target not in server_side:
+                server_side.add(target)
+                pending.append(target)
+    grew = True                                     # reverse: everything that loads privileged code, transitively
+    while grew:
+        grew = False
+        for path in files:
+            if path not in privileged and imports[path] & privileged:
+                privileged.add(path)
+                grew = True
+
+    for path in sorted(server_side):
+        if _NON_LITERAL_LOAD.search(text[path]):
+            problems.append((rel[path], "non-literal dynamic import/require in server-side module"))
+    for path in sorted(server_side | privileged):
+        if gate.is_frontend_only(rel[path], "M", "100644", "100644"):
+            problems.append((rel[path], "server-side or privileged module admitted to the frontend lane"))
+    return sorted(problems)
 
 
 class DevGateClassifierTests(unittest.TestCase):
@@ -529,6 +608,7 @@ class DevGateClassifierTests(unittest.TestCase):
             ("src/app/feed/route.tsx", "A"),
             ("src/lib/core-api-credentials.ts", "M"),
             ("src/lib/conversation/owner-capture-auth.ts", "M"),
+            ("src/lib/conversation/self-test.ts", "M"),
             ("src/lib/middleware.ts", "A"),
             ("src/components/instrumentation-client.ts", "A"),
             ("src/proxy.ts", "A"),
@@ -636,36 +716,86 @@ class DevGateClassifierTests(unittest.TestCase):
             with self.subTest(entry=entry):
                 self.assertEqual(self.classify(entry), gate.DEPLOY_REQUIRED)
 
-    def test_server_route_imports_stay_outside_the_frontend_lane(self):
-        """Every module a Next.js server route reaches (transitively, via @/) must be excluded from the lane."""
-        import re as _re
-        root = Path(__file__).resolve().parents[1]
-        src = root / "src"
-        importer = _re.compile(r"""from\s+["']@/([^"']+)["']|import\(\s*["']@/([^"']+)["']\s*\)""")
+    def test_server_boundary_closure_is_outside_the_frontend_lane(self):
+        """Every module that runs on the Next.js server, or loads privileged code, is excluded from the lane."""
+        self.assertEqual(server_boundary_violations(Path(__file__).resolve().parents[1]), [])
 
-        def resolve(spec):
-            for suffix in (".ts", ".tsx", "/index.ts", "/index.tsx"):
-                candidate = src / (spec + suffix)
-                if candidate.is_file():
-                    return candidate
-            return None
+    def test_server_boundary_guard_catches_each_gap_class(self):
+        cases = {
+            # name: ({file: content}, modules expected to be reported as admitted to the lane)
+            "relative import from a route": (
+                {"src/app/feed/api/x/route.ts": 'import { h } from "../../../../lib/helper";',
+                 "src/lib/helper.ts": "export const h = 1;"},
+                {"src/lib/helper.ts"}),
+            "re-export chain": (
+                {"src/app/api/x/route.ts": 'import { b } from "@/lib/a";',
+                 "src/lib/a.ts": 'export * from "./b";', "src/lib/b.ts": "export const b = 1;"},
+                {"src/lib/a.ts", "src/lib/b.ts"}),
+            "named re-export": (
+                {"src/app/api/x/route.ts": 'export { b } from "@/lib/b";', "src/lib/b.ts": "export const b = 1;"},
+                {"src/lib/b.ts"}),
+            "side-effect import": (
+                {"src/app/api/x/route.ts": 'import "@/lib/side";', "src/lib/side.ts": "globalThis.x = 1;"},
+                {"src/lib/side.ts"}),
+            "literal dynamic import": (
+                {"src/app/api/x/route.ts": 'const m = await import("@/lib/dyn");', "src/lib/dyn.ts": "export {};"},
+                {"src/lib/dyn.ts"}),
+            "require": (
+                {"src/app/api/x/route.ts": 'const m = require("../../../lib/req");', "src/lib/req.ts": "export {};"},
+                {"src/lib/req.ts"}),
+            "middleware outside src/app": (
+                {"src/lib/middleware.ts": 'import { m } from "./mw-helper";', "src/lib/mw-helper.ts": "export const m = 1;"},
+                {"src/lib/mw-helper.ts"}),
+            "server component importing credentials": (
+                {"src/app/page.tsx": 'import { coreApiHeaders } from "@/lib/core-api-credentials";'},
+                {"src/app/page.tsx"}),
+            "transitive importer of credentials": (
+                {"src/components/card.tsx": 'import { y } from "@/lib/y";',
+                 "src/lib/y.ts": 'import { coreApiHeaders } from "../lib/core-api-credentials";'},
+                {"src/components/card.tsx", "src/lib/y.ts"}),
+            "test or page importing a route": (
+                {"src/lib/route-test.ts": 'import { POST } from "@/app/api/x/route";',
+                 "src/app/api/x/route.ts": "export async function POST() {}"},
+                {"src/lib/route-test.ts"}),
+            "file-level server action": (
+                {"src/lib/actions.ts": '"use server";\nexport async function save() {}'},
+                {"src/lib/actions.ts"}),
+            "inline server action and what it loads": (
+                {"src/components/form.tsx": 'import { v } from "./v";\nasync function a() { "use server"; }',
+                 "src/components/v.ts": "export const v = 1;"},
+                {"src/components/form.tsx", "src/components/v.ts"}),
+            "server-only package": (
+                {"src/lib/s.ts": 'import "server-only";'}, {"src/lib/s.ts"}),
+            "next/headers user": (
+                {"src/lib/h.ts": 'import { cookies } from "next/headers";'}, {"src/lib/h.ts"}),
+            "secret env reader and its importer": (
+                {"src/lib/sec.ts": "export const t = process.env.SECRET_TOKEN;",
+                 "src/components/c.tsx": 'import { t } from "@/lib/sec";'},
+                {"src/lib/sec.ts", "src/components/c.tsx"}),
+        }
+        base = {"src/lib/core-api-credentials.ts": "export const coreApiHeaders = () => ({});"}
+        for name, (tree, expected) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                for rel, body in {**base, **tree}.items():
+                    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (root / rel).write_text(body, encoding="utf-8")
+                admitted = {path for path, reason in server_boundary_violations(root) if "admitted" in reason}
+                self.assertEqual(admitted, expected)
 
-        pending = [p for p in (src / "app").rglob("*") if p.is_file() and p.name in gate.FRONTEND_SERVER_FILENAMES]
-        self.assertTrue(pending, "expected Next.js server routes")
-        seen = set()
-        while pending:
-            current = pending.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            for match in importer.finditer(current.read_text(encoding="utf-8")):
-                target = resolve(match.group(1) or match.group(2))
-                if target is not None:
-                    pending.append(target)
-        for module in sorted(seen):
-            rel = module.relative_to(root).as_posix()
-            with self.subTest(module=rel):
-                self.assertFalse(gate.is_frontend_only(rel, "M", "100644", "100644"))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for rel, body in {
+                **base,
+                "src/app/api/x/route.ts": 'const m = await import(`@/lib/${name}`);\nimport { z } from "./missing";',
+                # negative controls: client code, public env, NODE_ENV, packages
+                "src/components/ok.tsx": 'import { api } from "@/lib/api";\nimport React from "react";',
+                "src/lib/api.ts": "export const api = process.env.NEXT_PUBLIC_API + process.env.NODE_ENV;",
+            }.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(body, encoding="utf-8")
+            reasons = {(path, reason.split(" ")[0]) for path, reason in server_boundary_violations(root)}
+            self.assertEqual(reasons, {("src/app/api/x/route.ts", "non-literal"), ("src/app/api/x/route.ts", "unresolved")})
 
     def test_frontend_is_not_consumed_by_any_deployment_path(self):
         from scripts import build_core_api_bundle as bundle
