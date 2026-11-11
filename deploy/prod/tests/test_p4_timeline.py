@@ -361,6 +361,24 @@ class LocalDateTests(unittest.TestCase):
         self.assertEqual(self.tl._day("2026-11-06T19:00:00", ZoneInfo("Asia/Colombo")), "2026-11-07")
         self.assertIsNone(self.tl._day("not a date"))
 
+    def test_size_pressure_drops_the_oldest_not_the_newest(self):
+        import os
+        os.environ.pop("HERMES_TIMEZONE", None)
+        recs = [dict(rec("x" * 240, "2026-10-%02dT10:00:00Z" % (i + 1)), entry_id="om_%02d" % (i + 1)) for i in range(20)]
+        recs.append(dict(rec("TEST_ONLY imported, undated."), entry_id="om_imp"))
+        for can_search in (False, True):
+            with self.subTest(can_search=can_search):
+                note, ids = self.tl.render_with_ids(recs, can_search=can_search)
+                body = note.splitlines()[1:]
+                self.assertLessEqual(len(note), self.tl.MAX_CHARS)
+                self.assertEqual(len(ids), len(body))                          # audit ids = exactly the lines
+                self.assertEqual(ids[-1], "om_imp")                             # undated stays last
+                dated = ids[:-1]
+                self.assertEqual(dated, sorted(dated))                          # chronological order kept
+                self.assertEqual(dated[-1], "om_20")                            # the newest survives
+                self.assertNotIn("om_01", ids)                                  # the oldest dropped first
+                self.assertLessEqual(len(ids), self.tl.MAX_ENTRIES)
+
     def test_stored_is_still_never_an_event_date(self):
         note, _ = self.render("Asia/Colombo")
         self.assertIn('A "stored" date is when the memory', note)

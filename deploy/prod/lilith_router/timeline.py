@@ -174,14 +174,16 @@ def render_with_ids(entries, can_search: bool = False) -> Tuple[Optional[str], L
     if not rows:
         return None, []
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last
-    lines, ids, size = [], [], len(header)
-    for _, line, eid in rows[-MAX_ENTRIES:]:
+    # Fill the size budget from the END of the list (newest dated entries, then the undated ones placed last), so under
+    # size pressure the OLDEST dated entries drop first, never the most recent. Output order is unchanged.
+    kept, size = [], len(header)
+    for _, line, eid in reversed(rows[-MAX_ENTRIES:]):
         if size + len(line) + 1 > MAX_CHARS:
             break
-        lines.append(line)
-        ids.append(eid)
+        kept.append((line, eid))
         size += len(line) + 1
-    return header + "\n" + "\n".join(lines), ids
+    kept.reverse()
+    return header + "\n" + "\n".join(l for l, _ in kept), [e for _, e in kept]
 
 
 class OwnerMemorySource:
