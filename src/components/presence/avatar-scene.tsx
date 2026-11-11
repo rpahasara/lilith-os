@@ -56,7 +56,12 @@ import { reportProblem } from "@/lib/diagnostics";
 // Development-only diagnostics; dropped from production builds (see lib/diagnostics).
 const DEV_DIAGNOSTICS = process.env.NODE_ENV !== "production";
 
-const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
+// Same bytes as public/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm, served from a
+// content-versioned, privately cached URL (see src/server/web-hosting/avatar.ts). The
+// version is the source file's hash, set at build time by next.config.ts.
+const AVATAR_URL = process.env.NEXT_PUBLIC_HSIN_AVATAR_VERSION
+  ? `/avatar/hsin-${process.env.NEXT_PUBLIC_HSIN_AVATAR_VERSION}.vrm`
+  : "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
 // Calibration/diagnostic surfaces are OFF by default, including in `next dev`.
 // Opt in explicitly with NEXT_PUBLIC_PRESENCE_DEBUG=1 for the full tooling, or

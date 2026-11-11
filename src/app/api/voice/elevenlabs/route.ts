@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 
 /**
  * Server-side proxy for LILITH voice synthesis (ElevenLabs TTS).
@@ -22,6 +23,8 @@ const DEFAULT_VOICE_ID = "f9x21lSfJr46lObG1WtU";
 const DEFAULT_MODEL_ID = "eleven_v3";
 
 export async function POST(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) {
     return NextResponse.json(

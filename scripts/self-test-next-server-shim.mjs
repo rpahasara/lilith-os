@@ -4,4 +4,9 @@ export class NextResponse extends Response {
   static json(body, init) {
     return Response.json(body, init);
   }
+
+  // Proxy pass-through. The real implementation also marks the response with this header.
+  static next() {
+    return new Response(null, { headers: { "x-middleware-next": "1" } });
+  }
 }

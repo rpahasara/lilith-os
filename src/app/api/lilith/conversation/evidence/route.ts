@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { ownerCaptureAuthentication } from "@/lib/conversation/owner-capture-auth";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
@@ -31,6 +32,8 @@ function refuse(error: string, status: number) {
 }
 
 export async function GET(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const auth = await ownerCaptureAuthentication(req);
   return NextResponse.json(
     auth.available ? { available: true } : { available: false, reason: auth.reason },
@@ -39,6 +42,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const auth = await ownerCaptureAuthentication(req);
   if (!auth.available) return refuse("OWNER_AUTHENTICATION_REQUIRED", 403);
   // CSRF: only same-origin JSON requests (a cross-site form cannot set this content type or origin).
