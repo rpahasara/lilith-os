@@ -8,6 +8,7 @@ import { nav } from "./nav";
 import { cn } from "@/lib/utils";
 import { user } from "@/lib/data";
 import { FoxMark } from "@/components/ui/fox-mark";
+import { unavailable } from "@/components/ui/unavailable";
 
 export function SidebarRail() {
   const pathname = usePathname();
@@ -73,19 +74,23 @@ export function SidebarRail() {
       {/* footer */}
       <div className="flex flex-col items-center gap-3">
         <button
+          type="button"
           aria-label="Settings"
-          className="grid h-10 w-10 place-items-center rounded-xl text-ink-faint transition-colors hover:bg-white/5 hover:text-ink"
+          {...unavailable("Settings")}
+          className="grid h-10 w-10 cursor-not-allowed place-items-center rounded-xl text-ink-faint opacity-50"
         >
           <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
-        <button
-          aria-label="Account"
+        {/* Owner monogram, display only: there is no account menu or sign-in yet. */}
+        <span
+          role="img"
+          aria-label={user.name}
           className="relative h-9 w-9 overflow-hidden rounded-full bg-gradient-to-br from-wine-deep to-wine-bright ring-1 ring-white/15"
         >
-          <span className="grid h-full w-full place-items-center text-xs font-semibold text-white">
+          <span aria-hidden className="grid h-full w-full place-items-center text-xs font-semibold text-white">
             {user.name.charAt(0)}
           </span>
-        </button>
+        </span>
       </div>
     </aside>
   );

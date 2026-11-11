@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowUp, Loader2, Mic, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { unavailable } from "@/components/ui/unavailable";
 
 interface CommandInputProps {
   onFocusChange?: (focused: boolean) => void;
@@ -145,10 +146,12 @@ export function CommandInput({
         <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint sm:flex">
           Ctrl Space
         </kbd>
+        {/* Voice input (speech-to-text) is not built yet: disabled, not a stub. */}
         <button
+          type="button"
           aria-label="Voice input"
-          disabled={loading}
-          className="grid h-9 w-9 place-items-center rounded-full text-ink-muted transition-colors hover:bg-white/5 hover:text-ink disabled:opacity-40"
+          {...unavailable("Voice input")}
+          className="grid h-9 w-9 cursor-not-allowed place-items-center rounded-full text-ink-muted opacity-40"
         >
           <Mic className="h-4 w-4" />
         </button>
