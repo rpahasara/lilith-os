@@ -183,6 +183,13 @@ jobs:
       - name: Run Command Core self-test
         run: npm run test:core
 
+      - name: Package the private web release artifact
+        run: npm run package:web
+
+      - name: End-to-end install of the web release artifact (systemd, health, auth, rollback)
+        # Uses only dist/lilith-web and its INSTALL.md procedure, on this ephemeral runner.
+        run: sudo -E env "PATH=$PATH" bash scripts/e2e-web-release.sh dist/lilith-web
+
   backend-quality:
     name: Core API tests
     runs-on: ubuntu-latest

@@ -195,7 +195,10 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
   /* ------------------------------------------------ readiness: artifact */
   const goodArtifact = {
     files: ["server.js", "web-artifact.json", ".next/static/chunks/a.js", "public/favicon.ico", "avatar-cache/hsin-x.vrm.gz",
-      "node_modules/next/package.json", "node_modules/react/index.js"],
+      "node_modules/next/package.json", "node_modules/react/index.js",
+      "bin/check-readiness.mjs", "bin/scan-prod-bundle.mjs", "bin/healthcheck.sh", "bin/install-release.sh", "bin/rollback.sh",
+      "deploy/lilith-web.service", "deploy/lilith-web-health.service", "deploy/lilith-web-health.timer",
+      "deploy/cloudflared.yml.template", "deploy/lilith-web.env.template", "INSTALL.md"],
     totalBytes: 150e6, nodeModulesBytes: 31e6,
   };
   check("readiness artifact: a standalone package passes", checkArtifact(goodArtifact).length === 0);
@@ -208,6 +211,9 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
     ["source tree", { files: [...goodArtifact.files, "src/server/edge-auth/jwt.ts"] }],
     ["full node_modules", { nodeModulesBytes: 600e6 }],
     ["no compressed avatar", { files: goodArtifact.files.filter((f) => !f.startsWith("avatar-cache/")) }],
+    ["no bundled readiness check", { files: goodArtifact.files.filter((f) => f !== "bin/check-readiness.mjs") }],
+    ["no install script", { files: goodArtifact.files.filter((f) => f !== "bin/install-release.sh") }],
+    ["no INSTALL.md", { files: goodArtifact.files.filter((f) => f !== "INSTALL.md") }],
   ];
   for (const [label, over] of artifactCases) check(`readiness artifact rejects: ${label}`, checkArtifact({ ...goodArtifact, ...over }).length > 0);
 
