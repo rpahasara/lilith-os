@@ -66,4 +66,11 @@ export interface SpeechControllerSnapshot {
   durationSec: number;
   /** Monotonic id; increments on every speak()/stop() for stale-guarding. */
   requestId: number;
+  /**
+   * Outcome of the most recent speak() that ran to completion or failure:
+   * "ok" played, "unavailable" synthesis/decode failed (e.g. TTS not
+   * configured), "blocked" the browser kept audio locked. null = none yet.
+   * Superseded or stopped requests do not change it.
+   */
+  lastResult: "ok" | "unavailable" | "blocked" | null;
 }

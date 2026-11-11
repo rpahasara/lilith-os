@@ -31,7 +31,7 @@ import type {
   TTSRequest,
 } from "./types";
 
-class LilithSpeechController {
+export class LilithSpeechController {
   private provider: TTSProvider = new MockTTSProvider();
   private playback: WebAudioPlayback | null = null;
 
@@ -41,11 +41,15 @@ class LilithSpeechController {
   private durationSec = 0;
 
   private listeners = new Set<() => void>();
+  /** Aborts the in-flight synthesis request when superseded or stopped. */
+  private synthAbort: AbortController | null = null;
+  private lastResult: SpeechControllerSnapshot["lastResult"] = null;
   private snapshot: SpeechControllerSnapshot = {
     status: "idle",
     provider: null,
     durationSec: 0,
     requestId: 0,
+    lastResult: null,
   };
 
   /** Swap the active provider (dev/config). */
@@ -81,15 +85,19 @@ class LilithSpeechController {
     const provider = providerOverride ?? this.provider;
     // New request owns everything from here; invalidates prior async work.
     const myId = ++this.requestId;
+    this.abortSynthesis();
+    const synthAbort = new AbortController();
+    this.synthAbort = synthAbort;
     this.teardownPlayback();
     hsinLipSync.stopSpeech();
     this.setState("loading", provider.name, 0);
 
     let result;
     try {
-      result = await provider.synthesize(req);
+      // Abortable, so a superseded or stopped request stops downloading audio.
+      result = await provider.synthesize({ ...req, signal: synthAbort.signal });
     } catch {
-      if (myId === this.requestId) this.hardReset();
+      if (myId === this.requestId) this.fail("unavailable");
       return false;
     }
     if (myId !== this.requestId) return false; // superseded during synthesis
@@ -100,10 +108,17 @@ class LilithSpeechController {
       ctx = await ensureAudioContext();
       buffer = await decodeAudio(ctx, result.audio);
     } catch {
-      if (myId === this.requestId) this.hardReset();
+      if (myId === this.requestId) this.fail("unavailable");
       return false;
     }
     if (myId !== this.requestId) return false; // superseded during decode
+    // Autoplay policy: if the browser still holds audio locked (no owner
+    // interaction yet), do not animate speech that would be silent. Mouth
+    // motion only ever runs with audible playback.
+    if (ctx.state !== "running") {
+      this.fail("blocked");
+      return false;
+    }
 
     const playback = new WebAudioPlayback(ctx, buffer);
     playback.setOnEnded(() => {
@@ -127,13 +142,27 @@ class LilithSpeechController {
     // Start audio and visemes together; audio is the completion authority.
     hsinLipSync.startSpeech(cues, { externalClock: true });
     playback.play();
+    this.synthAbort = null;
+    this.lastResult = "ok";
     this.setState("playing", result.meta?.provider ?? provider.name, this.durationSec);
     return true;
   }
 
   stop(): void {
-    // Invalidate any in-flight/stale callbacks, then tear down.
+    // Invalidate any in-flight/stale callbacks, abort synthesis, then tear down.
     this.requestId++;
+    this.abortSynthesis();
+    this.hardReset();
+  }
+
+  private abortSynthesis(): void {
+    this.synthAbort?.abort();
+    this.synthAbort = null;
+  }
+
+  private fail(reason: "unavailable" | "blocked"): void {
+    this.synthAbort = null;
+    this.lastResult = reason;
     this.hardReset();
   }
 
@@ -183,6 +212,7 @@ class LilithSpeechController {
       provider,
       durationSec,
       requestId: this.requestId,
+      lastResult: this.lastResult,
     };
     this.listeners.forEach((l) => l());
   }
