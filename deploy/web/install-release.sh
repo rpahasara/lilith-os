@@ -58,6 +58,7 @@ switch_to "releases/$ID"
 
 systemctl daemon-reload
 systemctl enable --quiet lilith-web.service lilith-web-health.timer
+systemctl reset-failed lilith-web.service 2>/dev/null || true   # clear earlier failures / start-rate limit
 if systemctl restart lilith-web.service && "$BASE/bin/healthcheck.sh" --wait 30; then
   systemctl start lilith-web-health.timer
   echo "install-release: release $ID is live (previous: ${PREV:-none})"
@@ -69,6 +70,7 @@ fi
 echo "install-release: release $ID failed its health check; rolling back" >&2
 if [ -n "$PREV" ]; then
   switch_to "$PREV"
+  systemctl reset-failed lilith-web.service 2>/dev/null || true
   systemctl restart lilith-web.service && "$BASE/bin/healthcheck.sh" --wait 30 && echo "install-release: rolled back to $PREV" >&2
 else
   systemctl stop lilith-web.service || true

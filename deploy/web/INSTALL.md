@@ -36,6 +36,13 @@ sudo /opt/lilith-web/current/bin/rollback.sh                 # to the previous r
 sudo /opt/lilith-web/current/bin/rollback.sh releases/<id>   # to a specific one
 ```
 
+## Recover after fixing the configuration
+A misconfigured or failing service is refused at startup, and repeated failures trip systemd's start-rate limit. After fixing `/etc/lilith-web/env`, clear the failed state, then restart:
+```bash
+sudo systemctl reset-failed lilith-web.service && sudo systemctl restart lilith-web.service
+/opt/lilith-web/bin/healthcheck.sh
+```
+
 ## Stop
 ```bash
 sudo systemctl disable --now lilith-web-health.timer lilith-web.service
