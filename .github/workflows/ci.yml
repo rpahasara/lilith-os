@@ -188,7 +188,8 @@ jobs:
 
       - name: End-to-end install of the web release artifact (systemd, health, auth, rollback)
         # Uses only dist/lilith-web and its INSTALL.md procedure, on this ephemeral runner.
-        run: sudo -E env "PATH=$PATH" bash scripts/e2e-web-release.sh dist/lilith-web
+        # sudo on the runner ignores -E, so pass PATH (toolcache Node) and CI explicitly.
+        run: sudo env "PATH=$PATH" CI=true bash scripts/e2e-web-release.sh dist/lilith-web
 
   backend-quality:
     name: Core API tests
