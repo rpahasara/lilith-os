@@ -25,7 +25,9 @@ await build({
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest())];
+      import { runShellHealthSelfTest } from "@/lib/system/self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
+                       ...(await runShellHealthSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
