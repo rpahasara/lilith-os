@@ -113,6 +113,8 @@ CONTROL_ONLY_PATHS = frozenset(
         "docs/adr/README.md",
         "docs/engineering/source-consolidation-2026-10.md",
         "docs/engineering/vm-only-source-gaps.md",
+        # Frontend-only lane record (2026-11-11), admitted only at its exact reviewed revision pinned below.
+        "docs/architecture/dev-deploy-classifier-frontend-only.md",
     }
 )
 
@@ -120,6 +122,58 @@ CONTROL_ONLY_PATHS = frozenset(
 # referenced by a workflow or installed on DEV. Only a brand-new regular file qualifies: a modification, deletion,
 # symlink or mode change under the prefix takes full deployment, as does any path outside it.
 PRESERVED_SOURCE_ADDITION_PREFIX = "integrations/hermes/"
+
+# Next.js web frontend (record: docs/architecture/dev-deploy-classifier-frontend-only.md). None of these paths is
+# packaged into the Core API bundle (build_core_api_bundle.FIXED_FILES and services/core-api/lilith_memory/*.py),
+# referenced by a DEV/PROD deployment workflow, installed on DEV, or read by the DEV helper; the frontend is built and
+# tested only by CI. Only an addition, or a content-only modification, of a regular non-executable file (100644)
+# qualifies. A deletion, mode change, executable bit, symlink or submodule takes full deployment, as does any path not
+# matched exactly below.
+FRONTEND_EXACT_PATHS = frozenset({
+    "package.json",
+    "package-lock.json",
+    "scripts/run-core-self-test.mjs",
+    "scripts/self-test-next-server-shim.mjs",
+    "scripts/scan-prod-bundle.mjs",
+    "scripts/test-stubs/next-link.tsx",
+    "scripts/test-stubs/next-navigation.ts",
+})
+# Browser/rendering source trees, limited to these extensions.
+FRONTEND_SOURCE_TREES = ("src/app/", "src/components/", "src/hooks/", "src/lib/")
+FRONTEND_SOURCE_EXTENSIONS = (".ts", ".tsx", ".css")
+# Roadmap notes: Markdown files directly in this directory only (no subdirectories).
+FRONTEND_ROADMAP_DIR = "docs/roadmap/"
+# Next.js server-side code runs with the Core API service credentials and the owner-capture gate. It never reaches
+# DEV either, but it is the web app's privileged boundary, so it stays on the full path: any `api` route segment under
+# src/app, any route/middleware/proxy/instrumentation entry point, and the server-only modules those routes import.
+FRONTEND_SERVER_SEGMENT = "api"
+FRONTEND_SERVER_FILENAMES = frozenset({
+    "route.ts", "route.tsx", "middleware.ts", "proxy.ts", "instrumentation.ts", "instrumentation-client.ts",
+})
+FRONTEND_SERVER_PATHS = frozenset({
+    "src/lib/core-api-credentials.ts",
+    "src/lib/conversation/owner-capture-auth.ts",
+})
+
+
+def is_frontend_only(path: str, status: str, old_mode: str, new_mode: str) -> bool:
+    """True only for a reviewed, browser-side frontend file changed as a regular non-executable file."""
+    if new_mode != "100644":
+        return False
+    if not ((status == "A" and old_mode == "000000") or (status == "M" and old_mode == "100644")):
+        return False
+    if path in FRONTEND_EXACT_PATHS:
+        return True
+    parts = path.split("/")
+    if path.startswith(FRONTEND_ROADMAP_DIR):
+        return len(parts) == 3 and parts[2].endswith(".md") and not parts[2].startswith(".")
+    if not path.startswith(FRONTEND_SOURCE_TREES) or not path.endswith(FRONTEND_SOURCE_EXTENSIONS):
+        return False
+    if path in FRONTEND_SERVER_PATHS or parts[-1] in FRONTEND_SERVER_FILENAMES:
+        return False
+    if parts[1] == "app" and FRONTEND_SERVER_SEGMENT in parts[2:-1]:
+        return False
+    return not any(part.startswith(".") for part in parts)
 
 # The installer is admitted only at the exact reviewed Stage-II revision, the source consolidation record
 # and the 2026-11-05 runner amendment files only at their exact reviewed revision. Any other revision of these paths takes full deployment.
@@ -132,6 +186,7 @@ PINNED_CANDIDATE_BLOBS = {
     "services/owner-memory-control/tests/test_b1b3e_mb11_signer_start.py": "bd4891da82f25842676f382043f4c9336b8d0425",
     "services/owner-memory-control/tests/test_b1b3e_mb11_restart_boundary.py": "1061fca0074268d147796e1aaec712edebe25280",
     "docs/architecture/ci-contracts-runner-amendment-20261105.md": "aa5322142f043c25d63cb97c4ce453011a107e66",
+    "docs/architecture/dev-deploy-classifier-frontend-only.md": "0bf4ef07ded09a386f576eca31b1339785b3af35",
 }
 
 # Exact broker-owned source/test surface. No shared Core API module, installer,
@@ -217,6 +272,8 @@ def classify_entries(
             path.startswith(PRESERVED_SOURCE_ADDITION_PREFIX)
             and status == "A" and old_mode == "000000" and new_mode in ("100644", "100755")
         ):
+            current = CONTROL_ONLY_NO_DEPLOY
+        elif is_frontend_only(path, status, old_mode, new_mode):
             current = CONTROL_ONLY_NO_DEPLOY
         else:
             return DEPLOY_REQUIRED
