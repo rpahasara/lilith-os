@@ -25,7 +25,9 @@ await build({
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest())];
+      import { runControlsSelfTest } from "@/lib/ui/controls-self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
+                       ...runControlsSelfTest()];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
@@ -44,7 +46,16 @@ await build({
   platform: "node",
   format: "esm",
   target: "node18",
-  alias: { "@": join(root, "src"), "next/server": join(root, "scripts", "self-test-next-server-shim.mjs") },
+  alias: {
+    "@": join(root, "src"),
+    "next/server": join(root, "scripts", "self-test-next-server-shim.mjs"),
+    // No App Router in Node: the UI controls test server-renders shell components.
+    "next/navigation": join(root, "scripts", "test-stubs", "next-navigation.ts"),
+    "next/link": join(root, "scripts", "test-stubs", "next-link.tsx"),
+  },
+  jsx: "automatic",
+  // react-dom/server requires Node built-ins; give the ESM bundle a real require.
+  banner: { js: 'import { createRequire as __lilithCreateRequire } from "node:module"; const require = __lilithCreateRequire(import.meta.url);' },
   outfile: out,
   logLevel: "warning",
 });

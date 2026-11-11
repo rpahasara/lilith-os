@@ -5,6 +5,7 @@ import { Bell, Search, LayoutGrid } from "lucide-react";
 import { nav } from "./nav";
 import { Clock } from "./clock";
 import { user } from "@/lib/data";
+import { unavailable } from "@/components/ui/unavailable";
 
 function titleFor(pathname: string) {
   if (pathname === "/") return "Command Center";
@@ -27,14 +28,18 @@ export function TopBar() {
         </span>
       </div>
 
-      {/* center: search */}
-      <button className="glass group relative hidden h-10 max-w-[460px] flex-1 items-center gap-3 overflow-hidden rounded-full px-4 text-left text-sm text-ink-faint transition-all hover:border-wine/25 hover:text-ink-muted md:flex">
+      {/* center: search. Not connected yet, so it is a disabled control: no
+          shortcut hint, no hover affordance, and the reason is exposed as the
+          accessible description. */}
+      <button
+        type="button"
+        aria-label="Search"
+        {...unavailable("Search")}
+        className="glass relative hidden h-10 max-w-[460px] flex-1 cursor-not-allowed items-center gap-3 overflow-hidden rounded-full px-4 text-left text-sm text-ink-faint opacity-60 md:flex"
+      >
         <span className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-pearl/30 to-transparent" />
-        <Search className="h-4 w-4 text-wine-bright/70 transition-colors group-hover:text-wine-bright" />
+        <Search className="h-4 w-4 text-wine-bright/70" />
         <span className="flex-1">Search, recall, or ask Lilith…</span>
-        <kbd className="rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
-          Ctrl K
-        </kbd>
       </button>
 
       {/* right: actions */}
@@ -44,9 +49,9 @@ export function TopBar() {
         </IconBtn>
         <IconBtn label="Notifications">
           <Bell className="h-[18px] w-[18px]" />
-          <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-rose" />
         </IconBtn>
-        <button className="glass flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 transition-colors hover:border-wine/25">
+        {/* Identity display only: there is no account menu or sign-in yet. */}
+        <div className="glass flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3">
           <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-wine-deep to-wine-bright text-xs font-semibold text-white">
             {user.name.charAt(0)}
           </span>
@@ -58,12 +63,13 @@ export function TopBar() {
               {user.plan}
             </span>
           </span>
-        </button>
+        </div>
       </div>
     </header>
   );
 }
 
+/** Top-bar icon slot for a feature that is not connected yet (disabled). */
 function IconBtn({
   children,
   label,
@@ -73,8 +79,10 @@ function IconBtn({
 }) {
   return (
     <button
+      type="button"
       aria-label={label}
-      className="glass relative grid h-10 w-10 place-items-center rounded-full text-ink-muted transition-colors hover:border-wine/25 hover:text-ink"
+      {...unavailable(label)}
+      className="glass relative grid h-10 w-10 cursor-not-allowed place-items-center rounded-full text-ink-muted opacity-50"
     >
       {children}
     </button>
