@@ -16,8 +16,11 @@ import { brief, nextEvent, pipeline } from "@/lib/data";
 import type { Followup, MeetingEvent, MeetingsData } from "@/lib/meetings/types";
 import {
   STALE_AFTER_MS,
+  clockIn,
   countdownLabel,
   deriveHomeMeetings,
+  dueLabel,
+  resolveTimeZone,
   safeJoinUrl,
   type HomeMeetingsView,
 } from "./meetings-view";
@@ -227,6 +230,41 @@ export function runHomeSelfTest(): Result[] {
 
   check("stale agenda: TODAY says 'as of'",
     /as of /.test(markup(stale).today) && !/as of /.test(markup(fresh).today));
+
+  /* ------------------------------------------------ owner timezone */
+  // Two zones 25 h apart, so the outcome never depends on the machine's zone.
+  // At 09:30Z it is 23:30 on the 11th in Kiritimati (UTC+14) and 22:30 on the
+  // 10th in Pago Pago (UTC-11). An event at 10:45Z is the NEXT day in
+  // Kiritimati but the SAME day in Pago Pago.
+  const tzNow = Date.UTC(2026, 10, 11, 9, 30);
+  const tzEvent = event({ id: "tz", start: iso(Date.UTC(2026, 10, 11, 10, 45)), end: iso(Date.UTC(2026, 10, 11, 11, 15)) });
+  const inZone = (timezone: string | undefined) => {
+    const d = data({ events: [tzEvent] }, iso(tzNow - 5 * MIN));
+    d.overview.timezone = timezone;
+    return deriveHomeMeetings(d, false, tzNow);
+  };
+  const kiri = inZone("Pacific/Kiritimati");
+  const pago = inZone("Pacific/Pago_Pago");
+  check("'today' follows the owner timezone, not the browser's",
+    kiri.kind === "live" && kiri.today.total === 0 && kiri.timeZone === "Pacific/Kiritimati" &&
+    pago.kind === "live" && pago.today.total === 1, JSON.stringify([kiri.kind === "live" && kiri.today, pago.kind === "live" && pago.today]));
+  const bogus = inZone("Mars/Olympus_Mons");
+  check("an invalid or missing owner timezone falls back to the browser zone without failing",
+    resolveTimeZone("Mars/Olympus_Mons") === null && resolveTimeZone(undefined) === null &&
+    bogus.kind === "live" && bogus.timeZone === null);
+  const dueAt = Date.UTC(2026, 10, 11, 10, 45);
+  check("due labels follow the owner timezone",
+    dueLabel(dueAt, tzNow, "Pacific/Kiritimati") === "due tomorrow" &&
+    dueLabel(dueAt, tzNow, "Pacific/Pago_Pago") === "due today", `${dueLabel(dueAt, tzNow, "Pacific/Kiritimati")} / ${dueLabel(dueAt, tzNow, "Pacific/Pago_Pago")}`);
+  check("clock times render in the owner timezone (Colombo is UTC+5:30)",
+    clockIn(Date.UTC(2026, 10, 11, 9, 30), "Asia/Colombo") === "3:00 PM");
+  const colombo = deriveHomeMeetings(
+    Object.assign(data({ events: [event({ id: "c", title: "Colombo sync", start: iso(tzNow + 30 * MIN), end: iso(tzNow + 60 * MIN) })] },
+      iso(tzNow - 5 * MIN)), {}),
+    false, tzNow);
+  if (colombo.kind === "live") colombo.timeZone = "Asia/Colombo";
+  check("NEXT shows the meeting time in the owner timezone",
+    /3:30 PM/.test(markup(colombo, tzNow).next) && /4:00 PM/.test(markup(colombo, tzNow).next));
 
   /* ------------------------------------------------ source guard */
   const root = process.cwd();

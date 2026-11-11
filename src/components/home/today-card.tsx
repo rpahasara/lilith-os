@@ -5,10 +5,11 @@ import { CalendarDays, CloudOff, Flag, Target } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { staggerContainer, riseIn } from "@/lib/motion";
-import { formatClock } from "@/lib/utils";
 import {
+  clockIn,
   dueLabel,
   durationLabel,
+  zoneHint,
   type HomeMeetingsView,
 } from "@/lib/home/meetings-view";
 
@@ -19,7 +20,7 @@ interface Row {
 }
 
 function rowsFor(view: Extract<HomeMeetingsView, { kind: "live" }>, now: number): Row[] {
-  const { today, nextDue, focus } = view;
+  const { today, nextDue, focus, timeZone } = view;
   const meetings: Row =
     today.total === 0
       ? { icon: CalendarDays, text: "No meetings today" }
@@ -29,19 +30,19 @@ function rowsFor(view: Extract<HomeMeetingsView, { kind: "live" }>, now: number)
           meta: today.remaining === 0 ? "all done" : `${today.remaining} left`,
         };
   const followup: Row = nextDue
-    ? { icon: Flag, text: nextDue.title, meta: dueLabel(nextDue.dueMs, now) }
+    ? { icon: Flag, text: nextDue.title, meta: dueLabel(nextDue.dueMs, now, timeZone) }
     : { icon: Flag, text: "No follow-ups due" };
   const window: Row = focus
     ? focus.current
       ? {
           icon: Target,
           text: "Focus window open",
-          meta: `${durationLabel(focus.minutes)}, until ${formatClock(new Date(focus.endMs))}`,
+          meta: `${durationLabel(focus.minutes)}, until ${clockIn(focus.endMs, timeZone)}`,
         }
       : {
           icon: Target,
           text: "Next focus window",
-          meta: `${formatClock(new Date(focus.startMs))}, ${durationLabel(focus.minutes)}`,
+          meta: `${clockIn(focus.startMs, timeZone)}, ${durationLabel(focus.minutes)}`,
         }
     : { icon: Target, text: "No focus window in the next 48h" };
   return [meetings, followup, window];
@@ -65,14 +66,18 @@ export function TodayCard({ view, now }: { view: HomeMeetingsView; now: number |
       <span className="pointer-events-none absolute inset-y-5 left-0 w-px bg-gradient-to-b from-transparent via-wine-bright/55 to-transparent" />
       <div className="flex items-center justify-between gap-2">
         <span className="eyebrow text-ink">Today</span>
-        {view.kind === "live" && view.stale && (
+        {view.kind === "live" && view.stale ? (
           <span
             className="font-mono text-[10px] text-amber/90"
             title="The agenda has not refreshed recently"
           >
-            {view.asOf ? `as of ${formatClock(new Date(view.asOf))}` : "freshness unknown"}
+            {view.asOf ? `as of ${clockIn(new Date(view.asOf).getTime(), view.timeZone)}` : "freshness unknown"}
           </span>
-        )}
+        ) : view.kind === "live" && zoneHint(view.timeZone) ? (
+          <span className="font-mono text-[10px] text-ink-faint" title={`Times shown in ${view.timeZone}`} data-home-zone="">
+            {zoneHint(view.timeZone)}
+          </span>
+        ) : null}
       </div>
 
       {view.kind === "live" && now != null ? (

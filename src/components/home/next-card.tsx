@@ -3,8 +3,7 @@
 import { CloudOff, Video, Users } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { formatClock } from "@/lib/utils";
-import { countdownLabel, type HomeMeetingsView } from "@/lib/home/meetings-view";
+import { clockIn, countdownLabel, type HomeMeetingsView } from "@/lib/home/meetings-view";
 
 /**
  * NEXT — the single immediate contextual item: the next (or current) meeting
@@ -18,6 +17,7 @@ import { countdownLabel, type HomeMeetingsView } from "@/lib/home/meetings-view"
  */
 export function NextCard({ view }: { view: HomeMeetingsView }) {
   const next = view.kind === "live" ? view.next : null;
+  const tz = view.kind === "live" ? view.timeZone : null;
 
   return (
     <GlassCard
@@ -69,10 +69,10 @@ export function NextCard({ view }: { view: HomeMeetingsView }) {
           <div className="mt-4">
             <div className="flex items-baseline gap-2 font-mono">
               <span className="text-[1.7rem] font-semibold leading-none tracking-[-0.04em] text-ink">
-                {formatClock(new Date(next.startMs))}
+                {clockIn(next.startMs, tz)}
               </span>
               {next.endMs != null && (
-                <span className="text-[11px] text-ink-faint">– {formatClock(new Date(next.endMs))}</span>
+                <span className="text-[11px] text-ink-faint">– {clockIn(next.endMs, tz)}</span>
               )}
             </div>
             <h3 className="mt-2.5 text-[15px] font-medium leading-tight text-ink">{next.title}</h3>
