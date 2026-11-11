@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { History } from "lucide-react";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
-import { ConversationView } from "@/components/conversation/conversation-view";
+import { ConversationAnnouncer, ConversationView } from "@/components/conversation/conversation-view";
 import { RecordingControl } from "@/components/conversation/recording-control";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { CommandConsole, CommandHistory, useCommand } from "@/components/command";
@@ -23,12 +23,12 @@ const productionVoiceProvider = new ElevenLabsTTSProvider();
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
-  const { messages, status, error, reset } = useConversation();
+  const { messages, status, error, reset, stop, stopped } = useConversation();
   const { submit, activeTask, history, historyOpen, setHistoryOpen, recentInputs } = useCommand();
   const [greeting, setGreeting] = useState("Good evening");
   const [editFill, setEditFill] = useState<{ text: string; nonce: number } | undefined>();
 
-  const hasConversation = messages.length > 0 || !!error;
+  const hasConversation = messages.length > 0 || !!error || !!stopped;
   const isSending = status === "sending";
   const activity = signal.activity;
 
@@ -127,6 +127,13 @@ export function PresenceHero() {
     emit({
       type: focused ? "conversation.input_focus" : "conversation.input_blur",
     });
+  }
+
+  function handleStop() {
+    // Browser-side only: stop waiting for the reply. Hsin leaves the thinking
+    // beat and settles; no completion/speaking transient, since nothing came back.
+    stop();
+    override({ activity: "idle", emotion: "neutral", attention: "ambient", speaking: false });
   }
 
   function handleSubmit(text: string) {
@@ -233,10 +240,14 @@ export function PresenceHero() {
           onSubmit={handleSubmit}
           onType={() => emit({ type: "conversation.typing" })}
           loading={isSending}
+          onStop={handleStop}
           historyItems={recentInputs}
           fill={editFill}
         />
       </div>
+
+      {/* screen-reader announcement of each new reply (always mounted) */}
+      <ConversationAnnouncer />
 
       {/* command history drawer (fixed overlay) */}
       <CommandHistory />

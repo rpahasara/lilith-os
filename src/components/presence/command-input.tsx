@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowUp, Loader2, Mic, Sparkles } from "lucide-react";
+import { ArrowUp, Loader2, Mic, Sparkles, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CommandInputProps {
@@ -19,6 +19,8 @@ interface CommandInputProps {
   historyItems?: string[];
   /** Bump `nonce` to load `text` into the field (e.g. "Edit" from review). */
   fill?: { text: string; nonce: number };
+  /** While `loading`, shows a Stop button in place of Send that calls this. */
+  onStop?: () => void;
 }
 
 const DEFAULT_SUGGESTIONS = ["System health", "Summarise inbox", "Compare AWS cost", "Plan my day"];
@@ -31,10 +33,21 @@ export function CommandInput({
   suggestions = DEFAULT_SUGGESTIONS,
   historyItems = [],
   fill,
+  onStop,
 }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Stop replaces Send while loading. When the owner used it, focus returns to
+  // the (re-enabled) field so they can type straight away.
+  const stopHadFocus = useRef(false);
+  useEffect(() => {
+    if (!loading && stopHadFocus.current) {
+      stopHadFocus.current = false;
+      inputRef.current?.focus();
+    }
+  }, [loading]);
 
   // History recall cursor: -1 = live (not recalling), 0..n = index from newest.
   const [recall, setRecall] = useState(-1);
@@ -152,23 +165,41 @@ export function CommandInput({
         >
           <Mic className="h-4 w-4" />
         </button>
-        <button
-          aria-label="Send"
-          onClick={submit}
-          disabled={loading || !value.trim()}
-          className={cn(
-            "grid h-9 w-9 place-items-center rounded-full border transition-all",
-            value.trim() && !loading
-              ? "border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_8px_22px_-6px_rgba(201,79,109,0.85)]"
-              : "border-white/[0.06] bg-white/[0.045] text-ink-faint",
-          )}
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <ArrowUp className="h-4 w-4" />
-          )}
-        </button>
+        {loading && onStop ? (
+          <button
+            type="button"
+            aria-label="Stop waiting for reply"
+            title="Stop waiting for this reply (it may still finish on the server)"
+            onClick={() => {
+              stopHadFocus.current = true;
+              onStop();
+            }}
+            onFocus={() => (stopHadFocus.current = true)}
+            onBlur={() => (stopHadFocus.current = false)}
+            data-command-stop=""
+            className="grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-ink transition-all hover:border-wine-bright/50 hover:bg-wine/[0.15]"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </button>
+        ) : (
+          <button
+            aria-label="Send"
+            onClick={submit}
+            disabled={loading || !value.trim()}
+            className={cn(
+              "grid h-9 w-9 place-items-center rounded-full border transition-all",
+              value.trim() && !loading
+                ? "border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_8px_22px_-6px_rgba(201,79,109,0.85)]"
+                : "border-white/[0.06] bg-white/[0.045] text-ink-faint",
+            )}
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
+          </button>
+        )}
       </motion.div>
 
       <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
