@@ -14,6 +14,10 @@
  *  - No fabricated scores: a focus window is a real gap between meetings
  *    (`computeFocusWindows`), never a number.
  *  - A join link is offered only when it is a well-formed https URL.
+ *  - "Today", "tomorrow" and clock times use the OWNER's timezone (the
+ *    agenda's `overview.timezone`, e.g. Asia/Colombo), not whatever timezone
+ *    the viewing browser happens to be in. Only when the backend gives no
+ *    valid IANA zone does it fall back to the browser's zone.
  */
 import { computeFocusWindows } from "@/lib/meetings/focus";
 import type { Followup, MeetingEvent, MeetingsData } from "@/lib/meetings/types";
@@ -53,6 +57,8 @@ export type HomeMeetingsView =
   | { kind: "unavailable" }
   | {
       kind: "live";
+      /** Owner IANA timezone used for day boundaries and times; null = browser zone. */
+      timeZone: string | null;
       /** ISO time the backend generated the agenda, when known. */
       asOf: string | null;
       stale: boolean;
@@ -76,14 +82,48 @@ function endMsOf(e: MeetingEvent): number | null {
   return null;
 }
 
-function sameLocalDay(a: number, b: number): boolean {
-  const x = new Date(a);
-  const y = new Date(b);
-  return (
-    x.getFullYear() === y.getFullYear() &&
-    x.getMonth() === y.getMonth() &&
-    x.getDate() === y.getDate()
-  );
+/** A valid IANA zone name, or null (unknown/invalid → caller uses the browser zone). */
+export function resolveTimeZone(tz: string | null | undefined): string | null {
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return null;
+  }
+}
+
+/** Calendar day ("YYYY-MM-DD") of an instant in `tz` (null = browser zone). */
+function dayKey(t: number, tz: string | null): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz ?? undefined,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(t);
+}
+
+function sameDay(a: number, b: number, tz: string | null): boolean {
+  return dayKey(a, tz) === dayKey(b, tz);
+}
+
+/** "3:00 PM" in `tz` (null = browser zone); same format as formatClock. */
+export function clockIn(t: number, tz: string | null): string {
+  return new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz ?? undefined });
+}
+
+/** Short label for the owner zone when it differs from the browser's, else null. */
+export function zoneHint(tz: string | null): string | null {
+  if (!tz) return null;
+  let browser: string | undefined;
+  try {
+    browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    browser = undefined;
+  }
+  if (browser === tz) return null;
+  const city = tz.split("/").pop()?.replace(/_/g, " ");
+  return city ? `${city} time` : null;
 }
 
 /** Only https URLs are offered as a join action (no javascript:, http:, etc.). */
@@ -139,10 +179,11 @@ export function deriveHomeMeetings(
   if (!data) return loading ? { kind: "loading" } : { kind: "unavailable" };
   if (data.isDemo) return { kind: "unavailable" };
 
+  const timeZone = resolveTimeZone(data.overview?.timezone);
   const events = data.events ?? [];
   const todays = events.filter((e) => {
     const s = ms(e.start);
-    return s != null && sameLocalDay(s, now);
+    return s != null && sameDay(s, now, timeZone);
   });
   const remaining = todays.filter((e) => {
     const end = endMsOf(e) ?? ms(e.start);
@@ -163,6 +204,7 @@ export function deriveHomeMeetings(
   const asOfMs = ms(asOf);
   return {
     kind: "live",
+    timeZone,
     asOf,
     // Unknown generation time counts as stale: we cannot vouch for freshness.
     stale: asOfMs == null || now - asOfMs > STALE_AFTER_MS,
@@ -190,10 +232,10 @@ export function durationLabel(minutes: number): string {
   return rest ? `${h}h ${rest}m` : `${h}h`;
 }
 
-/** "today", "tomorrow", "overdue", or a short date. */
-export function dueLabel(dueMs: number, now: number): string {
-  if (sameLocalDay(dueMs, now)) return dueMs < now ? "due earlier today" : "due today";
+/** "today", "tomorrow", "overdue", or a short date, in `tz` (null = browser zone). */
+export function dueLabel(dueMs: number, now: number, tz: string | null = null): string {
+  if (sameDay(dueMs, now, tz)) return dueMs < now ? "due earlier today" : "due today";
   if (dueMs < now) return "overdue";
-  if (sameLocalDay(dueMs, now + 24 * 3600_000)) return "due tomorrow";
-  return `due ${new Date(dueMs).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  if (sameDay(dueMs, now + 24 * 3600_000, tz)) return "due tomorrow";
+  return `due ${new Date(dueMs).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: tz ?? undefined })}`;
 }
