@@ -1,6 +1,6 @@
 # LILITH Experience V2: audit and implementation plan
 
-Status: **PROPOSED**, for owner review. Audit date 2026-11-11, against `main` at `cda3d85`.
+Status: **ACCEPTED roadmap reference.** Phase 0 is delivered (see *Delivery status*). Audit date 2026-11-11, against `main` at `cda3d85`; the audit text below is kept as written.
 Scope: the Next.js frontend (Command Center, Hsin/Presence, voice) and its private hosting.
 Backend model and voice findings come from code plus the recorded 2026-11-02 diagnostics. Nothing was re-measured on PROD or DEV.
 
@@ -12,6 +12,27 @@ Boundaries for this whole workstream:
 - No Hsin personality or identity changes without approval.
 - UI PRs are not merged or deployed without separate authorization.
 - #412, #416, #417 and #418 stay on their existing tracks. Timeline stays shadow, and P-5 stays disabled.
+
+## Delivery status (updated 2026-11-11)
+
+| Item | Delivered by | State |
+|---|---|---|
+| A: truthful status capsule | #419 → RC1 #426 | **On `main`** |
+| B: disable controls with no function | #421 → RC1 #426 | **On `main`** |
+| Home cards: real agenda or "unavailable", in the owner timezone | #422 → RC1 #426 | **On `main`** |
+| C: conversation Stop, stale-reply safety, live-region announcements | #423 → RC1 #426 | **On `main`** |
+| D: owner-facing voice toggle | #424 → RC1 #426 | **On `main`** |
+| E: development-only diagnostics | #425 → RC1 #426 | **On `main`** |
+| DEV deploy classifier: frontend-only lane | #427 | **On `main`** |
+
+**RC1 #426** merged as `ccd045c` from the approved head `bccb485`. Main's Repository validation (run `43077524922`) passed with 249/249 combined tests. The DEV workflow (run `43078221038`) reported `MODE=CONTROL_ONLY_NO_DEPLOY` and `DEV_MUTATION=NONE`, and `lilith-os-api-dev` was not restarted. Details and the rollback plan are in `docs/roadmap/experience-v2-rc1.md`.
+
+**#427** merged as `4d2e6ea`, also control-only. From now on, frontend-only merges do not redeploy the DEV Core API. Record: `docs/architecture/dev-deploy-classifier-frontend-only.md`.
+
+**Next, in order:**
+1. **Private web preview under our domain, owner-only** (§2, H1–H3): Cloudflare Tunnel + Access, the app-level Access-JWT check, and Origin checks. It needs a host decision.
+2. **Hsin avatar optimization** (S1–S2): the 113 MB VRM. `public/**` is outside the frontend lane, so its own reviewed classifier addition is needed first, or one authorized same-code DEV redeploy.
+3. **Mobile UI** (X1–X2): including the avatar-layer overflow on phones.
 
 ---
 
