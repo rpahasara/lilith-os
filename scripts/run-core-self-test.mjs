@@ -32,8 +32,9 @@ await build({
       import { runVoiceSelfTest } from "@/lib/voice/voice-self-test";
       import { runDiagnosticsSelfTest } from "@/lib/diagnostics-self-test";
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
+      import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
       const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runEdgeAuthSelfTest())];
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));

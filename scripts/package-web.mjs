@@ -1,0 +1,89 @@
+/**
+ * Assemble the deployable web artifact from a standalone build.
+ *
+ *   npm run build && npm run package:web      -> dist/lilith-web/
+ *
+ * Contents: .next/standalone (server.js + only the traced runtime dependencies,
+ * not the full node_modules), plus .next/static, public/, and
+ * avatar-cache/hsin-<version>.vrm.gz (the original avatar, gzip -9). The gzip
+ * copy is verified to decompress to exactly the original bytes, and the
+ * version is verified to match the one baked into the client bundle.
+ * A manifest (web-artifact.json) records sizes and hashes. Nothing is uploaded
+ * or deployed by this script.
+ */
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { gunzipSync, gzipSync, constants } from "node:zlib";
+import { execFileSync } from "node:child_process";
+
+const root = process.cwd();
+const out = join(root, "dist", "lilith-web");
+const AVATAR = "public/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
+
+const fail = (msg) => {
+  console.error(`package-web: ${msg}`);
+  process.exit(1);
+};
+
+if (!existsSync(join(root, ".next/standalone/server.js"))) fail("no .next/standalone/server.js (run `npm run build` with output: standalone)");
+if (!existsSync(join(root, ".next/static"))) fail("no .next/static");
+
+rmSync(out, { recursive: true, force: true });
+mkdirSync(out, { recursive: true });
+cpSync(join(root, ".next/standalone"), out, { recursive: true });
+cpSync(join(root, ".next/static"), join(out, ".next/static"), { recursive: true });
+cpSync(join(root, "public"), join(out, "public"), { recursive: true, force: true });
+
+const source = readFileSync(join(root, AVATAR));
+const sha256 = createHash("sha256").update(source).digest("hex");
+const version = sha256.slice(0, 16);
+const versionedPath = `/avatar/hsin-${version}.vrm`;
+const chunks = readdirSync(join(root, ".next/static/chunks"), { recursive: true })
+  .filter((f) => String(f).endsWith(".js"))
+  .map((f) => readFileSync(join(root, ".next/static/chunks", String(f)), "utf8"));
+if (!chunks.some((c) => c.includes(versionedPath))) {
+  fail(`the client bundle does not reference ${versionedPath}: rebuild before packaging`);
+}
+
+const gz = gzipSync(source, { level: constants.Z_BEST_COMPRESSION });
+const roundTrip = createHash("sha256").update(gunzipSync(gz)).digest("hex");
+if (roundTrip !== sha256) fail("compressed avatar does not round-trip to the original bytes");
+mkdirSync(join(out, "avatar-cache"), { recursive: true });
+writeFileSync(join(out, "avatar-cache", `hsin-${version}.vrm.gz`), gz);
+
+for (const f of readdirSync(out, { recursive: true })) {
+  if (/(^|[\\/])\.env/.test(String(f))) fail(`refusing to package an environment file: ${f}`);
+}
+
+function walk(dir) {
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? walk(p) : [p];
+  });
+}
+const files = walk(out);
+const total = files.reduce((n, f) => n + statSync(f).size, 0);
+const nodeModules = files.filter((f) => relative(out, f).split(sep)[0] === "node_modules")
+  .reduce((n, f) => n + statSync(f).size, 0);
+let gitSha = null;
+try {
+  gitSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+} catch {
+  /* not a git checkout */
+}
+const manifest = {
+  artifact: "lilith-web",
+  gitSha,
+  builtAt: new Date().toISOString(),
+  files: files.length + 1,
+  totalBytes: total,
+  nodeModulesBytes: nodeModules,
+  avatar: { source: AVATAR, version, sha256, bytes: source.length, gzipBytes: gz.length, url: versionedPath },
+};
+writeFileSync(join(out, "web-artifact.json"), JSON.stringify(manifest, null, 2) + "\n");
+
+const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
+console.log(`packaged ${out}`);
+console.log(`  files ${manifest.files}, total ${mb(total)}, node_modules ${mb(nodeModules)}`);
+console.log(`  avatar ${version}: ${mb(source.length)} -> gzip ${mb(gz.length)} (${Math.round((100 * gz.length) / source.length)}%), round-trip verified`);

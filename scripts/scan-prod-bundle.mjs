@@ -13,7 +13,8 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const STATIC_DIR = join(process.cwd(), ".next", "static");
+const staticArg = process.argv.indexOf("--static");
+const STATIC_DIR = staticArg > 0 ? process.argv[staticArg + 1] : join(process.cwd(), ".next", "static");
 
 export const DEV_LOG_MARKERS = [
   "[Hsin LookAt]",
