@@ -46,6 +46,34 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual((cls, flags), ("told_on", set()))
 
 
+class PhrasingTests(unittest.TestCase):
+    """Phrasings the review model is likely to write (2026-11-11 probe; the first version missed most of these)."""
+
+    def test_realistic_phrasings(self):
+        cases = {
+            "On 3 November, TEST_ONLY passed.": ("event_dated", set()),               # the guidance's own example
+            "On 3rd November 2026, TEST_ONLY passed.": ("event_dated", set()),
+            "On Nov 3, TEST_ONLY passed.": ("event_dated", set()),
+            "On 9 Nov 2026, TEST_ONLY moved.": ("event_dated", set()),
+            "On Monday, 9 November, TEST_ONLY passed.": ("event_dated", set()),
+            "TEST_ONLY moved two weeks ago.": ("relative", set()),
+            "TEST_ONLY started a few days ago.": ("relative", set()),
+            "TEST_ONLY visited Kandy this past weekend.": ("relative", set()),
+            "TEST_ONLY passed on Monday.": ("relative", set()),
+            "Told Lilith on 12 November: TEST_ONLY has a sister.": ("told_on", set()),
+            "In 2024 TEST_ONLY lived in Leeds.": ("event_dated", {"partial_date"}),
+            "On 12 Nov, TEST_ONLY submitted it.": ("event_dated", {"event_date_equals_review_day"}),
+            "TEST_ONLY may visit soon.": ("undated", set()),
+        }
+        for text, want in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(C.classify(text, DAY), want)
+
+    def test_year_less_dates_never_land_in_the_future(self):
+        self.assertEqual(C._iso("20 December", DAY), dt.date(2025, 12, 20))
+        self.assertEqual(C._iso("3rd Nov", DAY), dt.date(2026, 11, 3))
+
+
 class MeasureTests(unittest.TestCase):
     EVENTS = [
         {"kind": "PROPOSED", "proposal_id": "p1", "text": "On 2026-11-11, TEST_ONLY passed.", "at": "2026-11-12T16:31:00+00:00"},
@@ -67,6 +95,12 @@ class MeasureTests(unittest.TestCase):
         for e in self.EVENTS:
             self.assertNotIn(e["text"], blob)
             self.assertNotIn("TEST_ONLY", blob)
+
+    def test_removals_are_counted_apart(self):
+        ev = self.EVENTS[:1] + [{"kind": "PROPOSED", "proposal_id": "p9", "text": "TEST_ONLY old fact.", "at": "2026-11-12T16:31:00Z",
+                                 "detail": "remove"}]
+        out = C.measure(ev, dt.datetime(2026, 11, 12, tzinfo=dt.timezone.utc), COL)
+        self.assertEqual((out["items"], out["counts"].get("removals")), (1, 1))
 
     def test_review_day_is_the_colombo_day(self):
         # 2026-11-12T18:40Z is 13 Nov in Colombo: an event dated 13 Nov is flagged, 12 Nov is not

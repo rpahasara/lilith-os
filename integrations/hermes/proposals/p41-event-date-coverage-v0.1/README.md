@@ -25,6 +25,19 @@ running it needs the owner's separate OK. It prints counts only.
 | `also_told_on` | both an event date and a told-on date |
 | `relative_kept_with_told_on` | the owner's own vague wording kept with the told date (allowed by the guidance) |
 
+**Classifier limits** (probed 2026-11-11; the first version missed year-less, ordinal and abbreviated dates and most
+relative phrasings, now fixed and tested):
+- English phrasing only.
+- One class per proposed item: an item stating several facts counts once.
+- Any explicit date in the item counts as `event_dated`, including the date of a future plan or a birth date.
+- Year-only or month-only dates count as `event_dated` with the flag `partial_date`.
+- A year-less date takes the review's year (the year before, if it would otherwise be in the future).
+- Proposed removals are counted apart (`removals`).
+
+So the counts measure **how proposals are dated, not whether the dates are right.** Correctness is decided by the owner
+approving or rejecting each proposal. `event_date_equals_review_day` is the one flag that points at a possible run-date
+leak.
+
 **Baseline before #412:** E-8 inventory, 1 of 11 entry texts contained any date. Since the P4-1 guidance was installed
 (2026-11-09): 0 proposals.
 
@@ -46,6 +59,7 @@ Anything else goes back to the guidance, not to a schema change.
 | T5 | The agent sees no per-message times in history (`gateway.message_timestamps.enabled: false`) | PROD config | candidate only: enabling it adds a time to each replayed owner message, which affects cost and prompt caching. Measure first with E-8-style arms; do not change config without evidence | **not proposed yet** |
 | T6 | Commitment deadlines are shown as raw ISO (`2026-11-12T22:00:00+05:30`) | `commitments.py`, review script | none needed: the offset is explicit; new deadlines carry `+05:30` | no change |
 | T7 | The Groq budget day key is UTC (`social_lean.Budget`) | source | none: the provider's daily quota resets in UTC | correct as is |
+| T8 | Under the 1600-character note limit the timeline kept the OLDEST of its newest 14 entries, dropping the most recent memories first (found reviewing #417; whether PROD's note reaches the limit today is unmeasured: reading entry text lengths was not permitted) | fill the budget from the newest end; display order and audit ids unchanged | **#417** (second commit); shadow lane |
 
 T1 and T2 must use the **same zone source** (Hermes' setting); both do.
 

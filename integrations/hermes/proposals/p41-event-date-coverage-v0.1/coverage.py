@@ -6,6 +6,9 @@ Measures whether the nightly review's proposals (after #412 is deployed) carry d
 - relative:          a relative word ("yesterday", "last week", "recently", ...) left without any explicit date
 - undated:           a fact with no date and no relative word
 - preference:        "Preference (...)" / "Boundary (...)" lines (dates do not apply)
+Known limits (see README): English phrasing only; one class per proposed item (an item stating several facts counts
+once); a date anywhere in the item counts, including a future plan's date; year-only and month-only dates count as
+event_dated with the flag partial_date; removals are counted apart.
 Flags: event_date_equals_review_day (an event date equal to the Colombo day the proposal was made: legitimate when the
 owner said "today", but also what a run-date leak looks like; reported for review, never judged here).
 
@@ -24,23 +27,44 @@ import sys
 import urllib.request
 from collections import Counter
 
-MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December"
+MONTHS = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|"
+          r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
+WEEKDAYS = r"monday|tuesday|wednesday|thursday|friday|saturday|sunday"
 ISO = r"\d{4}-\d{2}-\d{2}"
-DATE = rf"(?:{ISO}|\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}}|(?:{MONTHS})\s+\d{{1,2}},?\s+\d{{4}})"
+DM = rf"\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:{MONTHS})\.?(?:,?\s+\d{{4}})?"           # 3 November [2026], 3rd Nov
+MD = rf"(?:{MONTHS})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?"                       # November 3[, 2026]
+DATE = rf"(?:{ISO}|{DM}|{MD})"
+PARTIAL = rf"(?:(?:in|since|from)\s+(?:(?:{MONTHS})\s+)?(?:19|20)\d{{2}})"                    # in 2024, since May 2023
 TOLD_RE = re.compile(rf"\btold\s+lilith\s+on\s+({DATE})", re.I)
-EVENT_RE = re.compile(rf"(?:^|[.;:]\s*|\b(?:on|since|from|in)\s+)({DATE})\b", re.I)
+EVENT_RE = re.compile(rf"(?:^|[.;:,]\s*|\b(?:on|since|from|in|by)\s+)(?:(?:{WEEKDAYS}),?\s+)?({DATE})\b", re.I)
+PARTIAL_RE = re.compile(rf"\b{PARTIAL}\b", re.I)
 RELATIVE_RE = re.compile(r"\b(?:today|tonight|yesterday|tomorrow|last\s+(?:week|month|year|night|weekend|"
-                         r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)|this\s+(?:week|morning|evening|"
-                         r"month)|recently|the\s+other\s+day|a\s+while\s+ago|earlier\s+today|just\s+now)\b", re.I)
+                         rf"{WEEKDAYS})|this\s+(?:past\s+)?(?:week|weekend|morning|evening|month|year)|recently|"
+                         r"the\s+other\s+day|a\s+while\s+ago|earlier\s+today|just\s+now|"
+                         r"(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|a\s+couple\s+of|several)\s+"
+                         rf"(?:days?|weeks?|months?|years?)\s+ago|on\s+(?:{WEEKDAYS})\b(?!,?\s+\d))", re.I)
 PREF_RE = re.compile(r"^\s*(?:Preference|Boundary)\s*\(", re.I)
 
 
-def _iso(day: str):
-    for fmt in ("%Y-%m-%d", "%d %B %Y", "%B %d %Y", "%B %d, %Y"):
+def _iso(day: str, review_day: dt.date | None = None):
+    """A date for the flag check; a year-less date takes the review day's year (the previous year if it would be in
+    the future). None when it cannot be read."""
+    s = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", " ".join(day.replace(",", " ").split()), flags=re.I).replace(" of ", " ")
+    s = re.sub(r"\.", "", s)
+    try:
+        return dt.date.fromisoformat(s)
+    except ValueError:
+        pass
+    for fmt in ("%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y", "%d %B", "%d %b", "%B %d", "%b %d"):
         try:
-            return dt.datetime.strptime(" ".join(day.replace(",", ", ").split()).replace(" ,", ","), fmt).date()
+            d = dt.datetime.strptime(s.title() if not s[0].isdigit() else s[:3] + s[3:].title(), fmt).date()
         except ValueError:
             continue
+        if "%Y" not in fmt and review_day:
+            d = d.replace(year=review_day.year)
+            if d > review_day:
+                d = d.replace(year=review_day.year - 1)
+        return d
     return None
 
 
@@ -54,9 +78,16 @@ def classify(text: str, review_day: dt.date | None = None) -> tuple[str, set]:
     rest = TOLD_RE.sub(" ", t)                         # the told-on date is not an event date
     event = EVENT_RE.search(rest)
     if event:
-        d = _iso(event.group(1))
-        if review_day and d == review_day:
+        d = _iso(event.group(1), review_day)
+        if d is None:
+            flags.add("unparsed_date")
+        elif review_day and d == review_day:
             flags.add("event_date_equals_review_day")
+        if told:
+            flags.add("also_told_on")
+        return "event_dated", flags
+    if PARTIAL_RE.search(rest):
+        flags.add("partial_date")                       # a year or month only: dated, but coarsely
         if told:
             flags.add("also_told_on")
         return "event_dated", flags
@@ -74,6 +105,9 @@ def measure(events: list, since: dt.datetime, zone) -> dict:
     for e in events:
         if e.get("kind") != "PROPOSED" or not e.get("text"):
             continue
+        if e.get("detail") == "remove":                 # a proposed removal is not a proposed fact
+            counts["removals"] += 1
+            continue
         try:
             at = dt.datetime.fromisoformat(str(e.get("at")).replace("Z", "+00:00"))
         except ValueError:
@@ -87,7 +121,7 @@ def measure(events: list, since: dt.datetime, zone) -> dict:
         cls, fl = classify(e["text"], at.astimezone(zone).date())
         counts[cls] += 1
         flags.update(fl)
-    items = sum(v for k, v in counts.items() if k != "unparseable_time")
+    items = sum(v for k, v in counts.items() if k not in ("unparseable_time", "removals"))
     dated_facts = counts["event_dated"] + counts["told_on"]
     facts = items - counts["preference"]
     return {"since": since.isoformat(), "proposals": len(proposals), "items": items, "counts": dict(sorted(counts.items())),
