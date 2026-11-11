@@ -12,6 +12,7 @@ TARGET="${1:-$(cat "$BASE/previous" 2>/dev/null || true)}"
 CURRENT="$(readlink "$BASE/current")"
 ln -sfn "$TARGET" "$BASE/current.new" && mv -Tf "$BASE/current.new" "$BASE/current"
 echo "$CURRENT" > "$BASE/previous"
+systemctl reset-failed lilith-web.service 2>/dev/null || true   # clear earlier failures / start-rate limit
 systemctl restart lilith-web.service
 "$BASE/bin/healthcheck.sh" --wait 30 || die "rolled back to $TARGET but it is not healthy"
 echo "rollback: now serving $TARGET (previous: $CURRENT)"

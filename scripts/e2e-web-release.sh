@@ -100,8 +100,13 @@ systemctl start lilith-web.service >/dev/null 2>&1 || true
 systemctl start lilith-web-health.service >/dev/null 2>&1 || true
 expect "periodic health check stops a server serving without auth" bash -c "! systemctl is-active --quiet lilith-web.service"
 cp /tmp/env.good /etc/lilith-web/env && chmod 0640 /etc/lilith-web/env && chown root:lilith-web /etc/lilith-web/env
-expect "restored configuration starts healthy again" bash -c "systemctl restart lilith-web.service && $BASE/bin/healthcheck.sh"
+expect "restored configuration starts healthy again (documented recovery: reset-failed + restart)" bash -c "systemctl reset-failed lilith-web.service; systemctl restart lilith-web.service && $BASE/bin/healthcheck.sh"
 
+if [ "$fails" -gt 0 ]; then
+  echo "E2E DIAG  ---- systemctl status / journal (failure diagnostics) ----"
+  systemctl status lilith-web.service --no-pager 2>&1 | sed "s/^/E2E DIAG  /" | tail -15
+  journalctl -u lilith-web.service -n 40 --no-pager 2>&1 | sed "s/^/E2E DIAG  /"
+fi
 echo
 if [ "$fails" -eq 0 ]; then echo "E2E RESULT: PASS"; else echo "E2E RESULT: FAIL ($fails)"; fi
 exit $(( fails > 0 ))
