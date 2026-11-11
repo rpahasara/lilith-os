@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:core": "node scripts/run-core-self-test.mjs"
+    "test:core": "node scripts/run-core-self-test.mjs",
+    "scan:bundle": "node scripts/scan-prod-bundle.mjs"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",

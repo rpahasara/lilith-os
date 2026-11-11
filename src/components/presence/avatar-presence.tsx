@@ -66,6 +66,9 @@ import {
   type RelaxedPoseTuning,
 } from "./avatar-scene";
 
+// Development-only diagnostics; dropped from production builds (see lib/diagnostics).
+const DEV_DIAGNOSTICS = process.env.NODE_ENV !== "production";
+
 // Explicit opt-in (default OFF, even in `next dev`). NEXT_PUBLIC_PRESENCE_DEBUG=1
 // enables the full calibration/diagnostics surface; on localhost the control
 // panel alone can be summoned per-load with ?presencePreview=1 (handled by the
@@ -1938,7 +1941,7 @@ export function AvatarPresence({
             type="button"
             onClick={async () => {
               const json = JSON.stringify(canonicalNeutral, null, 2);
-              console.info(`[HSIN_CANONICAL_NEUTRAL] ${json}`);
+              if (DEV_DIAGNOSTICS) console.info(`[HSIN_CANONICAL_NEUTRAL] ${json}`);
               try {
                 await navigator.clipboard.writeText(json);
                 setValuesCopied(true);

@@ -5,8 +5,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { History } from "lucide-react";
 import { PresenceStage, usePresence } from "./presence-engine";
 import { CommandInput } from "./command-input";
-import { ConversationView } from "@/components/conversation/conversation-view";
+import { ConversationAnnouncer, ConversationView } from "@/components/conversation/conversation-view";
 import { RecordingControl } from "@/components/conversation/recording-control";
+import { VoiceToggle } from "@/components/conversation/voice-toggle";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { CommandConsole, CommandHistory, useCommand } from "@/components/command";
 import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
@@ -16,6 +17,7 @@ import { StatusDot } from "@/components/ui/primitives";
 import { lilithSpeech } from "@/lib/voice/speech-controller";
 import { voiceSettings } from "@/lib/voice/voice-settings";
 import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
+import { decideReplyVoicing } from "@/lib/voice/reply-voicing";
 
 // Stable module-level production auto-speech provider (never re-created on
 // render). Independent of the manual dev POC provider selection.
@@ -23,12 +25,12 @@ const productionVoiceProvider = new ElevenLabsTTSProvider();
 
 export function PresenceHero() {
   const { signal, emit, override } = usePresence();
-  const { messages, status, error, reset } = useConversation();
+  const { messages, status, error, reset, stop, stopped } = useConversation();
   const { submit, activeTask, history, historyOpen, setHistoryOpen, recentInputs } = useCommand();
   const [greeting, setGreeting] = useState("Good evening");
   const [editFill, setEditFill] = useState<{ text: string; nonce: number } | undefined>();
 
-  const hasConversation = messages.length > 0 || !!error;
+  const hasConversation = messages.length > 0 || !!error || !!stopped;
   const isSending = status === "sending";
   const activity = signal.activity;
 
@@ -43,6 +45,18 @@ export function PresenceHero() {
   // Tracks whether we've asserted a real-speaking presence override for the
   // current audio, so we only settle back to idle after having spoken.
   const spokePresence = useRef(false);
+  // True while voice owns presence (loading = thinking, playing = speaking).
+  const voicePresence = useRef(false);
+  // True only while a turn sent from THIS page awaits its reply. Restored or
+  // re-shown history never sets it, so it is never spoken or re-animated.
+  const awaitingReply = useRef(false);
+
+  // The single shared voice setting (owner toggle / debug panel).
+  const autoSpeak = useSyncExternalStore(
+    voiceSettings.subscribe,
+    () => voiceSettings.getSnapshot().autoSpeak,
+    () => voiceSettings.getServerSnapshot().autoSpeak,
+  );
 
   // Live production-voice playback status (audio lifecycle authority).
   const voiceStatus = useSyncExternalStore(
@@ -52,19 +66,31 @@ export function PresenceHero() {
   );
 
   useEffect(() => {
-    if (isSending) emit({ type: "conversation.response_started" });
+    if (!isSending) return;
+    awaitingReply.current = true;
+    emit({ type: "conversation.response_started" });
   }, [isSending, emit]);
 
   // Handle each finalized LILITH reply exactly once (dedupe by stable UUID id,
   // marked BEFORE any async so StrictMode/effect re-entry can't double-speak).
   useEffect(() => {
-    if (!lastLilith || lastLilith.id === handledReplyId.current) return;
+    if (!lastLilith) return;
     const id = lastLilith.id;
     const text = lastLilith.text;
+    const decision = decideReplyVoicing({
+      replyId: id,
+      handledReplyId: handledReplyId.current,
+      awaitingReply: awaitingReply.current,
+      autoSpeak: voiceSettings.getSnapshot().autoSpeak,
+      text,
+    });
     handledReplyId.current = id;
+    if (decision === "skip") return; // already handled, or history: never replayed
+    awaitingReply.current = false;
 
-    // AUTO SPEAK OFF (default): unchanged — the canned 2.6s speaking transient.
-    if (!voiceSettings.getSnapshot().autoSpeak) {
+    // AUTO SPEAK OFF (default), or nothing speakable: the canned 2.6s
+    // speaking transient, with no TTS call.
+    if (decision === "transient") {
       emit({ type: "conversation.response_complete" });
       return;
     }
@@ -88,10 +114,12 @@ export function PresenceHero() {
   // lifecycle is the sole authority for real speaking. Loading = thinking (not
   // speaking); playing/paused = speaking; return to idle settles once.
   useEffect(() => {
-    if (!voiceSettings.getSnapshot().autoSpeak) return;
+    if (!autoSpeak) return;
     if (voiceStatus === "loading") {
+      voicePresence.current = true;
       override({ activity: "thinking", emotion: "focused", attention: "locked" });
     } else if (voiceStatus === "playing" || voiceStatus === "paused") {
+      voicePresence.current = true;
       spokePresence.current = true;
       override({
         activity: "speaking",
@@ -101,6 +129,7 @@ export function PresenceHero() {
       });
     } else if (voiceStatus === "idle" && spokePresence.current) {
       spokePresence.current = false;
+      voicePresence.current = false;
       override({
         activity: "idle",
         emotion: "neutral",
@@ -108,7 +137,20 @@ export function PresenceHero() {
         speaking: false,
       });
     }
-  }, [voiceStatus, override]);
+  }, [voiceStatus, autoSpeak, override]);
+
+  // Voice switched OFF: stop any audio now (the controller also closes the
+  // mouth) and, if voice was driving presence, settle Hsin to idle so she is
+  // never left mid-"speaking".
+  useEffect(() => {
+    if (autoSpeak) return;
+    lilithSpeech.stop();
+    if (voicePresence.current) {
+      voicePresence.current = false;
+      spokePresence.current = false;
+      override({ activity: "idle", emotion: "neutral", attention: "ambient", speaking: false });
+    }
+  }, [autoSpeak, override]);
 
   // Stop any speech cleanly when this surface unmounts / route changes.
   useEffect(() => {
@@ -127,6 +169,13 @@ export function PresenceHero() {
     emit({
       type: focused ? "conversation.input_focus" : "conversation.input_blur",
     });
+  }
+
+  function handleStop() {
+    // Browser-side only: stop waiting for the reply. Hsin leaves the thinking
+    // beat and settles; no completion/speaking transient, since nothing came back.
+    stop();
+    override({ activity: "idle", emotion: "neutral", attention: "ambient", speaking: false });
   }
 
   function handleSubmit(text: string) {
@@ -227,16 +276,23 @@ export function PresenceHero() {
 
       {/* command input — the primary conversation + command surface */}
       <div className="w-full max-w-xl">
+        <div className="mb-1.5">
+          <VoiceToggle />
+        </div>
         <RecordingControl />
         <CommandInput
           onFocusChange={handleFocus}
           onSubmit={handleSubmit}
           onType={() => emit({ type: "conversation.typing" })}
           loading={isSending}
+          onStop={handleStop}
           historyItems={recentInputs}
           fill={editFill}
         />
       </div>
+
+      {/* screen-reader announcement of each new reply (always mounted) */}
+      <ConversationAnnouncer />
 
       {/* command history drawer (fixed overlay) */}
       <CommandHistory />
