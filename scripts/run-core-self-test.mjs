@@ -25,7 +25,9 @@ await build({
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest())];
+      import { runHomeSelfTest } from "@/lib/home/self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
+                       ...runHomeSelfTest()];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
@@ -45,6 +47,10 @@ await build({
   format: "esm",
   target: "node18",
   alias: { "@": join(root, "src"), "next/server": join(root, "scripts", "self-test-next-server-shim.mjs") },
+  // The home test server-renders the real cards with react-dom/server, which
+  // needs JSX and Node built-ins (give the ESM bundle a real require).
+  jsx: "automatic",
+  banner: { js: 'import { createRequire as __lilithCreateRequire } from "node:module"; const require = __lilithCreateRequire(import.meta.url);' },
   outfile: out,
   logLevel: "warning",
 });
