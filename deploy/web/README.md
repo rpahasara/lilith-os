@@ -25,17 +25,28 @@ The web server must **not** run on the Core API VM. A loopback caller there is t
 | `cloudflared.yml.template` | `/etc/cloudflared/config.yml`: one hostname plus a 404 catch-all, with `warp-routing` disabled |
 | `lilith-web.env.template` | `/etc/lilith-web/env` (root:lilith-web, 0640): server-only secrets and settings |
 
-## Build, package, verify (local; no deployment)
+## Build and package (release environment: a repository checkout)
 ```bash
 npm ci && npm run build && npm run package:web      # -> dist/lilith-web
-node scripts/check-web-readiness.mjs --artifact dist/lilith-web \
-  --unit deploy/web/lilith-web.service
-# On the VM, with the filled-in files:
-node scripts/check-web-readiness.mjs --artifact /opt/lilith-web/current \
-  --env /etc/lilith-web/env --cloudflared /etc/cloudflared/config.yml \
-  --unit /etc/systemd/system/lilith-web.service
+node scripts/check-web-readiness.mjs --artifact dist/lilith-web --unit deploy/web/lilith-web.service
 ```
-The artifact contains the standalone server, its traced runtime dependencies (not the full `node_modules`), `.next/static`, `public/` and `avatar-cache/hsin-<version>.vrm.gz`. It is verified to decompress to the original avatar bytes.
+The artifact contains:
+- the standalone server and its traced runtime dependencies (not the full `node_modules`);
+- `.next/static`, `public/`, and `avatar-cache/hsin-<version>.vrm.gz`, verified to decompress to the original avatar;
+- an **install kit**:
+  - `bin/check-readiness.mjs`, a single dependency-free file bundled at packaging time;
+  - `bin/install-release.sh`, `bin/rollback.sh`, `bin/healthcheck.sh` and `bin/scan-prod-bundle.mjs`;
+  - `deploy/`, with the units and templates;
+  - `INSTALL.md`.
 
-## Releases and rollback
-Unpack each artifact to `/opt/lilith-web/releases/<git-sha>/` and point `/opt/lilith-web/current` at it, then run `systemctl restart lilith-web`. To roll back, re-point the symlink to the previous release and restart. Nothing on the Core API or DEV/PROD changes.
+## Install, verify and roll back (web VM: the artifact only)
+Follow `INSTALL.md` **inside the artifact**. The web VM needs Node.js 20+ and no repository, `npm` or development dependencies:
+```bash
+sudo ./bin/install-release.sh /path/to/lilith-web
+sudo /usr/bin/node /opt/lilith-web/current/bin/check-readiness.mjs --artifact /opt/lilith-web/current \
+  --env /etc/lilith-web/env --unit /etc/systemd/system/lilith-web.service --cloudflared /etc/cloudflared/config.yml
+sudo /opt/lilith-web/current/bin/rollback.sh
+```
+`install-release.sh` runs the readiness check on the new release **before** switching, switches `/opt/lilith-web/current` atomically, and rolls back automatically if the health check fails. Nothing on the Core API or DEV/PROD changes.
+
+CI exercises this exact procedure on every PR: `scripts/e2e-web-release.sh` runs against the packaged artifact on an ephemeral GitHub runner with real systemd. It is destructive to its host, so it refuses to run outside CI unless explicitly told.

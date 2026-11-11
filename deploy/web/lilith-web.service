@@ -60,6 +60,9 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount @debug
+# Filtered calls fail with EPERM instead of killing Node (libuv probes optional
+# syscalls such as io_uring and falls back on an error).
+SystemCallErrorNumber=EPERM
 # V8's JIT needs writable+executable memory, so MemoryDenyWriteExecute stays off.
 ReadOnlyPaths=/opt/lilith-web
 

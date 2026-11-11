@@ -183,6 +183,11 @@ export function checkArtifact(listing: ArtifactListing): string[] {
   if (!under("public/")) problems.push("public/ is missing");
   if (!has("web-artifact.json")) problems.push("web-artifact.json manifest is missing");
   if (!under("avatar-cache/")) problems.push("the compressed avatar is missing");
+  for (const f of ["bin/check-readiness.mjs", "bin/scan-prod-bundle.mjs", "bin/healthcheck.sh", "bin/install-release.sh",
+    "bin/rollback.sh", "deploy/lilith-web.service", "deploy/lilith-web-health.service", "deploy/lilith-web-health.timer",
+    "deploy/cloudflared.yml.template", "deploy/lilith-web.env.template", "INSTALL.md"]) {
+    if (!has(f)) problems.push(`install kit file missing: ${f}`);
+  }
   for (const f of listing.files) {
     const base = f.split("/").pop() ?? "";
     if (/^\.env/.test(base)) problems.push(`${f}: environment files must not be packaged`);
