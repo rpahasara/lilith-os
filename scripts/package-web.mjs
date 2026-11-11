@@ -37,6 +37,14 @@ cpSync(join(root, ".next/static"), join(out, ".next/static"), { recursive: true 
 cpSync(join(root, "public"), join(out, "public"), { recursive: true, force: true });
 
 const source = readFileSync(join(root, AVATAR));
+const glb = source.length >= 20 && source.readUInt32LE(0) === 0x46546c67 && source.readUInt32LE(4) === 2 &&
+  source.readUInt32LE(8) === source.length;
+if (!glb) {
+  const pointer = source.toString("utf8", 0, 64).startsWith("version https://git-lfs.github.com/spec/");
+  fail(pointer
+    ? `${AVATAR} is a Git LFS pointer, not the avatar: run \`git lfs pull\` before packaging a release`
+    : `${AVATAR} is not a valid binary glTF (GLB/VRM)`);
+}
 const sha256 = createHash("sha256").update(source).digest("hex");
 const version = sha256.slice(0, 16);
 const versionedPath = `/avatar/hsin-${version}.vrm`;
