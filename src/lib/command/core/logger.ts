@@ -36,13 +36,32 @@ export interface CoreLogger {
   log(event: CoreLogEvent, taskId: string, fields?: Record<string, unknown>): void;
 }
 
-/** Default console logger. Prefixes every line with the correlating taskId. */
-export const consoleCoreLogger: CoreLogger = {
-  log(event, taskId, fields) {
-    // eslint-disable-next-line no-console
-    console.info(`[core ${event}] task=${taskId}`, fields ?? {});
-  },
-};
+/** Lifecycle events that indicate a real problem worth surfacing in production. */
+const PRODUCTION_EVENTS: ReadonlySet<CoreLogEvent> = new Set(["persist.degraded"]);
+
+/**
+ * Console logger. In development it traces every event with its fields,
+ * prefixed by the correlating taskId. In production it is quiet: only problem
+ * events, as one line with the event and taskId and NO fields (fields can carry
+ * backend error text).
+ */
+export function createConsoleCoreLogger(
+  development: boolean,
+  sink: { info: (...a: unknown[]) => void; warn: (...a: unknown[]) => void } = console,
+): CoreLogger {
+  return {
+    log(event, taskId, fields) {
+      if (development) {
+        sink.info(`[core ${event}] task=${taskId}`, fields ?? {});
+      } else if (PRODUCTION_EVENTS.has(event)) {
+        sink.warn(`[core ${event}] task=${taskId}`);
+      }
+    },
+  };
+}
+
+/** Default logger: full traces in development, problem-only in production. */
+export const consoleCoreLogger: CoreLogger = createConsoleCoreLogger(process.env.NODE_ENV !== "production");
 
 /** No-op logger for tests that don't want output. */
 export const silentCoreLogger: CoreLogger = { log() {} };

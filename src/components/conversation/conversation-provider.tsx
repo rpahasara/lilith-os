@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { sendConversation } from "@/lib/conversation/client";
+import { TurnRunner, canReuseUserMessage, type TurnOutcome } from "@/lib/conversation/turn-runner";
 import {
   INITIAL_RECORDING,
   fetchRecordingAvailability,
@@ -44,9 +45,17 @@ interface ConversationContextValue {
   status: ConversationStatus;
   error: string | null;
   sessionId: string;
+  /** true once persisted history has been restored (client only). */
+  hydrated: boolean;
+  /** Epoch ms the in-flight turn started, or null when idle. */
+  pendingSince: number | null;
+  /** Set after Stop: the unanswered turn the owner may ask again. */
+  stopped: { userMessageId: string } | null;
   /** Send a message. No-op while a send is already in flight. */
   send: (text: string) => void;
-  /** Retry the last message that failed. */
+  /** Stop waiting for the in-flight reply (browser-side abort only). */
+  stop: () => void;
+  /** Re-send the last failed or stopped turn, reusing its user message. */
   retry: () => void;
   /** Clear the transcript and start a fresh backend session. */
   reset: () => void;
@@ -83,10 +92,22 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   // Guards duplicate Start/Finish clicks while a recording request is pending.
   const recordingBusy = useRef(false);
 
-  // Guards against duplicate concurrent sends even across rapid calls.
-  const inFlight = useRef(false);
-  // Last user text, kept for retry.
-  const lastAttempt = useRef<string | null>(null);
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
+  const [stopped, setStopped] = useState<{ userMessageId: string } | null>(null);
+
+  // One turn at a time, with abort + stale-reply protection (see TurnRunner).
+  const runner = useRef<TurnRunner | null>(null);
+  if (runner.current === null) {
+    runner.current = new TurnRunner((text, session, signal) => sendConversation(text, session, signal));
+  }
+  // The last failed or stopped turn, kept for retry.
+  const lastAttempt = useRef<{ text: string; userMessageId: string } | null>(null);
+  // Mirror of the transcript for synchronous checks inside callbacks.
+  const messagesRef = useRef<ConversationMessage[]>([]);
+  messagesRef.current = messages;
+
+  // Unmount: abort the browser request and drop any late reply.
+  useEffect(() => () => runner.current?.dispose(), []);
 
   // Hydrate from localStorage (client only).
   useEffect(() => {
@@ -143,62 +164,76 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     }
   }, [messages, hydrated]);
 
-  const runSend = useCallback(
-    async (text: string) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      lastAttempt.current = text;
+  const handleOutcome = useCallback((outcome: TurnOutcome) => {
+    if (outcome.type === "dropped") return; // stopped, superseded or unmounted
+    setPendingSince(null);
+    setStatus("idle");
+    if (outcome.type === "reply") {
+      const reply = outcome.reply.reply.trim() || "…";
+      setMessages((prev) => [
+        ...prev,
+        { id: newId(), role: "lilith", text: reply, ts: new Date().toISOString() },
+      ]);
+      lastAttempt.current = null;
+    } else {
+      setError(outcome.message);
+    }
+  }, []);
+
+  /** Start a turn; reuses `userMessageId` when retrying an unanswered bubble. */
+  const runTurn = useCallback(
+    (text: string, reuseUserMessageId?: string) => {
+      const r = runner.current!;
+      if (r.isBusy()) return;
+      const userMessageId = reuseUserMessageId ?? newId();
+      const pending = r.start(text, activeSession, userMessageId);
+      if (!pending) return;
+      lastAttempt.current = { text, userMessageId };
       setError(null);
+      setStopped(null);
       setStatus("sending");
-
-      const userMsg: ConversationMessage = {
-        id: newId(),
-        role: "user",
-        text,
-        ts: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-
-      try {
-        const res = await sendConversation(text, activeSession);
-        const reply = res.reply.trim() || "…";
+      setPendingSince(r.current?.startedAt ?? Date.now());
+      if (!reuseUserMessageId) {
         setMessages((prev) => [
           ...prev,
-          {
-            id: newId(),
-            role: "lilith",
-            text: reply,
-            ts: new Date().toISOString(),
-          },
+          { id: userMessageId, role: "user", text, ts: new Date().toISOString() },
         ]);
-        lastAttempt.current = null;
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Something went wrong.");
-      } finally {
-        inFlight.current = false;
-        setStatus("idle");
       }
+      void pending.then(handleOutcome);
     },
-    [activeSession],
+    [activeSession, handleOutcome],
   );
 
   const send = useCallback(
     (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || inFlight.current) return;
-      void runSend(trimmed);
+      if (!trimmed) return;
+      runTurn(trimmed);
     },
-    [runSend],
+    [runTurn],
   );
 
+  const stop = useCallback(() => {
+    const result = runner.current?.stop();
+    if (!result) return;
+    lastAttempt.current = { text: result.text, userMessageId: result.userMessageId };
+    setPendingSince(null);
+    setStatus("idle");
+    setError(null);
+    setStopped({ userMessageId: result.userMessageId });
+  }, []);
+
   const retry = useCallback(() => {
-    const text = lastAttempt.current;
-    if (!text || inFlight.current) return;
-    void runSend(text);
-  }, [runSend]);
+    const attempt = lastAttempt.current;
+    if (!attempt || runner.current?.isBusy()) return;
+    // Reuse the unanswered bubble if it is still the last message; otherwise
+    // the transcript moved on and the retry is a fresh turn.
+    const reuse = canReuseUserMessage(messagesRef.current, attempt.userMessageId);
+    runTurn(attempt.text, reuse ? attempt.userMessageId : undefined);
+  }, [runTurn]);
 
   const reset = useCallback(() => {
-    if (inFlight.current || isRecordingActive(recording)) return; // finish the recording first
+    if (runner.current?.isBusy() || isRecordingActive(recording)) return; // finish the recording first
     const sid = makeSessionId();
     try {
       window.localStorage.setItem(SESSION_KEY, sid);
@@ -209,10 +244,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     setSessionId(sid);
     setMessages([]);
     setError(null);
+    setStopped(null);
+    lastAttempt.current = null;
   }, [recording]);
 
   const startRecording = useCallback(() => {
-    if (recordingBusy.current || inFlight.current) return;
+    if (recordingBusy.current || runner.current?.isBusy()) return;
     if (!["idle", "finished", "interrupted"].includes(recording.phase)) return;
     recordingBusy.current = true;
     dispatchRecording({ type: "START_REQUESTED" });
@@ -230,6 +267,8 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
         }
         setMessages([]); // a recording is its own conversation
         setError(null);
+        setStopped(null);
+        lastAttempt.current = null;
       })
       .finally(() => {
         recordingBusy.current = false;
@@ -238,7 +277,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
 
   const finishRecording = useCallback(() => {
     const session = recording.session;
-    if (recordingBusy.current || inFlight.current || recording.phase !== "recording" || !session) return;
+    if (recordingBusy.current || runner.current?.isBusy() || recording.phase !== "recording" || !session) return;
     recordingBusy.current = true;
     dispatchRecording({ type: "FINISH_REQUESTED" });
     void requestFinish(fetch, session)
@@ -272,10 +311,10 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const dismissRecording = useCallback(() => dispatchRecording({ type: "DISMISS" }), []);
 
   const value = useMemo(
-    () => ({ messages, status, error, sessionId, send, retry, reset, recording, startRecording, finishRecording,
-             dismissRecording }),
-    [messages, status, error, sessionId, send, retry, reset, recording, startRecording, finishRecording,
-     dismissRecording],
+    () => ({ messages, status, error, sessionId, hydrated, pendingSince, stopped, send, stop, retry, reset,
+             recording, startRecording, finishRecording, dismissRecording }),
+    [messages, status, error, sessionId, hydrated, pendingSince, stopped, send, stop, retry, reset,
+     recording, startRecording, finishRecording, dismissRecording],
   );
 
   return (

@@ -51,6 +51,10 @@ import {
   type OrchestratorMode,
   type OrchestratorReadout,
 } from "@/lib/hsin-motion-orchestrator";
+import { reportProblem } from "@/lib/diagnostics";
+
+// Development-only diagnostics; dropped from production builds (see lib/diagnostics).
+const DEV_DIAGNOSTICS = process.env.NODE_ENV !== "production";
 
 const AVATAR_URL = "/assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm";
 const RELAXED_IDLE_VRMA_URL = "/assets/animations/hsin-relaxed-idle.vrma";
@@ -1073,7 +1077,7 @@ function HsinAvatar({
     const maskedAction = mixer.clipAction(maskedClip);
     action.setLoop(THREE.LoopRepeat, Infinity);
     maskedAction.setLoop(THREE.LoopRepeat, Infinity);
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin hand override] tracks=${JSON.stringify({
         original: clip.tracks.length,
         masked: maskedClip.tracks.length,
@@ -1085,7 +1089,7 @@ function HsinAvatar({
 
   useEffect(() => {
     const expressionManager = vrm.expressionManager;
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin blink] ${JSON.stringify({
         api: "VRMExpressionManager.setValue/getValue/update",
         blinkAvailable: expressionManager?.getExpression("blink") != null,
@@ -1095,7 +1099,7 @@ function HsinAvatar({
           ) ?? [],
       })}`,
     );
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin visemes] ${JSON.stringify(
         HSIN_VISEMES.map((name) => {
           const expression = expressionManager?.getExpression(name);
@@ -1159,7 +1163,7 @@ function HsinAvatar({
   useEffect(() => {
     const lookAt = vrm.lookAt;
     if (!lookAt) {
-      console.warn("[Hsin LookAt] No VRM LookAt component is available");
+      if (DEV_DIAGNOSTICS) console.warn("[Hsin LookAt] No VRM LookAt component is available");
       return;
     }
     const applier = lookAt.applier;
@@ -1170,7 +1174,7 @@ function HsinAvatar({
         : null;
     const originalAutoUpdate = lookAt.autoUpdate;
     lookAt.autoUpdate = false;
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin LookAt] ${JSON.stringify({
         applierType: expressionDriven ? "expression" : "bone-or-custom",
         expressionDriven,
@@ -1215,7 +1219,7 @@ function HsinAvatar({
       }
     });
 
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin pose diagnostic] ${JSON.stringify({
         autoUpdateHumanBones: vrm.humanoid.autoUpdateHumanBones,
         springBoneManager: Boolean(vrm.springBoneManager),
@@ -1788,8 +1792,8 @@ function HsinAvatar({
       transparent: fallback.transparent,
       side: fallback.side === THREE.DoubleSide ? "DoubleSide" : fallback.side,
     }));
-    console.table(diagnostics);
-    console.info(
+    if (DEV_DIAGNOSTICS) console.table(diagnostics);
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin material fallback] ${JSON.stringify(diagnostics)}`,
     );
 
@@ -1844,7 +1848,7 @@ function HsinAvatar({
         }
       });
     });
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin arm anatomy view] hidden=${JSON.stringify(exposed)}`,
     );
     return () =>
@@ -1924,7 +1928,7 @@ function HsinAvatar({
       : center.x;
     const faceOffsetX = (center.x - headLocalX) * scale;
 
-    console.info(
+    if (DEV_DIAGNOSTICS) console.info(
       `[Hsin pose diagnostic] framing=${JSON.stringify({
         size: size.toArray(),
         center: center.toArray(),
@@ -1964,7 +1968,7 @@ function HsinAvatar({
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         if (mats.every((m) => m && m.visible === false)) hiddenMats += 1;
       });
-      console.info(
+      if (DEV_DIAGNOSTICS) console.info(
         `[Hsin presentation state] ${JSON.stringify({
           vrmLoaded: !!vrm.scene,
           sceneParentType: vrm.scene.parent?.type ?? null,
@@ -2041,7 +2045,7 @@ function HsinAvatar({
         if (handOverrideChanged && nextAction) {
           nextAction.time = previousTime % nextAction.getClip().duration;
         }
-        console.info(
+        if (DEV_DIAGNOSTICS) console.info(
           `[Hsin VRMA idle] playing=${JSON.stringify({
             source: RELAXED_IDLE_VRMA_URL,
             duration: nextAction?.getClip().duration ?? null,
@@ -2088,11 +2092,11 @@ function HsinAvatar({
               .toArray() ?? null,
           ]),
         );
-        console.info(
+        if (DEV_DIAGNOSTICS) console.info(
           `[Hsin normalized rest test] ${JSON.stringify({ rotations, worldPositions })}`,
         );
       }
-      console.info(`[Hsin pose diagnostic] phase=${poseMode}`);
+      if (DEV_DIAGNOSTICS) console.info(`[Hsin pose diagnostic] phase=${poseMode}`);
     }
 
     if (poseMode === "vrmaIdle") {
@@ -2133,7 +2137,7 @@ function HsinAvatar({
         vrm.humanoid.update();
         neutralSolutionKey.current = solutionKey;
         onCanonicalNeutralChange?.(HSIN_CANONICAL_NEUTRAL);
-        console.info(
+        if (DEV_DIAGNOSTICS) console.info(
           `[HSIN_CANONICAL_NEUTRAL] ${JSON.stringify(HSIN_CANONICAL_NEUTRAL)}`,
         );
         const geometry = (["left", "right"] as const).map((side) => {
@@ -2164,7 +2168,7 @@ function HsinAvatar({
             elbowFlexDegrees,
           };
         });
-        console.info(`[Hsin neutral geometry] ${JSON.stringify(geometry)}`);
+        if (DEV_DIAGNOSTICS) console.info(`[Hsin neutral geometry] ${JSON.stringify(geometry)}`);
       } else {
         neutralSolution.current.forEach((quaternion, boneName) => {
           poseDiagnostic.normalizedNodes.get(boneName)?.quaternion.copy(quaternion);
@@ -2465,7 +2469,7 @@ function HsinAvatar({
         if (rareState.phase !== lastRarePhase.current) {
           lastRarePhase.current = rareState.phase;
           onRareStateChange?.(rareState);
-          console.info(
+          if (DEV_DIAGNOSTICS) console.info(
             `[Hsin rare motion] ${JSON.stringify({
               phase: rareState.phase,
               variation: rareState.variation,
@@ -2515,7 +2519,7 @@ function HsinAvatar({
           lastAmbientPhase.current = ambientState.phase;
           lastAmbientVariation.current = ambientState.variation;
           onAmbientStateChange?.(ambientState);
-          console.info(
+          if (DEV_DIAGNOSTICS) console.info(
             `[Hsin ambient idle] ${JSON.stringify({
               phase: ambientState.phase,
               variation: ambientState.variation,
@@ -2630,14 +2634,14 @@ function HsinAvatar({
             result.count += 1;
             result.maxDegrees = Math.max(result.maxDegrees, degrees);
           });
-          console.info(
+          if (DEV_DIAGNOSTICS) console.info(
             `[Hsin spring init test] firstFrame=${JSON.stringify(groups)}`,
           );
         }
       } else if (!springsEnabled && wasSpringsEnabled && springBoneManager) {
         springBoneManager.reset();
         vrm.scene.updateMatrixWorld(true);
-        console.info(
+        if (DEV_DIAGNOSTICS) console.info(
           "[Hsin spring init test] disabled; restored captured canonical spring state",
         );
       }
@@ -2865,7 +2869,7 @@ function HsinAvatar({
               distance: position?.distanceTo(target) ?? null,
             };
           });
-          console.info(
+          if (DEV_DIAGNOSTICS) console.info(
             `[Hsin arm IK] cached new target solution ${JSON.stringify(solvedDistances)}`,
           );
         } else {
@@ -2893,11 +2897,11 @@ function HsinAvatar({
               distance: position?.distanceTo(target) ?? null,
             };
           });
-          console.info(`[Hsin arm IK] ${JSON.stringify(handDistances)}`);
+          if (DEV_DIAGNOSTICS) console.info(`[Hsin arm IK] ${JSON.stringify(handDistances)}`);
         }
         if (previousSpringsEnabled.current) {
           vrm.springBoneManager?.reset();
-          console.info("[Hsin spring diagnostic] disabled; restored spring initial state");
+          if (DEV_DIAGNOSTICS) console.info("[Hsin spring diagnostic] disabled; restored spring initial state");
         }
       } else {
         const isFirstSpringFrame = !previousSpringsEnabled.current;
@@ -2928,7 +2932,7 @@ function HsinAvatar({
             result.count += 1;
             result.maxDegrees = Math.max(result.maxDegrees, degrees);
           });
-          console.info(`[Hsin spring diagnostic] firstFrame=${JSON.stringify(groups)}`);
+          if (DEV_DIAGNOSTICS) console.info(`[Hsin spring diagnostic] firstFrame=${JSON.stringify(groups)}`);
         }
       }
     previousSpringsEnabled.current = springsEnabled;
@@ -3005,7 +3009,7 @@ function HsinAvatar({
             const markerWorld = handTargetMarker.current.getWorldPosition(
               new THREE.Vector3(),
             );
-            console.info(
+            if (DEV_DIAGNOSTICS) console.info(
               `[Hsin hand inspect] ${JSON.stringify({
                 view: handInspectionView,
                 normalizedHandWorld: normalizedWorld?.toArray() ?? null,
@@ -3120,7 +3124,7 @@ function HsinAvatar({
         );
       });
       if (maxPositionDrift > 1e-5 || maxScaleDrift > 1e-5) {
-        console.warn(
+        if (DEV_DIAGNOSTICS) console.warn(
           `[Hsin pose diagnostic] transform drift position=${maxPositionDrift} scale=${maxScaleDrift}`,
         );
       }
@@ -3529,20 +3533,16 @@ export function AvatarScene({
           clearTimeout(stabilityTimerRef.current);
           stabilityTimerRef.current = null;
         }
-        console.warn("[Hsin] WebGL context lost — awaiting restoration");
+        reportProblem("Hsin", "WebGL context lost — awaiting restoration");
         if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
         restoreTimerRef.current = setTimeout(() => {
           restoreTimerRef.current = null;
           if (remountCountRef.current >= MAX_CONTEXT_REMOUNTS) {
-            console.warn(
-              "[Hsin] WebGL context still lost; remount budget exhausted — leaving static fallback",
-            );
+            reportProblem("Hsin", "WebGL context still lost; remount budget exhausted — leaving static fallback");
             return;
           }
           remountCountRef.current += 1;
-          console.warn(
-            `[Hsin] WebGL context not restored — remounting canvas (${remountCountRef.current}/${MAX_CONTEXT_REMOUNTS})`,
-          );
+          reportProblem("Hsin", `WebGL context not restored — remounting canvas (${remountCountRef.current}/${MAX_CONTEXT_REMOUNTS})`);
           setCanvasGeneration((g) => g + 1);
         }, CONTEXT_RESTORE_GRACE_MS);
       };
@@ -3553,7 +3553,7 @@ export function AvatarScene({
           restoreTimerRef.current = null;
         }
         remountCountRef.current = 0;
-        console.info("[Hsin] WebGL context restored");
+        if (DEV_DIAGNOSTICS) console.info("[Hsin] WebGL context restored");
       };
 
       canvasEl.addEventListener("webglcontextlost", onLost, false);
