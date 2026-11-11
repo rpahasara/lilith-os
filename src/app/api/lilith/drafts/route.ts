@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
@@ -50,6 +51,8 @@ async function forward(method: "GET" | "POST", url: string, init?: { body?: stri
 }
 
 export async function GET(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   const q = new URLSearchParams();
@@ -63,6 +66,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   let body: unknown;

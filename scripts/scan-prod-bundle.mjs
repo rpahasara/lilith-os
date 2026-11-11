@@ -36,6 +36,13 @@ export const DEV_LOG_MARKERS = [
   "WebGL context restored",
   "[HSIN_CANONICAL_NEUTRAL]",
   "[Lilith perf guard]",
+  // Server-only web authentication internals (src/server/edge-auth): must never reach the browser.
+  "cdn-cgi/access/certs",
+  "cf-access-jwt-assertion",
+  "LILITH_ACCESS_AUD",
+  "LILITH_OWNER_EMAILS",
+  "LILITH_ACCESS_TEAM_DOMAIN",
+  "HOSTED_AUTH_MISCONFIGURED",
 ];
 
 /**

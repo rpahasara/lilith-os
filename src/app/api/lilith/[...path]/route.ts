@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
@@ -47,6 +48,8 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ path: string[] }> },
 ) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) {
     return NextResponse.json(
