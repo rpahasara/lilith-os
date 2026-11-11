@@ -10,7 +10,7 @@ Boundaries:
 
 ## 1. Contents (dependency order)
 
-The branch `integration/xv2-rc1` is `main` at `cda3d85` plus these merges, in this order:
+The branch `integration/xv2-rc1` is these merges in this order, originally on `main` at `cda3d85`. It was revalidated on `main` at `4d2e6ea` (2026-11-11, after #416 and #427):
 
 | # | PR | Head | Change |
 |---|---|---|---|
@@ -75,20 +75,22 @@ The individual PRs were also verified separately on desktop and mobile, as recor
 
 ## 4. Merge plan (requires separate authorization)
 
-### Blocking consideration: merging to `main` triggers a DEV deployment
-`.github/workflows/deploy-dev.yml` ("Deploy LILITH Core API to DEV") runs after every successful `Repository validation` on `main`. Its classifier (`scripts/classify_dev_deployment.py`) exempts only an exact list of control and broker paths, and accepts no directory globs. Run locally on this RC's diff it returns:
+### DEV deployment: resolved by #427
+`.github/workflows/deploy-dev.yml` ("Deploy LILITH Core API to DEV") runs after every successful `Repository validation` on `main`. Before #427, its classifier returned `MODE=DEPLOY_REQUIRED` for this RC, which would have meant a same-code DEV Core API redeploy and restart. The owner chose to change the classifier first.
 
-```
-MODE=DEPLOY_REQUIRED
-```
+**#427 was merged 2026-11-11 at 18:03:59Z.** It was pinned to the approved head `3b48b9b`, and the merge commit is `4d2e6ea`. Its `main` runs were:
 
-So merging RC1, any of #419 to #425, or #420's docs would make the fixed DEV helper deploy an exact-SHA bundle and restart `lilith-os-api-dev.service`. The Core API code would be unchanged, so it is a same-code redeploy and restart, but it is still a DEV restart. Before merging, the owner chooses one of:
+| Run | Result |
+|---|---|
+| Repository validation `43074170016` | success |
+| DEV workflow `43074807200` | `MODE=CONTROL_ONLY_NO_DEPLOY`, `DEV_MUTATION=NONE`. Bundle, deploy and health steps skipped. Read-only deployer boundary proof passed (170 denials). |
 
-- **(a) Accept the DEV redeploy** as part of the merge authorization (same Core API code; health-checked by the workflow), or
-- **(b) First change the classifier** so frontend-only diffs are `CONTROL_ONLY_NO_DEPLOY`. This is a security-sensitive change to a deliberately fail-closed control, so it needs its own reviewed PR and its own authorization. It is not part of this RC.
+A read-only DEV check afterwards showed `lilith-os-api-dev.service` active since 2026-11-10 14:40:39 UTC with `NRestarts=0`, so there was no restart.
+
+RC1 has been revalidated on the new `main` (`4d2e6ea`). Its effective diff is still the same 38 frontend, test and docs paths. A simulated `main` merge classifies as **`CONTROL_ONLY_NO_DEPLOY`**, and the server-boundary guard reports no violations. Merging RC1 therefore runs only the read-only control path, with no DEV deployment or restart.
 
 ### Recommended: one merge of the RC
-1. The owner authorizes the merge, including choice (a) or (b) above.
+1. The owner authorizes the merge of RC1 at its exact head SHA.
 2. Re-run CI on the RC PR at its final head. Confirm `main` has not moved, or rebase and re-run the full checklist in §5.
 3. Merge **once** with a merge commit, keeping the six PR merges visible.
 4. Close #419 and #421 to #425 as *superseded by the RC*. Their reviews and evidence stay linked.
@@ -126,13 +128,13 @@ Run on the exact merge candidate:
 
 **Rollback steps:**
 1. **Local frontend (immediate):**
-   - check out the pre-merge `main` SHA (recorded at merge time; `cda3d85` today);
+   - check out the pre-merge `main` SHA (recorded at merge time; `4d2e6ea` today);
    - `npm ci && npm run build && npm start`.
 
    Optionally remove `lilith-os:voice` from the browser.
 2. **Repository:** revert the single RC merge commit with `git revert -m 1 <rc-merge-sha>` in one PR.
    - Run CI on it.
-   - The revert's diff also classifies as `DEPLOY_REQUIRED`, so the same DEV-redeploy decision from §4 applies.
+   - A full revert deletes the files RC1 added. Deletions always classify as `DEPLOY_REQUIRED` (by design), so a full revert would trigger one same-code DEV redeploy. Get that authorized together with the revert, or prefer the local rollback (step 1). A partial revert that only modifies files stays `CONTROL_ONLY_NO_DEPLOY`.
 3. **Partial rollback:** if only one feature misbehaves (for example voice), revert that PR's files in a follow-up PR rather than the whole RC. Each feature is isolated in its own modules:
 
    | PR | Files |
