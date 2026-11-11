@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ReactNode } from "react";
+import { reportProblem } from "@/lib/diagnostics";
 
 /**
  * A pure-CSS presence: a soft violet→cyan bloom, no WebGL, no render loop.
@@ -41,8 +42,8 @@ export class PresenceErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown) {
-    // Non-fatal by design — log for diagnostics, keep the OS running.
-    console.warn("[presence] renderer failed, falling back to static", error);
+    // Non-fatal by design: report one sanitized line, keep the OS running.
+    reportProblem("presence", "renderer failed, falling back to static", error);
   }
 
   render() {

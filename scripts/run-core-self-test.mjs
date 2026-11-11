@@ -30,8 +30,9 @@ await build({
       import { runHomeSelfTest } from "@/lib/home/self-test";
       import { runTurnSelfTest } from "@/lib/conversation/turn-self-test";
       import { runVoiceSelfTest } from "@/lib/voice/voice-self-test";
+      import { runDiagnosticsSelfTest } from "@/lib/diagnostics-self-test";
       const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest())];
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest()];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
