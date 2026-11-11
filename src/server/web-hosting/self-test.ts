@@ -13,7 +13,7 @@ import nextConfig from "../../../next.config";
 import * as avatarRoute from "@/app/avatar/[asset]/route";
 import { CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY, SECURITY_HEADERS } from "./security-headers";
 import {
-  AVATAR_CACHE_CONTROL, AVATAR_SOURCE, acceptsGzip, avatarResponse, versionOfFile, versionedAvatarName,
+  AVATAR_CACHE_CONTROL, AVATAR_SOURCE, acceptsGzip, avatarResponse, isLfsPointer, looksLikeGlb, versionOfFile, versionedAvatarName,
 } from "./avatar";
 import { checkArtifact, checkCloudflared, checkEnv, checkUnit } from "./readiness";
 
@@ -85,6 +85,15 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
   check("the app loads the versioned avatar URL (same bytes, original stays in public/)",
     /\/avatar\/hsin-\$\{process\.env\.NEXT_PUBLIC_HSIN_AVATAR_VERSION\}\.vrm/.test(read("src/components/presence/avatar-scene.tsx")));
 
+  const pointer = new TextEncoder().encode(
+    ["version https://git-lfs.github.com/spec/v1", `oid sha256:${"a".repeat(64)}`, "size 115956460", ""].join("\n"));
+  const glbHeader = (len: number) => { const b = new Uint8Array(len); const v = new DataView(b.buffer);
+    v.setUint32(0, 0x46546c67, true); v.setUint32(4, 2, true); v.setUint32(8, len, true); return b; };
+  check("the source avatar in this checkout is a real GLB (not a Git LFS pointer)", looksLikeGlb(readFileSync(join(ROOT, AVATAR_SOURCE))));
+  check("GLB detection: valid header accepted; LFS pointer, truncated, wrong version or length rejected",
+    looksLikeGlb(glbHeader(64)) && !looksLikeGlb(pointer) && isLfsPointer(pointer) && !looksLikeGlb(glbHeader(64).subarray(0, 40)) &&
+    !looksLikeGlb((() => { const b = glbHeader(64); new DataView(b.buffer).setUint32(4, 1, true); return b; })()) &&
+    !looksLikeGlb(new Uint8Array(10)));
   check("gzip negotiation", acceptsGzip("gzip, deflate, br") && acceptsGzip("br;q=1, gzip;q=0.5") &&
     !acceptsGzip("gzip;q=0") && !acceptsGzip("br") && !acceptsGzip(null) && acceptsGzip("*"));
 

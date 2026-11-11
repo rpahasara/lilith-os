@@ -27,9 +27,12 @@ The web server must **not** run on the Core API VM. A loopback caller there is t
 
 ## Build and package (release environment: a repository checkout)
 ```bash
+git lfs pull                                          # the avatar VRM is a Git LFS object
 npm ci && npm run build && npm run package:web      # -> dist/lilith-web
 node scripts/check-web-readiness.mjs --artifact dist/lilith-web --unit deploy/web/lilith-web.service
 ```
+Packaging refuses a Git LFS pointer in place of the avatar, and so does the readiness check on the VM.
+
 The artifact contains:
 - the standalone server and its traced runtime dependencies (not the full `node_modules`);
 - `.next/static`, `public/`, and `avatar-cache/hsin-<version>.vrm.gz`, verified to decompress to the original avatar;

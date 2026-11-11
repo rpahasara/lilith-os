@@ -16,6 +16,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { checkArtifact, checkCloudflared, checkEnv, checkUnit, parseEnvFile } from "./readiness";
+import { isLfsPointer, looksLikeGlb } from "./avatar";
 
 function argMap(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -74,7 +75,13 @@ export function main(argv: string[] = process.argv.slice(2), here = dirname(file
       const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
       if (!existsSync(gzPath) || !existsSync(srcPath)) problems.push("packaged avatar files are missing");
       else {
-        if (sha(readFileSync(srcPath)) !== m.avatar.sha256) problems.push("packaged avatar does not match the manifest hash");
+        const avatarBytes = readFileSync(srcPath);
+        if (!looksLikeGlb(avatarBytes)) {
+          problems.push(isLfsPointer(avatarBytes)
+            ? "packaged avatar is a Git LFS pointer, not the model (release built without `git lfs pull`)"
+            : "packaged avatar is not a valid binary glTF (GLB/VRM)");
+        }
+        if (sha(avatarBytes) !== m.avatar.sha256) problems.push("packaged avatar does not match the manifest hash");
         if (sha(gunzipSync(readFileSync(gzPath))) !== m.avatar.sha256) problems.push("compressed avatar does not decompress to the original");
       }
     }

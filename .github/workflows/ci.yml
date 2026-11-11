@@ -171,6 +171,9 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Use a synthetic avatar in place of the Git LFS pointer (CI does not fetch LFS)
+        run: node scripts/ci-synthetic-avatar.mjs
+
       - name: Install frontend dependencies
         run: npm ci
 

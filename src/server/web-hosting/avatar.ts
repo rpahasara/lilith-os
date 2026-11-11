@@ -25,6 +25,22 @@ export const AVATAR_CONTENT_TYPE = "model/gltf-binary";
 export const AVATAR_CACHE_CONTROL = "private, max-age=31536000, immutable";
 const VERSION = /^[0-9a-f]{16}$/;
 
+/**
+ * True only for a real binary glTF (GLB/VRM): "glTF" magic, version 2, and a
+ * declared total length equal to the file size. The avatar is stored in Git LFS,
+ * so a checkout without LFS contains a small text pointer instead; releases must
+ * refuse that rather than ship a broken Hsin.
+ */
+export function looksLikeGlb(bytes: Uint8Array): boolean {
+  if (bytes.length < 20) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return view.getUint32(0, true) === 0x46546c67 && view.getUint32(4, true) === 2 && view.getUint32(8, true) === bytes.length;
+}
+
+export function isLfsPointer(bytes: Uint8Array): boolean {
+  return bytes.length < 1024 && new TextDecoder().decode(bytes.subarray(0, 64)).startsWith("version https://git-lfs.github.com/spec/");
+}
+
 /** First 16 hex of the SHA-256 of a file. Build/packaging time only (reads the whole file). */
 export function versionOfFile(path: string): string {
   const hash = createHash("sha256");
