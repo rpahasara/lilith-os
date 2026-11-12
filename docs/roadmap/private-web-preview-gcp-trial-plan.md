@@ -177,7 +177,7 @@ Each line is its own authorization. Order matters: no exposure happens before st
 | # | Step | Who | Gate |
 |---|---|---|---|
 | N-1 | W-SEC-1 PR (§5a) | — | **DONE**: #432 merged `0347706` (2026-11-12) |
-| N-1b | Packaging hygiene (F-1 below): release packaging starts from a clean build directory | agent PR, owner merge | before the first real release artifact is built |
+| N-1b | Packaging hygiene (F-1 below) | — | **DONE**: #433 merged `2c36c57` (2026-11-12) |
 | N-2 | Confirm second-trial eligibility (§0) and activate it | owner | owner only |
 | N-3 | Backend migration to VM 1 in the new project, then acceptance | infrastructure chat | separately gated |
 | N-4 | Create VM 2, networking, packages (§5 steps 1–3) | agent | after N-1, N-2, N-3 accepted |
@@ -185,7 +185,9 @@ Each line is its own authorization. Order matters: no exposure happens before st
 | N-6 | Build the release from a clean checkout (`git lfs pull`, no `dist/` or `.next/`); install it; re-run and record the **W-SEC-1 acceptance table on VM 2 (Ubuntu 24.04, systemd 255)**; **then** start `cloudflared` (§5 steps 6–7) | agent | first exposure; separate authorization |
 | N-7 | Acceptance tests (§5 step 8), recorded, including a **real Cloudflare Access owner login** in a browser (owner signs in, a non-owner email is denied, signed-out requests never reach app content) | owner + agent | the web preview is **not operational** until N-7 passes |
 
-**Follow-up F-1 (open): stale `dist/` in the packaged artifact.** `next build` with `output: "standalone"` traces files from the project directory. If an earlier `dist/lilith-web` exists at build time, it is copied into the new artifact (seen locally: 326 MB instead of 181 MB, with an old release nested inside). CI always builds from a clean checkout and is unaffected. Requirement: release packaging must start from a clean build directory. Until a packaging guard lands (N-1b), run `rm -rf dist .next` before `npm run build && npm run package:web`.
+**Follow-up F-1 (CLOSED by #433, `2c36c57`): stale `dist/` in the packaged artifact.** `next build` with `output: "standalone"` traces files from the project directory. If an earlier `dist/lilith-web` exists at build time, it is copied into the new artifact (seen locally: 326 MB instead of 181 MB, with an old release nested inside). CI always builds from a clean checkout and is unaffected. Requirement: release packaging must start from a clean build directory. `scripts/package-web.mjs` now refuses a standalone build with any top-level entry beyond `.next`, `node_modules`, `package.json`, `public` and `server.js`; the documented release build starts with `rm -rf dist .next`.
+
+**Hosting preparation is complete.** No further hosting-preparation PRs unless a genuine deployment blocker is found. Next: the second GCP trial (N-2) and the backend migration (N-3), then the separately authorized private web VM deployment (N-4 onward).
 
 ## 6. Coordination with the backend migration (infrastructure chat)
 - The two-VM design needs no change to the migration itself, only that VM 1 is in a VPC and zone that VM 2 can join, plus §1's token and reachability items.
