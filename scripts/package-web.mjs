@@ -83,7 +83,7 @@ if (foreign.length) fail(`bin/check-readiness.mjs must import Node built-ins onl
 cpSync(join(root, "scripts", "scan-prod-bundle.mjs"), join(out, "bin", "scan-prod-bundle.mjs"));
 for (const f of ["healthcheck.sh", "install-release.sh", "rollback.sh"]) cpSync(join(root, "deploy/web", f), join(out, "bin", f));
 for (const f of ["lilith-web.service", "lilith-web-health.service", "lilith-web-health.timer",
-  "cloudflared.yml.template", "lilith-web.env.template"]) cpSync(join(root, "deploy/web", f), join(out, "deploy", f));
+  "cloudflared.yml.template", "cloudflared-lilith-web.conf", "lilith-web.env.template"]) cpSync(join(root, "deploy/web", f), join(out, "deploy", f));
 cpSync(join(root, "deploy/web/INSTALL.md"), join(out, "INSTALL.md"));
 
 for (const f of readdirSync(out, { recursive: true })) {

@@ -51,6 +51,10 @@ echo "E2E INFO  install + start + health: $(( $(date +%s) - t0 ))s"
 expect "current -> releases/e2e-1" test "$(readlink $BASE/current)" = "releases/e2e-1"
 expect "service is active" systemctl is-active --quiet lilith-web.service
 expect "health timer is active" systemctl is-active --quiet lilith-web-health.timer
+expect "W-SEC-1 startup gate installed root-owned at a fixed path" test "$(stat -c '%U %a' $BASE/bin/check-readiness.mjs)" = "root 755"
+expect "W-SEC-1 tunnel binding installed" test -f /etc/systemd/system/cloudflared.service.d/10-lilith-web.conf
+expect "W-SEC-1 service runs with the hosted requirement on its command line" \
+  bash -c "tr '\0' ' ' < /proc/\$(systemctl show -p MainPID --value lilith-web.service)/environ | grep -q 'LILITH_REQUIRE_HOSTED=1'"
 pid=$(systemctl show -p MainPID --value lilith-web.service)
 expect "server runs as the unprivileged lilith-web user" test "$(ps -o user= -p "$pid" | tr -d ' ')" = "lilith-web"
 expect "server holds no capabilities" test "$(grep CapEff /proc/$pid/status | awk '{print $2}')" = "0000000000000000"
@@ -60,7 +64,9 @@ listeners=$(ss -ltnH | awk '{print $4}' | grep -E ':3000$' | sort -u | tr '\n' '
 expect "listens only on 127.0.0.1:3000 (got: $listeners)" test "$listeners" = "127.0.0.1:3000 "
 
 # 4. Authentication enforced on every path (no Cloudflare in front: direct-origin access).
-for path in / /assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm "/avatar/hsin-$(node -p "require('$ART/web-artifact.json').avatar.version").vrm" /api/lilith/system/status; do
+CHUNK="/_next/static/chunks/$(cd "$ART/.next/static/chunks" && ls *.js | head -1)"
+PATHS=(/ /assets/avatars/Hsin_FINAL_EXPORT_WORKING_FIXED.vrm "/avatar/hsin-$(node -p "require('$ART/web-artifact.json').avatar.version").vrm" /api/lilith/system/status "$CHUNK")
+for path in "${PATHS[@]}"; do
   expect "direct-origin GET $path -> 401 EDGE_AUTH_REQUIRED" bash -c "[ \"\$(curl -s -o /tmp/e2e-body -w '%{http_code}' http://127.0.0.1:3000$path)\" = 401 ] && grep -q EDGE_AUTH_REQUIRED /tmp/e2e-body"
 done
 expect "forged/malformed Access token -> 401" test "$(status -H 'Cf-Access-Jwt-Assertion: a.b.c' http://127.0.0.1:3000/)" = "401"
@@ -86,26 +92,121 @@ rm -rf /tmp/badrel && cp -a "$ART" /tmp/badrel && rm -f /tmp/badrel/bin/scan-pro
 if RELEASE_ID=e2e-bad "$ART/bin/install-release.sh" /tmp/badrel >/dev/null 2>&1; then bad "a broken release is refused"; else ok "a broken release is refused"; fi
 expect "refused release was removed; live release unchanged and healthy" bash -c "[ ! -e $BASE/releases/e2e-bad ] && [ \"\$(readlink $BASE/current)\" = releases/e2e-1 ] && $BASE/bin/healthcheck.sh >/dev/null"
 
-# 7. Fail-closed behaviour of the running service.
+# ---- W-SEC-1: no unauthenticated serving window (sections 7-11) ----
+echo "E2E INFO  systemd $(systemctl --version | head -1 | awk '{print $2}') on $(. /etc/os-release && echo "$PRETTY_NAME")"
+systemctl stop lilith-web-health.timer   # keep the periodic check from restarting the service mid-scenario (re-enabled in 11)
 cp /etc/lilith-web/env /tmp/env.good
-sed -i '/^LILITH_ACCESS_AUD=/d' /etc/lilith-web/env
-if systemctl restart lilith-web.service 2>/dev/null; then bad "misconfigured hosted auth refuses to start healthy"; else ok "misconfigured hosted auth refuses to start healthy"; fi
-"$BASE/bin/healthcheck.sh" >/dev/null 2>&1; rc=$?
-expect "health check reports misconfiguration (exit 2) or down (exit 1), never healthy (got $rc)" test "$rc" -eq 2 -o "$rc" -eq 1
-cp /tmp/env.good /etc/lilith-web/env && sed -i 's/^LILITH_HOSTED=1/LILITH_HOSTED=0/' /etc/lilith-web/env
-if systemctl restart lilith-web.service 2>/dev/null; then bad "a server that would serve WITHOUT auth fails its startup check"; else ok "a server that would serve WITHOUT auth fails its startup check"; fi
-systemctl start lilith-web.service >/dev/null 2>&1 || true
-"$BASE/bin/healthcheck.sh" --wait 20 >/dev/null 2>&1; rc=$?
-[ "$rc" -eq 3 ] && ok "health check flags serving without auth (exit 3)" || echo "E2E INFO  unauthenticated server not running (rc $rc): startup check already refused it"
-systemctl start lilith-web-health.service >/dev/null 2>&1 || true
-expect "periodic health check stops a server serving without auth" bash -c "! systemctl is-active --quiet lilith-web.service"
-cp /tmp/env.good /etc/lilith-web/env && chmod 0640 /etc/lilith-web/env && chown root:lilith-web /etc/lilith-web/env
-expect "restored configuration starts healthy again (documented recovery: reset-failed + restart)" bash -c "systemctl reset-failed lilith-web.service; systemctl restart lilith-web.service && $BASE/bin/healthcheck.sh"
+mono() { systemctl show -p "$2" --value "$1"; }
+wait_for() { local t=$1; shift; local end=$(( $(date +%s) + t )); until "$@"; do [ "$(date +%s)" -ge "$end" ] && return 1; sleep 0.2; done; }
+good_env() { cp /tmp/env.good /etc/lilith-web/env && chmod 0640 /etc/lilith-web/env && chown root:lilith-web /etc/lilith-web/env; }
+both_up() {  # deliberate exposure: starting the tunnel starts and verifies the web service first
+  systemctl reset-failed lilith-web.service cloudflared.service 2>/dev/null
+  systemctl start cloudflared.service && systemctl is-active --quiet lilith-web.service && "$BASE/bin/healthcheck.sh" >/dev/null
+}
+tunnel_down() { ! systemctl is-active --quiet cloudflared.service; }
+has_dep() { systemctl show -p "$1" --value cloudflared.service | tr ' ' '\n' | grep -qx lilith-web.service; }
+
+# 7. The tunnel follows the verified web service (a stand-in cloudflared unit; the real binding drop-in applies).
+cat > /etc/systemd/system/cloudflared.service <<'UNIT'
+[Unit]
+Description=cloudflared stand-in for the e2e test (the installed 10-lilith-web.conf binding applies)
+[Service]
+ExecStart=/usr/bin/sleep infinity
+UNIT
+systemctl daemon-reload
+for d in Requires BindsTo After; do expect "tunnel binding: cloudflared $d=lilith-web.service" has_dep "$d"; done
+systemctl stop cloudflared.service lilith-web.service
+expect "cold start: starting the tunnel starts and verifies the web service first" both_up
+web_up=$(mono lilith-web.service ActiveEnterTimestampMonotonic); cf_exec=$(mono cloudflared.service ExecMainStartTimestampMonotonic)
+expect "cold start: the tunnel process started only after lilith-web passed its gate and auth health check ($web_up <= $cf_exec)" test "$web_up" -le "$cf_exec"
+old=$(mono lilith-web.service MainPID); kill -9 "$old"
+expect "crash: the tunnel stops with the web service" wait_for 4 tunnel_down
+expect "crash recovery: the web service restarts through its gate and the tunnel returns" wait_for 40 bash -c \
+  "systemctl is-active --quiet lilith-web.service && systemctl is-active --quiet cloudflared.service && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" != $old ]"
+web_up=$(mono lilith-web.service ActiveEnterTimestampMonotonic); cf_exec=$(mono cloudflared.service ExecMainStartTimestampMonotonic)
+expect "crash recovery: the tunnel returned only after the new server was verified ($web_up <= $cf_exec)" test "$web_up" -le "$cf_exec"
+expect "crash recovery: healthy, authentication enforced" "$BASE/bin/healthcheck.sh"
+systemctl stop lilith-web.service
+expect "stopping the web service stops the tunnel" tunnel_down
+
+# 8. Startup gate: a disabled or broken hosted setting never binds, on the restart or any automatic retry.
+sample_3000() {  # every 50 ms for $1 s: record any listener on :3000 and any HTTP answer from it
+  local end=$(( $(date +%s) + $1 )) c; : > /tmp/e2e-sample
+  while [ "$(date +%s)" -lt "$end" ]; do
+    ss -ltnH 'sport = :3000' | grep -q . && echo "BOUND" >> /tmp/e2e-sample
+    c=$(curl -s -o /dev/null -m 1 -w '%{http_code}' http://127.0.0.1:3000/ 2>/dev/null); [ "$c" = "000" ] || echo "HTTP-$c" >> /tmp/e2e-sample
+    sleep 0.05
+  done
+}
+gate_case() {  # $1 label; then sed expressions (or append:<line>) applied to the good env file
+  local label="$1" started e; shift
+  good_env; expect "$label: starts from a healthy, exposed service" both_up
+  started=$(mono lilith-web.service ExecMainStartTimestampMonotonic)
+  for e in "$@"; do case "$e" in append:*) echo "${e#append:}" >> /etc/lilith-web/env ;; *) sed -i "$e" /etc/lilith-web/env ;; esac; done
+  if systemctl restart lilith-web.service >/dev/null 2>&1; then bad "$label: restart refused"; else ok "$label: restart refused"; fi
+  sample_3000 12
+  expect "$label: nothing listened or answered on :3000 for 12 s across the restart and automatic retries [$(sort /tmp/e2e-sample | uniq -c | tr -s ' \n' ' ')]" test ! -s /tmp/e2e-sample
+  expect "$label: the server process never started (ExecStart did not run)" test "$(mono lilith-web.service ExecMainStartTimestampMonotonic)" = "$started"
+  expect "$label: automatic retries happened and were refused too (NRestarts=$(mono lilith-web.service NRestarts))" test "$(mono lilith-web.service NRestarts)" -ge 1
+  expect "$label: the gate logged why" bash -c "journalctl -u lilith-web.service -n 60 --no-pager | grep -q 'NOT READY'"
+  expect "$label: the tunnel was stopped" tunnel_down
+  expect "$label: the tunnel cannot start while the gate fails" bash -c "! systemctl start cloudflared.service 2>/dev/null && ! ss -ltnH 'sport = :3000' | grep -q ."
+  systemctl stop lilith-web.service cloudflared.service >/dev/null 2>&1
+}
+gate_case "LILITH_HOSTED removed" '/^LILITH_HOSTED=/d'
+gate_case "LILITH_HOSTED=0" 's/^LILITH_HOSTED=1/LILITH_HOSTED=0/'
+gate_case "Access AUD missing" '/^LILITH_ACCESS_AUD=/d'
+gate_case "env file disables hosting and tries to lift the requirement" 's/^LILITH_HOSTED=1/LILITH_HOSTED=0/' 'append:LILITH_REQUIRE_HOSTED=0'
+
+# 9. Defence in depth: with the gate removed by a unit edit, the unit's own hosted requirement still refuses everything.
+refuse_all() {  # $1 base URL, $2 label: every path and a POST answer 503 HOSTED_AUTH_MISCONFIGURED; zero 200s
+  local p c n200=0 failed=""
+  for p in "${PATHS[@]}"; do
+    c=$(curl -s -o /tmp/e2e-body -w '%{http_code}' "$1$p"); [ "$c" = 200 ] && n200=$((n200 + 1))
+    { [ "$c" = 503 ] && grep -q HOSTED_AUTH_MISCONFIGURED /tmp/e2e-body; } || failed+=" $p=$c"
+  done
+  c=$(curl -s -o /tmp/e2e-body -w '%{http_code}' -X POST -H "Origin: $1" -H 'Content-Type: application/json' -d '{"message":"hi"}' "$1/api/lilith/conversation")
+  [ "$c" = 503 ] || failed+=" POST=$c"
+  expect "$2: page, API, avatar, public file, static chunk and POST all 503 (200s: $n200)${failed:+ unexpected:$failed}" test -z "$failed" -a "$n200" -eq 0
+}
+good_env; sed -i 's/^LILITH_HOSTED=1/LILITH_HOSTED=0/' /etc/lilith-web/env; echo 'LILITH_REQUIRE_HOSTED=0' >> /etc/lilith-web/env
+install -d /etc/systemd/system/lilith-web.service.d
+printf '[Service]\nExecStartPre=\nExecStartPost=\n' > /etc/systemd/system/lilith-web.service.d/99-e2e-gate-removed.conf
+systemctl daemon-reload; systemctl reset-failed lilith-web.service; systemctl start lilith-web.service
+expect "gate removed (test-only drop-in): the server binds (precondition)" wait_for 20 curl -s -o /dev/null -m 1 http://127.0.0.1:3000/
+refuse_all http://127.0.0.1:3000 "gate removed, env file disables hosting and sets LILITH_REQUIRE_HOSTED=0"
+systemctl stop lilith-web.service; rm -f /etc/systemd/system/lilith-web.service.d/99-e2e-gate-removed.conf; systemctl daemon-reload
+
+# 10. A manually started server: refuses everything with the requirement; local development is unchanged without it.
+manual() {  # $1 port, then extra environment; runs the installed release as the service user
+  local port=$1; shift
+  (cd "$BASE/current" && exec runuser -u lilith-web -- env -i PATH=/usr/bin:/bin NODE_ENV=production HOSTNAME=127.0.0.1 PORT="$port" "$@" \
+    /usr/bin/node server.js > "/tmp/e2e-manual-$port.log" 2>&1) &
+  wait_for 20 curl -s -o /dev/null -m 1 "http://127.0.0.1:$port/"
+}
+stop_port() { kill $(ss -ltnpH "sport = :$1" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u) 2>/dev/null; wait_for 10 bash -c "! ss -ltnH 'sport = :$1' | grep -q ."; }
+expect "manual start, LILITH_REQUIRE_HOSTED=1 and no hosted configuration (precondition: binds)" manual 3001 LILITH_REQUIRE_HOSTED=1
+refuse_all http://127.0.0.1:3001 "manual start, hosted required, no configuration"
+stop_port 3001
+expect "manual start, LILITH_REQUIRE_HOSTED=1 and LILITH_HOSTED=0 (precondition: binds)" manual 3001 LILITH_REQUIRE_HOSTED=1 LILITH_HOSTED=0
+refuse_all http://127.0.0.1:3001 "manual start, hosted required, hosting disabled"
+stop_port 3001
+expect "local development (no requirement, no LILITH_HOSTED): starts" manual 3002
+expect "local development unchanged: the page is served (200)" test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3002/)" = 200
+stop_port 3002
+
+# 11. Recovery after fixing the configuration (INSTALL.md): reset-failed + restart, then re-expose deliberately.
+good_env
+expect "restored configuration starts healthy again (reset-failed + restart)" bash -c "systemctl reset-failed lilith-web.service; systemctl restart lilith-web.service && $BASE/bin/healthcheck.sh"
+expect "the tunnel stays down until re-exposed deliberately" tunnel_down
+expect "re-exposure: the tunnel starts after the verified web service" both_up
+systemctl start lilith-web-health.timer
+expect "health timer re-enabled" systemctl is-active --quiet lilith-web-health.timer
 
 if [ "$fails" -gt 0 ]; then
   echo "E2E DIAG  ---- systemctl status / journal (failure diagnostics) ----"
-  systemctl status lilith-web.service --no-pager 2>&1 | sed "s/^/E2E DIAG  /" | tail -15
-  journalctl -u lilith-web.service -n 40 --no-pager 2>&1 | sed "s/^/E2E DIAG  /"
+  systemctl status lilith-web.service cloudflared.service --no-pager 2>&1 | sed "s/^/E2E DIAG  /" | tail -30
+  journalctl -u lilith-web.service -u cloudflared.service -n 60 --no-pager 2>&1 | sed "s/^/E2E DIAG  /"
 fi
 echo
 if [ "$fails" -eq 0 ]; then echo "E2E RESULT: PASS"; else echo "E2E RESULT: FAIL ($fails)"; fi

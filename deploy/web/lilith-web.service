@@ -22,7 +22,15 @@ Environment=HOSTNAME=127.0.0.1
 Environment=PORT=3000
 Environment=NEXT_TELEMETRY_DISABLED=1
 EnvironmentFile=/etc/lilith-web/env
-ExecStart=/usr/bin/node server.js
+# W-SEC-1 startup gate: verified BEFORE the server can bind. Unless the env file
+# and the effective environment resolve to valid hosted authentication, this
+# fails, systemd never runs ExecStart, and nothing listens on :3000 (also on
+# every automatic restart). Fixed root-owned path, updated only by install.
+ExecStartPre=/usr/bin/node /opt/lilith-web/bin/check-readiness.mjs --env /etc/lilith-web/env --startup
+# Hosted mode is required by the command line, not Environment=: systemd lets
+# EnvironmentFile override Environment=, but nothing overrides env(1) arguments.
+# With it, LILITH_HOSTED disabled or invalid means 503 on every path.
+ExecStart=/usr/bin/env LILITH_REQUIRE_HOSTED=1 /usr/bin/node server.js
 # Startup check: refuses to report started unless the server answers locally
 # AND enforces authentication (see healthcheck.sh).
 ExecStartPost=/opt/lilith-web/bin/healthcheck.sh --wait 30

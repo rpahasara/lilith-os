@@ -228,6 +228,18 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
         ["browser-direct backend in hosted mode", { ...HOSTED_ENV, NEXT_PUBLIC_LILITH_API_URL: "http://10.0.0.2:8765" }],
       ];
       for (const [name, env] of bad) check(`hosted misconfiguration fails closed: ${name}`, readEdgeAuthConfig(env).mode === "misconfigured");
+      // W-SEC-1: with the production requirement, local mode is impossible.
+      const required: [string, Record<string, string | undefined>, string][] = [
+        ["required + LILITH_HOSTED unset", { LILITH_REQUIRE_HOSTED: "1" }, "misconfigured"],
+        ["required + LILITH_HOSTED=0", { LILITH_REQUIRE_HOSTED: "1", LILITH_HOSTED: "0" }, "misconfigured"],
+        ["required + LILITH_HOSTED empty", { LILITH_REQUIRE_HOSTED: "1", LILITH_HOSTED: "" }, "misconfigured"],
+        ["required + incomplete hosted", { ...HOSTED_ENV, LILITH_REQUIRE_HOSTED: "1", LILITH_ACCESS_AUD: undefined }, "misconfigured"],
+        ["requirement value other than 1 (0)", { LILITH_REQUIRE_HOSTED: "0" }, "misconfigured"],
+        ["requirement value other than 1 (true)", { ...HOSTED_ENV, LILITH_REQUIRE_HOSTED: "true" }, "misconfigured"],
+        ["required + valid hosted", { ...HOSTED_ENV, LILITH_REQUIRE_HOSTED: "1" }, "hosted"],
+        ["requirement absent (local development unchanged)", { LILITH_REQUIRE_HOSTED: "" }, "local"],
+      ];
+      for (const [name, env, mode] of required) check(`W-SEC-1 config: ${name} -> ${mode}`, readEdgeAuthConfig(env).mode === mode);
       for (const k of Object.keys(HOSTED_ENV)) check(`${k} is server-only (not NEXT_PUBLIC_)`, !k.startsWith("NEXT_PUBLIC_"));
     }
 
@@ -247,6 +259,13 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
 
     setEnv({ ...HOSTED_ENV, LILITH_ACCESS_AUD: undefined });
     check("hosted misconfiguration: the proxy refuses with 503", (await proxy(fakeRequest({}))).status === 503);
+
+    for (const env of [{ LILITH_REQUIRE_HOSTED: "1" }, { LILITH_REQUIRE_HOSTED: "1", LILITH_HOSTED: "0" }]) {
+      setEnv(env);
+      const r = await proxy(fakeRequest({ [ACCESS_JWT_HEADER]: owner }));
+      check(`W-SEC-1 proxy: hosted required but ${env.LILITH_HOSTED === "0" ? "disabled" : "unset"} -> 503 for every request, even with a valid token`,
+        r.status === 503 && (await r.json()).error === "HOSTED_AUTH_MISCONFIGURED");
+    }
 
     setEnv(HOSTED_ENV);
     const p = async (h: Record<string, string>) => (await proxy(fakeRequest(h))).status;
@@ -312,6 +331,11 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
         check(`${name}: content-type ${ct.split(";")[0]} refused (415)`, r.status === 415, String(r.status));
       }
     }
+    setEnv({ LILITH_REQUIRE_HOSTED: "1", LILITH_HOSTED: "0" });
+    const refusedAll = await Promise.all(handlers.map(async ([, handler]) =>
+      (await handler(fakeRequest({ ...json, origin: ORIGIN, [ACCESS_JWT_HEADER]: owner }, { message: "hi", text: "hi" }))).status));
+    check("W-SEC-1: every API handler refuses (503) when hosted mode is required but disabled", refusedAll.every((s) => s === 503), refusedAll.join(","));
+    setEnv(HOSTED_ENV);
     check("read proxy stays GET-only (no state-changing export)",
       !("POST" in readProxyRoute) && !("PUT" in readProxyRoute) && !("PATCH" in readProxyRoute) && !("DELETE" in readProxyRoute));
 
