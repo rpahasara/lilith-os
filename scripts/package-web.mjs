@@ -30,6 +30,18 @@ const fail = (msg) => {
 if (!existsSync(join(root, ".next/standalone/server.js"))) fail("no .next/standalone/server.js (run `npm run build` with output: standalone)");
 if (!existsSync(join(root, ".next/static"))) fail("no .next/static");
 
+// Clean-build guard (N-1b / F-1): the standalone build traces files from the
+// project directory, so a build made while an earlier dist/lilith-web (or other
+// leftover output) existed copies it into the new release. A clean standalone
+// output has exactly these top-level entries; anything else means the build did
+// not start from a clean directory, and the release is refused.
+const STANDALONE_TOP = new Set([".next", "node_modules", "package.json", "public", "server.js"]);
+const unexpected = readdirSync(join(root, ".next/standalone")).filter((n) => !STANDALONE_TOP.has(n));
+if (unexpected.length) {
+  fail(`the standalone build contains unexpected top-level entries (${unexpected.join(", ")}): it was built from a ` +
+    "directory with leftover output. Rebuild from a clean build directory: rm -rf dist .next && npm run build && npm run package:web");
+}
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 cpSync(join(root, ".next/standalone"), out, { recursive: true });
