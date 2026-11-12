@@ -13,7 +13,8 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const STATIC_DIR = join(process.cwd(), ".next", "static");
+const staticArg = process.argv.indexOf("--static");
+const STATIC_DIR = staticArg > 0 ? process.argv[staticArg + 1] : join(process.cwd(), ".next", "static");
 
 export const DEV_LOG_MARKERS = [
   "[Hsin LookAt]",
@@ -36,6 +37,13 @@ export const DEV_LOG_MARKERS = [
   "WebGL context restored",
   "[HSIN_CANONICAL_NEUTRAL]",
   "[Lilith perf guard]",
+  // Server-only web authentication internals (src/server/edge-auth): must never reach the browser.
+  "cdn-cgi/access/certs",
+  "cf-access-jwt-assertion",
+  "LILITH_ACCESS_AUD",
+  "LILITH_OWNER_EMAILS",
+  "LILITH_ACCESS_TEAM_DOMAIN",
+  "HOSTED_AUTH_MISCONFIGURED",
 ];
 
 /**

@@ -1,0 +1,70 @@
+# LILITH private web preview: Next.js standalone server (TEMPLATE, not installed).
+#
+# Runs as a dedicated unprivileged user, listens ONLY on 127.0.0.1:3000 and is
+# reachable from outside solely through Cloudflare Tunnel (cloudflared.yml).
+# Secrets come from EnvironmentFile (root:lilith-web 0640), never this unit.
+# Verify before enabling:  node scripts/check-web-readiness.mjs --unit <this file>
+
+[Unit]
+Description=LILITH private web preview (Next.js standalone)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=lilith-web
+Group=lilith-web
+WorkingDirectory=/opt/lilith-web/current
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+Environment=NEXT_TELEMETRY_DISABLED=1
+EnvironmentFile=/etc/lilith-web/env
+ExecStart=/usr/bin/node server.js
+# Startup check: refuses to report started unless the server answers locally
+# AND enforces authentication (see healthcheck.sh).
+ExecStartPost=/opt/lilith-web/bin/healthcheck.sh --wait 30
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# Resources (measured peak ~130 MB under 20 concurrent page loads).
+MemoryMax=512M
+TasksMax=256
+LimitNOFILE=4096
+
+# Hardening
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RemoveIPC=yes
+UMask=0077
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug
+# Filtered calls fail with EPERM instead of killing Node (libuv probes optional
+# syscalls such as io_uring and falls back on an error).
+SystemCallErrorNumber=EPERM
+# V8's JIT needs writable+executable memory, so MemoryDenyWriteExecute stays off.
+ReadOnlyPaths=/opt/lilith-web
+
+[Install]
+WantedBy=multi-user.target

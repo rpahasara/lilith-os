@@ -1,0 +1,12 @@
+# LILITH web preview periodic health check (TEMPLATE, not installed).
+# Recovery: an unanswering server is restarted; a server that serves pages
+# WITHOUT authentication (exit 3) is STOPPED, so an auth regression fails closed.
+[Unit]
+Description=LILITH web preview health check
+After=lilith-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/opt/lilith-web/bin/healthcheck.sh; rc=$?; \
+  if [ $rc -eq 3 ] || [ $rc -eq 4 ]; then systemctl stop lilith-web.service; \
+  elif [ $rc -eq 1 ]; then systemctl restart lilith-web.service; fi; exit $rc'

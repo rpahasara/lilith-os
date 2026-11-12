@@ -1,0 +1,11 @@
+# LILITH web preview health check schedule (TEMPLATE, not installed).
+[Unit]
+Description=Run the LILITH web preview health check every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=lilith-web-health.service
+
+[Install]
+WantedBy=timers.target
