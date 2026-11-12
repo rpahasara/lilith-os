@@ -155,12 +155,12 @@ gate_case() {  # $1 label; then sed expressions (or append:<line>) applied to th
   if systemctl restart lilith-web.service >/dev/null 2>&1; then bad "$label: restart refused"; else ok "$label: restart refused"; fi
   sample_3000 12
   expect "$label: nothing listened or answered on :3000 for 12 s across the restart and automatic retries [$(sort /tmp/e2e-sample | uniq -c | tr -s ' \n' ' ')]" test ! -s /tmp/e2e-sample
-  expect "$label: the server never started (no Next.js startup in the journal since the change; MainPID=0)" bash -c \
-    "[ \"\$(journalctl -u lilith-web.service --since '$since' --no-pager | grep -cE 'Next\.js|Ready in')\" = 0 ] && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" = 0 ]"
-  systemctl start lilith-web-health.service >/dev/null 2>&1
-  expect "$label: the health check does not restore the tunnel while the gate fails" tunnel_down
+  expect "$label: the server never started (no server startup output in the journal since the change; MainPID=0)" bash -c \
+    "[ \"\$(journalctl -u lilith-web.service --since '$since' --no-pager | grep -cE 'Ready in|- Local:')\" = 0 ] && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" = 0 ]"
   expect "$label: automatic retries happened and were refused too (NRestarts=$(mono lilith-web.service NRestarts))" test "$(mono lilith-web.service NRestarts)" -ge 1
   expect "$label: the gate logged why" bash -c "journalctl -u lilith-web.service -n 60 --no-pager | grep -q 'NOT READY'"
+  systemctl start lilith-web-health.service >/dev/null 2>&1
+  expect "$label: the health check does not restore the tunnel while the gate fails" tunnel_down
   expect "$label: the tunnel was stopped" tunnel_down
   expect "$label: the tunnel cannot start while the gate fails" bash -c "! systemctl start cloudflared.service 2>/dev/null && ! ss -ltnH 'sport = :3000' | grep -q ."
   systemctl stop lilith-web.service cloudflared.service >/dev/null 2>&1
