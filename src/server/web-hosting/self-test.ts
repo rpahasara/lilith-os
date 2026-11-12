@@ -15,7 +15,7 @@ import { CONTENT_SECURITY_POLICY, PERMISSIONS_POLICY, SECURITY_HEADERS } from ".
 import {
   AVATAR_CACHE_CONTROL, AVATAR_SOURCE, acceptsGzip, avatarResponse, isLfsPointer, looksLikeGlb, versionOfFile, versionedAvatarName,
 } from "./avatar";
-import { checkArtifact, checkCloudflared, checkEnv, checkUnit } from "./readiness";
+import { checkArtifact, checkCloudflared, checkEnv, checkStartup, checkUnit, parseEnvFile } from "./readiness";
 
 interface Result {
   name: string;
@@ -138,7 +138,12 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
     const req = { headers: new Headers(), nextUrl: { origin: "http://localhost:3000" } } as unknown as NextRequest;
     check("avatar route re-checks authentication itself (hosted misconfigured -> 503)",
       (await avatarRoute.GET(req, ctx)).status === 503 && (await avatarRoute.HEAD(req, ctx)).status === 503);
+    delete process.env.LILITH_HOSTED;
+    process.env.LILITH_REQUIRE_HOSTED = "1"; // W-SEC-1: hosted required but disabled
+    check("W-SEC-1 avatar: hosted required but disabled -> 503",
+      (await avatarRoute.GET(req, ctx)).status === 503 && (await avatarRoute.HEAD(req, ctx)).status === 503);
   } finally {
+    delete process.env.LILITH_REQUIRE_HOSTED;
     if (saved.h === undefined) delete process.env.LILITH_HOSTED;
     else process.env.LILITH_HOSTED = saved.h;
   }
@@ -161,6 +166,23 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
   for (const [label, env] of envCases) check(`readiness env rejects: ${label}`, checkEnv(env).length > 0);
   check("readiness env: GCP internal DNS name is accepted as private",
     checkEnv(GOOD_ENV.replace("10.20.0.5", "lilith-core.asia-southeast1-b.c.project.internal")).length === 0);
+  check("readiness env rejects: LILITH_REQUIRE_HOSTED in the env file (the unit owns it)",
+    checkEnv(GOOD_ENV + "LILITH_REQUIRE_HOSTED=0\n").length > 0);
+
+  /* ------------------------------------------------ W-SEC-1 startup gate */
+  const goodProc: Record<string, string | undefined> = { ...parseEnvFile(GOOD_ENV).env, HOSTNAME: "127.0.0.1", PORT: "3000" };
+  check("startup gate: complete hosted env file + matching service environment passes",
+    checkStartup(GOOD_ENV, goodProc).length === 0, checkStartup(GOOD_ENV, goodProc).join("; "));
+  const gateCases: [string, string, Record<string, string | undefined>][] = [
+    ["LILITH_HOSTED removed", GOOD_ENV.replace("LILITH_HOSTED=1\n", ""), { ...goodProc, LILITH_HOSTED: undefined }],
+    ["LILITH_HOSTED=0", GOOD_ENV.replace("LILITH_HOSTED=1", "LILITH_HOSTED=0"), { ...goodProc, LILITH_HOSTED: "0" }],
+    ["Access AUD missing", GOOD_ENV.replace(/^LILITH_ACCESS_AUD=.*\n/m, ""), { ...goodProc, LILITH_ACCESS_AUD: undefined }],
+    ["file tries to lift the requirement", GOOD_ENV + "LILITH_REQUIRE_HOSTED=0\n", { ...goodProc, LILITH_REQUIRE_HOSTED: "0" }],
+    ["file is fine but the service environment is not hosted", GOOD_ENV, { ...goodProc, LILITH_HOSTED: "0" }],
+    ["empty env file", "", {}],
+  ];
+  for (const [label, file, proc] of gateCases) check(`startup gate refuses: ${label}`, checkStartup(file, proc).length > 0);
+
   check("readiness env: the shipped template is flagged until filled in", checkEnv(read("deploy/web/lilith-web.env.template")).length > 0);
 
   /* ------------------------------------------------ readiness: tunnel routing */
@@ -193,6 +215,12 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
     ["capabilities", unit.replace("CapabilityBoundingSet=\n", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n")],
     ["inlined secret", unit.replace("Environment=PORT=3000", `Environment=PORT=3000\nEnvironment=LILITH_OS_WRITE_TOKEN=${"w".repeat(40)}`)],
     ["no memory limit", unit.replace("MemoryMax=512M\n", "")],
+    ["W-SEC-1: no startup gate", unit.replace(/^ExecStartPre=.*\n/m, "")],
+    ["W-SEC-1: startup gate failure ignored ('-' prefix)", unit.replace("ExecStartPre=/usr/bin/node", "ExecStartPre=-/usr/bin/node")],
+    ["W-SEC-1: startup gate without --startup", unit.replace(" --startup", "")],
+    ["W-SEC-1: a second ExecStartPre", unit.replace(/^(ExecStartPre=.*)$/m, "$1\nExecStartPre=/usr/bin/true")],
+    ["W-SEC-1: hosted requirement dropped from ExecStart", unit.replace("/usr/bin/env LILITH_REQUIRE_HOSTED=1 /usr/bin/node server.js", "/usr/bin/node server.js")],
+    ["W-SEC-1: hosted mode via Environment=", unit.replace("Environment=PORT=3000", "Environment=PORT=3000\nEnvironment=LILITH_HOSTED=0")],
   ];
   for (const [label, text] of unitCases) check(`readiness unit rejects: ${label}`, checkUnit(text).length > 0);
   const hc = read("deploy/web/healthcheck.sh");
@@ -207,7 +235,7 @@ export async function runWebHostingSelfTest(): Promise<Result[]> {
       "node_modules/next/package.json", "node_modules/react/index.js",
       "bin/check-readiness.mjs", "bin/scan-prod-bundle.mjs", "bin/healthcheck.sh", "bin/install-release.sh", "bin/rollback.sh",
       "deploy/lilith-web.service", "deploy/lilith-web-health.service", "deploy/lilith-web-health.timer",
-      "deploy/cloudflared.yml.template", "deploy/lilith-web.env.template", "INSTALL.md"],
+      "deploy/cloudflared.yml.template", "deploy/cloudflared-lilith-web.conf", "deploy/lilith-web.env.template", "INSTALL.md"],
     totalBytes: 150e6, nodeModulesBytes: 31e6,
   };
   check("readiness artifact: a standalone package passes", checkArtifact(goodArtifact).length === 0);

@@ -8,6 +8,11 @@
  *        --cloudflared <config.yml> --unit <lilith-web.service>
  *
  * Any option may be omitted to skip that check. Exits non-zero on any problem.
+ *
+ *   node bin/check-readiness.mjs --env <env file> --startup
+ *
+ * is the W-SEC-1 pre-start gate (lilith-web.service ExecStartPre): it also
+ * requires the effective process environment to resolve to hosted mode.
  */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -15,7 +20,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
-import { checkArtifact, checkCloudflared, checkEnv, checkUnit, parseEnvFile } from "./readiness";
+import { checkArtifact, checkCloudflared, checkEnv, checkStartup, checkUnit, parseEnvFile } from "./readiness";
 import { isLfsPointer, looksLikeGlb } from "./avatar";
 
 function argMap(argv: string[]): Record<string, string> {
@@ -47,9 +52,10 @@ export function main(argv: string[] = process.argv.slice(2), here = dirname(file
   };
 
   let envText: string | null = null;
+  if ("startup" in args && !args.env) section("W-SEC-1 startup gate", ["--startup requires --env <env file>"]);
   if (args.env) {
     envText = readFileSync(args.env, "utf8");
-    const problems = checkEnv(envText);
+    const problems = "startup" in args ? checkStartup(envText, process.env) : checkEnv(envText);
     if (process.platform !== "win32") {
       const mode = statSync(args.env).mode & 0o777;
       if (mode & 0o007) problems.push(`env file is world-accessible (mode ${mode.toString(8)}); use 0640 or 0600`);

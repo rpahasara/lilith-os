@@ -6,6 +6,9 @@
  *   LILITH_ACCESS_AUD               Access application AUD tag (64 hex)
  *   LILITH_OWNER_EMAILS             comma-separated owner email allow-list (1-5)
  *   LILITH_PUBLIC_ORIGIN            https://<public host>, the ONLY trusted Origin
+ *   LILITH_REQUIRE_HOSTED=1         set by the production systemd unit (W-SEC-1): local
+ *                                   mode is refused, so a disabled or broken hosted
+ *                                   setting fails closed instead of serving openly
  *
  * LILITH_HOSTED unset or "0" is local mode (existing behaviour). Any other
  * value, or hosted mode with any missing or invalid setting, is "misconfigured"
@@ -33,9 +36,16 @@ const EMAIL = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
 type Env = Record<string, string | undefined>;
 
 export function readEdgeAuthConfig(env: Env = process.env): EdgeAuthConfig {
-  const hosted = env.LILITH_HOSTED;
-  if (hosted === undefined || hosted === "" || hosted === "0") return { mode: "local" };
+  const required = env.LILITH_REQUIRE_HOSTED;
   const problems: string[] = [];
+  if (required !== undefined && required !== "" && required !== "1") problems.push("LILITH_REQUIRE_HOSTED must be exactly 1 when set");
+  const mustBeHosted = required !== undefined && required !== "";
+  const hosted = env.LILITH_HOSTED;
+  if (hosted === undefined || hosted === "" || hosted === "0") {
+    if (!mustBeHosted) return { mode: "local" };
+    problems.push("hosted mode is required (LILITH_REQUIRE_HOSTED): LILITH_HOSTED must be 1 with a valid Access configuration");
+    return { mode: "misconfigured", problems };
+  }
   if (hosted !== "1") problems.push("LILITH_HOSTED must be exactly 1 or 0");
 
   const teamDomain = (env.LILITH_ACCESS_TEAM_DOMAIN ?? "").trim().toLowerCase();

@@ -48,6 +48,9 @@ export function checkEnv(text: string): string[] {
     if (k.startsWith("NEXT_PUBLIC_")) problems.push(`${k}: no NEXT_PUBLIC_ variables in the server environment`);
     if (PLACEHOLDER.test(v)) problems.push(`${k}: still a placeholder`);
   }
+  if ("LILITH_REQUIRE_HOSTED" in env) {
+    problems.push("LILITH_REQUIRE_HOSTED must not be in the env file: the service unit sets it (W-SEC-1)");
+  }
   const cfg = readEdgeAuthConfig(env);
   if (cfg.mode !== "hosted") {
     problems.push(`hosted authentication is not valid: ${cfg.mode === "misconfigured" ? cfg.problems.join("; ") : "LILITH_HOSTED is not 1"}`);
@@ -74,6 +77,24 @@ export function checkEnv(text: string): string[] {
   if (env.PORT !== undefined && env.PORT !== "3000") problems.push("PORT must be 3000");
   return problems;
 }
+
+/**
+ * W-SEC-1 pre-start gate (the unit's ExecStartPre). Passes only if the env file
+ * is complete AND the effective environment systemd hands the service resolves
+ * to hosted mode with the requirement enforced. On failure systemd never runs
+ * ExecStart, so the server never binds.
+ */
+export function checkStartup(envFileText: string, processEnv: Record<string, string | undefined>): string[] {
+  const problems = checkEnv(envFileText);
+  const effective = readEdgeAuthConfig({ ...processEnv, LILITH_REQUIRE_HOSTED: "1" });
+  if (effective.mode !== "hosted") {
+    problems.push(`the service environment is not hosted: ${effective.mode === "misconfigured" ? effective.problems.join("; ") : "local"}`);
+  }
+  return problems;
+}
+
+export const STARTUP_GATE = "/usr/bin/node /opt/lilith-web/bin/check-readiness.mjs --env /etc/lilith-web/env --startup";
+export const HOSTED_EXEC_START = "/usr/bin/env LILITH_REQUIRE_HOSTED=1 /usr/bin/node server.js";
 
 interface IngressRule {
   hostname?: string;
@@ -165,6 +186,12 @@ export function checkUnit(unit: string): string[] {
   if (!directive(unit, "MemoryMax")[0]) problems.push("MemoryMax= is required");
   if (!directive(unit, "EnvironmentFile")[0]) problems.push("EnvironmentFile= is required (secrets stay out of the unit)");
   if (/LILITH_OS_(READ|WRITE)_TOKEN|_API_KEY/.test(envs)) problems.push("secrets must not be inlined in the unit");
+  // W-SEC-1: verify before binding; require hosted mode where the env file cannot override it.
+  const pre = directive(unit, "ExecStartPre");
+  if (pre.length !== 1 || pre[0] !== STARTUP_GATE) problems.push(`ExecStartPre=${STARTUP_GATE} is required (exactly; no '-' prefix)`);
+  const start = directive(unit, "ExecStart");
+  if (start.length !== 1 || start[0] !== HOSTED_EXEC_START) problems.push(`ExecStart=${HOSTED_EXEC_START} is required`);
+  if (/LILITH_(REQUIRE_)?HOSTED=/.test(envs)) problems.push("LILITH_HOSTED/LILITH_REQUIRE_HOSTED must not be set through Environment=");
   return problems;
 }
 
@@ -184,7 +211,7 @@ export function checkArtifact(listing: ArtifactListing): string[] {
   if (!has("web-artifact.json")) problems.push("web-artifact.json manifest is missing");
   if (!under("avatar-cache/")) problems.push("the compressed avatar is missing");
   for (const f of ["bin/check-readiness.mjs", "bin/scan-prod-bundle.mjs", "bin/healthcheck.sh", "bin/install-release.sh",
-    "bin/rollback.sh", "deploy/lilith-web.service", "deploy/lilith-web-health.service", "deploy/lilith-web-health.timer",
+    "bin/rollback.sh", "deploy/lilith-web.service", "deploy/cloudflared-lilith-web.conf", "deploy/lilith-web-health.service", "deploy/lilith-web-health.timer",
     "deploy/cloudflared.yml.template", "deploy/lilith-web.env.template", "INSTALL.md"]) {
     if (!has(f)) problems.push(`install kit file missing: ${f}`);
   }

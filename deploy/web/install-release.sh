@@ -20,7 +20,7 @@ die() { echo "install-release: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root"
 [ $# -ge 1 ] || die "usage: install-release.sh <artifact dir>"
 ART="$(cd "$1" && pwd)"
-for f in server.js web-artifact.json bin/check-readiness.mjs bin/healthcheck.sh deploy/lilith-web.service; do
+for f in server.js web-artifact.json bin/check-readiness.mjs bin/healthcheck.sh deploy/lilith-web.service deploy/cloudflared-lilith-web.conf; do
   [ -e "$ART/$f" ] || die "not a lilith-web artifact (missing $f)"
 done
 [ -x /usr/bin/node ] || die "Node.js 20+ is required at /usr/bin/node"
@@ -43,6 +43,8 @@ chown -R root:root "$NEW"
 chmod -R u+rwX,go+rX,go-w "$NEW"
 install -m 0755 -o root -g root "$NEW/bin/healthcheck.sh" "$BASE/bin/healthcheck.sh"
 for u in "${UNITS[@]}"; do install -m 0644 -o root -g root "$NEW/deploy/$u" "/etc/systemd/system/$u"; done
+# W-SEC-1: tie Cloudflare Tunnel to the verified web service (before cloudflared ever exists).
+install -D -m 0644 -o root -g root "$NEW/deploy/cloudflared-lilith-web.conf" /etc/systemd/system/cloudflared.service.d/10-lilith-web.conf
 
 readiness=(/usr/bin/node "$NEW/bin/check-readiness.mjs" --artifact "$NEW" --env "$ENV_FILE" --unit /etc/systemd/system/lilith-web.service)
 [ -f /etc/cloudflared/config.yml ] && readiness+=(--cloudflared /etc/cloudflared/config.yml)
@@ -54,6 +56,8 @@ fi
 PREV="$(readlink "$BASE/current" 2>/dev/null || true)"
 switch_to() { ln -sfn "$1" "$BASE/current.new" && mv -Tf "$BASE/current.new" "$BASE/current"; }
 switch_to "releases/$ID"
+# W-SEC-1 pre-start gate (lilith-web.service ExecStartPre) at a fixed root-owned path.
+install -m 0755 -o root -g root "$NEW/bin/check-readiness.mjs" "$BASE/bin/check-readiness.mjs"
 [ -n "$PREV" ] && echo "$PREV" > "$BASE/previous"
 
 systemctl daemon-reload
