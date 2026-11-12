@@ -1,6 +1,6 @@
 # LILITH private web preview: two-VM GCP trial plan
 
-Status: **PREPARED, NOT EXECUTED** (2026-11-12). Nothing here is provisioned, activated, purchased or configured. Live exposure is blocked on security gate W-SEC-1 (§5a).
+Status: **PREPARED, NOT EXECUTED** (2026-11-12). Nothing here is provisioned, activated, purchased or configured. W-SEC-1 (§5a) is **implemented on main** (#432, `0347706`); live exposure stays separately gated (§5b).
 
 Each step below needs separate owner authorization. The backend migration is owned by the separate cognition and infrastructure workstream, and this plan follows it.
 
@@ -108,7 +108,7 @@ Every step needs separate authorization. Steps marked *(owner)* need the owner's
    - trial eligibility confirmed (§0);
    - the backend migration accepted in the new project (infrastructure chat);
    - #430 merged (done 2026-11-12, `f5be340`), and its `main` runs green;
-   - **security gate W-SEC-1 satisfied (§5a).** Until then the web service is not exposed: `cloudflared` is not started and no DNS route is created.
+   - **security gate W-SEC-1:** implemented on main (#432, `0347706`); its acceptance table must still pass **on VM 2 itself (Ubuntu 24.04, systemd 255)** before `cloudflared` is first started. Until then the web service is not exposed: `cloudflared` is not started and no DNS route is created.
 1. **Create VM 2 `lilith-web`:** e2-micro, Ubuntu 24.04 LTS or Debian 12, in the same zone and VPC as VM 1, **no external IP**, Shielded VM, OS Login, and its own service account with **no project roles** (logging only if wanted).
 2. **Networking:** Cloud Router plus Cloud NAT for the subnet; the firewall rules in §1. Verify from VM 2 that `curl http://<vm1-internal>:8765/health` returns 200 and that nothing else on VM 1 is reachable.
 3. **VM 2 packages:** Node.js 22 at `/usr/bin/node`, and `cloudflared` from Cloudflare's apt repository.
@@ -141,6 +141,10 @@ Every step needs separate authorization. Steps marked *(owner)* need the owner's
    - **Backend:** only the infrastructure chat's procedures apply. Nothing here changes VM 1 beyond step 4's token settings.
 
 ## 5a. Security gate W-SEC-1: no unauthenticated serving window (owner requirement, 2026-11-12)
+**Status: IMPLEMENTED on main** (#432, merged 2026-11-12 as `0347706`, pinned `5355f6e`). CI evidence: 512/512 self-tests and 92 real-systemd e2e checks on Ubuntu 26.04 / systemd 259 (run 43167370007). **Not yet verified on the target OS:** the acceptance table below must be re-run and recorded on VM 2 (Ubuntu 24.04 / systemd 255) before the tunnel is first started.
+
+**Design change found in CI:** systemd does not restart a `BindsTo`-stopped tunnel after the web service's automatic crash restart. Recovery therefore goes through the root health check (`lilith-web-health.service`, every 5 minutes): it starts a stopped tunnel only when the web service is verified healthy **and** `cloudflared` is enabled. `systemctl disable --now cloudflared` is a lasting emergency stop. Item 3 and the acceptance table below are otherwise implemented as designed.
+
 **Requirement:** before any live web deployment, a verified startup preflight (or equivalent protection) must prevent the web server from serving even one unauthenticated request when `LILITH_HOSTED` is disabled or misconfigured. The web service is not exposed until W-SEC-1 is accepted.
 
 **Gap in the #430 package:**
@@ -172,13 +176,16 @@ Each line is its own authorization. Order matters: no exposure happens before st
 
 | # | Step | Who | Gate |
 |---|---|---|---|
-| N-1 | W-SEC-1 PR (§5a): `ExecStartPre` gate, `LILITH_REQUIRE_HOSTED`, `cloudflared` drop-in, e2e cases, then merge | agent, then owner merge | owner review; DEV deploy expected (server-side web code) |
+| N-1 | W-SEC-1 PR (§5a) | — | **DONE**: #432 merged `0347706` (2026-11-12) |
+| N-1b | Packaging hygiene (F-1 below): release packaging starts from a clean build directory | agent PR, owner merge | before the first real release artifact is built |
 | N-2 | Confirm second-trial eligibility (§0) and activate it | owner | owner only |
 | N-3 | Backend migration to VM 1 in the new project, then acceptance | infrastructure chat | separately gated |
 | N-4 | Create VM 2, networking, packages (§5 steps 1–3) | agent | after N-1, N-2, N-3 accepted |
 | N-5 | Tokens, env file, Cloudflare zone, Access app, tunnel (§5 steps 4–5); no `cloudflared` start | owner (+ agent for VM 2 files) | Access app must exist first |
-| N-6 | Install the release, verify the W-SEC-1 acceptance table on VM 2, **then** start `cloudflared` (§5 steps 6–7) | agent | first exposure; separate authorization |
-| N-7 | Acceptance tests (§5 step 8), recorded | owner + agent | — |
+| N-6 | Build the release from a clean checkout (`git lfs pull`, no `dist/` or `.next/`); install it; re-run and record the **W-SEC-1 acceptance table on VM 2 (Ubuntu 24.04, systemd 255)**; **then** start `cloudflared` (§5 steps 6–7) | agent | first exposure; separate authorization |
+| N-7 | Acceptance tests (§5 step 8), recorded, including a **real Cloudflare Access owner login** in a browser (owner signs in, a non-owner email is denied, signed-out requests never reach app content) | owner + agent | the web preview is **not operational** until N-7 passes |
+
+**Follow-up F-1 (open): stale `dist/` in the packaged artifact.** `next build` with `output: "standalone"` traces files from the project directory. If an earlier `dist/lilith-web` exists at build time, it is copied into the new artifact (seen locally: 326 MB instead of 181 MB, with an old release nested inside). CI always builds from a clean checkout and is unaffected. Requirement: release packaging must start from a clean build directory. Until a packaging guard lands (N-1b), run `rm -rf dist .next` before `npm run build && npm run package:web`.
 
 ## 6. Coordination with the backend migration (infrastructure chat)
 - The two-VM design needs no change to the migration itself, only that VM 1 is in a VPC and zone that VM 2 can join, plus §1's token and reachability items.
