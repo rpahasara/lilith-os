@@ -112,8 +112,11 @@ cat > /etc/systemd/system/cloudflared.service <<'UNIT'
 Description=cloudflared stand-in for the e2e test (the installed 10-lilith-web.conf binding applies)
 [Service]
 ExecStart=/usr/bin/sleep infinity
+[Install]
+WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
+systemctl enable --quiet cloudflared.service   # the owner's intent to be exposed (as `cloudflared service install` does)
 for d in Requires BindsTo After; do expect "tunnel binding: cloudflared $d=lilith-web.service" has_dep "$d"; done
 systemctl stop cloudflared.service lilith-web.service
 expect "cold start: starting the tunnel starts and verifies the web service first" both_up
@@ -121,11 +124,17 @@ web_up=$(mono lilith-web.service ActiveEnterTimestampMonotonic); cf_exec=$(mono 
 expect "cold start: the tunnel process started only after lilith-web passed its gate and auth health check ($web_up <= $cf_exec)" test "$web_up" -le "$cf_exec"
 old=$(mono lilith-web.service MainPID); kill -9 "$old"
 expect "crash: the tunnel stops with the web service" wait_for 4 tunnel_down
-expect "crash recovery: the web service restarts through its gate and the tunnel returns" wait_for 40 bash -c \
-  "systemctl is-active --quiet lilith-web.service && systemctl is-active --quiet cloudflared.service && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" != $old ]"
+expect "crash recovery: the web service restarts through its gate (new process, healthy)" wait_for 40 bash -c \
+  "systemctl is-active --quiet lilith-web.service && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" != $old ] && $BASE/bin/healthcheck.sh >/dev/null"
+expect "crash recovery: the tunnel does not return by itself" tunnel_down
+systemctl disable --quiet cloudflared.service
+systemctl start lilith-web-health.service
+expect "crash recovery: the health check leaves a DISABLED tunnel down (emergency stop holds)" tunnel_down
+systemctl enable --quiet cloudflared.service
+systemctl start lilith-web-health.service
+expect "crash recovery: the health check restores an enabled tunnel once the web service is verified" wait_for 10 systemctl is-active --quiet cloudflared.service
 web_up=$(mono lilith-web.service ActiveEnterTimestampMonotonic); cf_exec=$(mono cloudflared.service ExecMainStartTimestampMonotonic)
 expect "crash recovery: the tunnel returned only after the new server was verified ($web_up <= $cf_exec)" test "$web_up" -le "$cf_exec"
-expect "crash recovery: healthy, authentication enforced" "$BASE/bin/healthcheck.sh"
 systemctl stop lilith-web.service
 expect "stopping the web service stops the tunnel" tunnel_down
 
@@ -139,14 +148,17 @@ sample_3000() {  # every 50 ms for $1 s: record any listener on :3000 and any HT
   done
 }
 gate_case() {  # $1 label; then sed expressions (or append:<line>) applied to the good env file
-  local label="$1" started e; shift
+  local label="$1" since e; shift
   good_env; expect "$label: starts from a healthy, exposed service" both_up
-  started=$(mono lilith-web.service ExecMainStartTimestampMonotonic)
+  sleep 1; since=$(date '+%Y-%m-%d %H:%M:%S')
   for e in "$@"; do case "$e" in append:*) echo "${e#append:}" >> /etc/lilith-web/env ;; *) sed -i "$e" /etc/lilith-web/env ;; esac; done
   if systemctl restart lilith-web.service >/dev/null 2>&1; then bad "$label: restart refused"; else ok "$label: restart refused"; fi
   sample_3000 12
   expect "$label: nothing listened or answered on :3000 for 12 s across the restart and automatic retries [$(sort /tmp/e2e-sample | uniq -c | tr -s ' \n' ' ')]" test ! -s /tmp/e2e-sample
-  expect "$label: the server process never started (ExecStart did not run)" test "$(mono lilith-web.service ExecMainStartTimestampMonotonic)" = "$started"
+  expect "$label: the server never started (no Next.js startup in the journal since the change; MainPID=0)" bash -c \
+    "[ \"\$(journalctl -u lilith-web.service --since '$since' --no-pager | grep -cE 'Next\.js|Ready in')\" = 0 ] && [ \"\$(systemctl show -p MainPID --value lilith-web.service)\" = 0 ]"
+  systemctl start lilith-web-health.service >/dev/null 2>&1
+  expect "$label: the health check does not restore the tunnel while the gate fails" tunnel_down
   expect "$label: automatic retries happened and were refused too (NRestarts=$(mono lilith-web.service NRestarts))" test "$(mono lilith-web.service NRestarts)" -ge 1
   expect "$label: the gate logged why" bash -c "journalctl -u lilith-web.service -n 60 --no-pager | grep -q 'NOT READY'"
   expect "$label: the tunnel was stopped" tunnel_down
@@ -198,8 +210,10 @@ stop_port 3002
 # 11. Recovery after fixing the configuration (INSTALL.md): reset-failed + restart, then re-expose deliberately.
 good_env
 expect "restored configuration starts healthy again (reset-failed + restart)" bash -c "systemctl reset-failed lilith-web.service; systemctl restart lilith-web.service && $BASE/bin/healthcheck.sh"
-expect "the tunnel stays down until re-exposed deliberately" tunnel_down
-expect "re-exposure: the tunnel starts after the verified web service" both_up
+expect "the tunnel does not return by itself on the restart" tunnel_down
+systemctl start lilith-web-health.service
+expect "re-exposure: the health check starts the enabled tunnel after the verified web service" wait_for 10 systemctl is-active --quiet cloudflared.service
+expect "re-exposure: deliberate start also works and is healthy" both_up
 systemctl start lilith-web-health.timer
 expect "health timer re-enabled" systemctl is-active --quiet lilith-web-health.timer
 
