@@ -310,7 +310,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(self.turn("live", "when did I move?").timeline, ())
         cfg = self.gi._config
         with mock.patch.object(cfg, "CONFIG_PATH", ROOT / "deploy/prod/lilith_router/router.yaml"):
-            self.assertEqual(cfg.load().timeline_mode, "shadow")
+            self.assertEqual(cfg.load().timeline_mode, "live")      # 2026-11-15 owner GO (owner turns only)
 
 
 class LocalDateTests(unittest.TestCase):

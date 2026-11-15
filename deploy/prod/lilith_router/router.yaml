@@ -60,7 +60,8 @@ commitments_mode: shadow
 # P-4 E-8 episodic timeline (owner turns only): off | shadow (log when a time/order/change question would get it) |
 # live (the agent's turn hint carries approved memories with their learned dates and superseded entries; the turn
 # leaves the fast path). Read-only. Rollback: shadow or off.
-timeline_mode: shadow
+# 2026-11-15 owner GO: live (owner turns only: lilith_os, owner Telegram DM, verified owner Discord DM).
+timeline_mode: live
 # log_path: ""          # default: ~/.hermes/lilith_router/decisions.log
 
 # ── Slice 7.2: World-Model-first cognitive lane (independent rollout) ──────────
