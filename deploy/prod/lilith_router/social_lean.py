@@ -53,6 +53,37 @@ _ACTION_RE = re.compile(
     r"file|attach|download|upload|install|timer|alarm|buy|order|translate)\b",
     re.IGNORECASE,
 )
+# Natural reminder / follow-up requests (2026-11-15): "ping me tomorrow", "check in on me later". Only the full agent
+# has the scheduler (Hermes' cronjob tool); on the lean path any "I'll ping you" is a promise nothing backs. Base-form
+# requests aimed at LILITH only: "she pinged me", "my alarm woke me up", "I'll follow up with my manager" stay lean.
+_DAYS = r"(?:mon|tues|wednes|thurs|fri|satur|sun)day"
+_WHEN = (r"(?:at\s+\d|in\s+(?:a|an|\d+|a\s+few|half\s+an)\b|tomorrow|tonight|later|this\s+(?:morning|afternoon|evening)"
+         r"|before\b|after\b|by\s+\d|on\s+" + _DAYS + r"|next\s+(?:week|" + _DAYS + r"))")
+_REMINDER_RE = re.compile(
+    r"\b(?:ping|nudge|buzz)\s+me\b|"
+    r"\bwake\s+me(?:\s+up)?\s+(?:at|in|tomorrow|before|by|on)\b|"
+    r"\btext\s+me\s+(?:when|once|if|" + _WHEN + r")|"
+    r"\bcheck\s+(?:in|back)\s+(?:on|with)\s+me\b|"
+    r"\bfollow[\s-]*up\s+with\s+me\b|"
+    r"\blet\s+me\s+know\s+" + _WHEN + r"|"
+    r"\btell\s+me\s+(?:again\s+|that\s+again\s+)?" + _WHEN,
+    re.IGNORECASE,
+)
+# Explicit scheduling words already route through _ACTION_RE; together with the natural phrasings they mark a turn
+# whose agent gets the reminder note (turn_context.REMINDER_NOTE).
+_EXPLICIT_REMINDER_RE = re.compile(
+    r"\bremind\s+me\b|\bset\s+(?:up\s+)?(?:a|an|the|my)\s+(?:reminder|timer|alarm|check[\s-]?in|follow[\s-]?up)\b|"
+    r"\bschedule\s+(?:a|an|the|my)\s+(?:reminder|check[\s-]?in|follow[\s-]?up|nudge)\b|"
+    r"\b(?:a|an)\s+(?:reminder|timer)\s+(?:for|at|in)\b|\bdon['’]?t\s+let\s+me\s+forget\b",
+    re.IGNORECASE)
+
+
+def reminder_request(message: str) -> bool:
+    """A request that LILITH remind or follow up with them later (natural or explicit wording)."""
+    text = message or ""
+    return bool(_REMINDER_RE.search(text) or _EXPLICIT_REMINDER_RE.search(text))
+
+
 # Durable preferences and facts about the owner go to the full (tool-capable) path, where LILITH can stage a memory
 # proposal in the conversation; the lean reply has no tools and must never imply it saved anything (2026-11-06).
 _MEMORY_STATEMENT_RE = re.compile(
@@ -80,6 +111,8 @@ def skip_reason(message: str) -> str:
         return "long_message"
     if _ACTION_RE.search(text):
         return "action_intent"
+    if _REMINDER_RE.search(text):
+        return "reminder_request"
     if _MEMORY_STATEMENT_RE.search(text):
         return "memory_statement"
     return ""

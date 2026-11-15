@@ -923,6 +923,7 @@ def _route_turn_impl(
     _apply_appraisal(cfg, message)
     _apply_commitments(cfg)
     _apply_timeline(cfg, message)
+    tctx.reminder = _social_lean.reminder_request(message)    # agent note only; the lean skip routes it (2026-11-15)
 
     # ── Slice 7.2 cognitive lane (additive; belief / pending / draft turns) ──
     # Runs BEFORE the social/technical/work model decision so a belief or pending

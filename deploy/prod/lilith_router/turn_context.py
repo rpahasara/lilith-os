@@ -75,6 +75,7 @@ class TurnContext:
     timeline_lean_note: Optional[str] = None     # record-level only: the plain-header note for the fast path
     timeline_lean_ids: Tuple[Any, ...] = ()      # the record ids of exactly that note's lines
     timeline_delivered: Optional[str] = None     # which note the reply was actually given: "agent" | "lean"
+    reminder: bool = False                       # a request to be reminded / followed up later (agent note only)
 
     def summary(self) -> Dict[str, Any]:
         """Metadata for the turn-end trace record. Keys, ids and flags only."""
@@ -182,6 +183,18 @@ def lean_timeline_text(ctx: TurnContext) -> Optional[str]:
     return ctx.timeline_lean_note
 
 
+# 2026-11-15: reminder requests. The agent has the scheduler; this keeps it honest about what it can do.
+REMINDER_NOTE = ("[If they're asking you to remind them or follow up later: only your scheduler (the cronjob tool) can "
+                 "do that, and it delivers here, in this chat. If the time or what to remind them about is unclear, ask "
+                 "first; never pick a time for them. Say it's set only after the scheduler confirms it; if it fails, say "
+                 "so. Don't offer texts, calls, alarms or anything outside this chat.]")
+
+
+def reminder_text(ctx: TurnContext) -> Optional[str]:
+    """Agent path only (the lean path has no scheduler and never sees it); owner turns only."""
+    return REMINDER_NOTE if (ctx.owner and ctx.reminder) else None
+
+
 def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[str]:
     """The API-only turn hint for the main agent (run.py `turn_hint`). A goals-status question carries its status hint
     instead of the tone and correction lines; approved preferences ride on either."""
@@ -193,6 +206,7 @@ def agent_hint(ctx: TurnContext, status_hint: Optional[str] = None) -> Optional[
         parts.append(goal_text(ctx))
     parts.append(responsibility_text(ctx))       # agent path only: never rendered on the lean path (N-48)
     parts.append(timeline_text(ctx))             # agent path only, likewise
+    parts.append(reminder_text(ctx))             # agent path only: reminder requests (scheduler rules)
     return "\n\n".join(p for p in parts if p) or None
 
 
