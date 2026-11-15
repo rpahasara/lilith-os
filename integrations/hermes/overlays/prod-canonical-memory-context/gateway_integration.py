@@ -48,6 +48,7 @@ from . import social_guard as _social_guard
 from . import social_lean as _social_lean
 from . import canonical_memory as _canonical_memory
 from . import owner_link as _owner_link
+from . import presentation as _presentation
 from . import social_preferences as _social_prefs
 from . import turn_context as _tc
 from . import metacognition as _meta
@@ -738,6 +739,8 @@ def route_turn(
         _begin_turn(_config.load())
     except Exception:
         _turn_id.set(None)
+    # Conversation-search dates in Hermes' zone (display only; idempotent, fail-open). See presentation.py.
+    _presentation.install_session_search_dates()
     _turn_mode.set(None)
     _turn_route.set(None)
     _social_lean.LAST_USAGE.set(None)
@@ -1293,8 +1296,11 @@ def enforce_reply(final_response, ctx):
 
     Cognitive-lane turns record mode WORK, so the ``previous_mode == SOCIAL``
     guard below leaves their grounded replies untouched.
+
+    Every reply first loses internal ``@session:`` references (presentation.py): no LILITH channel renders them.
     """
     try:
+        final_response = _presentation.strip_session_links(final_response)
         cfg = _config.load()
         if not cfg.enabled:
             return final_response
