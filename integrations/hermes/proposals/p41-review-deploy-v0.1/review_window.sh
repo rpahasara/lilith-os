@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PROD install of the P4-1 conversation-date review script (#412). Root on lilith-01; ONLY with the owner's explicit GO.
+# PROD install of the P4-1 conversation-date review script (#412). Root on the Contabo PROD host (vmi3753642); ONLY with the owner's explicit GO.
 #   sudo bash review_window.sh precheck CANDIDATE        read-only: pins, zone, jobs, blackout
 #   sudo bash review_window.sh install CANDIDATE         backup -> atomic swap -> import check; any failure restores
 #   sudo bash review_window.sh verify [--dry-run]        read-only: new file in place, dependants import it, jobs ok;
@@ -13,6 +13,7 @@
 set -Euo pipefail
 umask 077
 MODE=${1:-}
+PROD_HOST=vmi3753642   # Contabo PROD (was GCP lilith-01 until the 2026-11-14 migration)
 H=/home/lilith/.hermes; D=$H/scripts; F=$D/owner_memory_review.py; PY=$H/hermes-agent/venv/bin/python
 BKROOT=/var/backups/lilith-review
 LIVE_SHA=4324525d560887a5ef5ce3f11171c154e562ddb79ad785731a0392191b92096b      # main 7365bfd (P4-5b), live since 2026-11-09
@@ -47,7 +48,7 @@ import runpy; assert callable(runpy.run_path(sys.argv[1] + "/owner_memory_review
 
 precheck() {
   [[ $(id -u) -eq 0 ]] || refuse "not root"
-  [[ $(hostname -s) == lilith-01 ]] || refuse "wrong host"
+  [[ $(hostname -s) == "$PROD_HOST" ]] || refuse "wrong host"
   local hm=$(date -u +%H:%M); [[ $SIM == 1 && -n ${REVIEW_SIM_CLOCK:-} ]] && hm=$REVIEW_SIM_CLOCK
   local m=$((10#${hm%:*} * 60 + 10#${hm#*:})); (( m >= 16 * 60 && m < 17 * 60 )) && refuse "inside the 16:00-17:00Z review blackout"
   echo "PASS outside the review blackout ($hm)"
@@ -125,7 +126,7 @@ print("silent", out.startswith("NO_NEW"), "| zone_header", "dates in Asia/Colomb
     fi
     echo "REVIEW_VERIFY $([[ $fail == 0 ]] && echo PASS || echo FAIL) $(date -u +%Y-%m-%dT%H:%M:%SZ)"; exit $fail ;;
   rollback)
-    BK=${2:-}; [[ $(id -u) -eq 0 && $(hostname -s) == lilith-01 && -n $BK && -f $BK/owner_memory_review.py ]] || refuse "usage / host / backup"
+    BK=${2:-}; [[ $(id -u) -eq 0 && $(hostname -s) == "$PROD_HOST" && -n $BK && -f $BK/owner_memory_review.py ]] || refuse "usage / host / backup"
     restore "$BK" || escalate "rollback could not be verified"
     echo "REVIEW_ROLLED_BACK ($LIVE_SHA restored and importing)" ;;
   *) echo "usage: review_window.sh precheck CAND | install CAND | verify [--dry-run] | rollback BACKUP_DIR" >&2; exit 2 ;;

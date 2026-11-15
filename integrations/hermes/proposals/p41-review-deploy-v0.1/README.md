@@ -19,7 +19,7 @@ One file: `~/.hermes/scripts/owner_memory_review.py`, from `4324525d…` (main `
 Live file hashes verified read-only on 2026-11-11 04:25Z: review `4324525d…`, snapshot `99f0fd81…`, commitment sync
 `6527dd63…`, all identical to main.
 
-## Procedure (root on `lilith-01`)
+## Procedure (root on the Contabo PROD host `vmi3753642`)
 
 Run outside 16:00–17:00Z. The candidate is the file from the #412 merge commit, hash-checked.
 
@@ -82,7 +82,7 @@ It restores the exact `4324525d…` file, verified, and import-checks it. No res
 
 ## Rehearsal
 
-`rehearse_review_window.sh` (WSL, private mount and hostname namespaces as `lilith-01`, real `lilith` ownership,
+`rehearse_review_window.sh` (WSL, private mount and hostname namespaces as `vmi3753642`, real `lilith` ownership,
 main's live scripts plus the #412 candidate, a stand-in scheduler that really runs `owner_memory_snapshot.py` and
 commitment sync's import): **19/19 PASS**.
 

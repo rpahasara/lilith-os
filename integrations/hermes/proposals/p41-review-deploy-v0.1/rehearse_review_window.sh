@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Offline rehearsal of review_window.sh. TEST_ONLY. Root on a disposable Linux machine (never lilith-*):
+# Offline rehearsal of review_window.sh. TEST_ONLY. Root on a disposable Linux machine (never a LILITH host):
 #   sudo bash rehearse_review_window.sh <bundle-dir>
 # <bundle-dir> holds review_window.sh, candidate.py (#412's owner_memory_review.py) and live/ (main's
 # owner_memory_review.py, owner_memory_snapshot.py, owner_memory_sync.py, commitment_sync.py).
-# Re-executes in private mount + hostname namespaces (hostname lilith-01) with overlays on /etc /home /root /var.
+# Re-executes in private mount + hostname namespaces (hostname vmi3753642, the PROD host) with overlays on /etc /home /root /var.
 # A stand-in scheduler (as lilith) really runs owner_memory_snapshot.py (runpy import of the review script) and the
 # exact import commitment_sync.py does, writing ok/error into a PROD-shaped cron/jobs.json. Prints PASS/FAIL per case.
 set -Eeuo pipefail
 B=$(readlink -f "${1:?bundle dir}")
 if [[ -z ${RVREH_INNER:-} ]]; then
-  [[ $(id -u) -eq 0 && $(hostname) != lilith-* ]] || { echo "root on a non-lilith host only"; exit 2; }
+  [[ $(id -u) -eq 0 && $(hostname) != lilith-* && $(hostname) != vmi3753642 ]] || { echo "root on a non-lilith host only"; exit 2; }
   exec env RVREH_INNER=1 unshare -m -u --propagation private bash "$0" "$B"
 fi
-hostname lilith-01
+hostname vmi3753642
 W=$(mktemp -d /tmp/rvreh.XXXXXX)
 for d in etc home root var; do mkdir -p "$W/ov/$d/u" "$W/ov/$d/w"; mount -t overlay overlay -o "lowerdir=/$d,upperdir=$W/ov/$d/u,workdir=$W/ov/$d/w" "/$d"; done
 mount -t tmpfs -o mode=0755 tmpfs /run
