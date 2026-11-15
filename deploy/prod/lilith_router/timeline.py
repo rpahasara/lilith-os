@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import time
 import urllib.request
@@ -111,19 +112,35 @@ def temporal(message: str) -> bool:
     return bool(TEMPORAL_RE.search(text) or (_FIRST_RE.search(text) and _OWNER_REF_RE.search(text)))
 
 
-def _day(value) -> Optional[str]:
+def zone() -> Tuple[dt.tzinfo, str]:
+    """The owner's zone: Hermes' own setting (HERMES_TIMEZONE, which the gateway sets in-process from config.yaml),
+    else UTC. A "stored" date is the owner's calendar day in that zone (2026-11-10: three PROD approvals made at
+    18:32-20:40Z on 6 Nov were 7 Nov in Asia/Colombo)."""
+    name = (os.environ.get("HERMES_TIMEZONE") or "").strip()
+    if name and name.upper() not in ("UTC", "ETC/UTC", "Z"):
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(name), name
+        except Exception:
+            pass
+    return dt.timezone.utc, "UTC"
+
+
+def _day(value, tz: Optional[dt.tzinfo] = None) -> Optional[str]:
     if not value:
         return None
     try:
         d = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
-    return d.strftime("%Y-%m-%d")
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)          # Core API timestamps are UTC
+    return d.astimezone(tz or dt.timezone.utc).strftime("%Y-%m-%d")
 
 
-def _learned(entry: dict) -> Optional[str]:
+def _learned(entry: dict, tz: Optional[dt.tzinfo] = None) -> Optional[str]:
     for p in entry.get("provenance") or ():
-        day = _day(p.get("approved_at")) if isinstance(p, dict) else None
+        day = _day(p.get("approved_at"), tz) if isinstance(p, dict) else None
         if day:
             return day
     return None                                         # imports and undated records stay undated: never invented
@@ -139,31 +156,34 @@ def render_with_ids(entries, can_search: bool = False) -> Tuple[Optional[str], L
     """(note, the entry id of every rendered line, in order; None where a record had no id). The SAME call produces
     the note and its audit ids, so the ids always describe exactly what the reader got (its header and size bounds).
     Ids are opaque record keys; never memory text."""
-    header = AGENT_HEADER if can_search else HEADER
+    tz, tz_name = zone()
+    header = (AGENT_HEADER if can_search else HEADER) + " (dates are calendar days in %s)" % tz_name
     rows: List[Tuple[str, str, Optional[str]]] = []
     for e in entries or ():
         if not isinstance(e, dict) or not str(e.get("text") or "").strip():
             continue
         text = " ".join(str(e["text"]).split())[:240]
         if e.get("lifecycle_state") == "SUPERSEDED":
-            since = _day(e.get("updated_at"))
+            since = _day(e.get("updated_at"), tz)
             rows.append((since or "", "- replaced%s (an earlier stored belief, not necessarily ever true): %s"
                          % (" " + since if since else "", text), (str(e["entry_id"]) if e.get("entry_id") else None)))
         else:
-            learned = _learned(e)
+            learned = _learned(e, tz)
             rows.append((learned or "", "- %s%s" % ("stored %s: " % learned if learned else "stored (undated): ", text),
                          (str(e["entry_id"]) if e.get("entry_id") else None)))
     if not rows:
         return None, []
     rows.sort(key=lambda r: (r[0] == "", r[0]))         # dated first, oldest first; undated last
-    lines, ids, size = [], [], len(header)
-    for _, line, eid in rows[-MAX_ENTRIES:]:
+    # Fill the size budget from the END of the list (newest dated entries, then the undated ones placed last), so under
+    # size pressure the OLDEST dated entries drop first, never the most recent. Output order is unchanged.
+    kept, size = [], len(header)
+    for _, line, eid in reversed(rows[-MAX_ENTRIES:]):
         if size + len(line) + 1 > MAX_CHARS:
             break
-        lines.append(line)
-        ids.append(eid)
+        kept.append((line, eid))
         size += len(line) + 1
-    return header + "\n" + "\n".join(lines), ids
+    kept.reverse()
+    return header + "\n" + "\n".join(l for l, _ in kept), [e for _, e in kept]
 
 
 class OwnerMemorySource:

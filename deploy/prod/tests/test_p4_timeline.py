@@ -313,6 +313,77 @@ class TimelineTests(unittest.TestCase):
             self.assertEqual(cfg.load().timeline_mode, "shadow")
 
 
+class LocalDateTests(unittest.TestCase):
+    """2026-11-10: PROD Hermes runs in Asia/Colombo. A "stored" date is the owner's calendar day in Hermes' zone, not
+    the UTC day: three PROD approvals at 18:32-20:40Z on 6 Nov were 7 Nov in Colombo."""
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tl_local", Path(__file__).resolve().parents[1] / "lilith_router" / "timeline.py")
+        self.tl = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tl)
+        self.recs = [dict(rec("TEST_ONLY a.", "2026-11-06T18:32:00+00:00"), entry_id="om_a"),
+                     dict(rec("TEST_ONLY b.", "2026-11-06T20:40:00Z"), entry_id="om_b"),
+                     dict(rec("TEST_ONLY c.", "2026-11-08T12:48:00+00:00"), entry_id="om_c"),
+                     dict(rec("TEST_ONLY old.", "2026-11-01T10:00:00Z", "SUPERSEDED", "2026-11-06T19:37:00+00:00"), entry_id="om_d")]
+
+    def render(self, zone):
+        env = {"HERMES_TIMEZONE": zone} if zone else {}
+        with mock.patch.dict("os.environ", env, clear=False):
+            if not zone:
+                import os
+                os.environ.pop("HERMES_TIMEZONE", None)
+            return self.tl.render_with_ids(self.recs)
+
+    def test_colombo_days(self):
+        note, ids = self.render("Asia/Colombo")
+        self.assertIn("(dates are calendar days in Asia/Colombo)", note.splitlines()[0])
+        self.assertEqual(note.splitlines()[1:], [
+            "- stored 2026-11-07: TEST_ONLY a.", "- stored 2026-11-07: TEST_ONLY b.",
+            "- replaced 2026-11-07 (an earlier stored belief, not necessarily ever true): TEST_ONLY old.",
+            "- stored 2026-11-08: TEST_ONLY c."])                         # same-day entries keep their stored order
+        self.assertEqual(ids, ["om_a", "om_b", "om_d", "om_c"])
+
+    def test_utc_when_no_zone_is_configured(self):
+        note, ids = self.render(None)
+        self.assertIn("(dates are calendar days in UTC)", note.splitlines()[0])
+        self.assertEqual([l.split(":")[0] for l in note.splitlines()[1:]],
+                         ["- stored 2026-11-06", "- stored 2026-11-06",
+                          "- replaced 2026-11-06 (an earlier stored belief, not necessarily ever true)", "- stored 2026-11-08"])
+
+    def test_unknown_zone_falls_back_to_named_utc(self):
+        note, _ = self.render("Not/AZone")
+        self.assertIn("(dates are calendar days in UTC)", note)
+
+    def test_naive_timestamps_are_utc(self):
+        self.assertEqual(self.tl._day("2026-11-06T19:00:00", self.tl.zone()[0]), "2026-11-06")
+        from zoneinfo import ZoneInfo
+        self.assertEqual(self.tl._day("2026-11-06T19:00:00", ZoneInfo("Asia/Colombo")), "2026-11-07")
+        self.assertIsNone(self.tl._day("not a date"))
+
+    def test_size_pressure_drops_the_oldest_not_the_newest(self):
+        import os
+        os.environ.pop("HERMES_TIMEZONE", None)
+        recs = [dict(rec("x" * 240, "2026-10-%02dT10:00:00Z" % (i + 1)), entry_id="om_%02d" % (i + 1)) for i in range(20)]
+        recs.append(dict(rec("TEST_ONLY imported, undated."), entry_id="om_imp"))
+        for can_search in (False, True):
+            with self.subTest(can_search=can_search):
+                note, ids = self.tl.render_with_ids(recs, can_search=can_search)
+                body = note.splitlines()[1:]
+                self.assertLessEqual(len(note), self.tl.MAX_CHARS)
+                self.assertEqual(len(ids), len(body))                          # audit ids = exactly the lines
+                self.assertEqual(ids[-1], "om_imp")                             # undated stays last
+                dated = ids[:-1]
+                self.assertEqual(dated, sorted(dated))                          # chronological order kept
+                self.assertEqual(dated[-1], "om_20")                            # the newest survives
+                self.assertNotIn("om_01", ids)                                  # the oldest dropped first
+                self.assertLessEqual(len(ids), self.tl.MAX_ENTRIES)
+
+    def test_stored_is_still_never_an_event_date(self):
+        note, _ = self.render("Asia/Colombo")
+        self.assertIn('A "stored" date is when the memory', note)
+
+
 class RoutedTurnTests(unittest.TestCase):
     """The real route: lean success, lean failure (fallback to the agent), event-level escalation, shadow."""
 
