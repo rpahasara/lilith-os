@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
@@ -56,9 +57,11 @@ async function forward(
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ taskId: string }> },
 ) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   const { taskId } = await ctx.params;
@@ -72,6 +75,8 @@ export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ taskId: string }> },
 ) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   const { taskId } = await ctx.params;

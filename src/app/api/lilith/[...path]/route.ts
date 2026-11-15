@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
@@ -38,6 +39,14 @@ const ALLOWED = [
   "meetings",
 ];
 
+// A plain path segment: non-empty, not a dot segment, and free of separators
+// (`/`, `\`), percent signs (double or ambiguous encoding), `?`, `#` and
+// control characters (the URL parser strips tabs and newlines).
+function isPlainSegment(s: unknown): boolean {
+  return typeof s === "string" && s.length > 0 && s !== "." && s !== ".." &&
+    !/[/\\%?#\u0000-\u001f\u007f]/.test(s);
+}
+
 function baseUrl() {
   const raw = process.env.LILITH_API_URL;
   return raw ? raw.replace(/\/+$/, "") : null;
@@ -47,6 +56,8 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ path: string[] }> },
 ) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) {
     return NextResponse.json(
@@ -56,6 +67,12 @@ export async function GET(
   }
 
   const { path } = await ctx.params;
+  // Segments arrive already decoded, so `..%2f..%2fos%2ftasks` is one segment
+  // holding slashes. Refuse every segment that could change the path once it
+  // is joined and normalised into the backend URL, before the allow-list check.
+  if (!Array.isArray(path) || !path.every(isPlainSegment)) {
+    return NextResponse.json({ error: "path not allowed" }, { status: 403 });
+  }
   const joined = path.join("/");
 
   if (!ALLOWED.some((p) => joined === p || joined.startsWith(`${p}/`))) {

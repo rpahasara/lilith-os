@@ -171,6 +171,9 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Use a synthetic avatar in place of the Git LFS pointer (CI does not fetch LFS)
+        run: node scripts/ci-synthetic-avatar.mjs
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -182,6 +185,14 @@ jobs:
 
       - name: Run Command Core self-test
         run: npm run test:core
+
+      - name: Package the private web release artifact
+        run: npm run package:web
+
+      - name: End-to-end install of the web release artifact (systemd, health, auth, rollback)
+        # Uses only dist/lilith-web and its INSTALL.md procedure, on this ephemeral runner.
+        # sudo on the runner ignores -E, so pass PATH (toolcache Node) and CI explicitly.
+        run: sudo env "PATH=$PATH" CI=true bash scripts/e2e-web-release.sh dist/lilith-web
 
   backend-quality:
     name: Core API tests
