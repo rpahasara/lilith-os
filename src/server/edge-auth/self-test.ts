@@ -339,6 +339,57 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
     check("read proxy stays GET-only (no state-changing export)",
       !("POST" in readProxyRoute) && !("PUT" in readProxyRoute) && !("PATCH" in readProxyRoute) && !("DELETE" in readProxyRoute));
 
+    /* ------------------------------------------------ read proxy path allow-list (W6) */
+    {
+      setEnv({ ...HOSTED_ENV, LILITH_API_URL: "http://core.internal:8765" });
+      const realFetch = globalThis.fetch;
+      const forwarded: string[] = [];
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        forwarded.push(String(input));
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }) as typeof fetch;
+      try {
+        const get = (path: string[]) => readProxyRoute.GET(
+          fakeRequest({ [ACCESS_JWT_HEADER]: owner }), { params: Promise.resolve({ path }) });
+        // Next.js hands the handler decoded segments: `..%2f..%2fos%2ftasks` arrives as "../../os/tasks".
+        for (const [label, path] of [
+          ["reported ..%2f bypass", ["os", "world", "../../os/tasks"]],
+          ["..%2f under meetings", ["meetings", "..%2f..%2fos%2ftasks"]],
+          ["dot-dot segments", ["meetings", "..", "os", "tasks"]],
+          ["single dot segment", ["os", "world", ".", "x"]],
+          ["%2e%2e encoded dot-dot", ["os", "world", "%2e%2e", "os", "tasks"]],
+          ["mixed .%2e", ["os", "world", ".%2e", "os", "tasks"]],
+          ["double-encoded %252f", ["os", "world", "..%252f..%252fos%252ftasks"]],
+          ["encoded slash inside a segment", ["os", "world/../../os/tasks"]],
+          ["backslash traversal", ["os", "world", "..\\..\\os\\tasks"]],
+          ["%5c encoded backslash", ["os", "world", "..%5c..%5cos%5ctasks"]],
+          ["embedded query", ["os", "world", "x?y=1"]],
+          ["embedded fragment", ["os", "world", "x#y"]],
+          ["tab (stripped by the URL parser)", ["os", "world", ".\t.", "os", "tasks"]],
+          ["empty segment", ["os", "world", "", "x"]],
+          ["not on the allow-list", ["os", "tasks"]],
+        ] as const) {
+          const r = await get([...path]);
+          check(`read proxy refuses ${label} (403, nothing forwarded)`, r.status === 403 && forwarded.length === 0,
+            `${r.status} forwarded=${forwarded.length}`);
+        }
+        for (const [path, expected] of [
+          [["system", "status"], "http://core.internal:8765/system/status"],
+          [["os", "world", "owner.timezone"], "http://core.internal:8765/os/world/owner.timezone"],
+          [["meetings", "m-1", "prep"], "http://core.internal:8765/meetings/m-1/prep"],
+          [["career", "applications"], "http://core.internal:8765/career/applications"],
+        ] as const) {
+          forwarded.length = 0;
+          const r = await get([...path]);
+          check(`read proxy forwards ${path.join("/")}`, r.status === 200 && forwarded.length === 1 && forwarded[0] === expected,
+            `${r.status} ${forwarded.join(",")}`);
+        }
+      } finally {
+        globalThis.fetch = realFetch;
+        setEnv(HOSTED_ENV);
+      }
+    }
+
     /* ------------------------------------------------ owner authority is untouched */
     const ownerReq = fakeRequest({ ...json, origin: ORIGIN, [ACCESS_JWT_HEADER]: owner }, { action: "open" });
     const capture = await ownerCaptureAuthentication(ownerReq);
