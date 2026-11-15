@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 
 /**
  * Server-side proxy for LILITH voice synthesis (OpenAI TTS).
@@ -23,6 +24,8 @@ const DEFAULT_INSTRUCTIONS =
   "Speak naturally, warmly, calmly, and conversationally. Keep the delivery clear and slightly playful without exaggeration.";
 
 export async function POST(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
     return NextResponse.json(

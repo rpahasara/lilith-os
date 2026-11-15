@@ -3,7 +3,7 @@
  * approval-gated write), the memory projection self-test (FM-09) and the
  * owner-protected recording self-test (F5). Bundles
  * the TypeScript with esbuild (resolving the `@/` path alias) and runs it under
- * Node — no browser, no live backend (the transport + task/draft stores are all
+ * Node â€” no browser, no live backend (the transport + task/draft stores are all
  * in-memory fakes).
  *
  *   node scripts/run-core-self-test.mjs
@@ -25,7 +25,16 @@ await build({
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest())];
+      import { runShellHealthSelfTest } from "@/lib/system/self-test";
+      import { runControlsSelfTest } from "@/lib/ui/controls-self-test";
+      import { runHomeSelfTest } from "@/lib/home/self-test";
+      import { runTurnSelfTest } from "@/lib/conversation/turn-self-test";
+      import { runVoiceSelfTest } from "@/lib/voice/voice-self-test";
+      import { runDiagnosticsSelfTest } from "@/lib/diagnostics-self-test";
+      import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
+      import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));
@@ -44,7 +53,17 @@ await build({
   platform: "node",
   format: "esm",
   target: "node18",
-  alias: { "@": join(root, "src"), "next/server": join(root, "scripts", "self-test-next-server-shim.mjs") },
+  alias: {
+    "@": join(root, "src"),
+    "next/server": join(root, "scripts", "self-test-next-server-shim.mjs"),
+    // No App Router in Node: UI tests server-render shell components.
+    "next/navigation": join(root, "scripts", "test-stubs", "next-navigation.ts"),
+    "next/link": join(root, "scripts", "test-stubs", "next-link.tsx"),
+  },
+  // UI tests server-render real components with react-dom/server, which
+  // needs JSX and Node built-ins (give the ESM bundle a real require).
+  jsx: "automatic",
+  banner: { js: 'import { createRequire as __lilithCreateRequire } from "node:module"; const require = __lilithCreateRequire(import.meta.url);' },
   outfile: out,
   logLevel: "warning",
 });

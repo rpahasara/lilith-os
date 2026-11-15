@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
 /**
@@ -43,7 +44,9 @@ async function forward(method: "GET" | "DELETE", url: string) {
   }
 }
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ draftId: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ draftId: string }> }) {
+  const denied = await guardApiRequest(req, { mutating: false });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   const { draftId } = await ctx.params;
@@ -53,7 +56,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ draftId: s
   return forward("GET", `${base}/os/drafts/${encodeURIComponent(draftId)}`);
 }
 
-export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ draftId: string }> }) {
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ draftId: string }> }) {
+  const denied = await guardApiRequest(req, { mutating: true });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) return noBackend();
   const { draftId } = await ctx.params;

@@ -1,0 +1,18 @@
+# LILITH web preview periodic health check (TEMPLATE, not installed).
+# Recovery: an unanswering server is restarted; a server that serves pages
+# WITHOUT authentication (exit 3) is STOPPED, so an auth regression fails closed.
+# W-SEC-1 tunnel recovery: the tunnel is bound to the web service and stops with
+# it (crash, failure, stop). Only when the web service is verified healthy
+# (exit 0) AND cloudflared is enabled (the owner's intent to be exposed) is a
+# stopped tunnel started again. `systemctl disable --now cloudflared` keeps it down.
+[Unit]
+Description=LILITH web preview health check
+After=lilith-web.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/opt/lilith-web/bin/healthcheck.sh; rc=$?; \
+  if [ $rc -eq 3 ] || [ $rc -eq 4 ]; then systemctl stop lilith-web.service; \
+  elif [ $rc -eq 1 ]; then systemctl restart lilith-web.service; \
+  elif [ $rc -eq 0 ] && [ "$(systemctl is-enabled cloudflared.service 2>/dev/null)" = enabled ] && \
+    ! systemctl -q is-active cloudflared.service; then systemctl start cloudflared.service; fi; exit $rc'

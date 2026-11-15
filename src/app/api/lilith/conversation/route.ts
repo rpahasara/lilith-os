@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { guardApiRequest } from "@/server/edge-auth/guard";
 import { ownerCaptureAuthentication } from "@/lib/conversation/owner-capture-auth";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
 
@@ -30,6 +31,8 @@ function baseUrl() {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await guardApiRequest(req, { mutating: true, json: true });
+  if (denied) return denied;
   const base = baseUrl();
   if (!base) {
     return NextResponse.json(

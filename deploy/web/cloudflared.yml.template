@@ -1,0 +1,18 @@
+# Cloudflare Tunnel for the LILITH private web preview (TEMPLATE, not installed).
+#
+# Exactly ONE public hostname, routed ONLY to the local Next.js server, and a
+# deny-by-default catch-all. The Core API (port 8765), SSH and the rest of the
+# network are never routable. Protect the hostname with a Cloudflare Access
+# application (owner email only) BEFORE starting the tunnel.
+# Verify:  node scripts/check-web-readiness.mjs --cloudflared <this file> --env <env file>
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: <PUBLIC_HOSTNAME>
+    service: http://127.0.0.1:3000
+  - service: http_status:404
+
+warp-routing:
+  enabled: false
