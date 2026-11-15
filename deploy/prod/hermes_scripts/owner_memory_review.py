@@ -16,6 +16,11 @@ reached an outcome in the window are listed from the Goals store (read-only GET 
 typed preferences / boundaries, dated event facts, fictional or test scenarios are never facts, at most 3 proposals.
 Nothing new is stored; every proposal still needs the owner's approval.
 
+P4-1 conversation dates (2026-11-10): the conversation is split by the owner's local day ("--- said on <date> ---",
+in Hermes' configured timezone, else UTC, always named), so the review can tell when each line was said and resolve
+"yesterday" against THAT day. The guidance keeps four dates apart: when it happened (only if they said so), when they
+told LILITH, unknown, and dates that are never event dates (this review's run date, approval or supersession times).
+
 Rejections leave no trace in Hermes (/memory reject deletes the pending file), so `snapshot()` (run every few minutes
 by the silent no-agent cron job owner_memory_snapshot.py) records every pending proposal in SEEN; a recorded proposal
 that is no longer pending and whose text is not in USER.md / MEMORY.md was rejected. The read is also a snapshot, so
@@ -38,6 +43,33 @@ PER_MESSAGE = 700
 TOTAL = 14000
 SEEN = "memory-review/seen.jsonl"
 API = os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765")
+
+
+def review_timezone(home: Path):
+    """(tzinfo, name): Hermes' own setting (HERMES_TIMEZONE, else `timezone:` in config.yaml), else UTC. An unknown or
+    unreadable zone falls back to UTC; the name is always printed, so a date is never ambiguous."""
+    name = (os.environ.get("HERMES_TIMEZONE") or "").strip()
+    if not name:
+        try:
+            for line in (home / "config.yaml").read_text(encoding="utf-8").splitlines():
+                m = re.match(r"timezone\s*:\s*(.*)$", line)                   # top level only (no indent)
+                if m:
+                    name = m.group(1).split("#")[0].strip().strip("'\"")
+                    break
+        except OSError:
+            pass
+    if name and name.upper() not in ("UTC", "ETC/UTC", "Z"):
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(name), name
+        except Exception:
+            pass
+    return _dt.timezone.utc, "UTC"
+
+
+def local_day(ts: float, tz) -> str:
+    """'2026-11-09 (Monday)': the local calendar date a line was said; the weekday resolves 'last Tuesday'."""
+    return _dt.datetime.fromtimestamp(float(ts), tz).strftime("%Y-%m-%d (%A)")
 
 
 def owner_ids(home: Path) -> set:
@@ -158,7 +190,7 @@ def _goals(query: str = "limit=200"):
 COMMITMENT_TYPES = ("commitment.once", "commitment.routine")
 
 
-def goal_outcomes(since: float) -> list:
+def goal_outcomes(since: float, tz=_dt.timezone.utc, tz_name: str = "UTC") -> list:
     """Their tracked LIFE goals that reached an outcome in the window. LILITH's own commitments are excluded: they
     are reported separately (commitment_status) and are never memories about them. Fail-open: none."""
     goals = _goals() or []
@@ -171,8 +203,9 @@ def goal_outcomes(since: float) -> list:
             if g.get("lifecycleState") == state and at is not None and at >= since:
                 topic = _goal_topic(g.get("title"))
                 if topic:
-                    day = _dt.datetime.fromtimestamp(at, _dt.timezone.utc).strftime("%Y-%m-%d")
-                    out.append(f"- {topic}: {verb} on {day} (recorded in their tracked goals)")
+                    day = _dt.datetime.fromtimestamp(at, tz).strftime("%Y-%m-%d")
+                    out.append(f"- {topic}: marked {verb} in their tracked goals on {day} ({tz_name}); that is when "
+                               "it was marked, not necessarily when it happened")
     return out[:10]
 
 
@@ -208,8 +241,22 @@ GUIDANCE = """\
 - Propose at most 3 items, the ones most worth keeping. Fewer is fine; nothing is fine.
 - A lasting preference or boundary about how LILITH talks or behaves: word it "Preference (scope): ..." or
   "Boundary (scope): ...", scope = global, casual, technical or topic: <word>.
-- An achievement, setback or outcome worth remembering: a short dated fact in plain words ("On 2026-11-09 he passed
-  ..."). Never record a mood or how LILITH felt about it.
+- An achievement, setback or outcome worth remembering: a short fact in plain words. Never record a mood or how
+  LILITH felt about it.
+- Dates. Each conversation day starts with "--- said on <date> ---": the date, in their timezone, on which those
+  lines were said. Keep four things apart:
+  * When it happened: write "On <date>, ..." ONLY when they said when it happened ("on 3 November", "today",
+    "yesterday", "last Tuesday"). Resolve today / yesterday / last <weekday> against the said-on date of THAT line,
+    never against today's date.
+  * When they told LILITH: if they reported something without saying when it happened, write "Told LILITH on
+    <said-on date>: ..." That is when they said it, not when it happened.
+  * Unknown: if the timing is vague or ambiguous ("recently", "the other day", "last week", "a while ago"), or a
+    relative word sits on a line marked [also said on ...], keep their own words and add only the told date. Never
+    invent or guess a day.
+  * Never an event date: the date this review runs (the "Conversation started" date), and any stored, approval,
+    replacement or goal-marked date.
+- Keep what kind of statement it was: a plan or intention stays a plan ("plans to ..."), never done; a correction
+  replaces the entry it corrects; a past fact stays past ("used to ..."); a wish, guess or hypothetical stays one.
 - A fictional, hypothetical or test scenario is never a real fact about them. If they clarified that something was only
   a test or made up, you may propose a boundary to treat it that way; never store the scenario itself as true.
 - If a new statement contradicts something already remembered, propose replacing that entry, not adding a second one.
@@ -219,7 +266,8 @@ GUIDANCE = """\
   the conversation itself before proposing anything."""
 
 
-def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at: list = ()) -> list:
+def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at: list = (),
+                 tz=_dt.timezone.utc, tz_name: str = "UTC") -> list:
     if not sessions:
         return []
     cols = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
@@ -228,7 +276,7 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at
     rows = con.execute(
         f"SELECT role, content, timestamp FROM messages WHERE session_id IN ({marks}) AND timestamp >= ?"
         f" AND role IN ('user', 'assistant'){active} ORDER BY timestamp, id", (*sessions, since)).fetchall()
-    seen, lines = set(), []
+    seen, lines = {}, []
     marks_at = list(marks_at or ())
     owner_ts = [ts for role, content, ts in rows if role == "user" and isinstance(content, str) and content.strip()]
     tags = {}
@@ -238,17 +286,29 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at
             tags.setdefault(max(prior), [])
             if label not in tags[max(prior)]:
                 tags[max(prior)].append(label)
+    kept, again = [], {}                      # key -> the later local days the same line was repeated on
     for role, content, ts in rows:
         if not isinstance(content, str) or not content.strip():
             continue
+        day = local_day(ts, tz)
         key = (role, content.strip())
-        if key in seen:                       # compaction can re-insert identical rows
+        if key in seen:                       # compaction can re-insert identical rows: keep the FIRST (earliest)
+            if day != seen[key] and day not in again.setdefault(key, []):
+                again[key].append(day)        # repeated on another day: noted, never moved to the later day
             continue
-        seen.add(key)
+        seen[key] = day
+        kept.append((role, content, ts, day, key))
+    current = None
+    for role, content, ts, day, key in kept:
+        if day != current:
+            lines.append(f"--- said on {day}, {tz_name} ---")
+            current = day
         text = " ".join(content.split())
         if len(text) > PER_MESSAGE:
             text = text[:PER_MESSAGE] + " ..."
         tag = (" [moment: " + "; ".join(tags[ts]) + "]") if role == "user" and ts in tags else ""
+        if role == "user" and again.get(key):
+            tag += " [also said on " + ", ".join(d.split(" ")[0] for d in again[key]) + "]"
         lines.append(f"{'OWNER' if role == 'user' else 'LILITH'}: {text}{tag}")
     return lines
 
@@ -385,9 +445,10 @@ def main(home: Path = HOME, now: float = None) -> str:
     except sqlite3.Error:
         return "NO_NEW_OWNER_CONVERSATION"
     since = now - REVIEW_HOURS * 3600
+    tz, tz_name = review_timezone(home)
     try:
         lines = conversation(con, owner_sessions(con, owner_ids(home), owner_discord_dms(home)), since,
-                             moments(home, since))
+                             moments(home, since), tz, tz_name)
     finally:
         con.close()
     if not any(l.startswith("OWNER: ") for l in lines):
@@ -399,6 +460,8 @@ def main(home: Path = HOME, now: float = None) -> str:
         body.append(line)
         size += len(line) + 1
     body.reverse()
+    if body and not body[0].startswith("--- said on "):  # cut mid-day: the kept lines still carry their date
+        body.insert(0, next(l for l in reversed(lines[:len(lines) - len(body)]) if l.startswith("--- said on ")))
     return "\n".join([
         "=== ALREADY REMEMBERED (do not propose again) ===", remembered(home), "",
         "=== ALREADY WAITING FOR APPROVAL (do not propose again) ===", "\n".join(pending(home)) or "(none)", "",
@@ -407,10 +470,11 @@ def main(home: Path = HOME, now: float = None) -> str:
         "- the project codename and the relationship-origin statement (canonical memory)", "",
         "=== HOW TO PROPOSE ===", GUIDANCE, "",
         f"=== THEIR TRACKED GOAL OUTCOMES, last {REVIEW_HOURS} h (verified in their goals; propose a dated fact "
-        "only if it matters to them) ===", "\n".join(goal_outcomes(since)) or "(none)", "",
+        "only if it matters to them) ===", "\n".join(goal_outcomes(since, tz, tz_name)) or "(none)", "",
         "=== LILITH'S OWN COMMITMENTS (scheduler evidence; her responsibilities, NOT memories about them) ===",
         "\n".join(commitment_status(now, since)), "",
-        f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM) ===",
+        f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM; "
+        f"dates in {tz_name}) ===",
         *body,
     ])
 

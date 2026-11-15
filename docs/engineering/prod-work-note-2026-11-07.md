@@ -1299,6 +1299,156 @@ Measure it with a counts-only check of the next real proposals (dated as event, 
 further change. A structured event-date field would be a schema change (out of scope; schema v4 is not touched) and is
 not justified by n = 0.
 
+**Built (owner GO 2026-11-10; PR "P4-1 conversation dates"; NOT deployed).** `owner_memory_review.py` only; no schema,
+no new store, no approval change.
+- **Said-on markers.** The OWNER CONVERSATION section starts each local day with `--- said on 2026-11-09 (Monday),
+  <zone> ---`, from the `messages.timestamp` already selected. The weekday lets the reviewer resolve "last Tuesday".
+  If the window is truncated, the kept lines keep their day marker.
+- **Timezone.** Hermes' own setting: `HERMES_TIMEZONE`, else top-level `timezone:` in `config.yaml`. Otherwise, or if
+  the zone is unknown, UTC. The zone is always named. **PROD today has no Hermes timezone set** (host clock UTC), so
+  markers will read UTC until the owner sets one. That is a separate PROD config change: Hermes uses the same setting
+  elsewhere, so it needs its own review.
+- **Repeated lines.** A line repeated on a later day stays under its FIRST day and is tagged `[also said on <date>]`.
+  It is never moved to the later day. Compaction re-inserts look the same, so a relative word on such a line counts as
+  ambiguous.
+- **Guidance: four dates kept apart.**
+  1. "On <date>" only when they said when it happened, with today / yesterday / last <weekday> resolved against THAT
+     line's said-on date.
+  2. "Told LILITH on <said-on date>" otherwise.
+  3. Vague or ambiguous timing keeps their words and adds only the told date; never invent a day.
+  4. Never an event date: the run ("Conversation started") date, or any stored, approval, replacement or goal-marked
+     date.
+
+  Plans, corrections, past facts and hypotheticals keep their kind. The old example "On 2026-11-09 he passed ..." is
+  gone.
+- **Goal outcomes** now read "marked completed in their tracked goals on <date> (<zone>); that is when it was marked,
+  not necessarily when it happened".
+- **Kept as before:** the owner-only filtering, read-only access (apart from the existing SEEN snapshot),
+  NO_NEW_OWNER_CONVERSATION, every proposal still staged for approval, and canonical items never proposed.
+- **Tests:** 12 new: midnight crossing, several days, truncation, "yesterday" tied to its line, timezone boundary with
+  env precedence, fail-safe UTC, undated and ambiguous events, never-event dates, repeated lines on different days,
+  plans/corrections/fiction, other chats adding no dates, and assistant-only staying silent.
+- **Measure after a separately approved deploy:** count the next real proposals by date kind (event-dated / told-on /
+  undated), counts only, and check none carries the run date as an event date.
+
+**Asia/Colombo plan (owner asked for a plan 2026-11-10; nothing changed).** Read-only PROD source check: Hermes'
+`timezone` is Hermes-wide, not review-only. It changes:
+- the agent's "Conversation started" date and zone;
+- compaction summary times;
+- how naive one-shot times ("remind me at 20:00") are anchored;
+- the wall clock **cron expressions** are evaluated against.
+
+The nightly review is `30 16 * * *` (16:30Z = 22:00 Colombo). Under Asia/Colombo it would fire at 16:30 Colombo
+unless it is re-expressed as `0 22 * * *`. The every-minute commitment sync and the 10-minute snapshot are unaffected.
+Hermes repairs stored `next_run_at` offsets itself (`_timezone_offset_mismatch` / `_stored_wall_clock_is_future`).
+`config.yaml` is host state, not managed by this repo. Message storage stays epoch.
+
+Sequence, each step separately approved:
+1. DEV rehearsal.
+2. PROD change: back up `config.yaml` and `cron/jobs.json`; set `timezone: Asia/Colombo` and the review to
+   `0 22 * * *`; restart the gateway in a quiet window.
+   - Verify the review `next_run_at` = the same 16:30Z instant.
+   - Rollback: restore both files and restart.
+3. Deploy #412.
+4. Counts-only measurement.
+
+**DEV rehearsal of Asia/Colombo (owner GO 2026-11-10, ref #412 @ b5e0947; 11:48–12:04Z; no PROD contact).**
+
+*Isolation and baseline.*
+- Host `lilith-dev-01`; driver hard-guarded to that hostname.
+- DEV Hermes: `hermes-gateway-dev`, home `~/.hermes-dev`, release `f293e72-…-e1`, Hermes 0.20.5. Console-only, no tools.
+- Baseline: no timezone, host UTC. `cron/jobs.json` = `{"jobs": []}`, so DEV has no nightly review and no jobs.
+- Backups of `config.yaml` (4a28709d…), `jobs.json` (ada86724…) and `critical.sha256` (459b7557…) taken first.
+
+*Live DEV not reconfigured.* DEV's pre-start verifier blocks it:
+- `config.yaml` is hash-pinned in `critical.sha256`;
+- `jobs.json` must be exactly `{"jobs": []}`;
+- compression is pinned off.
+
+Changing those integrity pins was not authorized. The rehearsal therefore ran DEV's own release code (`cron.jobs`, `hermes_time`, `agent.system_prompt`, `gateway.message_timestamps`) in an isolated `HERMES_HOME` under `/var/tmp`:
+- run as `nobody`, which is denied access to `~/.hermes-dev`;
+- simulated clock;
+- synthetic no-op jobs (`deliver: local`, never executed);
+- synthetic state.db;
+- Core API pointed at a dead port.
+
+*Results: 14/14 PASS.*
+
+| # | Check | Result |
+| --- | --- | --- |
+| S1 | Baseline review `30 16 * * *` | next 16:30Z |
+| S2 | Timezone only, expression unchanged | review fires 16:30Z on day 1, then **11:00Z** (16:30 Colombo). The drift is real; the schedule must change with the zone |
+| S3 | Zone + `update_job` → `0 22 * * *` at 11:55Z | next `22:00+05:30`; fires 16:30Z on 3 consecutive days; snapshot 319/319, sync 3186/3186 on time; no duplicates |
+| S4 | Same, applied at 17:00Z after the day's run | no double fire; 16:30Z daily |
+| S5 | Direct `jobs.json` edit while stopped (stale `next_run_at` 16:30+00:00) | 16:30Z daily; Hermes repaired the stored offset |
+| S6 | Unzoned one-shot `2026-11-11T20:00` | `20:00+05:30` = 14:30Z; fired once; job completed |
+| S6b | Zoned input | unaffected |
+| S7 | Agent date line (the release's own code) | 18:20Z → "Monday, November 09 (Asia/Colombo, +0530, UTC+05:30)"; 18:40Z → "Tuesday, November 10 …". UTC gives Monday for both |
+| S7b | Compaction date | follows the zone |
+| S8 | Stored message timestamps (epoch / aware / ISO-Z / naive) | identical under UTC and Colombo |
+| S9 | #412 review from `config.yaml` | Colombo markers, midnight split, `[also said on]`, relative line stays on its own day |
+| S9b | Review with no zone set | named UTC |
+| S10 | New process after downtime 16:00–16:20Z | review 16:30Z; one snapshot catch-up; no burst |
+| S11 | New process, down across 16:30Z | exactly one catch-up (16:45Z), then 16:30Z |
+
+*Regression tests on DEV (as `nobody`; pytest wheels on `PYTHONPATH` in the sandbox only; DEV venv untouched).*
+- #412 `test_owner_memory_review`: 34/34 with no zone, 34/34 with `HERMES_TIMEZONE=Asia/Colombo`.
+- Hermes `tests/test_timezone.py` + 9 scheduler suites: 243/243 with no zone, 243/243 under Colombo.
+- Full `tests/cron`: 878 passed, 5 skipped, 2 failed. The failures were in `test_media_send_timeout`, which passes 10/10 alone: order-dependent, not timezone-related.
+
+*Rollback.* Live `config.yaml`, `jobs.json` and `critical.sha256` are hash-identical to the backups. Gateway PID 442539, `NRestarts=0`, active since 2026-11-04 (never restarted). Sandbox, wheels and backups removed.
+
+*Defect found (pre-existing, DEV only).* `verify_release.py --pre-start` now fails with `GOAL_STORE_NOT_EMPTY`:
+- the F8 verifier requires an empty goal store (line 154), but DEV runs the Goals lane;
+- the gateway last passed the check at its 2026-11-04 start;
+- consequence: the next DEV gateway restart will fail pre-start. It needs its own fix.
+
+*Before any PROD proposal.*
+- Hash-compare PROD's `hermes_time.py`, `cron/jobs.py`, `agent/system_prompt.py` and `gateway/message_timestamps.py` with DEV's (read-only; needs authorization).
+- Change zone and schedule together while the gateway is stopped (S5), or zone then `update_job` (S3/S4).
+- Avoid a restart window spanning 16:30Z (S11).
+
+**DEV↔PROD source identity and the DEV verifier (owner GO 2026-11-10; read-only on both).**
+
+| File | DEV (`f293e72-…-e1` release) | PROD (`~/.hermes/hermes-agent`) | Result |
+| --- | --- | --- | --- |
+| `hermes_time.py` | `3f4ee146…` | `3f4ee146…` | MATCH |
+| `cron/jobs.py` | `edf2469d…` | `edf2469d…` | MATCH |
+| `agent/system_prompt.py` | `1d1c1bfb…` | `1d1c1bfb…` | MATCH |
+| `gateway/message_timestamps.py` | `daa620ef…` | `daa620ef…` | MATCH |
+| Hermes version | 0.20.5 (pyproject, `__version__`, dist) | 0.20.5 | MATCH |
+| Python | 3.11.16 | 3.11.16 | MATCH |
+
+The DEV rehearsal (S1–S11) exercised byte-identical timezone and scheduler code to PROD. One remaining difference matters
+for PROD: PROD has cron jobs and `jobs.json` is writable there. The schedule change must happen with the zone change
+(S2 shows the drift otherwise).
+
+*`GOAL_STORE_NOT_EMPTY` on DEV: literal rule stale, intended invariant intact.*
+- **The rule.** w1 (`f634039`, 2026-10-30) added `count(goal) == 0` to the pre-start verifier; m1, p1 and e1 carried it
+  unchanged. Stated reason (w1 README / INSTALL-PLAN): a `GET /os/goals/focus` read with a goal present writes an
+  arbitration trace, so the Workspace shadow lane would not be write-free. g2 was accepted "on an empty store only".
+- **What is in the store.** 6 goals, all `commitment.once`, source `SCHEDULED`, terminal (2 COMPLETED, 2 FAILED,
+  2 CANCELLED). They were created 2026-11-09 05:50:11Z and 06:33:44Z from `127.0.0.1` inside owner-account SSH sessions,
+  with operation prefix `commit-t1794…`. That is the P4-4 commitment-sync DEV test (§ above: "terminal `TEST_ONLY P4-4
+  DEV` goals remain on DEV as history"; there are six, from two runs). No DEV component wrote them. 20 `goal_trace` rows,
+  all `transition`.
+- **Why the invariant still holds.**
+  - `_arbitrate` considers only ACTIVE/PENDING goals, and there are 0.
+  - `_record_focus_trace` writes only when the winner changes; with no candidates the winner stays `None`.
+  - DEV's Core API runs with `LILITH_OS_FOCUS_READ_ONLY=1`, so focus reads never write.
+  - 0 arbitration traces exist.
+- **Consequence.** The verifier is stricter than its purpose and blocks the next DEV gateway start (last good start
+  2026-11-04 08:32Z, before the test goals).
+- **Proposed fix (not done; needs separate authorization: new DEV release package, verifier pin, gateway restart).**
+  Replace `count(goal) == 0` with what the rule protects:
+  - fail on any ACTIVE/PENDING goal;
+  - fail on any `arbitration` trace;
+  - fail if the API unit lacks `LILITH_OS_FOCUS_READ_ONLY=1`;
+  - add a release test with terminal-only goals.
+
+  Deleting the six TEST_ONLY goals would also clear it, but it erases recorded test history. The narrowed rule keeps
+  the same protection without deleting anything.
+
 ## 3s. P-5 Autonomous Initiative & Verified Outcome Learning: design on paper (2026-11-09; NOT enabled)
 
 Owner: design may proceed; **no autonomous initiative is enabled.** Anchors: R&D plan
