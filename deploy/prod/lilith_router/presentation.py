@@ -3,8 +3,10 @@
 1. Dates. Hermes' session_search tool formats every conversation date with ``datetime.fromtimestamp(ts)``, i.e. the
    host clock (UTC on PROD), not Hermes' configured timezone. A message sent 2026-10-19 21:00 UTC is 20 Oct 02:30 in
    Asia/Colombo, but the agent was shown "October 19" and told the owner so. ``install_session_search_dates`` replaces
-   that one display formatter, in the running gateway only, with one that converts to Hermes' zone and names it. The
-   stored epoch timestamps, sorting and search are untouched: only the string the agent reads changes.
+   that one display formatter, in the running gateway only, with one that converts to Hermes' zone and names it.
+   Message-level results carried only a raw epoch ``timestamp`` (left for the model to convert, as UTC); they now
+   also carry ``when`` in Hermes' zone. The stored epoch timestamps, sorting and search are untouched: only what the
+   agent reads changes.
 
 2. Links. The same tool asks the model to paste ``@session:<profile>/<id>`` links into replies because the Hermes
    desktop renders them. Telegram, Discord and the LILITH console do not, so the owner saw a raw internal reference.
@@ -68,8 +70,26 @@ def zoned_timestamp(ts) -> str:
 setattr(zoned_timestamp, _MARK, True)
 
 
+def _with_when(shape):
+    """Wrap Hermes' ``_shape_message``: each returned message keeps its raw ``timestamp`` (epoch, untouched) and gains
+    ``when``, the same instant as a readable date in Hermes' zone, so the model never converts an epoch itself."""
+    def shaped(*args, **kwargs):
+        entry = shape(*args, **kwargs)
+        try:
+            ts = entry.get("timestamp") if isinstance(entry, dict) else None
+            if ts is not None and "when" not in entry:
+                entry["when"] = zoned_timestamp(ts)
+        except Exception:
+            logger.debug("lilith_router: message date presentation failed", exc_info=True)
+        return entry
+    setattr(shaped, _MARK, True)
+    shaped.__wrapped__ = shape
+    return shaped
+
+
 def install_session_search_dates(module=None) -> bool:
-    """Point session_search's display formatter at ``zoned_timestamp`` (idempotent). True when installed."""
+    """Point session_search's date presentation at Hermes' zone (idempotent). True when installed: the session-level
+    formatter (``_format_timestamp``) is replaced and message-level results (``_shape_message``) gain a zoned ``when``."""
     try:
         mod = module if module is not None else sys.modules.get("tools.session_search_tool")
         if mod is None:
@@ -80,6 +100,9 @@ def install_session_search_dates(module=None) -> bool:
             return False
         if not getattr(current, _MARK, False):
             mod._format_timestamp = zoned_timestamp
+        shape = getattr(mod, "_shape_message", None)
+        if callable(shape) and not getattr(shape, _MARK, False):
+            mod._shape_message = _with_when(shape)
         return True
     except Exception:
         logger.debug("lilith_router: session_search date presentation not installed", exc_info=True)

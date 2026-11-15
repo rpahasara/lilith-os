@@ -61,8 +61,26 @@ class InstallTests(unittest.TestCase):
     def fake_tool(self):
         mod = types.ModuleType("fake_session_search_tool")
         exec("def _format_timestamp(ts):\n    return 'host-local'\n"
-             "def when(meta):\n    return _format_timestamp(meta['started_at'])\n", mod.__dict__)
+             "def when(meta):\n    return _format_timestamp(meta['started_at'])\n"
+             "def _shape_message(m, anchor_id=None, max_content_len=None):\n"
+             "    return {'id': m.get('id'), 'role': m.get('role'), 'content': m.get('content'),"
+             " 'timestamp': m.get('timestamp')}\n"
+             "def scroll(rows):\n    return [_shape_message(m, anchor_id=1) for m in rows]\n", mod.__dict__)
         return mod
+
+    def test_message_results_keep_the_raw_epoch_and_gain_a_zoned_when(self):
+        mod = self.fake_tool()
+        rows = [{"id": 1, "role": "user", "content": "moving to Manchester tomorrow!", "timestamp": OCT19_UTC_2100},
+                {"id": 2, "role": "assistant", "content": "Big move!"}]
+        with no_hermes_time(), mock.patch.dict("os.environ", {"HERMES_TIMEZONE": "Asia/Colombo"}):
+            pr.install_session_search_dates(mod)
+            pr.install_session_search_dates(mod)                           # wrapped once, not twice
+            out = mod.scroll(rows)
+        self.assertEqual(out[0]["timestamp"], OCT19_UTC_2100)              # raw UTC epoch unchanged
+        self.assertEqual(out[0]["when"], "October 20, 2026 at 02:30 AM (Asia/Colombo)")
+        self.assertNotIn("when", out[1])                                  # no timestamp, no invented date
+        self.assertTrue(getattr(mod._shape_message, "__wrapped__", None))
+        self.assertFalse(hasattr(mod._shape_message.__wrapped__, "__wrapped__"))
 
     def test_tool_callers_get_the_zoned_date_and_storage_is_untouched(self):
         mod = self.fake_tool()
