@@ -268,7 +268,13 @@ GUIDANCE = """\
   replaces the entry it corrects; a past fact stays past ("used to ..."); a wish, guess or hypothetical stays one.
 - A fictional, hypothetical or test scenario is never a real fact about them. If they clarified that something was only
   a test or made up, you may propose a boundary to treat it that way; never store the scenario itself as true.
-- If a new statement contradicts something already remembered, propose replacing that entry, not adding a second one.
+- Corrections and updates: when the owner genuinely corrects or updates something under ALREADY REMEMBERED (a new
+  name or nickname, a changed preference, a fact they say was wrong), propose action "replace": old_text = the complete
+  text of that ONE entry exactly as shown (entries are separated by §), content = the corrected entry. Never add a
+  second entry that contradicts it. Only a current ALREADY REMEMBERED entry can be replaced: never one under REJECTED
+  or PREVIOUSLY STORED, SINCE REPLACED, and never because of a test, joke, quotation or hypothetical.
+- Something new that contradicts nothing is an "add". The same thing already remembered in other words is no
+  proposal at all. Never use remove.
 - LILITH's own commitments (reminders, follow-ups she scheduled) are her responsibilities, not facts about them:
   never propose them as memories. An UNRESOLVED one is hers to own next time they talk; never say it was delivered.
 - Lines tagged [moment: ...] are where LILITH's own signals saw something notable. They are hints, not proof: read
@@ -527,7 +533,7 @@ def main(home: Path = HOME, now: float = None, since: float = None) -> str:
     if body and not body[0].startswith("--- said on "):  # cut mid-day: the kept lines still carry their date
         body.insert(0, next(l for l in reversed(lines[:len(lines) - len(body)]) if l.startswith("--- said on ")))
     return "\n".join([
-        "=== ALREADY REMEMBERED (do not propose again) ===", remembered(home), "",
+        "=== ALREADY REMEMBERED (current; never add again; replace only on a genuine correction) ===", remembered(home), "",
         "=== ALREADY WAITING FOR APPROVAL (do not propose again) ===", "\n".join(pending(home)) or "(none)", "",
         "=== REJECTED BY THE OWNER (never propose these again) ===", "\n".join(rejected(home)) or "(none)", "",
         "=== PREVIOUSLY STORED, SINCE REPLACED (never propose these again) ===", "\n".join(replaced()) or "(none)", "",

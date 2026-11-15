@@ -588,5 +588,36 @@ class DurableStatementTests(unittest.TestCase):
         self.assertEqual(catch.WINDOW_START.isoformat(), "2026-11-06T00:00:00+05:30")
 
 
+class ReplaceGuidanceTests(unittest.TestCase):
+    """Correction-aware review (2026-11-15): the reviewer may propose add or replace (bound to one complete current
+    entry), never remove; the cron prompt and the context guidance say the same thing."""
+    setUp, tearDown = ReviewContextTests.setUp, ReviewContextTests.tearDown
+    PROMPT = (ROOT / "deploy/prod/hermes_scripts/nightly_memory_review.prompt.txt").read_text(encoding="utf-8")
+
+    def test_prompt_allows_add_and_bound_replace_never_remove(self):
+        self.assertIn('action "add" for something new', self.PROMPT)
+        self.assertIn('action "replace" ONLY when the owner genuinely corrected or updated something listed under '
+                      'ALREADY REMEMBERED', self.PROMPT)
+        self.assertIn("old_text is the complete text of that one entry exactly as shown there", self.PROMPT)
+        self.assertIn("Never replace because of a test, a joke, a quotation or a hypothetical", self.PROMPT)
+        self.assertIn("never re-add or revive anything rejected or since replaced", self.PROMPT)
+        self.assertIn("Never use remove.", self.PROMPT)
+        self.assertNotIn("Never use replace", self.PROMPT)
+        self.assertIn("Update: <old> \u2192 <new> \u2014 /memory approve <pending_id>", self.PROMPT)
+        self.assertIn("[SILENT]", self.PROMPT)
+
+    def test_context_shows_current_entries_exactly_and_the_replace_rule(self):
+        (self.home / "memories" / "USER.md").write_text(
+            "Prefers to be called Sam.\n\u00a7\nUser lives in Leeds.", encoding="utf-8")
+        out = OMR.main(self.home, now=NOW)
+        section = out.split("=== ALREADY REMEMBERED (current; never add again; replace only on a genuine correction) ===")[1]
+        self.assertIn("Prefers to be called Sam.\n\u00a7\nUser lives in Leeds.", section.split("===")[0])
+        self.assertIn('propose action "replace": old_text = the complete\n  text of that ONE entry exactly as shown', out)
+        self.assertIn("Never add a\n  second entry that contradicts it", out)
+        self.assertIn("never one under REJECTED\n  or PREVIOUSLY STORED, SINCE REPLACED", out)
+        self.assertIn("Never use remove.", out)
+        self.assertNotIn("do not propose again) ===\n[USER.md]", out)
+
+
 if __name__ == "__main__":
     unittest.main()

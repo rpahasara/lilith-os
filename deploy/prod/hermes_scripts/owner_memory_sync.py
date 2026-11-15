@@ -7,7 +7,8 @@ Rules (owner decisions 2026-11-06):
   is imported as HERMES_PREEXISTING_IMPORT (no approval time is invented).
 - Afterwards an entry is synced only when an owner-approved proposal for it is on record (memory-review/seen.jsonl):
   it is no longer pending and its text is in the file. Pending, rejected or unattributed entries are never synced.
-- An approved replace supersedes the old entry; an approved removal retracts it. An entry that merely disappears from
+- An approved replace supersedes the old entry (its exact text, else the one current entry containing old_text that the
+  replace removed from the Hermes file, as Hermes' own replace matches); an approved removal retracts it. An entry that merely disappears from
   a Hermes file is left alone (logged as missing), never retracted.
 State: memory-review/world_sync.json (normalised text -> entry id). Prints nothing on success (silent cron job).
 """
@@ -164,9 +165,20 @@ def sync(home: Path = HOME, poster=post, now: float = None, getter=get, repairer
     current = entries(home)
     present = {(s, norm(t)) for s, t in current}
 
+    def resolve_old(old):
+        """The entry an approved replace replaced: its exact text, else (Hermes' replace matches old_text as a
+        substring of exactly one entry) the ONE current entry that contains old_text and is gone from the Hermes
+        files. No unique match: None (never guessed)."""
+        key = norm(old)
+        if key in synced:
+            return synced[key]
+        names = {n for _, n in present}
+        hits = {eid for t, eid in synced.items() if key and key in t and eid not in inactive and t not in names}
+        return hits.pop() if len(hits) == 1 else None
+
     def assert_(store, text, prov, supersedes=()):
         body = {"store": store, "text": text, "provenance": prov}
-        olds = [synced[norm(o)] for o in supersedes if norm(o) in synced]
+        olds = [eid for eid in (resolve_old(o) for o in supersedes) if eid]
         if olds:
             body["supersedes"] = olds
         r = poster(body)

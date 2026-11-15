@@ -16,8 +16,8 @@ MODE=${1:-}
 PROD_HOST=vmi3753642   # Contabo PROD (was GCP lilith-01 until the 2026-11-14 migration)
 H=/home/lilith/.hermes; D=$H/scripts; F=$D/owner_memory_review.py; PY=$H/hermes-agent/venv/bin/python
 BKROOT=/var/backups/lilith-review
-LIVE_SHA=e6ec02a1db8bd21ba0237525b15603b00a6b58e69ef74b3c1d7e0bb97e83c5bd      # #412, live since 2026-11-15 11:15Z
-NEW_SHA=88bf8f38016295b7bda9fc9b8f050a3ac24ff0ac9f66b6ccddb40f2cdea20963       # durable statements + catch-up (2026-11-15)
+LIVE_SHA=88bf8f38016295b7bda9fc9b8f050a3ac24ff0ac9f66b6ccddb40f2cdea20963      # #437, live since 2026-11-15 12:32Z
+NEW_SHA=47854c322a970e700a5effa3bbe1f9c94e5e0a9ddcb834d7b5525b07cde43aff       # correction-aware review: add or replace (2026-11-15)
 declare -A DEP_SHA=([owner_memory_snapshot.py]=99f0fd81d677f8142e569825f0d8659cf845eed468c718216f229181e9721523
                     [commitment_sync.py]=6527dd634292bcf66fb9ce23b422e3d5d8727421b812a1335ad63548cd33f0fa)
 refuse() { echo "REVIEW_FAIL $* (nothing changed)" >&2; exit 1; }

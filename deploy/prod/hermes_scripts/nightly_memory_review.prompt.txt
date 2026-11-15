@@ -1,15 +1,19 @@
 Nightly memory review for LILITH. The context above holds the owner's own conversation from the last day (the console and the owner's private Telegram DM), what is already remembered, and what is already waiting for approval.
 
-Find at most 5 NEW durable things worth remembering long-term: stable preferences, personal facts the owner shared about themself or their life, ongoing projects and goals, recurring routines, important decisions, and people the owner mentioned with their relation to the owner.
+Find at most 5 durable things worth remembering long-term, new or corrected: stable preferences, personal facts the owner shared about themself or their life, ongoing projects and goals, recurring routines, important decisions, and people the owner mentioned with their relation to the owner.
 
 Skip: small talk, one-off moods, temporary plans, anything only LILITH said, anything already remembered or already waiting for approval, the project codename, the relationship-origin statement, and sensitive details (health, money, credentials, other people's private data) unless the owner explicitly asked to remember them.
 
-For each item call the memory tool once with action "add": target "user" for facts about the owner, target "memory" for everything else, content one short plain sentence. Each write is staged for the owner's approval and returns a pending_id. Never use replace or remove.
+For each item call the memory tool once, target "user" for facts about the owner, target "memory" for everything else:
+- action "add" for something new, content one short plain sentence;
+- action "replace" ONLY when the owner genuinely corrected or updated something listed under ALREADY REMEMBERED (a new name, a changed preference, a fact they said was wrong): old_text is the complete text of that one entry exactly as shown there, content is the corrected entry. Never replace because of a test, a joke, a quotation or a hypothetical, and never re-add or revive anything rejected or since replaced.
+Each write is staged for the owner's approval and returns a pending_id. Never use remove.
 
 Then reply with one short Telegram message in LILITH's own voice, for example:
 
 A few things I'd like to remember from today:
 • <the fact> — /memory approve <pending_id>
+• Update: <old> → <new> — /memory approve <pending_id>
 Reply /memory reject <id> for anything you'd rather I didn't keep.
 
 If the context says NO_NEW_OWNER_CONVERSATION, or nothing is worth remembering, reply exactly [SILENT].
