@@ -482,5 +482,111 @@ class ConversationDateTests(unittest.TestCase):
         self.assertEqual(OMR.main(self.home, now=REVIEW_AT), "NO_NEW_OWNER_CONVERSATION")
 
 
+STARLIGHT = "Hey Lilith ❤️ I've decided to call my weekend coding sessions \"Starlight Sessions\" from now on haha."
+STARLIGHT_QUIZ = "Hey Lilith ❤️ What do I call my weekend coding sessions?"
+
+
+class DurableStatementTests(unittest.TestCase):
+    """2026-11-15: the 2026-11-07 review saw the Starlight Sessions statement and its immediate recall quiz and stayed
+    [SILENT]. Explicit durable statements are now tagged for the review; tests, jokes, hypotheticals, quotations and
+    'nothing to remember' lines are not; replaced memories are listed; a bounded catch-up window exists."""
+    tearDown, db = ConversationDateTests.tearDown, ConversationDateTests.db
+
+    def setUp(self):
+        ConversationDateTests.setUp(self)
+        (self.home / "config.yaml").write_text("model: x\ntimezone: Asia/Colombo\n", encoding="utf-8")
+
+    def owner_lines(self, out):
+        return [l for l in out.split("=== OWNER CONVERSATION")[1].splitlines() if l.startswith("OWNER: ")]
+
+    def test_starlight_statement_is_a_strong_candidate_and_the_quiz_confirms_it(self):
+        self.db([("user", STARLIGHT, utc("2026-11-06T18:12")),                      # 23:42 Colombo
+                 ("assistant", "Starlight Sessions it is.", utc("2026-11-06T18:12")),
+                 ("user", STARLIGHT_QUIZ, utc("2026-11-06T18:21")),                 # 23:51 Colombo
+                 ("assistant", "Your Starlight Sessions!", utc("2026-11-06T18:21"))])
+        out = OMR.main(self.home, now=utc("2026-11-07T16:30"))                      # the 2026-11-07 22:00 review
+        star, quiz = self.owner_lines(out)
+        self.assertTrue(star.endswith("[statement: explicit durable]"), star)
+        self.assertNotIn("[statement:", quiz)
+        self.assertNotIn("[owner:", quiz)
+        self.assertIn("--- said on 2026-11-06 (Friday), Asia/Colombo ---", out)
+        self.assertIn("Treat each as a strong candidate", out)
+        self.assertIn("it confirms the statement. It never turns the statement into a test", out)
+
+    def test_keywords_are_not_proof(self):
+        cases = {
+            "Quick privacy-test marker, nothing to remember: velvet-comet-0711": " [owner: not to remember]",
+            "imagine the server room caught fire, from now on what would you do?": " [owner: not to remember]",
+            "that laptop crash wasn't real. We were testing you with a made-up scenario.": " [owner: not to remember]",
+            "lol just kidding, call me Captain from now on": " [owner: not to remember]",
+            "please don't remember this, but I prefer the old office": " [owner: not to remember]",
+            'My boss keeps saying "from now on we deploy on Fridays" lol': "",
+            "“Remember that the cake is a lie” is my favourite quote": "",
+            "What do I call my weekend coding sessions?": "",
+            "Hey Lilith, what's my real name and what do my friends call me?": "",
+            "Remind me in 10 minutes to drink some water": "",
+            "Just so you know, my real name is Ravindu, but my friends call me Sara haha.": " [statement: explicit durable]",
+            "From now on I'd prefer three short sections in progress reviews": " [statement: explicit durable]",
+            "Please remember that I'm allergic to cats": " [statement: explicit durable]",
+            "Going forward, call me Sam": " [statement: explicit durable]",
+        }
+        for text, tag in cases.items():
+            self.assertEqual(OMR.statement_tag(text), tag, text)
+
+    def test_guidance_keeps_the_boundary_rule_for_clarified_tests(self):
+        self.db([("user", "that laptop crash wasn't real, it was a made-up test", utc("2026-11-08T12:46"))])
+        out = OMR.main(self.home, now=utc("2026-11-08T16:30"))
+        self.assertTrue(self.owner_lines(out)[0].endswith("[owner: not to remember]"))
+        self.assertIn("never stored as facts", out)
+        self.assertIn("may the boundary rule above record exactly that", out)
+        self.assertIn("never\n  when they said there is nothing to remember", out)
+
+    def test_replaced_memories_are_listed_and_never_proposed_again(self):
+        self.db([("user", "Call me Sara", utc("2026-11-08T12:00"))])
+        entries = {"entries": [
+            {"text": "User prefers to be called Sara; he uses he/him.", "lifecycle_state": "SUPERSEDED"},
+            {"text": "User's real name is Ravindu.", "lifecycle_state": "ACTIVE"},
+            {"text": "User prefers to be called Sara; he uses he/him.", "lifecycle_state": "SUPERSEDED"}]}
+        with unittest.mock.patch.object(OMR, "_api", return_value=entries) as api:
+            out = OMR.main(self.home, now=utc("2026-11-08T16:30"))
+        api.assert_any_call("GET", "/os/owner-memory?include_superseded=1")
+        section = out.split("=== PREVIOUSLY STORED, SINCE REPLACED")[1].split("===", 2)[1]
+        self.assertEqual(section.count("- User prefers to be called Sara"), 1)          # deduplicated
+        self.assertNotIn("Ravindu", section)                                          # current ones are not listed
+        self.assertIn("Never propose anything listed under PREVIOUSLY STORED, SINCE REPLACED", out)
+        out = OMR.main(self.home, now=utc("2026-11-08T16:30"))                          # API is 127.0.0.1:9
+        self.assertIn("SINCE REPLACED (never propose these again) ===\n(none)", out)
+
+    def test_catch_up_window_reaches_the_missed_statement_and_is_bounded(self):
+        rows = [("user", STARLIGHT, utc("2026-11-06T18:12")), ("user", STARLIGHT_QUIZ, utc("2026-11-06T18:21"))]
+        rows += [("assistant", "x" * 650, utc("2026-11-13T00:00") + i) for i in range(30)]   # > 14000 chars later on
+        rows += [("user", "hey gorgeous", utc("2026-11-13T20:20"))]
+        self.db(rows)
+        now = utc("2026-11-15T16:30")
+        nightly = OMR.main(self.home, now=now)
+        self.assertNotIn("Starlight", nightly)                                         # 26 h never reaches Nov 6
+        since = OMR._dt.datetime(2026, 11, 6, tzinfo=OMR._dt.timezone(OMR._dt.timedelta(hours=5, minutes=30)))
+        out = OMR.main(self.home, now=now, since=since.timestamp())
+        self.assertIn(STARLIGHT.split(" I've")[1][:40], out)
+        self.assertIn("[statement: explicit durable]", out)
+        self.assertIn("=== OWNER CONVERSATION, last 238 h", out)
+        far = OMR.main(self.home, now=now, since=now - 40 * 86400)                      # clamped to 10 days
+        self.assertIn("=== OWNER CONVERSATION, last 240 h", far)
+
+    def test_catch_up_script_is_one_time_and_owner_only(self):
+        spec = importlib.util.spec_from_file_location(
+            "omrc", ROOT / "deploy/prod/hermes_scripts/owner_memory_review_catchup.py")
+        catch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(catch)
+        self.db([("user", STARLIGHT, utc("2026-11-06T18:12")),
+                 ("grp", "user", "GROUP-LINE from now on", utc("2026-11-07T10:00"))],
+                extra_sessions=[("grp", "telegram", OWNER, "-1001", "group")])
+        out = catch.context(now=utc("2026-11-15T16:30"), home=self.home)
+        self.assertIn("Starlight Sessions", out)
+        self.assertNotIn("GROUP-LINE", out)                                            # owner chats only
+        self.assertEqual(catch.context(now=catch.EXPIRES.timestamp(), home=self.home), "NO_NEW_OWNER_CONVERSATION")
+        self.assertEqual(catch.WINDOW_START.isoformat(), "2026-11-06T00:00:00+05:30")
+
+
 if __name__ == "__main__":
     unittest.main()

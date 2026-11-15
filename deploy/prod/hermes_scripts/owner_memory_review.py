@@ -25,6 +25,13 @@ Rejections leave no trace in Hermes (/memory reject deletes the pending file), s
 by the silent no-agent cron job owner_memory_snapshot.py) records every pending proposal in SEEN; a recorded proposal
 that is no longer pending and whose text is not in USER.md / MEMORY.md was rejected. The read is also a snapshot, so
 it is the one place that writes (only SEEN, under ~/.hermes/memory-review/).
+
+Durable statements (2026-11-15): an owner line that explicitly states something lasting ("from now on", "I've
+decided", "I prefer", "call me", "remember that", "my name is") is tagged [statement: explicit durable], unless the
+cue is only quoted, the line is a question, or the line says it is a test, a joke, hypothetical or not to be kept
+(those are tagged [owner: not to remember]). Tags are hints for the review, never proof. Replaced (superseded)
+memories are listed so they are never proposed again. `main(since=...)` serves the bounded one-time catch-up
+(owner_memory_review_catchup.py); every proposal still waits for the owner's /memory approve.
 """
 import datetime as _dt
 import glob
@@ -41,6 +48,8 @@ HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 REVIEW_HOURS = 26
 PER_MESSAGE = 700
 TOTAL = 14000
+CATCHUP_TOTAL = 40000         # a one-time catch-up window keeps more of its (older) lines
+CATCHUP_MAX_HOURS = 240       # a catch-up never reaches further back than 10 days
 SEEN = "memory-review/seen.jsonl"
 API = os.environ.get("LILITH_OS_API_URL", "http://127.0.0.1:8765")
 
@@ -263,7 +272,46 @@ GUIDANCE = """\
 - LILITH's own commitments (reminders, follow-ups she scheduled) are her responsibilities, not facts about them:
   never propose them as memories. An UNRESOLVED one is hers to own next time they talk; never say it was delivered.
 - Lines tagged [moment: ...] are where LILITH's own signals saw something notable. They are hints, not proof: read
-  the conversation itself before proposing anything."""
+  the conversation itself before proposing anything.
+- Lines tagged [statement: explicit durable] are the owner explicitly stating something lasting ("from now on",
+  "I've decided", "I prefer", "call me", "remember that", "my name is"). Treat each as a strong candidate: propose it
+  unless the conversation shows it is not genuine (a quotation of someone else, a joke, a hypothetical, a synthetic or
+  privacy test, something they asked you not to keep) or it is already remembered, waiting, rejected or replaced.
+  The keywords alone are not proof; read the line in context.
+- A recall question about it right after ("what do I call ...?", "what's my name?") is the owner checking that you
+  kept it: it confirms the statement. It never turns the statement into a test.
+- Lines tagged [owner: not to remember] are never stored as facts, and neither is anything they mention. Only when
+  they clarified that an earlier story was a test or made up may the boundary rule above record exactly that; never
+  when they said there is nothing to remember.
+- Never propose anything listed under PREVIOUSLY STORED, SINCE REPLACED, or a rewording of it."""
+
+
+_DURABLE_RE = re.compile(
+    r"\b(?:from now on|going forward|i(?:'|’)?ve decided|i have decided|i decided|i(?:'|’)?d prefer|i prefer"
+    r"|i would prefer|(?:please )?call me|remember that|please remember|always remember|my (?:real |full )?name is"
+    r"|i(?:'|’)?m (?:now )?going to call|i(?:'|’)?ll call)\b", re.I)
+_NOT_TO_REMEMBER_RE = re.compile(
+    r"\b(?:nothing to remember|(?:do not|don(?:'|’)?t) (?:remember|save|store|keep)|forget (?:that|this|it)"
+    r"|not real|wasn(?:'|’)?t real|made[- ]up|just (?:a )?(?:test|joke|kidding)|(?:privacy|synthetic)[- ]test"
+    r"|test (?:marker|phrase|scenario)|hypothetical(?:ly)?|imagine|pretend|role[- ]?play|only joking|jk)\b", re.I)
+_QUOTED_RE = re.compile(r"\"[^\"]*\"|“[^”]*”|(?<!\w)'[^']{3,}'(?!\w)|‘[^’]{3,}’")
+_QUESTION_RE = re.compile(
+    r"^\s*(?:hey\b[^,.!?]*[,.!]?\s*)?(?:what|how|when|which|who|whom|why|where|do|does|did|can|could|should|would"
+    r"|is|are|was|were|have|has)\b[^.!]*\?\s*$", re.I)
+
+
+def statement_tag(text: str) -> str:
+    """The tag for an owner line: ' [statement: explicit durable]' when it explicitly states something lasting,
+    ' [owner: not to remember]' when the owner says it is a test, a joke, hypothetical or not to be kept, else ''.
+    Deterministic and conservative; the keywords are a hint for the review, never proof."""
+    if not isinstance(text, str) or not text.strip():
+        return ""
+    if _NOT_TO_REMEMBER_RE.search(text):
+        return " [owner: not to remember]"
+    bare = _QUOTED_RE.sub(" ", text)                  # a cue inside a quotation is someone else's words
+    if _QUESTION_RE.match(bare) or not _DURABLE_RE.search(bare):
+        return ""
+    return " [statement: explicit durable]"
 
 
 def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at: list = (),
@@ -307,6 +355,8 @@ def conversation(con: sqlite3.Connection, sessions: list, since: float, marks_at
         if len(text) > PER_MESSAGE:
             text = text[:PER_MESSAGE] + " ..."
         tag = (" [moment: " + "; ".join(tags[ts]) + "]") if role == "user" and ts in tags else ""
+        if role == "user":
+            tag += statement_tag(text)
         if role == "user" and again.get(key):
             tag += " [also said on " + ", ".join(d.split(" ")[0] for d in again[key]) + "]"
         lines.append(f"{'OWNER' if role == 'user' else 'LILITH'}: {text}{tag}")
@@ -434,7 +484,18 @@ def remembered(home: Path) -> str:
     return "\n\n".join(parts)
 
 
-def main(home: Path = HOME, now: float = None) -> str:
+def replaced() -> list:
+    """Owner memories that were stored and later replaced (SUPERSEDED), so they are never proposed again. Read-only
+    GET; forgotten (FORGET) records are not returned by the Core API and are never listed. [] when unreachable."""
+    try:
+        entries = _api("GET", "/os/owner-memory?include_superseded=1").get("entries") or []
+    except Exception:
+        return []
+    return list(dict.fromkeys(f"- {' '.join(str(e['text']).split())[:200]}" for e in entries
+                              if isinstance(e, dict) and e.get("lifecycle_state") == "SUPERSEDED" and e.get("text")))
+
+
+def main(home: Path = HOME, now: float = None, since: float = None) -> str:
     now = time.time() if now is None else now
     try:
         snapshot(home)
@@ -444,7 +505,10 @@ def main(home: Path = HOME, now: float = None) -> str:
         con = sqlite3.connect(f"file:{home / 'state.db'}?mode=ro", uri=True, timeout=10)
     except sqlite3.Error:
         return "NO_NEW_OWNER_CONVERSATION"
-    since = now - REVIEW_HOURS * 3600
+    catchup = since is not None                     # bounded one-time catch-up (owner_memory_review_catchup.py)
+    since = max(float(since), now - CATCHUP_MAX_HOURS * 3600) if catchup else now - REVIEW_HOURS * 3600
+    hours = int(round((now - since) / 3600))
+    total = CATCHUP_TOTAL if catchup else TOTAL
     tz, tz_name = review_timezone(home)
     try:
         lines = conversation(con, owner_sessions(con, owner_ids(home), owner_discord_dms(home)), since,
@@ -455,7 +519,7 @@ def main(home: Path = HOME, now: float = None) -> str:
         return "NO_NEW_OWNER_CONVERSATION"
     body, size = [], 0
     for line in reversed(lines):              # keep the most recent part when long
-        if size + len(line) > TOTAL:
+        if size + len(line) > total:
             break
         body.append(line)
         size += len(line) + 1
@@ -466,14 +530,15 @@ def main(home: Path = HOME, now: float = None) -> str:
         "=== ALREADY REMEMBERED (do not propose again) ===", remembered(home), "",
         "=== ALREADY WAITING FOR APPROVAL (do not propose again) ===", "\n".join(pending(home)) or "(none)", "",
         "=== REJECTED BY THE OWNER (never propose these again) ===", "\n".join(rejected(home)) or "(none)", "",
+        "=== PREVIOUSLY STORED, SINCE REPLACED (never propose these again) ===", "\n".join(replaced()) or "(none)", "",
         "=== ALSO STORED ELSEWHERE (never propose) ===",
         "- the project codename and the relationship-origin statement (canonical memory)", "",
         "=== HOW TO PROPOSE ===", GUIDANCE, "",
-        f"=== THEIR TRACKED GOAL OUTCOMES, last {REVIEW_HOURS} h (verified in their goals; propose a dated fact "
+        f"=== THEIR TRACKED GOAL OUTCOMES, last {hours} h (verified in their goals; propose a dated fact "
         "only if it matters to them) ===", "\n".join(goal_outcomes(since, tz, tz_name)) or "(none)", "",
         "=== LILITH'S OWN COMMITMENTS (scheduler evidence; her responsibilities, NOT memories about them) ===",
         "\n".join(commitment_status(now, since)), "",
-        f"=== OWNER CONVERSATION, last {REVIEW_HOURS} h (console + private Telegram DM + verified Discord DM; "
+        f"=== OWNER CONVERSATION, last {hours} h (console + private Telegram DM + verified Discord DM; "
         f"dates in {tz_name}) ===",
         *body,
     ])
