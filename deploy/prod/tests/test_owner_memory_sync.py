@@ -162,5 +162,100 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(self.sync()["repaired_added"], 0)                         # restart: nothing twice
 
 
+class CorrectionSyncTests(unittest.TestCase):
+    """Correction-aware review (2026-11-15): an owner-approved REPLACE supersedes exactly the entry it corrects, keeps
+    it as history, and never leaves two current versions (the sync's repair step must not re-add the old one)."""
+    (setUp, write_user, poster, seen, sync, getter, user_entries,
+     export) = (SyncTest.setUp, SyncTest.write_user, SyncTest.poster, SyncTest.seen, SyncTest.sync, SyncTest.getter,
+                SyncTest.user_entries, SyncTest.export)
+
+    def approve_add(self, pid, text):
+        self.seen({"id": pid, "ops": [{"action": "add", "target": "user", "content": text}]})
+        self.write_user(self.user_entries() + [text])
+        self.sync()
+
+    def approve_replace(self, pid, old_text, new, old_entry=None):
+        """Hermes applies an approved replace to the entry containing old_text (whole entry swapped)."""
+        old_entry = old_entry or old_text
+        self.seen({"id": pid, "ops": [{"action": "replace", "target": "user", "old_text": old_text, "content": new}]})
+        self.write_user([new if e == old_entry else e for e in self.user_entries()])
+        return self.sync()
+
+    def assert_one_current(self, old, new):
+        cur, hist = self.export(), self.export(include_superseded=1)
+        self.assertIn(new, cur)
+        self.assertNotIn(old, cur)                                                 # never both current
+        self.assertEqual(hist[old]["lifecycle_state"], "SUPERSEDED")               # history kept
+        self.assertEqual(hist[new]["provenance"][0]["kind"], "OWNER_APPROVED_PROPOSAL")
+        self.assertNotIn(old, self.user_entries())                                 # repair never revives it
+        self.assertIn(new, self.user_entries())
+        again = self.sync()                                                        # idempotent
+        self.assertEqual((again["created"], again["superseded"], again["repaired_added"]), (0, 0, 0))
+        self.assertNotIn(old, self.export())
+
+    def test_changing_a_name(self):
+        self.sync()
+        self.approve_add("p20", "Prefers to be called Sam.")
+        report = self.approve_replace("p21", "Prefers to be called Sam.", "Prefers to be called Ravindu.")
+        self.assertEqual(report["superseded"], 1)
+        self.assert_one_current("Prefers to be called Sam.", "Prefers to be called Ravindu.")
+
+    def test_updating_a_preference_with_partial_old_text(self):
+        # Hermes accepts old_text as a substring of exactly one entry; the sync must resolve it the same way
+        old = "Prefers progress reviews in three sections: Done, Broken, Next."
+        new = "Prefers progress reviews in two sections: Done and Next."
+        self.sync()
+        self.approve_add("p30", old)
+        report = self.approve_replace("p31", "three sections", new, old_entry=old)
+        self.assertEqual(report["superseded"], 1)
+        self.assert_one_current(old, new)
+
+    def test_correcting_an_incorrect_fact(self):
+        self.sync()
+        self.approve_add("p40", "User lives in Leeds.")
+        self.approve_replace("p41", "User lives in Leeds.", "User lives in Manchester.")
+        self.assert_one_current("User lives in Leeds.", "User lives in Manchester.")
+
+    def test_unrelated_new_information_supersedes_nothing(self):
+        self.sync()
+        before = set(self.export())
+        self.approve_add("p50", "User has a cat named Miso.")
+        cur = self.export()
+        self.assertEqual(set(cur), before | {"User has a cat named Miso."})
+        self.assertFalse(any(e["lifecycle_state"] == "SUPERSEDED" for e in cur.values()))
+
+    def test_duplicate_statement_is_not_stored_twice(self):
+        self.sync()
+        self.approve_add("p60", "User owns a bike.")
+        self.seen({"id": "p61", "ops": [{"action": "add", "target": "user", "content": "User  owns a bike."}]})
+        report = self.sync()                                                       # same text (normalised) again
+        self.assertEqual(report["created"], 0)
+        self.assertEqual(sum(1 for t in self.export() if "owns a bike" in t), 1)
+
+    def test_rejected_replace_changes_nothing(self):
+        self.sync()
+        self.approve_add("p70", "User lives in Leeds.")
+        self.seen({"id": "p71", "ops": [{"action": "replace", "target": "user", "old_text": "User lives in Leeds.",
+                                         "content": "User lives in Paris."}]})       # rejected: file unchanged
+        report = self.sync()
+        cur = self.export()
+        self.assertIn("User lives in Leeds.", cur)
+        self.assertNotIn("User lives in Paris.", cur)
+        self.assertEqual(report["superseded"], 0)
+
+    def test_a_still_present_entry_is_never_superseded_by_a_partial_match(self):
+        self.sync()
+        self.approve_add("p80", "User drinks coffee in the morning.")
+        self.approve_add("p81", "User drinks green tea at night.")
+        self.seen({"id": "p82", "ops": [{"action": "replace", "target": "user", "old_text": "drinks",
+                                         "content": "User drinks black coffee in the morning."}]})
+        self.write_user([e if e != "User drinks coffee in the morning." else "User drinks black coffee in the morning."
+                         for e in self.user_entries()])
+        self.sync()
+        cur = self.export()
+        self.assertIn("User drinks green tea at night.", cur)                      # still in the file: untouched
+        self.assertNotIn("User drinks coffee in the morning.", cur)                # the one Hermes replaced
+
+
 if __name__ == "__main__":
     unittest.main()
