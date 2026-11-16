@@ -8,16 +8,35 @@
  *
  * Demo data is never a silent fallback. A workspace that cannot reach the
  * backend is `unavailable` unless `NEXT_PUBLIC_LILITH_DEMO_DATA=true` was set
- * when the app was built or started. The Command Center goes further and never
- * shows demo data at all (see `lib/home/meetings-view.ts`).
+ * for the development server. The Command Center goes further and never shows
+ * demo data at all (see `lib/home/meetings-view.ts`).
+ *
+ * Two locks, not one. The flag is the opt-in; the build is the guard. A
+ * production build (`next build`) never enables simulated content whatever the
+ * flags say, so a stray env file or a host variable cannot put invented data
+ * in front of real use. Both values are fixed when the app is built.
  */
 import { toDiagnostics, type Diagnostics, type EndpointResult } from "@/lib/api";
 
-/** True only when sample data has been explicitly asked for. */
+/** Simulated content exists for the development server only. */
+export function simulationAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): boolean {
+  return nodeEnv !== "production";
+}
+
+/** True only when sample data was explicitly asked for, outside a production build. */
 export function demoDataEnabled(
   flag: string | undefined = process.env.NEXT_PUBLIC_LILITH_DEMO_DATA,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
 ): boolean {
-  return flag === "true";
+  return flag === "true" && simulationAllowed(nodeEnv);
+}
+
+/** True only when the scripted demo commands were explicitly asked for, outside a production build. */
+export function demoCommandsEnabled(
+  flag: string | undefined = process.env.NEXT_PUBLIC_LILITH_ENABLE_DEMO_COMMANDS,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): boolean {
+  return flag === "true" && simulationAllowed(nodeEnv);
 }
 
 /** What a loader returns instead of data when the backend did not answer. */

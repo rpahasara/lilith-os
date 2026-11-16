@@ -6,13 +6,20 @@
  * No browser and no backend: `fetch` is replaced for the duration of the test.
  * Run by `npm run test:core`.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getAutomationsData } from "@/lib/automations/client";
 import { getCareerData } from "@/lib/career/client";
 import { matchRealIntent } from "@/lib/command/core/intents";
 import { DEMO_SUGGESTIONS, REAL_SUGGESTIONS, defaultSuggestions } from "@/lib/command/suggestions";
-import { demoDataEnabled, isUnavailable, unavailableReason, type Loaded } from "@/lib/data-mode";
+import {
+  demoCommandsEnabled,
+  demoDataEnabled,
+  isUnavailable,
+  simulationAllowed,
+  unavailableReason,
+  type Loaded,
+} from "@/lib/data-mode";
 import { getMeetingsData } from "@/lib/meetings/client";
 import { getMemoryData } from "@/lib/memory/client";
 
@@ -56,8 +63,34 @@ export async function runDataModeSelfTest(): Promise<Result[]> {
 
   /* the opt-in ------------------------------------------------------------- */
   check("sample data is off unless the flag is exactly \"true\"",
-    !demoDataEnabled(undefined) && !demoDataEnabled("") && !demoDataEnabled("false") &&
-      !demoDataEnabled("1") && !demoDataEnabled("TRUE") && demoDataEnabled("true"));
+    !demoDataEnabled(undefined, "development") && !demoDataEnabled("", "development") &&
+      !demoDataEnabled("false", "development") && !demoDataEnabled("1", "development") &&
+      !demoDataEnabled("TRUE", "development") && demoDataEnabled("true", "development"));
+
+  /* the production guard ----------------------------------------------------- */
+  check("a production build never enables sample data, whatever the flag says",
+    !demoDataEnabled("true", "production") && !simulationAllowed("production") &&
+      simulationAllowed("development") && simulationAllowed(undefined));
+  check("a production build never enables the scripted demo commands",
+    !demoCommandsEnabled("true", "production") && demoCommandsEnabled("true", "development") &&
+      !demoCommandsEnabled("false", "development") && !demoCommandsEnabled(undefined, "development"));
+  {
+    // The flags are read in exactly one place, so the guard cannot be bypassed.
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(ts|tsx)$/.test(entry.name) && !/self-test\.ts$/.test(entry.name)) {
+          const text = readFileSync(full, "utf8");
+          if (/process\.env\.NEXT_PUBLIC_LILITH_(DEMO_DATA|ENABLE_DEMO_COMMANDS)/.test(text)) offenders.push(full);
+        }
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    check("the demo flags are read only by the data-mode module",
+      offenders.length === 1 && /data-mode\.ts$/.test(offenders[0]), offenders.join(", "));
+  }
 
   /* every workspace, every way the backend can be absent --------------------- */
   const absences: Record<string, () => Response | Promise<Response>> = {
@@ -110,9 +143,9 @@ export async function runDataModeSelfTest(): Promise<Result[]> {
     REAL_SUGGESTIONS.every((s) => matchRealIntent(s) !== null),
     REAL_SUGGESTIONS.filter((s) => matchRealIntent(s) === null).join(", "));
   check("demo suggestions appear only when demo commands are enabled",
-    defaultSuggestions(undefined).length === REAL_SUGGESTIONS.length &&
-      defaultSuggestions("false").every((s) => !DEMO_SUGGESTIONS.includes(s as (typeof DEMO_SUGGESTIONS)[number])) &&
-      DEMO_SUGGESTIONS.every((s) => defaultSuggestions("true").includes(s)));
+    defaultSuggestions(false).length === REAL_SUGGESTIONS.length &&
+      defaultSuggestions(false).every((s) => !DEMO_SUGGESTIONS.includes(s as (typeof DEMO_SUGGESTIONS)[number])) &&
+      DEMO_SUGGESTIONS.every((s) => defaultSuggestions(true).includes(s)));
 
   const hero = source("components", "presence", "presence-hero.tsx");
   check("the hero makes no static \"Presence online\" claim", !/Presence online/.test(hero));

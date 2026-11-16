@@ -6,14 +6,12 @@
  * that holds them to it). The demo fixtures contribute theirs only when the
  * demo commands were explicitly enabled.
  */
+import { demoCommandsEnabled } from "@/lib/data-mode";
+
 export const REAL_SUGGESTIONS = ["System health", "Career summary"] as const;
 
 export const DEMO_SUGGESTIONS = ["Summarise inbox", "Compare AWS cost", "Plan my day"] as const;
 
-export function defaultSuggestions(
-  demoCommands: string | undefined = process.env.NEXT_PUBLIC_LILITH_ENABLE_DEMO_COMMANDS,
-): string[] {
-  return demoCommands === "true"
-    ? [...REAL_SUGGESTIONS, ...DEMO_SUGGESTIONS]
-    : [...REAL_SUGGESTIONS];
+export function defaultSuggestions(demoCommands: boolean = demoCommandsEnabled()): string[] {
+  return demoCommands ? [...REAL_SUGGESTIONS, ...DEMO_SUGGESTIONS] : [...REAL_SUGGESTIONS];
 }

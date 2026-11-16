@@ -60,7 +60,8 @@ export function WorkspaceUnavailable({
 
 /**
  * Shown at the top of any page that is rendering the bundled sample data.
- * Sample data only appears when `NEXT_PUBLIC_LILITH_DEMO_DATA=true` was set, and
+ * Sample data only appears when `NEXT_PUBLIC_LILITH_DEMO_DATA=true` was set for the
+ * development server (a production build never shows it), and
  * this banner is what makes it impossible to mistake for Lilith's own.
  */
 export function DemoBanner() {
