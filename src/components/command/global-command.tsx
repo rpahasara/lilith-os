@@ -250,6 +250,11 @@ export function GlobalCommandPanel() {
     // Opened by the shortcut, nothing in particular had focus: return it to the launcher.
     const active = document.activeElement as HTMLElement | null;
     const opener = active && active !== document.body ? active : launcherRef.current;
+    // The field takes focus itself. When it cannot (nothing can be sent), the
+    // dialog does, so focus is never left behind on the page underneath.
+    const settle = requestAnimationFrame(() => {
+      if (!panel.current?.contains(document.activeElement)) panel.current?.focus();
+    });
     function onKey(event: KeyboardEvent) {
       if (historyOpenRef.current) return;
       if (event.key === "Escape") {
@@ -277,6 +282,7 @@ export function GlobalCommandPanel() {
     }
     document.addEventListener("keydown", onKey);
     return () => {
+      cancelAnimationFrame(settle);
       document.removeEventListener("keydown", onKey);
       (opener && document.contains(opener) ? opener : launcherRef.current)?.focus();
     };
@@ -311,14 +317,15 @@ export function GlobalCommandPanel() {
                 role="dialog"
                 aria-modal="true"
                 aria-label="Lilith"
+                tabIndex={-1}
                 data-global-command-panel=""
                 data-surface-state={state}
                 initial={{ opacity: 0, y: -10, scale: 0.985 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6, scale: 0.99 }}
+                exit={{ opacity: 0, y: -6, scale: 0.99, transition: fade }}
                 transition={spring}
                 style={{ transformOrigin: "top center" }}
-                className="glass-strong pointer-events-auto relative flex max-h-[min(80dvh,720px)] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95),0_24px_80px_-48px_rgba(201,84,115,0.55)]"
+                className="glass-strong pointer-events-auto relative flex max-h-[min(80dvh,720px)] outline-none w-full max-w-[680px] flex-col overflow-hidden rounded-2xl shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95),0_24px_80px_-48px_rgba(201,84,115,0.55)]"
               >
                 <span className="pointer-events-none absolute inset-x-16 top-0 h-px bg-gradient-to-r from-transparent via-pearl/45 to-transparent" />
 

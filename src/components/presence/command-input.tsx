@@ -67,11 +67,15 @@ export function CommandInput({
   // The global panel opens straight into typing, and comes back to it when a
   // turn ends (the field is disabled while one is in flight, which drops focus).
   // Focus is only taken when nothing else has it.
+  // On opening, focus always moves in (whatever opened the panel had it). When
+  // a turn ends, it is only taken back if nothing else has it.
+  const focusedOnMount = useRef(false);
   useEffect(() => {
     if (!autoFocus || loading || disabled) return;
     const frame = requestAnimationFrame(() => {
       const active = document.activeElement;
-      if (!active || active === document.body) inputRef.current?.focus();
+      if (!focusedOnMount.current || !active || active === document.body) inputRef.current?.focus();
+      focusedOnMount.current = true;
     });
     return () => cancelAnimationFrame(frame);
   }, [autoFocus, loading, disabled]);
