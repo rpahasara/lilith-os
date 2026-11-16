@@ -14,11 +14,13 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, History, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, History, X } from "lucide-react";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { ConversationAnnouncer, ConversationView } from "@/components/conversation/conversation-view";
 import { useShellHealth } from "@/components/layout/shell-health-provider";
 import { CommandInput } from "@/components/presence/command-input";
+import { PresenceAnnouncer, PresenceMark, useShellPresence } from "@/components/presence/presence-mark";
+import { PRESENCE_LABEL } from "@/lib/presence/shell-presence";
 import { InlineNotice, LoadingRegion, Skeleton } from "@/components/ui/feedback";
 import {
   GLOBAL_INPUT_ID,
@@ -157,7 +159,9 @@ export function GlobalCommandLauncher() {
   const pathname = usePathname();
   const { open, activate, unseen, launcherRef } = useGlobalCommand();
   const onHome = isCommandCenter(pathname);
+  const presence = useShellPresence();
   const label = unseen ? "Lilith replied" : "Ask Lilith, or give a command…";
+  const name = unseen ? "Lilith replied. Open the conversation" : "Ask Lilith";
   // On the Command Center it moves focus to the hero input; elsewhere it opens a dialog.
   const popup = onHome
     ? {}
@@ -169,16 +173,25 @@ export function GlobalCommandLauncher() {
         ref={launcherRef}
         type="button"
         onClick={activate}
-        aria-label={unseen ? "Lilith replied. Open the conversation" : "Ask Lilith"}
+        aria-label={name}
+        aria-description={`Lilith is ${PRESENCE_LABEL[presence].toLowerCase()}`}
         aria-keyshortcuts="Control+Space"
         data-global-command-launcher=""
+        data-presence-state={presence}
         {...popup}
         className="glass group relative hidden h-10 max-w-[460px] flex-1 items-center gap-3 overflow-hidden rounded-full px-4 text-left text-sm text-ink-muted transition-[border-color,box-shadow,color] hover:border-wine/30 hover:text-ink hover:shadow-[0_14px_40px_-22px_rgba(201,84,115,0.75)] md:flex"
       >
         <span className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-pearl/30 to-transparent" />
-        <Sparkles className="h-4 w-4 shrink-0 text-wine-bright/80 transition-colors group-hover:text-wine-bright" />
+        <PresenceMark state={presence} />
         <span className={cn("flex-1 truncate", unseen && "text-ink")}>{label}</span>
-        {unseen && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-wine-bright shadow-[0_0_10px_rgba(225,132,157,0.9)]" />}
+        {unseen ? (
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-wine-bright shadow-[0_0_10px_rgba(225,132,157,0.9)]" />
+        ) : (
+          // Lilith's state in words, beside the mark that shows it.
+          <span aria-hidden data-presence-label="" className="hidden shrink-0 font-mono text-micro uppercase tracking-[0.12em] text-ink-faint sm:block">
+            {PRESENCE_LABEL[presence]}
+          </span>
+        )}
         <kbd className="hidden items-center rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-micro text-ink-faint lg:flex">
           Ctrl Space
         </kbd>
@@ -188,13 +201,15 @@ export function GlobalCommandLauncher() {
       <button
         type="button"
         onClick={activate}
-        aria-label={unseen ? "Lilith replied. Open the conversation" : "Ask Lilith"}
+        aria-label={name}
+        aria-description={`Lilith is ${PRESENCE_LABEL[presence].toLowerCase()}`}
         {...popup}
-        className="glass relative grid h-10 w-10 shrink-0 place-items-center rounded-full text-wine-bright md:hidden"
+        className="glass relative grid h-10 w-10 shrink-0 place-items-center rounded-full md:hidden"
       >
-        <Sparkles className="h-4 w-4" />
+        <PresenceMark state={presence} />
         {unseen && <span aria-hidden className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-wine-bright" />}
       </button>
+      <PresenceAnnouncer state={presence} />
     </>
   );
 }
@@ -212,6 +227,7 @@ export function GlobalCommandPanel() {
   const { submit, activeTask, history, historyOpen, setHistoryOpen, recentInputs } = useCommand();
   const { health, refresh } = useShellHealth();
   const panel = useRef<HTMLDivElement | null>(null);
+  const presence = useShellPresence();
   const [editFill, setEditFill] = useState<{ text: string; nonce: number } | undefined>();
   const onHome = isCommandCenter(pathname);
 
@@ -308,8 +324,8 @@ export function GlobalCommandPanel() {
 
                 {/* header: who this is, what is happening, and the way to the full surface */}
                 <header className="flex items-center gap-3 px-5 pb-3 pt-4">
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-wine/25 bg-wine/[0.1] text-wine-bright">
-                    <Sparkles className="h-4 w-4" />
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/[0.09] bg-black/20">
+                    <PresenceMark state={presence} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-body font-semibold leading-tight tracking-[-0.01em] text-ink">Lilith</p>
