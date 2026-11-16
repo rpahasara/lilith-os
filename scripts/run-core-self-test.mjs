@@ -31,6 +31,7 @@ await build({
       import { runControlsSelfTest } from "@/lib/ui/controls-self-test";
       import { runShellSelfTest } from "@/lib/ui/shell-self-test";
       import { runFoundationsSelfTest } from "@/lib/ui/foundations-self-test";
+      import { runGlobalSurfaceSelfTest } from "@/lib/command/global-surface-self-test";
       import { runHomeSelfTest } from "@/lib/home/self-test";
       import { runTurnSelfTest } from "@/lib/conversation/turn-self-test";
       import { runVoiceSelfTest } from "@/lib/voice/voice-self-test";
@@ -39,7 +40,7 @@ await build({
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
       import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
       const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...runAtlasPreviewSelfTest(), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runFoundationsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));

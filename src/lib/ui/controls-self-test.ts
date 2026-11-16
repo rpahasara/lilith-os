@@ -16,6 +16,7 @@
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TopBar } from "@/components/layout/top-bar";
+import { ShellProviders } from "@/components/layout/app-shell";
 import { SidebarRail } from "@/components/layout/sidebar-rail";
 import { CommandInput } from "@/components/presence/command-input";
 import { REAL_SUGGESTIONS } from "@/lib/command/suggestions";
@@ -63,7 +64,8 @@ function render(c: ComponentType<any>, props: Record<string, unknown> = {}) { //
 
 /** Controls with real handlers today, per surface. */
 const FUNCTIONAL: Record<string, string[]> = {
-  "top bar": [],
+  // The launcher opens Lilith over the page (one control per breakpoint).
+  "top bar": ["Ask Lilith"],
   "sidebar rail": [],
   // Suggestion chips fill the input; Send submits (disabled while empty).
   // Only chips backed by a real intent are offered by default.
@@ -72,7 +74,7 @@ const FUNCTIONAL: Record<string, string[]> = {
 
 /** Features that are not built yet and must render as disabled controls. */
 const UNAVAILABLE: Record<string, string[]> = {
-  "top bar": ["Search"],
+  "top bar": [],
   "sidebar rail": [],
   "command input": ["Voice input"],
 };
@@ -83,7 +85,8 @@ export function runControlsSelfTest(): Result[] {
     out.push({ name: `ui-controls: ${name}`, pass, detail: pass ? undefined : detail });
 
   const surfaces: Record<string, string> = {
-    "top bar": render(TopBar),
+    // The top bar reads the shell's shared state, so it renders inside the real stack.
+    "top bar": renderToStaticMarkup(createElement(ShellProviders, null, createElement(TopBar))),
     "sidebar rail": render(SidebarRail),
     "command input": render(CommandInput),
   };

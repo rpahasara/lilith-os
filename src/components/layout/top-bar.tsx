@@ -1,11 +1,10 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Search } from "lucide-react";
 import { nav } from "./nav";
 import { Clock } from "./clock";
 import { user } from "@/lib/data";
-import { unavailable } from "@/components/ui/unavailable";
+import { GlobalCommandLauncher } from "@/components/command/global-command";
 
 function titleFor(pathname: string) {
   if (pathname === "/") return "Command Center";
@@ -28,19 +27,9 @@ export function TopBar() {
         </span>
       </div>
 
-      {/* center: search. Not connected yet, so it is a disabled control: no
-          shortcut hint, no hover affordance, and the reason is exposed as the
-          accessible description. */}
-      <button
-        type="button"
-        aria-label="Search"
-        {...unavailable("Search")}
-        className="glass relative hidden h-10 max-w-[460px] flex-1 cursor-not-allowed items-center gap-3 overflow-hidden rounded-full px-4 text-left text-sm text-ink-faint opacity-60 md:flex"
-      >
-        <span className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-pearl/30 to-transparent" />
-        <Search className="h-4 w-4 text-wine-bright/70" />
-        <span className="flex-1">Search, recall, or ask Lilith…</span>
-      </button>
+      {/* center: Lilith. Opens the conversation over the current workspace; on
+          the Command Center it focuses the hero input. Ctrl+Space does the same. */}
+      <GlobalCommandLauncher />
 
       {/* right: actions */}
       <div className="flex items-center gap-2">

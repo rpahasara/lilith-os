@@ -5,16 +5,32 @@ import { PresenceProvider } from "@/components/presence/presence-engine";
 import { ConversationProvider } from "@/components/conversation/conversation-provider";
 import { CommandProvider } from "@/components/command";
 import { MotionPreferences } from "./motion-preferences";
+import { ShellHealthProvider } from "./shell-health-provider";
+import { GlobalCommandPanel, GlobalCommandProvider } from "@/components/command/global-command";
+
+/**
+ * Everything the shell shares with the pages, in dependency order. Presence,
+ * the one conversation and the one command store sit above the routed pages,
+ * so they survive navigation; the backend probe and the global command surface
+ * read from them. Exported so the headless tests render the real stack.
+ */
+export function ShellProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <PresenceProvider defaultRenderer="avatar">
+      <ConversationProvider>
+        <CommandProvider>
+          <ShellHealthProvider>
+            <GlobalCommandProvider>{children}</GlobalCommandProvider>
+          </ShellHealthProvider>
+        </CommandProvider>
+      </ConversationProvider>
+    </PresenceProvider>
+  );
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <PresenceProvider defaultRenderer="avatar">
-      {/* Conversation lives above the routed pages so the transcript + session
-          survive navigation between workspaces. The Command System sits inside
-          both so it can bridge plain chat to the backend and translate command
-          lifecycle into semantic presence. */}
-      <ConversationProvider>
-        <CommandProvider>
+    <ShellProviders>
         {/* Environmental wallpaper is its own layer so the filter (blur/dim)
             affects ONLY the artwork — never Lilith, glass, text, or grain. */}
         <div className="lilith-bg" aria-hidden>
@@ -43,9 +59,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <StatusBar />
           </div>
         </div>
+        {/* Lilith over the current workspace (never on the Command Center). */}
+        <GlobalCommandPanel />
         </MotionPreferences>
-        </CommandProvider>
-      </ConversationProvider>
-    </PresenceProvider>
+    </ShellProviders>
   );
 }

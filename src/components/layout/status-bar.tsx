@@ -1,15 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Cpu } from "lucide-react";
 import { StatusDot, type Accent } from "@/components/ui/primitives";
-import {
-  INITIAL_SHELL_HEALTH,
-  SHELL_HEALTH_INTERVAL_MS,
-  probeShellHealth,
-  shellHealthLabel,
-  type ShellHealth,
-} from "@/lib/system/shell-health";
+import { shellHealthLabel, type ShellHealth } from "@/lib/system/shell-health";
+import { useShellHealth } from "./shell-health-provider";
 
 const DOT: Record<ShellHealth["state"], Accent> = {
   checking: "orchid",
@@ -32,35 +26,7 @@ const TEXT: Record<ShellHealth["state"], string> = {
  * Nothing is displayed that the client cannot verify.
  */
 export function StatusBar() {
-  const [health, setHealth] = useState<ShellHealth>(INITIAL_SHELL_HEALTH);
-
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const run = async () => {
-      if (inFlight || document.visibilityState === "hidden") return;
-      inFlight = true;
-      try {
-        const next = await probeShellHealth();
-        if (!cancelled) setHealth(next);
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    void run();
-    const timer = window.setInterval(run, SHELL_HEALTH_INTERVAL_MS);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") void run();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
+  const { health } = useShellHealth();
 
   const title = health.checkedAt
     ? `Backend probe at ${new Date(health.checkedAt).toLocaleTimeString()} · ` +
