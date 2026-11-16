@@ -34,7 +34,7 @@ export default function WorkspaceError({
   return (
     <div className="workspace-page grid h-full place-items-center">
       <GlassCard strong animated={false} className="w-full max-w-md p-7 text-center" role="alert">
-        <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl border border-rose/25 bg-rose/10 text-rose">
+        <span className="mx-auto grid h-11 w-11 place-items-center rounded-lg border border-rose/25 bg-rose/10 text-rose">
           <TriangleAlert className="h-5 w-5" />
         </span>
         <h1 className="mt-4 text-lg font-semibold tracking-tight text-ink">This workspace hit a problem</h1>
@@ -42,7 +42,7 @@ export default function WorkspaceError({
           Something went wrong while drawing this page. The rest of Lilith OS is unaffected, and
           nothing was changed.
         </p>
-        {digest && <p className="mt-2 font-mono text-[11px] text-ink-faint">reference · {digest}</p>}
+        {digest && <p className="mt-2 font-mono text-micro text-ink-faint">reference · {digest}</p>}
         <div className="mt-5 flex items-center justify-center gap-2">
           <button
             type="button"

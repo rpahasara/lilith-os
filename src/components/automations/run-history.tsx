@@ -9,7 +9,7 @@ const COLOR: Record<RunOutcome, string> = {
 /** Compact bar strip of recent run outcomes (oldest → newest). */
 export function RunHistory({ history }: { history?: RunOutcome[] }) {
   if (!history || history.length === 0) {
-    return <span className="text-[11px] text-ink-faint">No run history</span>;
+    return <span className="text-micro text-ink-faint">No run history</span>;
   }
   return (
     <div className="flex items-end gap-[3px]" title="Recent runs">

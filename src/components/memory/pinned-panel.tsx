@@ -7,7 +7,7 @@ import { CATEGORY_META, type Accent, type MemoryRecord } from "@/lib/memory/type
 import { cn } from "@/lib/utils";
 
 const TEXT: Record<Accent, string> = {
-  violet: "text-violet-bright",
+  orchid: "text-orchid-bright",
   cyan: "text-cyan-bright",
   green: "text-green",
   amber: "text-amber",
@@ -35,7 +35,7 @@ export function PinnedPanel({
     <GlassCard className="p-5" animated={false}>
       <PanelHeader
         title="Pinned & important"
-        action={<Pin className="h-3.5 w-3.5 text-violet-bright/70" />}
+        action={<Pin className="h-3.5 w-3.5 text-orchid-bright/70" />}
       />
 
       <ul className="mt-4 space-y-2">
@@ -46,7 +46,7 @@ export function PinnedPanel({
             <li key={r.id}>
               <button
                 onClick={() => onSelect(r)}
-                className="group flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+                className="group flex w-full items-start gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
               >
                 <CatIcon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", TEXT[cat.accent])} />
                 <span className="min-w-0 flex-1">
@@ -55,7 +55,7 @@ export function PinnedPanel({
                   </span>
                 </span>
                 {r.pinned && (
-                  <Pin className="mt-0.5 h-3 w-3 shrink-0 fill-current text-violet-bright/80" />
+                  <Pin className="mt-0.5 h-3 w-3 shrink-0 fill-current text-orchid-bright/80" />
                 )}
               </button>
             </li>

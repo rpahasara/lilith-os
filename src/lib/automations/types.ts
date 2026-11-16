@@ -79,10 +79,10 @@ export interface AutomationsData {
 
 export const KIND_META: Record<
   UnitKind,
-  { label: string; accent: "violet" | "cyan" | "green" | "amber"; blurb: string }
+  { label: string; accent: "orchid" | "cyan" | "green" | "amber"; blurb: string }
 > = {
   service: { label: "Service", accent: "cyan", blurb: "Always-on process" },
-  timer: { label: "Timer", accent: "violet", blurb: "Scheduled job" },
+  timer: { label: "Timer", accent: "orchid", blurb: "Scheduled job" },
   watcher: { label: "Watcher", accent: "green", blurb: "Event processor" },
   agent: { label: "Agent", accent: "amber", blurb: "Background agent" },
 };

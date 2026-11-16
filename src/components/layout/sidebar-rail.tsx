@@ -7,6 +7,7 @@ import { nav } from "./nav";
 import { cn } from "@/lib/utils";
 import { user } from "@/lib/data";
 import { FoxMark } from "@/components/ui/fox-mark";
+import { springSnap } from "@/lib/motion";
 
 export function SidebarRail() {
   const pathname = usePathname();
@@ -16,11 +17,11 @@ export function SidebarRail() {
       <span className="shell-divider pointer-events-none absolute inset-y-5 right-0 w-px" />
       {/* mark */}
       <Link href="/" aria-label="Lilith command center" className="group flex flex-col items-center gap-2">
-        <div className="glass relative grid h-12 w-12 place-items-center overflow-hidden rounded-2xl shadow-[0_12px_30px_-14px_rgba(201,84,115,0.8)] transition-transform duration-300 group-hover:-translate-y-0.5">
+        <div className="glass relative grid h-12 w-12 place-items-center overflow-hidden rounded-lg shadow-[0_12px_30px_-14px_rgba(201,84,115,0.8)] transition-transform duration-300 group-hover:-translate-y-0.5">
           <span className="absolute inset-0 bg-[radial-gradient(circle_at_50%_12%,rgba(255,255,255,0.12),transparent_48%)]" />
           <FoxMark className="relative h-8 w-8 drop-shadow-[0_0_10px_rgba(225,132,157,0.4)]" />
         </div>
-        <span className="font-mono text-[9px] uppercase tracking-[0.24em] text-ink-muted">
+        <span className="font-mono text-micro uppercase tracking-[0.24em] text-ink-muted">
           Lilith
         </span>
       </Link>
@@ -43,13 +44,13 @@ export function SidebarRail() {
               {active && (
                 <motion.span
                   layoutId="nav-active"
-                  className="glass absolute inset-0 rounded-2xl shadow-[0_12px_28px_-18px_rgba(201,84,115,0.9)] ring-1 ring-wine/20"
-                  transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                  className="glass absolute inset-0 rounded-lg shadow-[0_12px_28px_-18px_rgba(201,84,115,0.9)] ring-1 ring-wine/20"
+                  transition={springSnap}
                 />
               )}
               <span
                 className={cn(
-                  "relative grid h-10 w-10 place-items-center rounded-xl transition-colors",
+                  "relative grid h-10 w-10 place-items-center rounded-2xl transition-colors",
                   active
                     ? "text-wine-bright"
                     : "text-ink-faint group-hover:text-ink",
@@ -59,7 +60,7 @@ export function SidebarRail() {
               </span>
               <span
                 className={cn(
-                  "relative text-[10px] transition-colors",
+                  "relative text-micro transition-colors",
                   active ? "font-medium text-ink" : "text-ink-faint group-hover:text-ink-muted",
                 )}
               >

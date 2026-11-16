@@ -20,10 +20,10 @@ export function TopBar() {
     <header className="flex h-[72px] shrink-0 items-center justify-between gap-5 px-5 sm:px-7 lg:px-8">
       {/* left: context */}
       <div className="flex flex-col">
-        <span className="text-[15px] font-semibold tracking-[-0.02em] text-ink">
+        <span className="text-lead font-semibold tracking-[-0.02em] text-ink">
           {titleFor(pathname)}
         </span>
-        <span className="font-mono text-[11px] text-ink-faint">
+        <span className="font-mono text-micro text-ink-faint">
           <Clock withDate />
         </span>
       </div>
@@ -53,7 +53,7 @@ export function TopBar() {
             <span className="block text-xs font-medium leading-none text-ink">
               {user.name}
             </span>
-            <span className="block font-mono text-[10px] text-ink-faint">
+            <span className="block font-mono text-micro text-ink-faint">
               {user.plan}
             </span>
           </span>

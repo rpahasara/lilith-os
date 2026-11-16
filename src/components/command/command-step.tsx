@@ -39,7 +39,7 @@ export function CommandStep({ step, showTiming = false }: { step: Step; showTimi
         <span className="flex items-baseline justify-between gap-3">
           <span
             className={cn(
-              "text-[13px] leading-snug",
+              "text-compact leading-snug",
               step.status === "pending"
                 ? "text-ink-faint"
                 : active
@@ -49,12 +49,12 @@ export function CommandStep({ step, showTiming = false }: { step: Step; showTimi
           >
             {step.label}
           </span>
-          {time && <span className="shrink-0 font-mono text-[10px] text-ink-faint">{time}</span>}
+          {time && <span className="shrink-0 font-mono text-micro text-ink-faint">{time}</span>}
         </span>
         {step.detail && (
           <span
             className={cn(
-              "mt-0.5 block text-[11px] leading-relaxed",
+              "mt-0.5 block text-micro leading-relaxed",
               step.status === "failed" ? "text-rose/90" : "text-ink-faint",
             )}
           >

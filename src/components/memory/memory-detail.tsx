@@ -14,7 +14,7 @@ import { ProvenanceBadge, KindTag } from "./provenance-badge";
 import { ConfidenceMeter } from "./confidence-meter";
 
 const TEXT: Record<Accent, string> = {
-  violet: "text-violet-bright",
+  orchid: "text-orchid-bright",
   cyan: "text-cyan-bright",
   green: "text-green",
   amber: "text-amber",
@@ -84,14 +84,14 @@ export function MemoryDetail({
                 key={a.label}
                 disabled
                 title="Read-only · write actions arrive with the backend approval flow"
-                className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-2 text-xs text-ink-faint opacity-60"
+                className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2 py-2 text-xs text-ink-faint opacity-60"
               >
                 <a.icon className="h-3.5 w-3.5" />
                 {a.label}
               </button>
             ))}
           </div>
-          <p className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-ink-faint">
+          <p className="mt-2 flex items-center justify-center gap-1.5 text-micro text-ink-faint">
             <Lock className="h-3 w-3" />
             Read-only — Lilith won&apos;t change or forget memories without your approval.
           </p>
@@ -107,19 +107,19 @@ export function MemoryDetail({
             </span>
             <KindTag kind={record.kind} />
             {record.pinned && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-bright/10 px-2 py-0.5 text-[10px] text-violet-bright">
+              <span className="inline-flex items-center gap-1 rounded-full bg-orchid-bright/10 px-2 py-0.5 text-micro text-orchid-bright">
                 <Pin className="h-2.5 w-2.5 fill-current" />
                 Pinned
               </span>
             )}
           </div>
 
-          <p className="mt-4 text-[15px] leading-relaxed text-ink">{record.content}</p>
+          <p className="mt-4 text-lead leading-relaxed text-ink">{record.content}</p>
 
           {record.tags.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {record.tags.map((t) => (
-                <span key={t} className="rounded-md bg-white/[0.04] px-2 py-0.5 text-[11px] text-ink-muted">
+                <span key={t} className="rounded-md bg-white/[0.04] px-2 py-0.5 text-micro text-ink-muted">
                   #{t}
                 </span>
               ))}
@@ -135,7 +135,7 @@ export function MemoryDetail({
                 </div>
                 <p className="mt-2 text-xs text-ink-muted">{record.provenance.label}</p>
                 {record.provenance.at && (
-                  <p className="mt-1 font-mono text-[10px] text-ink-faint">
+                  <p className="mt-1 font-mono text-micro text-ink-faint">
                     signal · {fmt(record.provenance.at)}
                   </p>
                 )}
@@ -145,13 +145,13 @@ export function MemoryDetail({
             <Section label="Confidence & importance">
               <div className="space-y-2.5">
                 <div>
-                  <div className="mb-1 flex items-center justify-between text-[11px] text-ink-faint">
+                  <div className="mb-1 flex items-center justify-between text-micro text-ink-faint">
                     <span>Confidence</span>
                   </div>
                   <ConfidenceMeter value={record.confidence} />
                 </div>
                 <div>
-                  <div className="mb-1 flex items-center justify-between text-[11px] text-ink-faint">
+                  <div className="mb-1 flex items-center justify-between text-micro text-ink-faint">
                     <span>Importance</span>
                   </div>
                   <ConfidenceMeter value={record.importance} />
@@ -167,11 +167,11 @@ export function MemoryDetail({
                     return (
                       <span
                         key={e.id}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-xs text-ink-muted"
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2 py-1 text-xs text-ink-muted"
                       >
                         <EIcon className="h-3 w-3 text-cyan-bright" />
                         {e.label}
-                        <span className="text-[10px] text-ink-faint">{ENTITY_META[e.type].label}</span>
+                        <span className="text-micro text-ink-faint">{ENTITY_META[e.type].label}</span>
                       </span>
                     );
                   })}
@@ -186,7 +186,7 @@ export function MemoryDetail({
                     <li key={r.id}>
                       <button
                         onClick={() => onSelectRelated(r)}
-                        className="group flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
+                        className="group flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/[0.04]"
                       >
                         <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-ink-faint group-hover:text-cyan-bright" />
                         <span className="line-clamp-2 text-xs text-ink-muted group-hover:text-ink">
@@ -200,7 +200,7 @@ export function MemoryDetail({
             )}
 
             <Section label="Timeline">
-              <ul className="space-y-1.5 font-mono text-[11px] text-ink-muted">
+              <ul className="space-y-1.5 font-mono text-micro text-ink-muted">
                 <li className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-ink-faint">
                     <Clock className="h-3 w-3" /> Created

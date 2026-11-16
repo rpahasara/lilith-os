@@ -49,17 +49,17 @@ export const CATEGORIES = [
 
 export type MemoryCategory = (typeof CATEGORIES)[number];
 
-export type Accent = "violet" | "cyan" | "green" | "amber" | "rose" | "faint";
+export type Accent = "orchid" | "cyan" | "green" | "amber" | "rose" | "faint";
 
 export const CATEGORY_META: Record<
   MemoryCategory,
   { label: string; accent: Accent; icon: LucideIcon; blurb: string }
 > = {
-  people: { label: "People", accent: "violet", icon: Users, blurb: "Relationships & contacts" },
+  people: { label: "People", accent: "orchid", icon: Users, blurb: "Relationships & contacts" },
   projects: { label: "Projects", accent: "cyan", icon: FolderKanban, blurb: "What you're building" },
   career: { label: "Career", accent: "amber", icon: Briefcase, blurb: "Roles & opportunities" },
   work: { label: "Work", accent: "cyan", icon: Building2, blurb: "How you work" },
-  personal: { label: "Personal", accent: "violet", icon: User, blurb: "Context about you" },
+  personal: { label: "Personal", accent: "orchid", icon: User, blurb: "Context about you" },
   preferences: { label: "Preferences", accent: "green", icon: Sliders, blurb: "How you like things" },
   knowledge: { label: "Knowledge", accent: "cyan", icon: BookOpen, blurb: "Facts & references" },
 };
@@ -105,7 +105,7 @@ export const PROVENANCE_META: Record<
   ProvenanceKind,
   { label: string; icon: LucideIcon; accent: Accent }
 > = {
-  conversation: { label: "Conversation", icon: MessageSquare, accent: "violet" },
+  conversation: { label: "Conversation", icon: MessageSquare, accent: "orchid" },
   gmail: { label: "Gmail", icon: Mail, accent: "cyan" },
   calendar: { label: "Calendar", icon: CalendarDays, accent: "cyan" },
   manual: { label: "Manual", icon: PenLine, accent: "green" },

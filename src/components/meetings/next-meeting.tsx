@@ -63,7 +63,7 @@ export function NextMeeting({
   return (
     <GlassCard strong className="relative overflow-hidden p-6" animated={false}>
       {/* soft temporal glow */}
-      <span className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full bg-violet-bright/12 blur-3xl" />
+      <span className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full bg-orchid-bright/12 blur-3xl" />
       <span className="pointer-events-none absolute -left-12 bottom-0 h-40 w-40 rounded-full bg-cyan-bright/10 blur-3xl" />
 
       <div className="relative flex items-start justify-between gap-3">
@@ -75,7 +75,7 @@ export function NextMeeting({
 
       <div className="relative mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-lg font-semibold tracking-tight text-ink">{event.title}</h2>
-        <span className="animate-breathe font-mono text-sm text-violet-bright">{label(mins)}</span>
+        <span className="animate-breathe font-mono text-sm text-orchid-bright">{label(mins)}</span>
       </div>
 
       <div className="relative mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
@@ -96,14 +96,14 @@ export function NextMeeting({
           {event.attendees.slice(0, 5).map((a, i) => (
             <span
               key={i}
-              className="rounded-md bg-white/[0.04] px-2 py-0.5 text-[11px] text-ink-muted"
+              className="rounded-md bg-white/[0.04] px-2 py-0.5 text-micro text-ink-muted"
               title={a.emailMasked || undefined}
             >
               {a.displayName || a.emailMasked || "Guest"}
             </span>
           ))}
           {event.attendeeCount > event.attendees.length && (
-            <span className="text-[10px] text-ink-faint">+{event.attendeeCount - event.attendees.length}</span>
+            <span className="text-micro text-ink-faint">+{event.attendeeCount - event.attendees.length}</span>
           )}
         </div>
       )}
@@ -115,7 +115,7 @@ export function NextMeeting({
             href={event.joinLink}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-violet-bright/15 px-3 py-1.5 text-xs font-medium text-violet-bright transition-colors hover:bg-violet-bright/25"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-orchid-bright/15 px-3 py-1.5 text-xs font-medium text-orchid-bright transition-colors hover:bg-orchid-bright/25"
           >
             <Video className="h-3.5 w-3.5" />
             Join
@@ -123,11 +123,11 @@ export function NextMeeting({
         )}
         <button
           onClick={() => onOpen(event.id)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-white/15"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-white/15"
         >
           {event.briefAvailable ? (
             <>
-              <Sparkles className="h-3.5 w-3.5 text-violet-bright" /> Open brief
+              <Sparkles className="h-3.5 w-3.5 text-orchid-bright" /> Open brief
             </>
           ) : (
             <>
@@ -136,7 +136,7 @@ export function NextMeeting({
           )}
         </button>
         {contextCount ? (
-          <span className="font-mono text-[10px] text-ink-faint">{contextCount} related items</span>
+          <span className="font-mono text-micro text-ink-faint">{contextCount} related items</span>
         ) : null}
       </div>
     </GlassCard>

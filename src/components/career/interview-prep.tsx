@@ -21,8 +21,8 @@ export function InterviewPrep({ applications }: { applications: Application[] })
       <PanelHeader
         title="Interview prep"
         action={
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-violet-bright/12">
-            <GraduationCap className="h-3.5 w-3.5 text-violet-bright" />
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-orchid-bright/12">
+            <GraduationCap className="h-3.5 w-3.5 text-orchid-bright" />
           </span>
         }
       />
@@ -34,19 +34,19 @@ export function InterviewPrep({ applications }: { applications: Application[] })
           {upcoming.map((a) => (
             <li
               key={a.id}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"
+              className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3"
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-medium text-ink">
+                  <p className="truncate text-compact font-medium text-ink">
                     {a.company}
                   </p>
-                  <p className="truncate text-[11px] text-ink-faint">{a.role}</p>
+                  <p className="truncate text-micro text-ink-faint">{a.role}</p>
                 </div>
                 <StageBadge stage={a.stage} />
               </div>
               {a.nextAction?.due && (
-                <p className="mt-2 text-[11px] text-ink-muted">
+                <p className="mt-2 text-micro text-ink-muted">
                   Next: {a.nextAction.label} · {shortDate(a.nextAction.due)}
                 </p>
               )}
@@ -54,7 +54,7 @@ export function InterviewPrep({ applications }: { applications: Application[] })
               <button
                 type="button"
                 {...unavailable("Prep with Lilith")}
-                className="mt-2 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-lg bg-white/[0.04] py-1.5 text-xs font-medium text-ink-faint opacity-60"
+                className="mt-2 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-xl bg-white/[0.04] py-1.5 text-xs font-medium text-ink-faint opacity-60"
               >
                 <Sparkles className="h-3 w-3" /> Prep with Lilith
               </button>

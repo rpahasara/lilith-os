@@ -105,14 +105,14 @@ export interface CareerData {
 /** Human-facing labels + accent per stage. */
 export const STAGE_META: Record<
   Stage,
-  { label: string; accent: "violet" | "cyan" | "green" | "amber" | "rose" | "faint" }
+  { label: string; accent: "orchid" | "cyan" | "green" | "amber" | "rose" | "faint" }
 > = {
   discovered: { label: "Discovered", accent: "faint" },
   applied: { label: "Applied", accent: "cyan" },
   recruiter_contact: { label: "Recruiter", accent: "cyan" },
-  screening: { label: "Screening", accent: "violet" },
-  assessment: { label: "Assessment", accent: "violet" },
-  interview: { label: "Interview", accent: "violet" },
+  screening: { label: "Screening", accent: "orchid" },
+  assessment: { label: "Assessment", accent: "orchid" },
+  interview: { label: "Interview", accent: "orchid" },
   final_interview: { label: "Final round", accent: "amber" },
   offer: { label: "Offer", accent: "green" },
   rejected: { label: "Rejected", accent: "rose" },

@@ -4,6 +4,8 @@ import { type ComponentType, useEffect, useRef, useState } from "react";
 import { Search, X, Sparkles, MessagesSquare, BookMarked } from "lucide-react";
 import type { SearchScope } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
+import { NotYetTag } from "@/components/ui/feedback";
+import { unavailable } from "@/components/ui/unavailable";
 
 const PLACEHOLDERS = [
   "Ask what Lilith remembers…",
@@ -38,12 +40,12 @@ export function MemorySearch({
   }, [query]);
 
   return (
-    <div className="glass-strong relative overflow-hidden rounded-[var(--radius-lg)] p-4">
+    <div className="glass-strong relative overflow-hidden rounded-[var(--radius-xl)] p-4">
       {/* faint aurora wash to make search feel like the cognitive entry point */}
-      <span className="pointer-events-none absolute -right-10 -top-16 h-40 w-40 rounded-full bg-violet-bright/10 blur-3xl" />
+      <span className="pointer-events-none absolute -right-10 -top-16 h-40 w-40 rounded-full bg-orchid-bright/10 blur-3xl" />
       <span className="pointer-events-none absolute -left-10 -bottom-16 h-40 w-40 rounded-full bg-cyan-bright/10 blur-3xl" />
 
-      <div className="relative flex items-center gap-3 rounded-[var(--radius-md)] border border-white/[0.08] bg-white/[0.03] px-4 py-3 focus-within:border-violet-bright/40">
+      <div className="relative flex items-center gap-3 rounded-[var(--radius-md)] border border-white/[0.08] bg-white/[0.03] px-4 py-3 focus-within:border-orchid-bright/40">
         <Search className="h-4 w-4 shrink-0 text-ink-faint" />
         <input
           ref={inputRef}
@@ -88,7 +90,7 @@ export function MemorySearch({
         {/* suggestions / status */}
         <div className="flex flex-wrap items-center gap-1.5">
           {query ? (
-            <span className="font-mono text-[10px] text-ink-faint">
+            <span className="font-mono text-micro text-ink-faint">
               {resultCount} {resultCount === 1 ? "match" : "matches"}
             </span>
           ) : (
@@ -96,7 +98,7 @@ export function MemorySearch({
               <button
                 key={s}
                 onClick={() => onQuery(s)}
-                className="rounded-full bg-white/[0.04] px-2.5 py-1 text-[11px] text-ink-muted transition-colors hover:bg-white/[0.08] hover:text-ink"
+                className="rounded-full bg-white/[0.04] px-2.5 py-1 text-micro text-ink-muted transition-colors hover:bg-white/[0.08] hover:text-ink"
               >
                 {s}
               </button>
@@ -105,8 +107,8 @@ export function MemorySearch({
         </div>
       </div>
 
-      <p className="relative mt-3 flex items-center gap-1.5 text-[10px] text-ink-faint">
-        <Sparkles className="h-3 w-3 text-violet-bright/70" />
+      <p className="relative mt-3 flex items-center gap-1.5 text-micro text-ink-faint">
+        <Sparkles className="h-3 w-3 text-orchid-bright/70" />
         Search checks summaries, details, entities, tags, and provenance. Semantic recall arrives with the memory backend.
       </p>
     </div>
@@ -129,8 +131,7 @@ function ScopeButton({
   return (
     <button
       onClick={onClick}
-      disabled={soon}
-      title={soon ? "Conversation recall arrives with the memory backend" : undefined}
+      {...(soon ? unavailable(`${label} recall`) : {})}
       className={cn(
         "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors",
         active ? "bg-white/10 text-ink" : "text-ink-faint",
@@ -139,7 +140,7 @@ function ScopeButton({
     >
       <Icon className="h-3 w-3" />
       {label}
-      {soon && <span className="font-mono text-[9px] uppercase tracking-wider">soon</span>}
+      {soon && <NotYetTag />}
     </button>
   );
 }

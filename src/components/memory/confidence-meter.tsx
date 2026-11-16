@@ -3,9 +3,10 @@
 import { motion } from "framer-motion";
 import { confidenceTier, type Accent } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
+import { meter } from "@/lib/motion";
 
 const FILL: Record<Accent, string> = {
-  violet: "bg-violet-bright",
+  orchid: "bg-orchid-bright",
   cyan: "bg-cyan-bright",
   green: "bg-green",
   amber: "bg-amber",
@@ -38,14 +39,14 @@ export function ConfidenceMeter({
             className={cn("h-full rounded-full", FILL[tier.accent])}
             initial={{ width: 0 }}
             animate={{ width: `${value}%` }}
-            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+            transition={meter}
           />
         ) : (
           <div className="h-full w-full bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.08)_0_4px,transparent_4px_8px)]" />
         )}
       </div>
       {showLabel && (
-        <span className="w-14 shrink-0 text-right font-mono text-[10px] text-ink-muted">
+        <span className="w-14 shrink-0 text-right font-mono text-micro text-ink-muted">
           {known ? `${value}%` : "—"}
         </span>
       )}

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ConversationMessage } from "@/lib/conversation/types";
 import {
@@ -12,10 +11,12 @@ import {
   nextAnnouncement,
 } from "@/lib/conversation/turn-runner";
 import { useConversation } from "./conversation-provider";
+import { settle } from "@/lib/motion";
+import { InlineError, InlineNotice } from "@/components/ui/feedback";
 
 /**
  * The live conversation transcript, rendered in LILITH's existing visual
- * language (glass bubbles, violet accents). Shows a subtle thinking state while
+ * language (glass bubbles, orchid accents). Shows a subtle thinking state while
  * a turn is in flight (with measured elapsed time after 10 s), a graceful error
  * row with retry, and a truthful notice after Stop. Auto-scrolls to the latest
  * turn. Renders nothing in the empty state; the hero keeps its greeting there.
@@ -84,19 +85,19 @@ export function ConversationTranscript({
               key={m.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
+              transition={settle}
               className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
             >
               <div
                 className={cn(
-                  "max-w-[85%] rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed",
+                  "max-w-[85%] rounded-lg px-3.5 py-2 text-body leading-relaxed",
                   m.role === "user"
-                    ? "border border-violet-bright/25 bg-violet-bright/[0.12] text-ink"
+                    ? "border border-orchid-bright/25 bg-orchid-bright/[0.12] text-ink"
                     : "glass text-ink",
                 )}
               >
                 {m.role === "lilith" ? (
-                  <span className="eyebrow mb-1 block text-violet-bright/80">Lilith</span>
+                  <span className="eyebrow mb-1 block text-orchid-bright/80">Lilith</span>
                 ) : (
                   <span className="sr-only">You: </span>
                 )}
@@ -114,7 +115,7 @@ export function ConversationTranscript({
           className="flex justify-start"
           data-conversation-pending=""
         >
-          <div className="glass flex items-center gap-1.5 rounded-2xl px-3.5 py-2.5">
+          <div className="glass flex items-center gap-1.5 rounded-lg px-3.5 py-2.5">
             <span className="sr-only">LILITH is replying.</span>
             <Dot delay={0} />
             <Dot delay={0.15} />
@@ -122,7 +123,7 @@ export function ConversationTranscript({
             {elapsed && (
               // Measured wall-clock time since the request left this browser.
               // Not model progress, and not announced every second.
-              <span aria-hidden className="ml-1.5 font-mono text-[10px] text-ink-faint" data-conversation-elapsed="">
+              <span aria-hidden className="ml-1.5 font-mono text-micro text-ink-faint" data-conversation-elapsed="">
                 Waiting for a reply · {elapsed}
               </span>
             )}
@@ -134,18 +135,8 @@ export function ConversationTranscript({
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          role="status"
-          data-conversation-stopped=""
-          className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2"
         >
-          <span className="text-[12px] leading-snug text-ink-muted">{STOP_NOTICE}</span>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-white/20 hover:text-ink"
-          >
-            <RotateCcw className="h-3 w-3" /> Ask again
-          </button>
+          <InlineNotice data-conversation-stopped="" message={STOP_NOTICE} onAction={onRetry} actionLabel="Ask again" />
         </motion.div>
       )}
 
@@ -153,18 +144,8 @@ export function ConversationTranscript({
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          role="alert"
-          data-conversation-error=""
-          className="flex items-center justify-between gap-3 rounded-2xl border border-rose/25 bg-rose/[0.08] px-3.5 py-2"
         >
-          <span className="text-[13px] text-rose">{error}</span>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-xs text-ink-muted transition-colors hover:border-white/20 hover:text-ink"
-          >
-            <RotateCcw className="h-3 w-3" /> Retry
-          </button>
+          <InlineError data-conversation-error="" message={error} onAction={onRetry} />
         </motion.div>
       )}
 
@@ -222,7 +203,7 @@ function useTicker(intervalMs: number | null): number | null {
 function Dot({ delay }: { delay: number }) {
   return (
     <motion.span
-      className="block h-1.5 w-1.5 rounded-full bg-violet-bright"
+      className="block h-1.5 w-1.5 rounded-full bg-orchid-bright"
       animate={{ opacity: [0.3, 1, 0.3] }}
       transition={{ duration: 1.1, repeat: Infinity, delay }}
     />

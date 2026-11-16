@@ -39,10 +39,10 @@ export function ExecutionTimeline({ activity }: { activity: AutomationEvent[] })
                   <Icon className={`h-4 w-4 ${o.color}`} />
                 </span>
                 <div className="min-w-0 flex-1 pt-1">
-                  <p className="text-[13px] leading-snug text-ink-muted">
+                  <p className="text-compact leading-snug text-ink-muted">
                     <span className="text-ink">{e.unit}</span> — {e.text}
                   </p>
-                  <p className="mt-0.5 font-mono text-[10px] text-ink-faint">
+                  <p className="mt-0.5 font-mono text-micro text-ink-faint">
                     {timeAgo(e.time)}
                   </p>
                 </div>

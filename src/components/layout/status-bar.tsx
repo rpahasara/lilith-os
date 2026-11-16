@@ -12,7 +12,7 @@ import {
 } from "@/lib/system/shell-health";
 
 const DOT: Record<ShellHealth["state"], Accent> = {
-  checking: "violet",
+  checking: "orchid",
   live: "green",
   unconfigured: "amber",
   unreachable: "rose",
@@ -74,7 +74,7 @@ export function StatusBar() {
         aria-live="polite"
         title={title}
         data-shell-health={health.state}
-        className="glass flex items-center gap-3 rounded-full px-4 py-2 font-mono text-[10px] text-ink-faint shadow-[0_16px_38px_-24px_rgba(0,0,0,0.95)]"
+        className="glass flex items-center gap-3 rounded-full px-4 py-2 font-mono text-micro leading-[15px] text-ink-faint shadow-[0_16px_38px_-24px_rgba(0,0,0,0.95)]"
       >
         <span className="flex items-center gap-1.5">
           <StatusDot accent={DOT[health.state]} />

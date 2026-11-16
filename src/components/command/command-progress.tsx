@@ -26,12 +26,12 @@ export function CommandProgress({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-strong w-full rounded-2xl p-4"
+      className="glass-strong w-full rounded-lg p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-[15px] font-semibold tracking-tight text-ink">{task.title}</h3>
-          <p className="mt-0.5 font-mono text-[10px] text-ink-faint">
+          <h3 className="truncate text-lead font-semibold tracking-tight text-ink">{task.title}</h3>
+          <p className="mt-0.5 font-mono text-micro text-ink-faint">
             {completed}/{task.steps.length} steps
             {task.cancelRequested && " · cancelling…"}
           </p>
@@ -39,14 +39,14 @@ export function CommandProgress({
         <div className="flex shrink-0 items-center gap-2">
           {task.source === "demo" ? (
             <span
-              className="flex items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber"
+              className="flex items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-amber"
               title="Preview state — no real external execution"
             >
               <FlaskConical className="h-2.5 w-2.5" /> Simulated
             </span>
           ) : task.source === "core" ? (
             <span
-              className="flex items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-green"
+              className="flex items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-green"
               title="Real read-only backend execution"
             >
               <Radio className="h-2.5 w-2.5" /> Live
@@ -67,7 +67,7 @@ export function CommandProgress({
           <button
             onClick={onCancel}
             disabled={task.cancelRequested}
-            className="flex items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-ink-muted transition-colors hover:border-rose/30 hover:text-rose disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-compact text-ink-muted transition-colors hover:border-rose/30 hover:text-rose disabled:opacity-50"
           >
             <XCircle className="h-3.5 w-3.5" />
             {task.cancelRequested ? "Cancelling…" : "Cancel"}

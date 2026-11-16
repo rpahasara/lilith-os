@@ -107,7 +107,7 @@ export default function MemoryPage() {
                 <PanelHeader
                   title="Memory shards"
                   action={
-                    <span className="font-mono text-[10px] text-ink-faint">
+                    <span className="font-mono text-micro text-ink-faint">
                       {shown.length} shown
                     </span>
                   }

@@ -26,11 +26,11 @@ export type PrepStatus = (typeof PREP_STAGES)[number] | "scheduled";
 
 export const PREP_META: Record<
   PrepStatus,
-  { label: string; accent: "violet" | "cyan" | "green" | "amber" | "faint" }
+  { label: string; accent: "orchid" | "cyan" | "green" | "amber" | "faint" }
 > = {
   scheduled: { label: "Scheduled", accent: "faint" },
   detected: { label: "Detected", accent: "cyan" },
-  context_gathered: { label: "Context gathered", accent: "violet" },
+  context_gathered: { label: "Context gathered", accent: "orchid" },
   delivered: { label: "Prepared", accent: "green" },
   completed: { label: "Completed", accent: "faint" },
 };

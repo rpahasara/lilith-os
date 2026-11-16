@@ -7,6 +7,7 @@ import { CommandProgress } from "./command-progress";
 import { ApprovalRequest } from "./approval-request";
 import { CommandResult } from "./command-result";
 import { CommandUnsupported } from "./command-unsupported";
+import { fade } from "@/lib/motion";
 
 /**
  * The active-command console. Renders exactly one lifecycle surface for the
@@ -77,7 +78,7 @@ export function CommandConsole({ onEditRequest }: { onEditRequest?: (text: strin
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={fade}
         >
           {surface}
         </motion.div>

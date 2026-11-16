@@ -26,27 +26,27 @@ export function CommandReview({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-strong w-full rounded-2xl p-4"
+      className="glass-strong w-full rounded-lg p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="eyebrow text-wine-bright/80">Review · confirm before running</p>
-          <h3 className="mt-1 text-[15px] font-semibold tracking-tight text-ink">{task.title}</h3>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">{task.normalizedIntent}</p>
+          <h3 className="mt-1 text-lead font-semibold tracking-tight text-ink">{task.title}</h3>
+          <p className="mt-0.5 text-caption leading-relaxed text-ink-muted">{task.normalizedIntent}</p>
         </div>
         {task.source === "core" ? (
-          <span className="flex shrink-0 items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-green" title="Real read-only backend execution">
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-green/20 bg-green/10 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-green" title="Real read-only backend execution">
             <Radio className="h-2.5 w-2.5" /> Live
           </span>
         ) : task.source === "demo" ? (
-          <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber" title="Preview — no real execution">
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber/20 bg-amber/10 px-2 py-0.5 font-mono text-micro uppercase tracking-wider text-amber" title="Preview — no real execution">
             <FlaskConical className="h-2.5 w-2.5" /> Simulated
           </span>
         ) : null}
       </div>
 
       {task.contextSummary && (
-        <p className="mt-2.5 inline-flex rounded-full border border-white/[0.07] bg-white/[0.03] px-2.5 py-1 text-[10px] text-ink-faint">
+        <p className="mt-2.5 inline-flex rounded-full border border-white/[0.07] bg-white/[0.03] px-2.5 py-1 text-micro text-ink-faint">
           {task.contextSummary}
         </p>
       )}
@@ -63,7 +63,7 @@ export function CommandReview({
         <button
           onClick={onRun}
           className={cn(
-            "flex items-center gap-1.5 rounded-full border border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep px-4 py-1.5 text-[13px] font-medium text-white",
+            "flex items-center gap-1.5 rounded-full border border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep px-4 py-1.5 text-compact font-medium text-white",
             "shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_8px_22px_-6px_rgba(201,79,109,0.85)] transition-transform hover:-translate-y-px",
           )}
         >
@@ -71,13 +71,13 @@ export function CommandReview({
         </button>
         <button
           onClick={onEdit}
-          className="flex items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-[13px] text-ink-muted transition-colors hover:border-white/20 hover:text-ink"
+          className="flex items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-compact text-ink-muted transition-colors hover:border-white/20 hover:text-ink"
         >
           <Pencil className="h-3.5 w-3.5" /> Edit
         </button>
         <button
           onClick={onCancel}
-          className="ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-ink-faint transition-colors hover:text-ink-muted"
+          className="ml-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-compact text-ink-faint transition-colors hover:text-ink-muted"
         >
           <X className="h-3.5 w-3.5" /> Cancel
         </button>

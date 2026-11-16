@@ -8,8 +8,8 @@ export const metadata: Metadata = { title: "Not found" };
 export default function NotFound() {
   return (
     <div className="workspace-page grid h-full place-items-center">
-      <div className="glass-strong relative w-full max-w-md overflow-hidden rounded-[var(--radius-lg)] p-7 text-center">
-        <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl border border-white/[0.08] bg-white/[0.04] text-ink-muted">
+      <div className="glass-strong relative w-full max-w-md overflow-hidden rounded-[var(--radius-xl)] p-7 text-center">
+        <span className="mx-auto grid h-11 w-11 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-ink-muted">
           <Compass className="h-5 w-5" />
         </span>
         <h1 className="mt-4 text-lg font-semibold tracking-tight text-ink">Nothing lives at this address</h1>

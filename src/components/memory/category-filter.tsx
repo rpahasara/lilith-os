@@ -9,9 +9,10 @@ import {
   type MemoryCategory,
 } from "@/lib/memory/types";
 import { cn } from "@/lib/utils";
+import { springSnap } from "@/lib/motion";
 
 const DOT: Record<Accent, string> = {
-  violet: "bg-violet-bright",
+  orchid: "bg-orchid-bright",
   cyan: "bg-cyan-bright",
   green: "bg-green",
   amber: "bg-amber",
@@ -59,7 +60,7 @@ export function CategoryFilter({
               <motion.span
                 layoutId="memory-category-filter"
                 className="absolute inset-0 rounded-full bg-white/10"
-                transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                transition={springSnap}
               />
             )}
             <span className="relative flex items-center gap-1.5">
@@ -69,7 +70,7 @@ export function CategoryFilter({
                 <Layers className="h-3 w-3" />
               )}
               {it.label}
-              <span className="font-mono text-[10px] text-ink-faint">{it.count}</span>
+              <span className="font-mono text-micro text-ink-faint">{it.count}</span>
             </span>
           </button>
         );

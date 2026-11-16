@@ -16,7 +16,7 @@ export function FollowupsPanel({ followups }: { followups: Followup[] }) {
       <PanelHeader
         title="Follow-ups"
         action={
-          <span className="font-mono text-[10px] text-ink-faint">
+          <span className="font-mono text-micro text-ink-faint">
             {followups.filter((f) => f.status === "waiting").length} pending
           </span>
         }
@@ -39,7 +39,7 @@ export function FollowupsPanel({ followups }: { followups: Followup[] }) {
                   <p className={cn("text-xs leading-snug", resolved ? "text-ink-faint line-through" : "text-ink-muted")}>
                     {f.title}
                   </p>
-                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-micro text-ink-faint">
                     {f.source && <span className="uppercase tracking-wider">source · {f.source}</span>}
                     {f.due && (
                       <>
@@ -54,7 +54,7 @@ export function FollowupsPanel({ followups }: { followups: Followup[] }) {
                       </>
                     )}
                   </p>
-                  {f.reason && !resolved && <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-ink-faint">{f.reason}</p>}
+                  {f.reason && !resolved && <p className="mt-1 line-clamp-2 text-micro leading-relaxed text-ink-faint">{f.reason}</p>}
                 </div>
               </li>
             );

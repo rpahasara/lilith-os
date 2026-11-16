@@ -7,7 +7,7 @@ type Tone = Parameters<typeof StatusBadge>[0]["tone"];
 
 const META: Record<CommandStatus, { label: string; tone: Tone }> = {
   draft: { label: "Draft", tone: "faint" },
-  reviewing: { label: "Review", tone: "violet" },
+  reviewing: { label: "Review", tone: "orchid" },
   queued: { label: "Queued", tone: "cyan" },
   planning: { label: "Planning", tone: "cyan" },
   waiting_for_approval: { label: "Needs approval", tone: "amber" },

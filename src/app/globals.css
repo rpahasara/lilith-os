@@ -42,7 +42,10 @@
   /* Ink — pearl, echoing her hair */
   --ink: #f3eef4;
   --ink-muted: #bcb1c1;
-  --ink-faint: #817587;
+  /* Faint ink is for secondary text that is still meant to be read: 5.7:1 on
+     the base colour (it was 4.6:1, at the edge for the small sizes it is used
+     at). Same hue, a step lighter. */
+  --ink-faint: #908496;
 
   /* Lines */
   --line: 255 255 255; /* used at low alpha */
@@ -55,11 +58,9 @@
   --wine-deep: #812a49;
   --orchid: #a985c4; /* secondary */
   --orchid-bright: #cdb0dd;
+  --orchid-deep: #6f3b6e;
   --pearl: #f3eef4; /* highlight / specular */
   --gold: #d4b77b; /* luxury micro-accent — use very sparingly */
-  --violet: #a985c4; /* legacy semantic alias, visually folded into orchid */
-  --violet-bright: #cdb0dd;
-  --violet-deep: #6f3b6e;
 
   /* System / telemetry — cyan, restrained (data / status only, never brand) */
   --cyan: #5bc7d8;
@@ -71,11 +72,30 @@
   --amber: #fbbf24;
   --rose: #fb7185;
 
-  /* Radii */
-  --radius-sm: 0.625rem;
-  --radius-md: 0.875rem;
+  /* Radii — one rising scale. (lg and xl used to sit above 2xl.) */
+  --radius-sm: 0.625rem; /* 10 — chips, keys */
+  --radius-md: 0.875rem; /* 14 — fields, tiles */
+  --radius-lg: 1rem; /* 16 — bubbles, nav items */
+  --radius-xl: 1.25rem; /* 20 — cards */
+  --radius-2xl: 1.75rem; /* 28 — panels */
+
+  /* Motion — the CSS half of lib/motion.ts. One curve, four durations. */
+  --ease-lilith: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-instant: 120ms;
+  --duration-fast: 200ms;
+  --duration-base: 300ms;
+  --duration-slow: 600ms;
+}
+
+/* The Cognitive Atlas was approved as it looked before these foundations. It
+   keeps the earlier radius values, faint ink and transition curve, scoped to
+   its own route, so nothing here changes what it shows. */
+.atlas-token-scope {
   --radius-lg: 1.25rem;
   --radius-xl: 1.75rem;
+  --radius-2xl: 1rem;
+  --ink-faint: #817587;
+  --ease-lilith: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @theme inline {
@@ -86,12 +106,9 @@
   --color-ink-muted: var(--ink-muted);
   --color-ink-faint: var(--ink-faint);
 
-  --color-violet: var(--violet);
-  --color-violet-bright: var(--violet-bright);
-  --color-violet-deep: var(--violet-deep);
-
   --color-orchid: var(--orchid);
   --color-orchid-bright: var(--orchid-bright);
+  --color-orchid-deep: var(--orchid-deep);
   --color-wine: var(--wine);
   --color-wine-bright: var(--wine-bright);
   --color-wine-deep: var(--wine-deep);
@@ -110,6 +127,25 @@
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
   --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  /* Type scale. Nothing meant to be read is set below 11px. Sizes only (no
+     line-height), so text keeps the leading of where it sits.
+       micro    11  labels, meta, badges, timestamps
+       caption  12  secondary lines
+       compact  13  dense rows
+       body     14  running text
+       lead     15  inputs, emphasised lines
+     Above that, the standard steps: lg 18, xl 20, 2xl 24, 3xl 30. */
+  --text-micro: 0.6875rem;
+  --text-caption: 0.75rem;
+  --text-compact: 0.8125rem;
+  --text-body: 0.875rem;
+  --text-lead: 0.9375rem;
+
+  /* Every transition utility uses the house curve unless it says otherwise. */
+  --ease-lilith: var(--ease-lilith);
+  --default-transition-timing-function: var(--ease-lilith);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -135,7 +171,7 @@ body {
 }
 
 /* Cinematic backdrop: deep space where the centre — the avatar — reads as the
-   luminous heart. Large soft ellipses (no hard spotlights): a primary violet
+   luminous heart. Large soft ellipses (no hard spotlights): a primary orchid
    pool centred-upper behind the hero, a muted-rose influence just off-centre,
    and a much weaker cyan glow banished to the far corner (telemetry only). */
 .lilith-bg {

@@ -37,7 +37,7 @@ export function FocusWindows({ events }: { events: MeetingEvent[] }) {
             <li
               key={i}
               className={cn(
-                "flex items-center justify-between rounded-lg px-3 py-2",
+                "flex items-center justify-between rounded-xl px-3 py-2",
                 w.current ? "bg-cyan-bright/[0.06] hairline" : "bg-white/[0.02]",
               )}
             >
@@ -48,15 +48,15 @@ export function FocusWindows({ events }: { events: MeetingEvent[] }) {
                 <span className={cn(w.current ? "text-ink" : "text-ink-muted")}>
                   {formatClock(start)} – {crossesDay && `${end.toLocaleDateString(undefined, { weekday: "short" })} `}{formatClock(end)}
                 </span>
-                {w.current && <span className="font-mono text-[9px] uppercase text-cyan-bright">open now</span>}
+                {w.current && <span className="font-mono text-micro uppercase text-cyan-bright">open now</span>}
               </span>
-              <span className="font-mono text-[11px] text-ink-faint">{dur(w.minutes)}</span>
+              <span className="font-mono text-micro text-ink-faint">{dur(w.minutes)}</span>
             </li>
             );
           })}
         </ul>
       )}
-      <p className="mt-3 text-[10px] text-ink-faint">Derived from real gaps between meetings.</p>
+      <p className="mt-3 text-micro text-ink-faint">Derived from real gaps between meetings.</p>
     </GlassCard>
   );
 }

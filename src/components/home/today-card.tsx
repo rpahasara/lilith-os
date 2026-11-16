@@ -68,13 +68,13 @@ export function TodayCard({ view, now }: { view: HomeMeetingsView; now: number |
         <span className="eyebrow text-ink">Today</span>
         {view.kind === "live" && view.stale ? (
           <span
-            className="font-mono text-[10px] text-amber/90"
+            className="font-mono text-micro text-amber/90"
             title="The agenda has not refreshed recently"
           >
             {view.asOf ? `as of ${clockIn(new Date(view.asOf).getTime(), view.timeZone)}` : "freshness unknown"}
           </span>
         ) : view.kind === "live" && zoneHint(view.timeZone) ? (
-          <span className="font-mono text-[10px] text-ink-faint" title={`Times shown in ${view.timeZone}`} data-home-zone="">
+          <span className="font-mono text-micro text-ink-faint" title={`Times shown in ${view.timeZone}`} data-home-zone="">
             {zoneHint(view.timeZone)}
           </span>
         ) : null}
@@ -91,8 +91,8 @@ export function TodayCard({ view, now }: { view: HomeMeetingsView; now: number |
             <motion.li key={r.text} variants={riseIn} className="flex items-center gap-2.5">
               <RowIcon icon={r.icon} />
               <div className="min-w-0 leading-tight">
-                <span className="text-[13px] text-ink">{r.text}</span>
-                {r.meta && <span className="ml-1.5 text-[11px] text-ink-faint">{r.meta}</span>}
+                <span className="text-compact text-ink">{r.text}</span>
+                {r.meta && <span className="ml-1.5 text-micro text-ink-faint">{r.meta}</span>}
               </div>
             </motion.li>
           ))}
@@ -101,8 +101,8 @@ export function TodayCard({ view, now }: { view: HomeMeetingsView; now: number |
         <div className="mt-3 flex items-center gap-2.5" role="status">
           <RowIcon icon={CloudOff} />
           <div className="min-w-0 leading-tight">
-            <span className="block text-[13px] text-ink">Agenda unavailable</span>
-            <span className="block text-[11px] text-ink-faint">
+            <span className="block text-compact text-ink">Agenda unavailable</span>
+            <span className="block text-micro text-ink-faint">
               The meetings service isn&apos;t reachable, so nothing is shown.
             </span>
           </div>

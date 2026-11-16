@@ -25,7 +25,7 @@ export function RelationshipPreview({
       <PanelHeader
         title="Relationships"
         action={
-          <span className="flex items-center gap-1 font-mono text-[10px] text-ink-faint">
+          <span className="flex items-center gap-1 font-mono text-micro text-ink-faint">
             <Network className="h-3 w-3" />
             {relationships.length}
           </span>
@@ -44,13 +44,13 @@ export function RelationshipPreview({
             return (
               <li
                 key={e.id}
-                className="flex items-center gap-2 rounded-lg bg-white/[0.02] px-2.5 py-2 text-xs"
+                className="flex items-center gap-2 rounded-xl bg-white/[0.02] px-2.5 py-2 text-xs"
               >
                 <span className="flex min-w-0 items-center gap-1.5 text-ink">
-                  <FromIcon className="h-3 w-3 shrink-0 text-violet-bright" />
+                  <FromIcon className="h-3 w-3 shrink-0 text-orchid-bright" />
                   <span className="truncate">{from.label}</span>
                 </span>
-                <span className="flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+                <span className="flex shrink-0 items-center gap-1 font-mono text-micro uppercase tracking-wider text-ink-faint">
                   <ArrowRight className="h-3 w-3" />
                   {e.kind}
                 </span>
@@ -64,7 +64,7 @@ export function RelationshipPreview({
         </ul>
       )}
 
-      <p className="mt-3 text-[10px] text-ink-faint">
+      <p className="mt-3 text-micro text-ink-faint">
         Interactive memory graph — a future milestone.
       </p>
     </GlassCard>
