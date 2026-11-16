@@ -6,6 +6,7 @@ import { ArrowUp, Loader2, Mic, Sparkles, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { unavailable } from "@/components/ui/unavailable";
 import { defaultSuggestions } from "@/lib/command/suggestions";
+import { HERO_INPUT_ID } from "@/lib/command/global-surface";
 
 interface CommandInputProps {
   onFocusChange?: (focused: boolean) => void;
@@ -23,6 +24,13 @@ interface CommandInputProps {
   fill?: { text: string; nonce: number };
   /** While `loading`, shows a Stop button in place of Send that calls this. */
   onStop?: () => void;
+  /** DOM id of the field. Defaults to the Command Center's hero input. */
+  id?: string;
+  /** Focus the field when it mounts (the global panel opens straight into typing). */
+  autoFocus?: boolean;
+  /** Nothing can be sent right now; `disabledPlaceholder` says why. */
+  disabled?: boolean;
+  disabledPlaceholder?: string;
 }
 
 // Only what Lilith can actually do (see lib/command/suggestions.ts).
@@ -37,6 +45,10 @@ export function CommandInput({
   historyItems = [],
   fill,
   onStop,
+  id = HERO_INPUT_ID,
+  autoFocus = false,
+  disabled = false,
+  disabledPlaceholder,
 }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
@@ -51,6 +63,22 @@ export function CommandInput({
       inputRef.current?.focus();
     }
   }, [loading]);
+
+  // The global panel opens straight into typing, and comes back to it when a
+  // turn ends (the field is disabled while one is in flight, which drops focus).
+  // Focus is only taken when nothing else has it.
+  // On opening, focus always moves in (whatever opened the panel had it). When
+  // a turn ends, it is only taken back if nothing else has it.
+  const focusedOnMount = useRef(false);
+  useEffect(() => {
+    if (!autoFocus || loading || disabled) return;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!focusedOnMount.current || !active || active === document.body) inputRef.current?.focus();
+      focusedOnMount.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus, loading, disabled]);
 
   // History recall cursor: -1 = live (not recalling), 0..n = index from newest.
   const [recall, setRecall] = useState(-1);
@@ -77,7 +105,7 @@ export function CommandInput({
   }, [fill?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function submit() {
-    if (loading) return;
+    if (loading || disabled) return;
     const text = value.trim();
     if (!text) return;
     onSubmit?.(text);
@@ -120,13 +148,14 @@ export function CommandInput({
         )}
         <input
           ref={inputRef}
+          id={id}
           value={value}
           onChange={(e) => {
             setValue(e.target.value);
             setRecall(-1);
             onType?.();
           }}
-          disabled={loading}
+          disabled={loading || disabled}
           onFocus={() => {
             setFocused(true);
             onFocusChange?.(true);
@@ -156,8 +185,14 @@ export function CommandInput({
             }
           }}
           aria-label="Ask Lilith, or give a command"
-          placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
-          className="min-w-0 flex-1 bg-transparent text-lead text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+          placeholder={
+            loading
+              ? "Lilith is thinking…"
+              : disabled
+                ? (disabledPlaceholder ?? "Unavailable right now")
+                : "Ask Lilith, or command anything…"
+          }
+          className="min-w-0 flex-1 bg-transparent text-lead text-ink placeholder:text-ink-faint focus:outline-none focus-visible:outline-none! disabled:opacity-60"
         />
         <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-micro text-ink-faint sm:flex">
           Ctrl Space
@@ -191,10 +226,10 @@ export function CommandInput({
           <button
             aria-label="Send"
             onClick={submit}
-            disabled={loading || !value.trim()}
+            disabled={loading || disabled || !value.trim()}
             className={cn(
               "grid h-9 w-9 place-items-center rounded-full border transition-all",
-              value.trim() && !loading
+              value.trim() && !loading && !disabled
                 ? "border-wine-bright/55 bg-gradient-to-b from-wine-bright via-wine to-wine-deep text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_8px_22px_-6px_rgba(201,79,109,0.85)]"
                 : "border-white/[0.06] bg-white/[0.045] text-ink-faint",
             )}
@@ -212,12 +247,14 @@ export function CommandInput({
         {suggestions.map((s) => (
           <button
             key={s}
+            type="button"
+            disabled={disabled}
             onClick={() => {
               setValue(s);
               setRecall(-1);
               inputRef.current?.focus();
             }}
-            className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-micro text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink"
+            className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-micro text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink disabled:pointer-events-none disabled:opacity-40"
           >
             {s}
           </button>

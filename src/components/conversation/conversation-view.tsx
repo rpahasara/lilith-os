@@ -26,7 +26,7 @@ import { InlineError, InlineNotice } from "@/components/ui/feedback";
  * exactly once by <ConversationAnnouncer>, which stays mounted even when this
  * view is hidden.
  */
-export function ConversationView() {
+export function ConversationView({ className }: { className?: string } = {}) {
   const { messages, status, error, retry, pendingSince, stopped } = useConversation();
   const now = useTicker(status === "sending" ? 1000 : null);
   const elapsed =
@@ -40,6 +40,7 @@ export function ConversationView() {
       error={error}
       stopped={!!stopped}
       onRetry={retry}
+      className={className}
     />
   );
 }
@@ -52,6 +53,7 @@ export function ConversationTranscript({
   error,
   stopped,
   onRetry,
+  className,
 }: {
   messages: ConversationMessage[];
   sending: boolean;
@@ -59,6 +61,8 @@ export function ConversationTranscript({
   error: string | null;
   stopped: boolean;
   onRetry: () => void;
+  /** Overrides the default height cap (the global panel sizes itself). */
+  className?: string;
 }) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -69,7 +73,7 @@ export function ConversationTranscript({
   if (messages.length === 0 && !error && !stopped) return null;
 
   return (
-    <div className="scroll-area flex max-h-[34vh] w-full flex-col gap-2.5 overflow-y-auto px-1 py-1 lg:max-h-[240px]">
+    <div className={cn("scroll-area flex max-h-[34vh] w-full flex-col gap-2.5 overflow-y-auto px-1 py-1 lg:max-h-[240px]", className)}>
       {/* Browsable history. Announcements come from <ConversationAnnouncer>,
           so this log is aria-live="off" to avoid reading replies twice. */}
       <div
