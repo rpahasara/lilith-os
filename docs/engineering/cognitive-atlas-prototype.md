@@ -83,25 +83,34 @@ it could be mistaken for the real thing:
 
 ## Preview gate
 
-The Atlas is a preview until it is wired to real memory and approved for
-production. `atlasPreviewEnabled()` in `src/lib/memory/atlas/preview.ts` is the
-one switch:
+Owner decision (2026-11-16): the Atlas ships in production as a clearly
+labelled **Cognitive Atlas Preview** on synthetic data. It is not connected to
+real memory and does not touch canonical memory authority. Real memory comes
+later, through the authorized read-only interface, as its own approved change.
 
-| Where | Atlas |
+`atlasPreviewEnabled()` in `src/lib/memory/atlas/preview.ts` is the one switch:
+
+| Build | Atlas |
 | --- | --- |
-| Development server (`next dev`) | on |
-| Production build (`next build`) | off |
-| Production build made with `NEXT_PUBLIC_LILITH_ATLAS_PREVIEW=true` | on |
+| Development server (`next dev`) | included |
+| Production build (`next build`) | included |
+| Any build made with `NEXT_PUBLIC_LILITH_ATLAS_PREVIEW=false` | left out |
 
-When it is off, `/memory/atlas` is a 404 (gated in the server layout, so the
-route is prerendered as not-found) and the Archive shows no Brain / Timeline
-switch. The value is fixed at build time; a host environment variable cannot
-change it afterwards.
+When it is left out, `/memory/atlas` is a 404 (gated in the server layout, so
+the route is prerendered as not-found) and the Archive shows no Brain /
+Timeline switch. The value is fixed at build time; a host environment variable
+cannot change it afterwards. Removing the preview from a live site therefore
+means building and installing a release with the flag set to false.
 
-The flag only decides whether the prototype is included. It does not connect
+The switch only decides whether the preview is included. It does not connect
 the Atlas to real memory: the data stays synthetic either way, and
-`preview-self-test.ts` fails the build's test run if anything under
-`memory/atlas` starts talking to the backend.
+`preview-self-test.ts` fails the test run if anything under `memory/atlas`
+starts talking to the backend, or if the on-screen "Preview · Synthetic data"
+label goes missing.
+
+This is a different rule from the workspace sample data (`lib/data-mode.ts`),
+which a production build never shows. Sample data imitates real records inside
+real workspaces; the Atlas is its own surface and names itself a preview.
 
 ## Structure
 

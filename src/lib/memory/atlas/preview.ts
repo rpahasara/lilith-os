@@ -1,21 +1,23 @@
 /**
- * The Cognitive Atlas preview gate.
+ * The Cognitive Atlas preview switch.
  *
- * The Atlas is a prototype that runs on synthetic data only (see `synthetic.ts`
- * and `simulation.ts`); it reads nothing from Lilith's real memory. Until it is
- * wired to real memory and approved for production, it is a preview:
+ * Owner decision (2026-11-16): the Atlas ships in production as a clearly
+ * labelled preview. It runs on synthetic data only (see `synthetic.ts` and
+ * `simulation.ts`), reads nothing from Lilith's real memory, and says so on
+ * screen. Real memory arrives later, through the authorized read-only
+ * interface, as a separate and separately approved change.
  *
- *   development server   on, so the prototype can be worked on.
- *   production build     off, unless the build was made with
- *                        NEXT_PUBLIC_LILITH_ATLAS_PREVIEW=true.
+ * So the Atlas is included in every build, development and production alike.
+ * This switch exists only to take it out again without a code change: a build
+ * made with NEXT_PUBLIC_LILITH_ATLAS_PREVIEW=false has no `/memory/atlas`
+ * (the route is a 404) and no Brain / Timeline switch on the Archive. The
+ * value is fixed when the app is built.
  *
- * When it is off, `/memory/atlas` is a 404 and the Memory Archive shows no
- * Brain / Timeline switch: a built release looks exactly as it did before the
- * prototype existed. The value is fixed when the app is built.
+ * The switch decides whether the preview is included. It never connects the
+ * Atlas to real memory; `preview-self-test.ts` holds that boundary.
  */
 export function atlasPreviewEnabled(
   flag: string | undefined = process.env.NEXT_PUBLIC_LILITH_ATLAS_PREVIEW,
-  nodeEnv: string | undefined = process.env.NODE_ENV,
 ): boolean {
-  return nodeEnv !== "production" || flag === "true";
+  return flag !== "false";
 }

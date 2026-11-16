@@ -532,10 +532,10 @@ export default function CognitiveAtlas() {
           <div className="pointer-events-auto flex flex-wrap items-center gap-2">
             <span
               className="inline-flex items-center gap-1.5 rounded-full border border-amber/25 bg-amber/10 px-2.5 py-1 text-[10px] font-medium text-amber backdrop-blur-md"
-              title="Every memory shown here is invented for the prototype. The Atlas is not connected to Lilith's real memory."
+              title="This is a preview. Every memory shown here is invented; the Atlas is not connected to Lilith's real memory."
             >
               <FlaskConical className="h-3 w-3" />
-              Synthetic data
+              Preview · Synthetic data
             </span>
             <MemoryViewSwitch active={view} onSelect={changeView} inPlace={["brain", "timeline"]} />
           </div>

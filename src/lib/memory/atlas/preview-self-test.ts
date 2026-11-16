@@ -1,8 +1,9 @@
 /**
- * Headless regression test for the Cognitive Atlas boundary: the prototype is
- * a preview that a production build leaves out unless asked, it stays reachable
- * from Memory when it is on, and it runs on synthetic data only — nothing under
- * `memory/atlas` talks to the backend or to Lilith's real memory.
+ * Headless regression test for the Cognitive Atlas boundary: the preview ships
+ * in every build unless it is switched off, it stays reachable from Memory, it
+ * says on screen that it is a preview on synthetic data, and it runs on
+ * synthetic data only — nothing under `memory/atlas` talks to the backend or to
+ * Lilith's real memory.
  *
  * Reads source: the things under test are a route convention and an import
  * boundary. Run by `npm run test:core`.
@@ -50,14 +51,12 @@ export function runAtlasPreviewSelfTest(): Result[] {
     out.push({ name: `atlas: ${name}`, pass, detail: pass ? undefined : detail });
 
   /* the gate ----------------------------------------------------------------- */
-  check("the preview is on for the development server",
-    atlasPreviewEnabled(undefined, "development") && atlasPreviewEnabled("false", "development"));
-  check("a production build leaves the preview out by default",
-    !atlasPreviewEnabled(undefined, "production") && !atlasPreviewEnabled("", "production") &&
-      !atlasPreviewEnabled("false", "production") && !atlasPreviewEnabled("1", "production") &&
-      !atlasPreviewEnabled("TRUE", "production"));
-  check("a production build includes the preview only when the flag is exactly \"true\"",
-    atlasPreviewEnabled("true", "production"));
+  check("the preview is included by default, in production too",
+    atlasPreviewEnabled(undefined) && atlasPreviewEnabled("") && atlasPreviewEnabled("true"));
+  check("the preview is left out only when the flag is exactly \"false\"",
+    !atlasPreviewEnabled("false") && atlasPreviewEnabled("0") && atlasPreviewEnabled("FALSE"));
+  check("the switch does not depend on the build mode",
+    !/NODE_ENV/.test(src("lib", "memory", "atlas", "preview.ts").replace(/\/\*[\s\S]*?\*\//g, "")));
 
   const layout = src("app", "memory", "atlas", "layout.tsx");
   check("the Atlas route is gated on the server",
@@ -94,7 +93,15 @@ export function runAtlasPreviewSelfTest(): Result[] {
   check("nothing in the Atlas reads or writes the backend or real memory", offenders.length === 0, offenders.join("; "));
 
   const atlas = src("components", "memory", "atlas", "cognitive-atlas.tsx");
-  check("the Atlas marks its data as synthetic on screen", /Synthetic data/.test(atlas));
+  check("the Atlas says on screen that it is a preview on synthetic data",
+    /Preview · Synthetic data/.test(atlas) && /not connected to Lilith's real memory/.test(atlas));
+  check("the Atlas inspector says nothing real is read or changed",
+    /Nothing real is read or changed/.test(src("components", "memory", "atlas", "atlas-inspector.tsx")));
+  check("simulated recall and activity are marked as simulated",
+    /Simulated recall/.test(src("components", "memory", "atlas", "recall-console.tsx")) &&
+      /Simulated/.test(src("components", "memory", "atlas", "cognition-feed.tsx")));
+  check("the Atlas route names itself a preview in its title",
+    /Cognitive Atlas Preview/.test(src("app", "memory", "atlas", "layout.tsx")));
 
   return out;
 }

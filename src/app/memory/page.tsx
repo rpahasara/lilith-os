@@ -34,7 +34,7 @@ function matches(r: MemoryRecord, q: string): boolean {
   return hay.includes(q);
 }
 
-/** Brain / Timeline exist only where the Cognitive Atlas preview is built in. */
+/** Brain / Timeline open the Cognitive Atlas preview; a build can leave it out. */
 const ATLAS_PREVIEW = atlasPreviewEnabled();
 
 export default function MemoryPage() {
