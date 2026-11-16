@@ -152,6 +152,20 @@ export function runGlobalSurfaceSelfTest(): Result[] {
   check("it offers no suggestions of its own", !/suggestions=/.test(surface));
   check("it does not drive the avatar's presence engine", !/usePresence|emit\(/.test(surface));
 
+  /* owner decisions: text-first, no clearing, page origin only ---------------------------------- */
+  const code = surface.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check("the panel is text-first: nothing in it plays audio",
+    !/lilithSpeech|voice|speak\(|Audio\(|TTS/i.test(code));
+  check("the panel offers no way to clear or reset the conversation",
+    !/\breset\b|Clear|startRecording|finishRecording/.test(code));
+  check("a turn carries its page of origin and nothing about what is on the page",
+    (code.match(/context:/g) ?? []).length === 1 && /context: \{ surface: surfaceFor\(pathname\) \}/.test(code) &&
+      !/selected|selection|recordId|applicationId|entityId|summary:/.test(code));
+  check("the page label is a route segment, never an object id",
+    surfaceFor("/memory/atlas") === "memory" && surfaceFor("/career/applications/42") === "career");
+  check("the panel says plainly that Lilith does not see the page",
+    /Lilith does not see what is open on this page unless you tell her\./.test(surface));
+
   /* the panel ---------------------------------------------------------------------------------- */
   check("the panel is a labelled modal dialog with a live state line",
     /role="dialog"/.test(surface) && /aria-modal="true"/.test(surface) && /aria-label="Lilith"/.test(surface) &&
