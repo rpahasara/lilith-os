@@ -5,6 +5,7 @@ import { useMemory } from "@/hooks/use-memory";
 import type { MemoryRecord, SearchScope } from "@/lib/memory/types";
 import { MemoryHeader } from "@/components/memory/memory-header";
 import { MemorySearch } from "@/components/memory/memory-search";
+import { MemoryViewSwitch } from "@/components/memory/memory-view-switch";
 import { MemoryConstellation } from "@/components/memory/memory-constellation";
 import { CategoryFilter, type CategorySelection } from "@/components/memory/category-filter";
 import { MemoryGrid } from "@/components/memory/memory-grid";
@@ -65,6 +66,11 @@ export default function MemoryPage() {
             isDemo={data.isDemo}
             diagnostics={data.diagnostics}
           />
+
+          {/* Brain / Timeline open the Cognitive Atlas prototype (synthetic data). */}
+          <div className="flex justify-end">
+            <MemoryViewSwitch active="archive" />
+          </div>
 
           <MemorySearch
             query={query}
