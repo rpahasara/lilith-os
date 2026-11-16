@@ -81,6 +81,28 @@ it could be mistaken for the real thing:
   orbiting and picking a memory directly on the brain do not.
 - **Hidden tab.** Rendering and the simulation stop while the page is hidden.
 
+## Preview gate
+
+The Atlas is a preview until it is wired to real memory and approved for
+production. `atlasPreviewEnabled()` in `src/lib/memory/atlas/preview.ts` is the
+one switch:
+
+| Where | Atlas |
+| --- | --- |
+| Development server (`next dev`) | on |
+| Production build (`next build`) | off |
+| Production build made with `NEXT_PUBLIC_LILITH_ATLAS_PREVIEW=true` | on |
+
+When it is off, `/memory/atlas` is a 404 (gated in the server layout, so the
+route is prerendered as not-found) and the Archive shows no Brain / Timeline
+switch. The value is fixed at build time; a host environment variable cannot
+change it afterwards.
+
+The flag only decides whether the prototype is included. It does not connect
+the Atlas to real memory: the data stays synthetic either way, and
+`preview-self-test.ts` fails the build's test run if anything under
+`memory/atlas` starts talking to the backend.
+
 ## Structure
 
 ```
