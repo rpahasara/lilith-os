@@ -17,6 +17,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TopBar } from "@/components/layout/top-bar";
 import { SidebarRail } from "@/components/layout/sidebar-rail";
 import { CommandInput } from "@/components/presence/command-input";
+import { REAL_SUGGESTIONS } from "@/lib/command/suggestions";
 
 interface Result {
   name: string;
@@ -64,7 +65,8 @@ const FUNCTIONAL: Record<string, string[]> = {
   "top bar": [],
   "sidebar rail": [],
   // Suggestion chips fill the input; Send submits (disabled while empty).
-  "command input": ["System health", "Summarise inbox", "Compare AWS cost", "Plan my day"],
+  // Only chips backed by a real intent are offered by default.
+  "command input": [...REAL_SUGGESTIONS],
 };
 
 /** Features that are not built yet and must render as disabled controls. */

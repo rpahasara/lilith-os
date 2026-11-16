@@ -6,6 +6,14 @@ import type { CareerOverview } from "@/lib/career/types";
 import type { Diagnostics } from "@/lib/api";
 import { staggerContainer } from "@/lib/motion";
 import { MetricTile, WorkspaceHeader } from "@/components/ui/primitives";
+import type { WorkspaceIdentity } from "@/components/ui/data-state";
+
+export const CAREER_IDENTITY: WorkspaceIdentity = {
+  icon: Briefcase,
+  eyebrow: "Opportunity field",
+  title: "Career Intelligence",
+  description: "Lilith is tracking your opportunities and moving the pipeline forward.",
+};
 
 export function CareerHeader({
   overview,
@@ -18,7 +26,7 @@ export function CareerHeader({
 }) {
   return (
     <div>
-      <WorkspaceHeader icon={Briefcase} eyebrow="Opportunity field" title="Career Intelligence" description="Lilith is tracking your opportunities and moving the pipeline forward." isDemo={isDemo} diagnostics={diagnostics} />
+      <WorkspaceHeader {...CAREER_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />
 
       <motion.div
         variants={staggerContainer}

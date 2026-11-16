@@ -2,15 +2,21 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FlaskConical, Radio, ChevronDown, Check, X } from "lucide-react";
+import { CloudOff, FlaskConical, Radio, ChevronDown, Check, X } from "lucide-react";
 import type { Diagnostics } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+/**
+ * The workspace connection chip. Three states, each said plainly:
+ * live data, simulated (sample) data, or nothing available.
+ */
 export function ConnectionStatus({
   isDemo,
+  unavailable = false,
   diagnostics,
 }: {
   isDemo: boolean;
+  unavailable?: boolean;
   diagnostics?: Diagnostics;
 }) {
   const [open, setOpen] = useState(false);
@@ -23,16 +29,23 @@ export function ConnectionStatus({
         onClick={() => diagnostics && setOpen((o) => !o)}
         className={cn(
           "flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors",
-          isDemo
-            ? "border-amber/20 bg-amber/10 text-amber"
-            : "border-green/20 bg-green/10 text-green",
+          unavailable
+            ? "border-rose/25 bg-rose/10 text-rose"
+            : isDemo
+              ? "border-amber/20 bg-amber/10 text-amber"
+              : "border-green/20 bg-green/10 text-green",
           diagnostics && "hover:brightness-110",
         )}
       >
-        {isDemo ? (
+        {unavailable ? (
+          <>
+            <CloudOff className="h-3 w-3" />
+            Unavailable · no live data
+          </>
+        ) : isDemo ? (
           <>
             <FlaskConical className="h-3 w-3" />
-            Demo data · backend offline
+            Simulated data · backend offline
           </>
         ) : (
           <>

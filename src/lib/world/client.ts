@@ -170,7 +170,7 @@ export async function fetchWorld(
 ): Promise<WorldReadResult> {
   const path = `/os/world${toSearch(query)}`;
   const res = await fetchEndpoint<WireWorldResponse>(path, signal);
-  const diagnostics = toDiagnostics(res.ok ? "live" : "demo", [res]);
+  const diagnostics = toDiagnostics(res.ok ? "live" : "unavailable", [res]);
 
   if (!res.ok || !res.data) {
     const u = unavailable(res);
@@ -192,7 +192,7 @@ export async function fetchBelief(
 ): Promise<WorldReadResult> {
   const path = `/os/world/${encodeURIComponent(key)}`;
   const res = await fetchEndpoint<WireBelief>(path, signal);
-  const diagnostics = toDiagnostics(res.ok ? "live" : "demo", [res]);
+  const diagnostics = toDiagnostics(res.ok ? "live" : "unavailable", [res]);
 
   if (!res.ok || !res.data) {
     const u = unavailable(res);

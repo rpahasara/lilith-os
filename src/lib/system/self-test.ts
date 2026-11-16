@@ -32,9 +32,9 @@ export async function runShellHealthSelfTest(): Promise<Result[]> {
     live.state === "live" && live.latencyMs === 42 && live.checkedAt === NOW.toISOString(),
     JSON.stringify(live));
 
-  const demo = deriveShellHealth(res(false, 503), 5, NOW);
-  check("503 (proxy unconfigured) is demo, no latency",
-    demo.state === "demo" && demo.latencyMs === null, JSON.stringify(demo));
+  const unconfigured = deriveShellHealth(res(false, 503), 5, NOW);
+  check("503 (proxy unconfigured) is unconfigured, no latency",
+    unconfigured.state === "unconfigured" && unconfigured.latencyMs === null, JSON.stringify(unconfigured));
 
   for (const status of [0, 401, 403, 404, 500, 502, 504]) {
     const h = deriveShellHealth(res(false, status), 5, NOW);
@@ -47,7 +47,7 @@ export async function runShellHealthSelfTest(): Promise<Result[]> {
     deriveShellHealth(res(true, 200), -3, NOW).latencyMs === 0);
 
   check("labels never claim more than measured",
-    shellHealthLabel({ state: "demo", latencyMs: null, httpStatus: 503, checkedAt: null }) === "Demo data" &&
+    shellHealthLabel({ state: "unconfigured", latencyMs: null, httpStatus: 503, checkedAt: null }) === "No backend configured" &&
     shellHealthLabel({ state: "unreachable", latencyMs: null, httpStatus: 0, checkedAt: null }) === "Backend unreachable" &&
     shellHealthLabel({ state: "checking", latencyMs: null, httpStatus: null, checkedAt: null }) === "Checking");
 

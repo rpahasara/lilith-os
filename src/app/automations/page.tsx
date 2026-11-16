@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import { useAutomations } from "@/hooks/use-automations";
-import { AutomationsHeader } from "@/components/automations/automations-header";
+import { AUTOMATIONS_IDENTITY, AutomationsHeader } from "@/components/automations/automations-header";
+import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { AutomationsSkeleton } from "@/components/automations/automations-skeleton";
 import { SystemsGrid } from "@/components/automations/systems-grid";
 import { ExecutionTimeline } from "@/components/automations/execution-timeline";
@@ -13,15 +14,23 @@ import { AutomationDetail } from "@/components/automations/automation-detail";
 import type { AutomationUnit } from "@/lib/automations/types";
 
 export default function AutomationsPage() {
-  const { data, loading } = useAutomations();
+  const { data, unavailable, loading, retry } = useAutomations();
   const [selected, setSelected] = useState<AutomationUnit | null>(null);
 
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
-      {loading || !data ? (
+      {loading ? (
         <AutomationsSkeleton />
-      ) : (
+      ) : unavailable ? (
+        <WorkspaceUnavailable
+          identity={AUTOMATIONS_IDENTITY}
+          what="Automation status"
+          diagnostics={unavailable.diagnostics}
+          onRetry={retry}
+        />
+      ) : !data ? null : (
         <>
+          {data.isDemo && <DemoBanner />}
           <AutomationsHeader
             health={data.health}
             isDemo={data.isDemo}

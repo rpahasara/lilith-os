@@ -5,7 +5,8 @@ import { useMeetings } from "@/hooks/use-meetings";
 import { getMeetingBrief } from "@/lib/meetings/client";
 import { demoBriefFor } from "@/lib/meetings/demo";
 import type { PrepBrief } from "@/lib/meetings/types";
-import { MeetingsHeader } from "@/components/meetings/meetings-header";
+import { MEETINGS_IDENTITY, MeetingsHeader } from "@/components/meetings/meetings-header";
+import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { NextMeeting } from "@/components/meetings/next-meeting";
 import { TimelineToday } from "@/components/meetings/timeline-today";
 import { MeetingIntelligence } from "@/components/meetings/meeting-intelligence";
@@ -14,7 +15,7 @@ import { FollowupsPanel } from "@/components/meetings/followups-panel";
 import { MeetingsSkeleton } from "@/components/meetings/meetings-skeleton";
 
 export default function MeetingsPage() {
-  const { data, loading } = useMeetings();
+  const { data, unavailable, loading, retry } = useMeetings();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [brief, setBrief] = useState<PrepBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
@@ -59,10 +60,18 @@ export default function MeetingsPage() {
 
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
-      {loading || !data ? (
+      {loading ? (
         <MeetingsSkeleton />
-      ) : (
+      ) : unavailable ? (
+        <WorkspaceUnavailable
+          identity={MEETINGS_IDENTITY}
+          what="Meetings"
+          diagnostics={unavailable.diagnostics}
+          onRetry={retry}
+        />
+      ) : !data ? null : (
         <>
+          {data.isDemo && <DemoBanner />}
           <MeetingsHeader
             overview={data.overview}
             isDemo={data.isDemo}

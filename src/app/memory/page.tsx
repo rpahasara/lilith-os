@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { useMemory } from "@/hooks/use-memory";
 import type { MemoryRecord, SearchScope } from "@/lib/memory/types";
-import { MemoryHeader } from "@/components/memory/memory-header";
+import { MEMORY_IDENTITY, MemoryHeader } from "@/components/memory/memory-header";
+import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { MemorySearch } from "@/components/memory/memory-search";
 import { MemoryConstellation } from "@/components/memory/memory-constellation";
 import { CategoryFilter, type CategorySelection } from "@/components/memory/category-filter";
@@ -34,7 +35,7 @@ function matches(r: MemoryRecord, q: string): boolean {
 }
 
 export default function MemoryPage() {
-  const { data, loading } = useMemory();
+  const { data, unavailable, loading, retry } = useMemory();
   const [category, setCategory] = useState<CategorySelection>("all");
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<SearchScope>("memory");
@@ -56,10 +57,18 @@ export default function MemoryPage() {
 
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
-      {loading || !data ? (
+      {loading ? (
         <MemorySkeleton />
-      ) : (
+      ) : unavailable ? (
+        <WorkspaceUnavailable
+          identity={MEMORY_IDENTITY}
+          what="Memory"
+          diagnostics={unavailable.diagnostics}
+          onRetry={retry}
+        />
+      ) : !data ? null : (
         <>
+          {data.isDemo && <DemoBanner />}
           <MemoryHeader
             overview={data.overview}
             isDemo={data.isDemo}
