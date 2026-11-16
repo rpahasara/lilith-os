@@ -40,9 +40,14 @@ export const PRESENCE_SOURCES: Record<ShellPresenceState, string | null> = {
   unavailable: "the proxy reports that no backend is configured",
 };
 
+/**
+ * The normal state is called "Connected", not "Available": the probe proves
+ * that the backend answered, which is all the client knows. It is not proof
+ * that every capability behind it is working.
+ */
 export const PRESENCE_LABEL: Record<ShellPresenceState, string> = {
   checking: "Connecting",
-  available: "Available",
+  available: "Connected",
   responding: "Responding",
   working: "Working",
   attention: "Needs your approval",
@@ -51,6 +56,33 @@ export const PRESENCE_LABEL: Record<ShellPresenceState, string> = {
   disconnected: "Disconnected",
   unavailable: "Unavailable",
 };
+
+/**
+ * What is actually verified, in a sentence: the tooltip and the accessible
+ * description. Says what the evidence is and, for the normal state, what it
+ * does not cover.
+ */
+export const PRESENCE_DETAIL: Record<ShellPresenceState, string> = {
+  checking: "Checking the connection to Lilith's backend.",
+  available:
+    "Connected: the backend answered the last health check. This confirms the connection only, not that every capability is working.",
+  responding: "Responding: a message sent from this browser is waiting for its reply.",
+  working: "Working: a command is queued or running.",
+  attention: "Needs your approval: a command is waiting for your decision.",
+  speaking: "Speaking: a reply is being played aloud.",
+  listening: "Listening: the microphone is capturing speech.",
+  disconnected: "Disconnected: the backend did not answer the last health check.",
+  unavailable: "Unavailable: no backend is configured for this app.",
+};
+
+/**
+ * Whether the state is put into words beside the mark. When everything is
+ * normal the mark alone is enough; words are for states that mean something
+ * to act on or wait for.
+ */
+export function presenceShowsLabel(state: ShellPresenceState): boolean {
+  return state !== "available" && state !== "checking";
+}
 
 export interface ShellPresenceInputs {
   health: ShellHealthState;
@@ -100,6 +132,6 @@ export function presenceAnnouncement(prev: ShellPresenceState | null, next: Shel
   if (next === "disconnected") return "Lilith is disconnected.";
   if (next === "unavailable") return "Lilith is unavailable: no backend is configured.";
   if (next === "attention") return "Lilith needs your approval for a command.";
-  if (next === "available" && (prev === "disconnected" || prev === "unavailable")) return "Lilith is available again.";
+  if (next === "available" && (prev === "disconnected" || prev === "unavailable")) return "Lilith is connected again.";
   return "";
 }

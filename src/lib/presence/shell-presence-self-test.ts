@@ -14,8 +14,10 @@ import { ShellProviders } from "@/components/layout/app-shell";
 import { TopBar } from "@/components/layout/top-bar";
 import { PresenceAnnouncer, PresenceMark } from "@/components/presence/presence-mark";
 import {
+  PRESENCE_DETAIL,
   PRESENCE_LABEL,
   PRESENCE_SOURCES,
+  presenceShowsLabel,
   presenceAnnouncement,
   shellPresence,
   type ShellPresenceInputs,
@@ -93,7 +95,7 @@ export function runShellPresenceSelfTest(): Result[] {
   /* announcements ------------------------------------------------------------------ */
   check("losing Lilith is announced", /disconnected/.test(presenceAnnouncement("available", "disconnected")) &&
     /unavailable/.test(presenceAnnouncement("checking", "unavailable")));
-  check("getting her back is announced", /available again/.test(presenceAnnouncement("disconnected", "available")));
+  check("getting her back is announced", /connected again/.test(presenceAnnouncement("disconnected", "available")));
   check("a request for approval is announced", /approval/.test(presenceAnnouncement("working", "attention")));
   check("routine activity is not narrated",
     presenceAnnouncement("available", "responding") === "" && presenceAnnouncement("responding", "available") === "" &&
@@ -120,9 +122,26 @@ export function runShellPresenceSelfTest(): Result[] {
 
   /* in the shell ----------------------------------------------------------------------- */
   const bar = renderToStaticMarkup(createElement(ShellProviders, null, createElement(TopBar)));
-  check("the top bar shows the mark with its state in words",
-    /class="presence-mark"/.test(bar) && /data-presence-state="checking"/.test(bar) && bar.includes(PRESENCE_LABEL.checking));
-  check("the launcher describes Lilith's state to assistive technology", /aria-description="Lilith is connecting"/.test(bar));
+  check("the top bar always shows the mark",
+    /class="presence-mark"/.test(bar) && /data-presence-state="checking"/.test(bar));
+  check("no status word is shown while everything is normal", !/data-presence-label/.test(bar));
+  const described = (html: string) => /aria-description="([^"]*)"/.exec(html)?.[1].replace(/&#x27;/g, "'") ?? "";
+  check("the launcher's description and tooltip are the verified detail",
+    described(bar) === PRESENCE_DETAIL.checking && bar.includes(`title="${PRESENCE_DETAIL.checking.replace(/'/g, "&#x27;")}"`), described(bar));
+
+  /* words only when they mean something ------------------------------------------------- */
+  check("the normal states carry no words beside the mark", !presenceShowsLabel("available") && !presenceShowsLabel("checking"));
+  check("states to act on or wait for are put into words",
+    (["responding", "working", "attention", "speaking", "disconnected", "unavailable"] as const).every(presenceShowsLabel));
+  check("the normal state is called Connected, never Available", PRESENCE_LABEL.available === "Connected" &&
+    !Object.values(PRESENCE_LABEL).includes("Available"));
+  check("its tooltip says what is verified and what is not",
+    /health check/.test(PRESENCE_DETAIL.available) && /connection only/.test(PRESENCE_DETAIL.available) &&
+      /not that every capability is working/.test(PRESENCE_DETAIL.available));
+  check("every state has a tooltip that starts with its label",
+    STATES.every((s) => s === "checking" || PRESENCE_DETAIL[s].startsWith(PRESENCE_LABEL[s] + ":")));
+  check("no tooltip claims intelligence, thinking or readiness of capabilities",
+    !Object.values(PRESENCE_DETAIL).some((d) => /thinking|ready|online|all systems|fully|intelligen/i.test(d)));
   check("the mark is announced from exactly one place", (bar.match(/data-presence-announcer/g) ?? []).length === 1);
   check("the panel header carries the mark too", /<PresenceMark state=\{presence\} \/>/.test(src("components", "command", "global-command.tsx")));
 

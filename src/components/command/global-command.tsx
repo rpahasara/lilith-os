@@ -20,7 +20,7 @@ import { ConversationAnnouncer, ConversationView } from "@/components/conversati
 import { useShellHealth } from "@/components/layout/shell-health-provider";
 import { CommandInput } from "@/components/presence/command-input";
 import { PresenceAnnouncer, PresenceMark, useShellPresence } from "@/components/presence/presence-mark";
-import { PRESENCE_LABEL } from "@/lib/presence/shell-presence";
+import { PRESENCE_DETAIL, PRESENCE_LABEL, presenceShowsLabel } from "@/lib/presence/shell-presence";
 import { InlineNotice, LoadingRegion, Skeleton } from "@/components/ui/feedback";
 import {
   GLOBAL_INPUT_ID,
@@ -185,7 +185,8 @@ export function GlobalCommandLauncher() {
         type="button"
         onClick={activate}
         aria-label={name}
-        aria-description={`Lilith is ${PRESENCE_LABEL[presence].toLowerCase()}`}
+        aria-description={PRESENCE_DETAIL[presence]}
+        title={PRESENCE_DETAIL[presence]}
         aria-keyshortcuts="Control+Space"
         data-global-command-launcher=""
         data-presence-state={presence}
@@ -197,12 +198,13 @@ export function GlobalCommandLauncher() {
         <span className={cn("flex-1 truncate", unseen && "text-ink")}>{label}</span>
         {unseen ? (
           <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-wine-bright shadow-[0_0_10px_rgba(225,132,157,0.9)]" />
-        ) : (
-          // Lilith's state in words, beside the mark that shows it.
+        ) : presenceShowsLabel(presence) ? (
+          // Words only for states that mean something to act on or wait for;
+          // when everything is normal the mark alone says so.
           <span aria-hidden data-presence-label="" className="hidden shrink-0 font-mono text-micro uppercase tracking-[0.12em] text-ink-faint sm:block">
             {PRESENCE_LABEL[presence]}
           </span>
-        )}
+        ) : null}
         <kbd className="hidden items-center rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-micro text-ink-faint lg:flex">
           Ctrl Space
         </kbd>
@@ -213,7 +215,8 @@ export function GlobalCommandLauncher() {
         type="button"
         onClick={activate}
         aria-label={name}
-        aria-description={`Lilith is ${PRESENCE_LABEL[presence].toLowerCase()}`}
+        aria-description={PRESENCE_DETAIL[presence]}
+        title={PRESENCE_DETAIL[presence]}
         {...popup}
         className="glass relative grid h-10 w-10 shrink-0 place-items-center rounded-full md:hidden"
       >
