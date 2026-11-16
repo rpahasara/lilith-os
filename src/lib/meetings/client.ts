@@ -21,6 +21,7 @@ import {
   type PrepStatus,
 } from "./types";
 import { fetchEndpoint, toDiagnostics, type EndpointResult } from "@/lib/api";
+import { demoDataEnabled, unavailable, type Loaded } from "@/lib/data-mode";
 
 const PREP_SET = new Set<string>([...PREP_STAGES, "scheduled"]);
 
@@ -137,8 +138,14 @@ function normContext(x: any): MeetingContext {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-/** Fetch everything the Meetings screen needs. Never throws. */
-export async function getMeetingsData(signal?: AbortSignal): Promise<MeetingsData> {
+/**
+ * Fetch everything the Meetings screen needs. Never throws. When the backend is
+ * absent it resolves to `unavailable` — or to the sample data, if `demo`.
+ */
+export async function getMeetingsData(
+  signal?: AbortSignal,
+  demo: boolean = demoDataEnabled(),
+): Promise<Loaded<MeetingsData>> {
   const paths = [
     "/meetings/overview",
     "/meetings/upcoming",
@@ -150,11 +157,13 @@ export async function getMeetingsData(signal?: AbortSignal): Promise<MeetingsDat
   )) as EndpointResult[];
   const results = [ovRes, upRes, ctxRes, fuRes];
 
-  // Overview is the backbone. Without it we serve demo data.
+  // Overview is the backbone. Without it the workspace is unavailable; sample
+  // data is shown only when it was explicitly asked for.
   if (!ovRes.ok || ovRes.data == null) {
-    const demo = buildDemoMeetingsData();
-    demo.diagnostics = toDiagnostics("demo", results);
-    return demo;
+    if (!demo) return unavailable(results);
+    const sample = buildDemoMeetingsData();
+    sample.diagnostics = toDiagnostics("demo", results);
+    return sample;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

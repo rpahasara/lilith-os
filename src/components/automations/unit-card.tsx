@@ -13,7 +13,6 @@ import { KindBadge, StatusPill } from "./unit-chips";
 import { RunHistory } from "./run-history";
 import type { AutomationUnit, TriggerType } from "@/lib/automations/types";
 import { timeAgo, shortDate, cn } from "@/lib/utils";
-import { riseIn } from "@/lib/motion";
 
 const TRIGGER_ICON: Record<TriggerType, LucideIcon> = {
   continuous: InfinityIcon,
@@ -41,7 +40,6 @@ export function UnitCard({ unit, selected, onSelect }: { unit: AutomationUnit; s
 
   return (
     <motion.button type="button" onClick={() => onSelect(unit)} aria-pressed={selected}
-      variants={riseIn}
       className={cn(
         "group rounded-[var(--radius-md)] border bg-white/[0.015] p-4 transition-colors",
         selected ? "border-wine-bright/35 bg-wine/10 text-left" : failed

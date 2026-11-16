@@ -6,6 +6,7 @@ import { PanelHeader } from "@/components/ui/primitives";
 import { StageBadge } from "./stage-badge";
 import type { Application } from "@/lib/career/types";
 import { shortDate } from "@/lib/utils";
+import { unavailable } from "@/components/ui/unavailable";
 
 const PREP_STAGES = ["screening", "assessment", "interview", "final_interview"];
 
@@ -16,7 +17,7 @@ export function InterviewPrep({ applications }: { applications: Application[] })
     .slice(0, 4);
 
   return (
-    <GlassCard className="p-5" interactive>
+    <GlassCard className="p-5">
       <PanelHeader
         title="Interview prep"
         action={
@@ -49,7 +50,12 @@ export function InterviewPrep({ applications }: { applications: Application[] })
                   Next: {a.nextAction.label} · {shortDate(a.nextAction.due)}
                 </p>
               )}
-              <button className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-gradient-to-b from-violet-bright/20 to-violet-deep/20 py-1.5 text-xs font-medium text-violet-bright transition-colors hover:from-violet-bright/30 hover:to-violet-deep/30">
+              {/* Not built yet: a disabled control with its reason, as on Home. */}
+              <button
+                type="button"
+                {...unavailable("Prep with Lilith")}
+                className="mt-2 flex w-full cursor-not-allowed items-center justify-center gap-1.5 rounded-lg bg-white/[0.04] py-1.5 text-xs font-medium text-ink-faint opacity-60"
+              >
                 <Sparkles className="h-3 w-3" /> Prep with Lilith
               </button>
             </li>

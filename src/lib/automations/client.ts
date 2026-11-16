@@ -18,6 +18,7 @@ import type {
   UnitStatus,
 } from "./types";
 import { fetchEndpoint, toDiagnostics, type EndpointResult } from "@/lib/api";
+import { demoDataEnabled, unavailable, type Loaded } from "@/lib/data-mode";
 
 /**
  * Static descriptions for the known Lilith units. These are documentation-level
@@ -202,9 +203,15 @@ function deriveInsights(units: AutomationUnit[]): AutomationInsight[] {
   }));
 }
 
+/**
+ * Fetch everything the Automations screen needs. Never throws. When neither
+ * source of units answers it resolves to `unavailable` — or to the sample
+ * data, if `demo`. A backend that answers with no units is live and empty.
+ */
 export async function getAutomationsData(
   signal?: AbortSignal,
-): Promise<AutomationsData> {
+  demo: boolean = demoDataEnabled(),
+): Promise<Loaded<AutomationsData>> {
   const paths = ["/system/status", "/os/overview", "/audit/recent"];
   const [statusRes, ovRes, auditRes] = (await Promise.all(
     paths.map((p) => fetchEndpoint(p, signal)),
@@ -231,10 +238,11 @@ export async function getAutomationsData(
   }
   const units = [...byUnit.values()].map(normalizeUnit);
 
-  if (units.length === 0) {
-    const demo = buildDemoAutomationsData();
-    demo.diagnostics = toDiagnostics("demo", results);
-    return demo;
+  if (units.length === 0 && !statusRes.ok && !ovRes.ok) {
+    if (!demo) return unavailable(results);
+    const sample = buildDemoAutomationsData();
+    sample.diagnostics = toDiagnostics("demo", results);
+    return sample;
   }
   const backendInsights = Array.isArray(ov.automation_insights)
     ? ov.automation_insights

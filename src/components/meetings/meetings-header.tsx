@@ -6,6 +6,7 @@ import type { MeetingsOverview } from "@/lib/meetings/types";
 import type { Diagnostics } from "@/lib/api";
 import { staggerContainer } from "@/lib/motion";
 import { MetricTile, WorkspaceHeader } from "@/components/ui/primitives";
+import type { WorkspaceIdentity } from "@/components/ui/data-state";
 
 export function fmtCountdown(mins?: number | null): string {
   if (mins == null) return "—";
@@ -19,6 +20,13 @@ export function fmtCountdown(mins?: number | null): string {
   return `${d}d ${h % 24}h`;
 }
 
+export const MEETINGS_IDENTITY: WorkspaceIdentity = {
+  icon: CalendarClock,
+  eyebrow: "Temporal field",
+  title: "Meetings Intelligence",
+  description: "Everything Lilith knows and prepares around your time.",
+};
+
 export function MeetingsHeader({
   overview,
   isDemo,
@@ -31,7 +39,7 @@ export function MeetingsHeader({
   const c = overview.counts;
   return (
     <div>
-      <WorkspaceHeader icon={CalendarClock} eyebrow="Temporal field" title="Meetings Intelligence" description="Everything Lilith knows and prepares around your time." isDemo={isDemo} diagnostics={diagnostics} />
+      <WorkspaceHeader {...MEETINGS_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />
 
       <motion.div
         variants={staggerContainer}

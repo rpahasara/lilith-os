@@ -13,11 +13,13 @@ import { CommandConsole, CommandHistory, useCommand } from "@/components/command
 import { ACTIVITY_META, CHIP_ACTIVITIES } from "@/lib/presence";
 import { user } from "@/lib/data";
 import { greetingFor, cn } from "@/lib/utils";
-import { StatusDot } from "@/components/ui/primitives";
 import { lilithSpeech } from "@/lib/voice/speech-controller";
 import { voiceSettings } from "@/lib/voice/voice-settings";
 import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
 import { decideReplyVoicing } from "@/lib/voice/reply-voicing";
+
+// Same opt-in as the avatar calibration tools (default off, even in `next dev`).
+const SHOW_PRESENCE_CONTROLS = process.env.NEXT_PUBLIC_PRESENCE_DEBUG === "1";
 
 // Stable module-level production auto-speech provider (never re-created on
 // render). Independent of the manual dev POC provider selection.
@@ -199,9 +201,6 @@ export function PresenceHero() {
         transition={{ delay: 0.2, duration: 0.7 }}
         className="text-center"
       >
-        <p className="eyebrow mb-2.5 flex items-center justify-center gap-2 text-wine-bright/85">
-          <StatusDot accent="wine" /> Presence online
-        </p>
         <h1 className="text-3xl font-medium tracking-[-0.045em] text-ink [text-shadow:0_2px_28px_rgba(0,0,0,0.72)] sm:text-[2.6rem]">
           {greeting}, <span className="bg-gradient-to-r from-pearl via-wine-bright to-orchid-bright bg-clip-text font-semibold text-transparent">{user.name}</span>.
         </h1>
@@ -250,7 +249,10 @@ export function PresenceHero() {
               </motion.p>
             </AnimatePresence>
 
-            <div className="flex items-center gap-1.5">
+            {/* Manual presence overrides are a calibration tool, not status:
+                shown only with the presence debug flag. */}
+            {SHOW_PRESENCE_CONTROLS && (
+            <div className="flex items-center gap-1.5" data-presence-controls>
               {CHIP_ACTIVITIES.map((a) => (
                 <button
                   key={a}
@@ -266,6 +268,7 @@ export function PresenceHero() {
                 </button>
               ))}
             </div>
+            )}
 
             {history.length > 0 && (
               <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />

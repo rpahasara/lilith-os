@@ -1,7 +1,9 @@
 "use client";
 
 import { Activity, Braces, Cpu, Database, Gauge, Globe2, KeyRound, LockKeyhole, Mic2, MonitorCog, PlugZap, ShieldCheck, TriangleAlert, type LucideIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 import { GlassCard } from "@/components/ui/card";
+import { detectWebGL, readPresencePreference } from "@/lib/presence/capabilities";
 import { Button } from "@/components/ui/button";
 import { WorkspaceHeader } from "@/components/ui/primitives";
 import { ContextAction, SectionHeader, StatusBadge } from "@/components/ui/workspace";
@@ -15,13 +17,21 @@ const integrations = [
 
 export default function SystemPage() {
   const environment = process.env.NODE_ENV === "production" ? "Production build" : "Development build";
+  // What this browser will actually render, read after mount rather than assumed.
+  const [renderer, setRenderer] = useState<{ label: string; tone: "green" | "cyan" | "faint" }>({ label: "Checking", tone: "faint" });
+  useEffect(() => {
+    const preference = readPresencePreference();
+    if (preference === "off") setRenderer({ label: "Off", tone: "faint" });
+    else if (!detectWebGL()) setRenderer({ label: "Static fallback", tone: "faint" });
+    else setRenderer({ label: preference === "orb" ? "Orb" : "Enabled", tone: "cyan" });
+  }, []);
   return <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
     <WorkspaceHeader icon={Activity} eyebrow="Control surface" title="System" description="Runtime visibility, integrations, permissions, and diagnostics in one place." />
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <div className="space-y-4">
         <GlassCard className="p-5" animated={false}>
           <SectionHeader title="Runtime" description="What this client can verify without exposing sensitive configuration." action={<StatusBadge label="Client active" tone="green"/>}/>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2"><RuntimeItem icon={Globe2} name="Application shell" detail={environment} status="Active" tone="green"/><RuntimeItem icon={MonitorCog} name="Avatar renderer" detail="Managed by the shared shell" status="Enabled" tone="cyan"/><RuntimeItem icon={Mic2} name="Voice pipeline" detail="Status remains in the voice surface" status="Module-owned" tone="faint"/><RuntimeItem icon={Cpu} name="Backend services" detail="Verified per workspace endpoint" status="Module-owned" tone="faint"/></div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2"><RuntimeItem icon={Globe2} name="Application shell" detail={environment} status="Active" tone="green"/><RuntimeItem icon={MonitorCog} name="Avatar renderer" detail="Lilith's presence on the Command Center" status={renderer.label} tone={renderer.tone}/><RuntimeItem icon={Mic2} name="Voice pipeline" detail="Shown beside the command input" status="In Command" tone="faint"/><RuntimeItem icon={Cpu} name="Backend services" detail="Each workspace reports its own connection" status="Per workspace" tone="faint"/></div>
         </GlassCard>
         <GlassCard className="p-5" animated={false}>
           <SectionHeader title="Integrations" description="Capability boundaries are visible here; connection details stay private." action={<Button size="sm" disabled title="Integration management is not connected"><PlugZap className="h-3.5 w-3.5"/>Manage</Button>}/>
@@ -33,7 +43,7 @@ export default function SystemPage() {
         </GlassCard>
       </div>
       <div className="space-y-4">
-        <GlassCard className="p-5" animated={false}><SectionHeader title="Environment" /><dl className="mt-4 space-y-3"><Datum label="Application" value="LILITH OS"/><Datum label="Version" value="0.1.0"/><Datum label="Build mode" value={environment}/><Datum label="UI baseline" value="Home V2 approved"/></dl></GlassCard>
+        <GlassCard className="p-5" animated={false}><SectionHeader title="Environment" /><dl className="mt-4 space-y-3"><Datum label="Application" value="LILITH OS"/><Datum label="Version" value="0.1.0"/><Datum label="Build mode" value={environment}/></dl></GlassCard>
         <GlassCard className="p-5" animated={false}><SectionHeader title="Performance" description="Detailed telemetry is waiting for a measured runtime source." /><div className="mt-4"><ContextAction icon={Gauge} title="Runtime metrics" description="No performance endpoint is connected, so values are intentionally omitted." disabled/></div></GlassCard>
         <GlassCard className="p-5" animated={false}>
           <details className="group"><summary className="cursor-pointer list-none"><SectionHeader title="Advanced diagnostics" description="Development notes and low-level checks." action={<Braces className="h-4 w-4 text-ink-faint"/>}/></summary><div className="mt-4 space-y-3 border-t border-white/[0.06] pt-4"><div className="rounded-xl border border-amber/15 bg-amber/[0.04] p-3"><p className="flex items-center gap-2 text-xs font-medium text-amber"><TriangleAlert className="h-3.5 w-3.5"/>Known development-only renderer signal</p><p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">React Strict Mode may recreate the R3F canvas during development and report WebGL context loss. The approved production build remains the validation target.</p></div><p className="flex items-center gap-2 text-[10px] text-ink-faint"><LockKeyhole className="h-3 w-3"/>Tokens, keys, account addresses, and API targets are omitted.</p></div></details>

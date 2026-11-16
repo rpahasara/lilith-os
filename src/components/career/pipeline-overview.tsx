@@ -17,7 +17,7 @@ const NODE_ACCENT: Record<string, string> = {
 
 export function PipelineOverview({ pipeline, selectedStage, onSelect }: { pipeline: PipelineStage[]; selectedStage?: Stage | null; onSelect?: (stage: Stage) => void }) {
   return (
-    <GlassCard className="p-5" interactive>
+    <GlassCard className="p-5">
       <PanelHeader
         title="Pipeline overview"
         action={

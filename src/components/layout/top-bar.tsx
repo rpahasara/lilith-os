@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Bell, Search, LayoutGrid } from "lucide-react";
+import { Search } from "lucide-react";
 import { nav } from "./nav";
 import { Clock } from "./clock";
 import { user } from "@/lib/data";
@@ -44,12 +44,6 @@ export function TopBar() {
 
       {/* right: actions */}
       <div className="flex items-center gap-2">
-        <IconBtn label="Apps">
-          <LayoutGrid className="h-[18px] w-[18px]" />
-        </IconBtn>
-        <IconBtn label="Notifications">
-          <Bell className="h-[18px] w-[18px]" />
-        </IconBtn>
         {/* Identity display only: there is no account menu or sign-in yet. */}
         <div className="glass flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3">
           <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-wine-deep to-wine-bright text-xs font-semibold text-white">
@@ -66,25 +60,5 @@ export function TopBar() {
         </div>
       </div>
     </header>
-  );
-}
-
-/** Top-bar icon slot for a feature that is not connected yet (disabled). */
-function IconBtn({
-  children,
-  label,
-}: {
-  children: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      {...unavailable(label)}
-      className="glass relative grid h-10 w-10 cursor-not-allowed place-items-center rounded-full text-ink-muted opacity-50"
-    >
-      {children}
-    </button>
   );
 }

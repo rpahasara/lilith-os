@@ -92,7 +92,7 @@ export default function WorldPage() {
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
       <WorkspaceHeader
         icon={Globe2}
-        eyebrow="Slice 7 · World Model"
+        eyebrow="Belief state"
         title="World Model"
         description="What LILITH currently believes is true — reconciled from observations, tasks and memory, with provenance and confidence on every belief. Read-only; beliefs are never mutated from here."
         diagnostics={available?.diagnostics}
