@@ -6,6 +6,8 @@ import type { MemoryRecord, SearchScope } from "@/lib/memory/types";
 import { MEMORY_IDENTITY, MemoryHeader } from "@/components/memory/memory-header";
 import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { MemorySearch } from "@/components/memory/memory-search";
+import { MemoryViewSwitch } from "@/components/memory/memory-view-switch";
+import { atlasPreviewEnabled } from "@/lib/memory/atlas/preview";
 import { CategoryFilter, type CategorySelection } from "@/components/memory/category-filter";
 import { MemoryGrid } from "@/components/memory/memory-grid";
 import { RecentlyLearned } from "@/components/memory/recently-learned";
@@ -31,6 +33,9 @@ function matches(r: MemoryRecord, q: string): boolean {
     .toLowerCase();
   return hay.includes(q);
 }
+
+/** Brain / Timeline open the Cognitive Atlas preview; a build can leave it out. */
+const ATLAS_PREVIEW = atlasPreviewEnabled();
 
 export default function MemoryPage() {
   const { data, unavailable, loading, retry } = useMemory();
@@ -58,12 +63,19 @@ export default function MemoryPage() {
       {loading ? (
         <MemorySkeleton />
       ) : unavailable ? (
-        <WorkspaceUnavailable
-          identity={MEMORY_IDENTITY}
-          what="Memory"
-          diagnostics={unavailable.diagnostics}
-          onRetry={retry}
-        />
+        <>
+          <WorkspaceUnavailable
+            identity={MEMORY_IDENTITY}
+            what="Memory"
+            diagnostics={unavailable.diagnostics}
+            onRetry={retry}
+          />
+          {ATLAS_PREVIEW && (
+            <div className="flex justify-end">
+              <MemoryViewSwitch active="archive" />
+            </div>
+          )}
+        </>
       ) : !data ? null : (
         <>
           {data.isDemo && <DemoBanner />}
@@ -72,6 +84,13 @@ export default function MemoryPage() {
             isDemo={data.isDemo}
             diagnostics={data.diagnostics}
           />
+
+          {/* Brain / Timeline open the Cognitive Atlas prototype (synthetic data). */}
+          {ATLAS_PREVIEW && (
+            <div className="flex justify-end">
+              <MemoryViewSwitch active="archive" />
+            </div>
+          )}
 
           <MemorySearch
             query={query}
