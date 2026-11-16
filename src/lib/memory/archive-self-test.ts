@@ -3,7 +3,7 @@
  * from the backend is what the Archive shows. The fact / inference / unknown
  * classification, the provenance ("why Lilith knows this"), the source account,
  * confidence, importance, entities, relations and timestamps all survive the
- * trip from a live payload to the card and the detail drawer.
+ * trip from a live payload to the row and the detail drawer.
  *
  * No browser and no backend: `fetch` is replaced for the duration of the test,
  * and the components are server-rendered. Run by `npm run test:core`.
@@ -11,7 +11,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryDetail } from "@/components/memory/memory-detail";
-import { ShardCard } from "@/components/memory/shard-card";
+import { MemoryRow } from "@/components/memory/memory-row";
 import { isUnavailable } from "@/lib/data-mode";
 import { getMemoryData } from "@/lib/memory/client";
 import { KIND_META, PROVENANCE_META, type MemoryData, type MemoryRecord } from "@/lib/memory/types";
@@ -108,11 +108,13 @@ export async function runArchiveSelfTest(): Promise<Result[]> {
       fact.entities.length === 1 && fact.related.includes("m-inference"));
   check("an absent confidence stays absent, not invented", byId("m-unstated").confidence === undefined);
 
-  /* the card ------------------------------------------------------------------- */
+  /* the row ------------------------------------------------------------------- */
   for (const record of data.records) {
-    const card = renderToStaticMarkup(createElement(ShardCard, { record, onSelect: () => {} }));
-    check(`the card shows the class of ${record.id}`, card.includes(KIND_META[record.kind].label), card.slice(0, 160));
-    check(`the card shows the source of ${record.id}`, card.includes(PROVENANCE_META[record.provenance.kind].label));
+    const row = renderToStaticMarkup(createElement(MemoryRow, { record, selected: false, tabIndex: 0, onSelect: () => {} }));
+    check(`the row shows the class of ${record.id}, or a dash when it is not stated`,
+      record.kind === "unknown" ? /aria-label="Classification not stated"/.test(row) && !/>Fact<|>Inference</.test(row) : row.includes(KIND_META[record.kind].label),
+      row.slice(0, 160));
+    check(`the row shows the source of ${record.id}`, row.includes(PROVENANCE_META[record.provenance.kind].label));
   }
 
   /* the detail drawer ----------------------------------------------------------- */
@@ -134,7 +136,7 @@ export async function runArchiveSelfTest(): Promise<Result[]> {
     !fact.provenance.sourceAccount || factHtml.includes(fact.provenance.sourceAccount));
   check("the drawer shows confidence, importance, entities, relations and timestamps",
     /Confidence/.test(factHtml) && /Importance/.test(factHtml) && factHtml.includes("Owner") &&
-      factHtml.includes("Probably prefers mornings") && /Created/.test(factHtml) && /Updated/.test(factHtml));
+      factHtml.includes("Probably prefers mornings") && /Recorded/.test(factHtml) && /Updated/.test(factHtml));
   check("the drawer keeps its read-only promise", /Read-only/.test(factHtml) && (factHtml.match(/disabled=""/g) ?? []).length >= 3);
 
   return out;
