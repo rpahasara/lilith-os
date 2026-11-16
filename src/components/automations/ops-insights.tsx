@@ -15,7 +15,7 @@ const TONE = {
 
 export function OpsInsights({ insights }: { insights: AutomationInsight[] }) {
   return (
-    <GlassCard strong className="p-5" interactive>
+    <GlassCard strong className="p-5">
       <PanelHeader
         title="Lilith insights"
         action={

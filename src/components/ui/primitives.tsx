@@ -140,24 +140,3 @@ export function StatusDot({
     />
   );
 }
-
-/* ---------------------------------------------------------------- Bars mini */
-export function Bars({
-  values,
-  accent = "cyan",
-}: {
-  values: number[];
-  accent?: Accent;
-}) {
-  return (
-    <div className="flex items-end gap-0.5">
-      {values.map((v, i) => (
-        <span
-          key={i}
-          className={cn("w-[3px] rounded-full", accentBg[accent])}
-          style={{ height: `${v * 3}px`, opacity: 0.35 + v * 0.12 }}
-        />
-      ))}
-    </div>
-  );
-}

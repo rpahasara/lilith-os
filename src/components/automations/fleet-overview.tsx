@@ -27,7 +27,7 @@ export function FleetOverview({
   }));
 
   return (
-    <GlassCard className="p-5" interactive>
+    <GlassCard className="p-5">
       <PanelHeader title="Fleet" />
 
       <div className="mt-4 flex items-center gap-5">

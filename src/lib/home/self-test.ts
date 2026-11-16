@@ -12,7 +12,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TodayCard } from "@/components/home/today-card";
 import { NextCard } from "@/components/home/next-card";
-import { brief, nextEvent, pipeline } from "@/lib/data";
 import type { Followup, MeetingEvent, MeetingsData } from "@/lib/meetings/types";
 import {
   STALE_AFTER_MS,
@@ -77,14 +76,22 @@ function data(over: Partial<MeetingsData> = {}, generatedAt: string | null = iso
  */
 const LEGITIMATE_LABELS = new Set(["Focus window open"]);
 
-/** Every fact the old hard-coded cards showed (read from the demo module). */
+/**
+ * Every fact the old hard-coded Home cards showed. Those cards and their mock
+ * data are gone; the strings are kept here so they can never come back.
+ */
 const FABRICATED = [
-  nextEvent.title,
-  nextEvent.where,
-  `in ${nextEvent.inMinutes}m`,
-  `${nextEvent.people} attending`,
-  `Focus ${pipeline.focusScore}`,
-  ...brief.flatMap((b) => [b.text, b.meta]),
+  "Product Strategy Sync",
+  "Deep Focus Room",
+  "in 45m",
+  "4 attending",
+  "Focus 87",
+  "3 meetings today",
+  "2 high priority",
+  "Project Nova review due",
+  "Tomorrow, 5:00 PM",
+  "Focus window open",
+  "Recommended 2h",
 ].filter((s) => !LEGITIMATE_LABELS.has(s));
 
 function markup(view: HomeMeetingsView, now: number | null = NOW) {

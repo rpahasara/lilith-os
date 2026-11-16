@@ -5,11 +5,12 @@
  * browser; `next/navigation` and `next/link` are stubbed by the runner) and
  * checks the markup:
  *  - every enabled <button> is one we know has a real handler;
- *  - every not-yet-built feature is a natively `disabled` button with an
- *    accessible name and a reason (title), so mouse and keyboard cannot
- *    activate it;
- *  - no fake unread indicator, no promised-but-missing shortcut, no fake
- *    account button.
+ *  - a not-yet-built feature that is still shown is a natively `disabled`
+ *    button with an accessible name and a reason (title), so mouse and
+ *    keyboard cannot activate it;
+ *  - controls for features that do not exist at all (Apps, Notifications,
+ *    Settings) are not rendered;
+ *  - no promised-but-missing shortcut, no fake account button.
  * Run by `npm run test:core`.
  */
 import { createElement, type ComponentType } from "react";
@@ -71,8 +72,8 @@ const FUNCTIONAL: Record<string, string[]> = {
 
 /** Features that are not built yet and must render as disabled controls. */
 const UNAVAILABLE: Record<string, string[]> = {
-  "top bar": ["Search", "Apps", "Notifications"],
-  "sidebar rail": ["Settings"],
+  "top bar": ["Search"],
+  "sidebar rail": [],
   "command input": ["Voice input"],
 };
 
@@ -109,14 +110,16 @@ export function runControlsSelfTest(): Result[] {
   }
 
   const top = surfaces["top bar"];
-  const notifications = buttons(top).find((b) => b.name === "Notifications");
-  check("top bar: no fake unread indicator",
-    !!notifications && !/bg-rose/.test(notifications.inner), notifications?.inner);
+  check("top bar: no Apps or Notifications control until those exist",
+    !buttons(top).some((b) => b.name === "Apps" || b.name === "Notifications"));
+  check("top bar: no unread indicator", !/bg-rose/.test(top));
   check("top bar: no advertised Ctrl K shortcut", !/Ctrl K/.test(top));
   check("top bar: account is display-only, not a button",
     !buttons(top).some((b) => /Founder|Account/.test(b.inner + b.name)) && /Founder/.test(top));
 
   const rail = surfaces["sidebar rail"];
+  check("sidebar rail: no Settings control until settings exist",
+    !buttons(rail).some((b) => b.name === "Settings"));
   check("sidebar rail: account monogram is display-only",
     !buttons(rail).some((b) => b.name === "Account") && /role="img"/.test(rail));
   check("sidebar rail: primary navigation still renders as links",

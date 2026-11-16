@@ -6,7 +6,6 @@ import { StageBadge } from "./stage-badge";
 import { ConfidenceBar } from "./confidence-bar";
 import type { Application } from "@/lib/career/types";
 import { timeAgo, shortDate } from "@/lib/utils";
-import { riseIn } from "@/lib/motion";
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
@@ -22,7 +21,6 @@ function Meta({ label, value }: { label: string; value: string }) {
 export function ApplicationRow({ app, selected, onSelect }: { app: Application; selected?: boolean; onSelect: (app: Application) => void }) {
   return (
     <motion.button type="button" onClick={() => onSelect(app)} aria-pressed={selected}
-      variants={riseIn}
       className={`group w-full rounded-[var(--radius-md)] border p-4 text-left transition-colors ${selected ? "border-wine-bright/35 bg-wine/10" : "border-white/[0.06] bg-white/[0.015] hover:border-white/12 hover:bg-white/[0.03]"}`}
     >
       <div className="flex items-start gap-3">
