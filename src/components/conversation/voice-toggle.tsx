@@ -95,7 +95,7 @@ export function VoiceToggleButton({
   return (
     <div className="flex items-center justify-end gap-2">
       {problem && (
-        <span role="status" className="text-[10px] text-amber/90" data-voice-problem={problem}>
+        <span role="status" className="text-micro text-amber/90" data-voice-problem={problem}>
           {VOICE_PROBLEM_TEXT[problem]}
         </span>
       )}
@@ -109,7 +109,7 @@ export function VoiceToggleButton({
         data-voice-toggle={on ? "on" : "off"}
         data-voice-speaking={speaking ? "true" : "false"}
         className={cn(
-          "flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wine-bright",
+          "flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-micro uppercase tracking-wider transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-wine-bright",
           on
             ? "border-wine/25 bg-wine/[0.12] text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
             : "border-transparent text-ink-faint hover:border-white/10 hover:bg-white/[0.035] hover:text-ink-muted",

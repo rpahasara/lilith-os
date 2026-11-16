@@ -19,8 +19,8 @@ export function InsightsPanel({ insights }: { insights: Insight[] }) {
       <PanelHeader
         title="Lilith insights"
         action={
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-violet-bright/30 to-cyan-bright/20">
-            <Sparkles className="h-3.5 w-3.5 text-violet-bright" />
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-orchid-bright/30 to-cyan-bright/20">
+            <Sparkles className="h-3.5 w-3.5 text-orchid-bright" />
           </span>
         }
       />
@@ -38,14 +38,14 @@ export function InsightsPanel({ insights }: { insights: Insight[] }) {
             <motion.li
               key={ins.id}
               variants={riseIn}
-              className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"
+              className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3"
             >
               <div className="flex items-start gap-2.5">
-                <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg ${tone.ring}`}>
+                <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-xl ${tone.ring}`}>
                   <Icon className={`h-3.5 w-3.5 ${tone.color}`} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium leading-snug text-ink">
+                  <p className="text-compact font-medium leading-snug text-ink">
                     {ins.title}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-ink-muted">

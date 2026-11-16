@@ -16,9 +16,9 @@ import { timeAgo } from "@/lib/utils";
 import { staggerContainer, riseIn } from "@/lib/motion";
 
 const KIND: Record<ActivityEvent["kind"], { icon: LucideIcon; color: string }> = {
-  stage: { icon: GitBranch, color: "text-violet-bright" },
+  stage: { icon: GitBranch, color: "text-orchid-bright" },
   recruiter: { icon: UserRound, color: "text-cyan-bright" },
-  insight: { icon: Sparkles, color: "text-violet-bright" },
+  insight: { icon: Sparkles, color: "text-orchid-bright" },
   action: { icon: CheckCircle2, color: "text-amber" },
   system: { icon: Cpu, color: "text-cyan-bright" },
 };
@@ -43,8 +43,8 @@ export function ActivityTimeline({ activity }: { activity: ActivityEvent[] }) {
                 <Icon className={`h-4 w-4 ${k.color}`} />
               </span>
               <div className="min-w-0 flex-1 pt-1">
-                <p className="text-[13px] leading-snug text-ink-muted">{e.text}</p>
-                <p className="mt-0.5 font-mono text-[10px] text-ink-faint">
+                <p className="text-compact leading-snug text-ink-muted">{e.text}</p>
+                <p className="mt-0.5 font-mono text-micro text-ink-faint">
                   {e.company ? `${e.company} · ` : ""}
                   {timeAgo(e.time)}
                 </p>

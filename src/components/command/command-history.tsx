@@ -43,19 +43,19 @@ export function CommandHistory() {
               <button
                 onClick={() => reopen(t.taskId)}
                 className={cn(
-                  "group flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-left transition-colors",
+                  "group flex w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 text-left transition-colors",
                   "hover:border-white/15 hover:bg-white/[0.045]",
                 )}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-ink">{t.title}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-ink-faint">
+                  <span className="block truncate text-compact font-medium text-ink">{t.title}</span>
+                  <span className="mt-0.5 block truncate text-micro text-ink-faint">
                     {t.result?.summary ?? t.error ?? t.normalizedIntent}
                   </span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-1">
                   <TaskStatusBadge status={t.status} />
-                  <span className="font-mono text-[10px] text-ink-faint">{relativeTime(t.updatedAt)}</span>
+                  <span className="font-mono text-micro text-ink-faint">{relativeTime(t.updatedAt)}</span>
                 </span>
               </button>
             </li>

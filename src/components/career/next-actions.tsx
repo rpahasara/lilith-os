@@ -23,7 +23,7 @@ export function NextActions({ applications }: { applications: Application[] }) {
       <PanelHeader
         title="Next actions"
         action={
-          <span className="font-mono text-[10px] text-amber">
+          <span className="font-mono text-micro text-amber">
             {applications.filter((a) => a.followUp).length} follow-ups
           </span>
         }
@@ -39,12 +39,12 @@ export function NextActions({ applications }: { applications: Application[] }) {
           <motion.li
             key={a.id}
             variants={riseIn}
-            className="flex items-center gap-3 rounded-xl p-2"
+            className="flex items-center gap-3 rounded-2xl p-2"
           >
             <CheckCircle2 className="h-4 w-4 shrink-0 text-ink-faint" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[13px] text-ink">{a.nextAction?.label}</p>
-              <p className="truncate text-[11px] text-ink-faint">
+              <p className="truncate text-compact text-ink">{a.nextAction?.label}</p>
+              <p className="truncate text-micro text-ink-faint">
                 {a.company}
                 {a.nextAction?.due && ` · due ${shortDate(a.nextAction.due)}`}
               </p>

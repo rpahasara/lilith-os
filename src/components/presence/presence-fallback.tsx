@@ -4,7 +4,7 @@ import { Component, type ReactNode } from "react";
 import { reportProblem } from "@/lib/diagnostics";
 
 /**
- * A pure-CSS presence: a soft violet→cyan bloom, no WebGL, no render loop.
+ * A pure-CSS presence: a soft orchid→cyan bloom, no WebGL, no render loop.
  *
  * Used whenever a live renderer can't or shouldn't run — WebGL unavailable,
  * the "orb" preference under reduced motion, a renderer crash, or a detected

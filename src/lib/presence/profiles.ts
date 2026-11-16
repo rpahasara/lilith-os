@@ -19,7 +19,7 @@ export interface OrbParams {
   amplitude: number;
   /** Animation speed multiplier. */
   speed: number;
-  /** 0 = fully violet, 1 = fully cyan. */
+  /** 0 = fully orchid, 1 = fully cyan. */
   colorMix: number;
   /** Rim / glow intensity. */
   intensity: number;

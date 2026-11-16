@@ -51,10 +51,10 @@ export function UnitCard({ unit, selected, onSelect }: { unit: AutomationUnit; s
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-[15px] font-medium text-ink">{unit.name}</h3>
+            <h3 className="truncate text-lead font-medium text-ink">{unit.name}</h3>
             <KindBadge kind={unit.kind} />
           </div>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-ink-faint">
+          <p className="mt-0.5 truncate font-mono text-micro text-ink-faint">
             {unit.unit}
           </p>
         </div>
@@ -94,7 +94,7 @@ export function UnitCard({ unit, selected, onSelect }: { unit: AutomationUnit; s
       {/* footer */}
       <div className="mt-3 flex items-center justify-between border-t border-white/[0.05] pt-3">
         <RunHistory history={unit.history} />
-        <span className="font-mono text-[10px] text-ink-faint">
+        <span className="font-mono text-micro text-ink-faint">
           {unit.runsToday != null ? `${unit.runsToday} runs today` : ""}
         </span>
       </div>
@@ -115,7 +115,7 @@ function Meta({
 }) {
   return (
     <div className="min-w-0">
-      <p className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+      <p className="flex items-center gap-1 font-mono text-micro uppercase tracking-wider text-ink-faint">
         <Icon className="h-2.5 w-2.5" />
         {label}
       </p>

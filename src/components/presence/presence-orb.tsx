@@ -11,7 +11,7 @@ const OrbScene = dynamic(
     ssr: false,
     loading: () => (
       <div className="absolute inset-0 grid place-items-center">
-        <div className="h-40 w-40 rounded-full bg-gradient-to-br from-violet-bright/40 to-cyan-bright/30 blur-2xl animate-breathe" />
+        <div className="h-40 w-40 rounded-full bg-gradient-to-br from-orchid-bright/40 to-cyan-bright/30 blur-2xl animate-breathe" />
       </div>
     ),
   },

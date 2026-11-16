@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { meter } from "@/lib/motion";
 
 interface RingProps {
   value: number; // 0..100
@@ -12,14 +13,14 @@ interface RingProps {
   to?: string;
 }
 
-/** Animated circular progress with a violet→cyan gradient stroke. */
+/** Animated circular progress with a orchid→cyan gradient stroke. */
 export function Ring({
   value,
   size = 116,
   stroke = 8,
   label,
   sub,
-  from = "var(--violet-bright)",
+  from = "var(--orchid-bright)",
   to = "var(--cyan-bright)",
 }: RingProps) {
   const r = (size - stroke) / 2;
@@ -55,7 +56,7 @@ export function Ring({
           strokeDasharray={c}
           initial={{ strokeDashoffset: c }}
           animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
+          transition={meter}
         />
       </svg>
       <div className="absolute grid place-items-center text-center">
@@ -64,7 +65,7 @@ export function Ring({
             {label}
           </span>
         )}
-        {sub && <span className="text-[10px] text-ink-faint">{sub}</span>}
+        {sub && <span className="text-micro text-ink-faint">{sub}</span>}
       </div>
     </div>
   );

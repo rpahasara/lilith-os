@@ -5,7 +5,7 @@ import { PREP_META, type PrepStatus } from "@/lib/meetings/types";
 import { cn } from "@/lib/utils";
 
 const BADGE: Record<string, string> = {
-  violet: "bg-violet-bright/12 text-violet-bright",
+  orchid: "bg-orchid-bright/12 text-orchid-bright",
   cyan: "bg-cyan-bright/12 text-cyan-bright",
   green: "bg-green/12 text-green",
   amber: "bg-amber/12 text-amber",
@@ -18,7 +18,7 @@ export function PrepBadge({ status, className }: { status: PrepStatus; className
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
+        "inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium",
         BADGE[meta.accent],
         className,
       )}
@@ -56,11 +56,11 @@ export function PrepLifecycle({ status }: { status: PrepStatus }) {
             <div className="flex flex-col items-center gap-1">
               <span
                 className={cn(
-                  "grid h-6 w-6 place-items-center rounded-full border text-[10px] transition-colors",
+                  "grid h-6 w-6 place-items-center rounded-full border text-micro transition-colors",
                   done
-                    ? "border-transparent bg-violet-bright/20 text-violet-bright"
+                    ? "border-transparent bg-orchid-bright/20 text-orchid-bright"
                     : "border-white/10 bg-white/[0.03] text-ink-faint",
-                  isCurrent && "ring-2 ring-violet-bright/40",
+                  isCurrent && "ring-2 ring-orchid-bright/40",
                 )}
               >
                 {done && step.key !== "completed" ? (
@@ -71,7 +71,7 @@ export function PrepLifecycle({ status }: { status: PrepStatus }) {
                   i + 1
                 )}
               </span>
-              <span className={cn("text-[9px]", done ? "text-ink-muted" : "text-ink-faint")}>
+              <span className={cn("text-micro", done ? "text-ink-muted" : "text-ink-faint")}>
                 {step.label}
               </span>
             </div>
@@ -79,7 +79,7 @@ export function PrepLifecycle({ status }: { status: PrepStatus }) {
               <span
                 className={cn(
                   "mx-1 h-px flex-1 self-start mt-3",
-                  current > stepIndex ? "bg-violet-bright/40" : "bg-white/[0.08]",
+                  current > stepIndex ? "bg-orchid-bright/40" : "bg-white/[0.08]",
                 )}
               />
             )}

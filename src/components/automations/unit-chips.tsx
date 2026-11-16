@@ -2,7 +2,7 @@ import { KIND_META, STATUS_META, type UnitKind, type UnitStatus } from "@/lib/au
 import { cn } from "@/lib/utils";
 
 const KIND_STYLE: Record<string, string> = {
-  violet: "bg-violet-bright/12 text-violet-bright",
+  orchid: "bg-orchid-bright/12 text-orchid-bright",
   cyan: "bg-cyan-bright/12 text-cyan-bright",
   green: "bg-green/12 text-green",
   amber: "bg-amber/12 text-amber",
@@ -13,7 +13,7 @@ export function KindBadge({ kind }: { kind: UnitKind }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider",
+        "inline-flex items-center rounded-md px-2 py-0.5 font-mono text-micro uppercase tracking-wider",
         KIND_STYLE[meta.accent],
       )}
     >

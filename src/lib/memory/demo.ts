@@ -46,7 +46,7 @@ const records: MemoryRecord[] = [
     id: "m01",
     summary: "LILITH OS is a premium personal AI operating system.",
     content:
-      "LILITH OS is a dark, premium personal AI operating system — a command center built with Next.js 16 (App Router), React 19, Tailwind v4, Framer Motion, and React Three Fiber. The visual language is deep-navy glassmorphism with violet (presence) and cyan (system/data) accents.",
+      "LILITH OS is a dark, premium personal AI operating system — a command center built with Next.js 16 (App Router), React 19, Tailwind v4, Framer Motion, and React Three Fiber. The visual language is deep-navy glassmorphism with orchid (presence) and cyan (system/data) accents.",
     category: "projects",
     kind: "fact",
     entities: [ref("proj_lilith"), ref("t_next"), ref("t_r3f")],

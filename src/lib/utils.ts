@@ -1,5 +1,16 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+/**
+ * The type scale from app/globals.css. The merger has to be told these are
+ * font sizes: otherwise it reads `text-micro` as a colour and drops it when a
+ * real colour such as `text-ink` follows.
+ */
+export const TYPE_SCALE = ["micro", "caption", "compact", "body", "lead"] as const;
+
+const twMerge = extendTailwindMerge({
+  extend: { theme: { text: [...TYPE_SCALE] } },
+});
 
 /** Merge Tailwind classes with conditional logic, de-duping conflicts. */
 export function cn(...inputs: ClassValue[]) {

@@ -10,7 +10,7 @@ import {
 import { cn, timeAgo } from "@/lib/utils";
 
 const DOT: Record<Accent, string> = {
-  violet: "bg-violet-bright",
+  orchid: "bg-orchid-bright",
   cyan: "bg-cyan-bright",
   green: "bg-green",
   amber: "bg-amber",
@@ -40,7 +40,7 @@ export function RecentlyLearned({ events }: { events: RecentMemoryEvent[] }) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs leading-snug text-ink-muted">{e.text}</p>
-                <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+                <p className="mt-0.5 flex items-center gap-1.5 font-mono text-micro text-ink-faint">
                   <span className="uppercase tracking-wider">{KIND_LABEL[e.kind]}</span>
                   <span>·</span>
                   <span>{timeAgo(e.at)}</span>

@@ -3,7 +3,7 @@ import { KIND_META, PROVENANCE_META, type MemoryKind, type Provenance, type Acce
 import { cn } from "@/lib/utils";
 
 const CHIP: Record<Accent, string> = {
-  violet: "bg-violet-bright/10 text-violet-bright",
+  orchid: "bg-orchid-bright/10 text-orchid-bright",
   cyan: "bg-cyan-bright/10 text-cyan-bright",
   green: "bg-green/10 text-green",
   amber: "bg-amber/10 text-amber",
@@ -26,7 +26,7 @@ export function ProvenanceBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-micro font-medium",
         CHIP[meta.accent],
         className,
       )}
@@ -54,7 +54,7 @@ export function KindTag({ kind, className }: { kind: MemoryKind; className?: str
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em]",
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-micro uppercase tracking-[0.12em]",
         CHIP[meta.accent],
         className,
       )}

@@ -54,7 +54,7 @@ export function MeetingIntelligence({
         <PrepBadge status={event.prepStatus} />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs text-ink-muted">
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs text-ink-muted">
         <span className="flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5 text-cyan-bright"/>{event.start ? `${new Date(event.start).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${formatClock(new Date(event.start))}` : "Time unavailable"}</span>
         <span>{event.durationMinutes != null ? `${event.durationMinutes} min` : "Duration unavailable"}</span>
         {event.calendar && <span>{event.calendar}</span>}
@@ -76,11 +76,11 @@ export function MeetingIntelligence({
               <div className="h-3 w-2/3 animate-pulse rounded bg-white/[0.04]" />
             </div>
           ) : brief ? (
-            <div className="rounded-[var(--radius-md)] border border-violet-bright/15 bg-violet-bright/[0.04] p-3">
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-muted">
+            <div className="rounded-[var(--radius-md)] border border-orchid-bright/15 bg-orchid-bright/[0.04] p-3">
+              <p className="whitespace-pre-wrap text-compact leading-relaxed text-ink-muted">
                 {brief.brief}
               </p>
-              <p className="mt-2 font-mono text-[10px] text-ink-faint">
+              <p className="mt-2 font-mono text-micro text-ink-faint">
                 prepared from {brief.sourceCounts.gmailMessages ?? 0} threads ·{" "}
                 {brief.sourceCounts.followups ?? 0} follow-ups
               </p>
@@ -101,12 +101,12 @@ export function MeetingIntelligence({
           {hasContext && context!.messages.length > 0 ? (
             <ul className="space-y-2">
               {context!.messages.slice(0, 6).map((m, i) => (
-                <li key={i} className="rounded-lg bg-white/[0.02] px-2.5 py-2">
+                <li key={i} className="rounded-xl bg-white/[0.02] px-2.5 py-2">
                   <p className="flex items-center gap-1.5 text-xs text-ink">
                     <Mail className="h-3 w-3 shrink-0 text-cyan-bright/70" />
                     <span className="truncate">{m.subject || "(no subject)"}</span>
                   </p>
-                  <p className="mt-0.5 truncate font-mono text-[10px] text-ink-faint">
+                  <p className="mt-0.5 truncate font-mono text-micro text-ink-faint">
                     {m.from}
                     {m.account ? ` · ${m.account}` : ""}
                   </p>
@@ -125,7 +125,7 @@ export function MeetingIntelligence({
           <Section icon={Hash} title="Signals">
             <div className="flex flex-wrap gap-1.5">
               {context!.keywords.slice(0, 12).map((k) => (
-                <span key={k} className="rounded-md bg-white/[0.04] px-2 py-0.5 text-[11px] text-ink-muted">
+                <span key={k} className="rounded-md bg-white/[0.04] px-2 py-0.5 text-micro text-ink-muted">
                   {k}
                 </span>
               ))}
@@ -141,7 +141,7 @@ export function MeetingIntelligence({
                 <li key={i} className="flex items-center justify-between gap-2 text-xs">
                   <span className="truncate text-ink-muted">{a.displayName || a.emailMasked || "Guest"}</span>
                   {a.emailMasked && (
-                    <span className="shrink-0 font-mono text-[10px] text-ink-faint">{a.emailMasked}</span>
+                    <span className="shrink-0 font-mono text-micro text-ink-faint">{a.emailMasked}</span>
                   )}
                 </li>
               ))}

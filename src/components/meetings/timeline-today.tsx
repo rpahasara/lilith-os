@@ -39,7 +39,7 @@ export function TimelineToday({
       <PanelHeader
         title="Schedule"
         action={
-          <span className="font-mono text-[10px] text-ink-faint">
+          <span className="font-mono text-micro text-ink-faint">
             {visible.length} {visible.length === 1 ? "event" : "events"}
           </span>
         }
@@ -71,11 +71,11 @@ export function TimelineToday({
 function NowMarker() {
   return (
     <li className="flex items-center gap-3 py-1" aria-hidden>
-      <span className="w-14 shrink-0 text-right font-mono text-[10px] text-violet-bright">now</span>
+      <span className="w-14 shrink-0 text-right font-mono text-micro text-orchid-bright">now</span>
       <span className="relative flex h-2 w-2 items-center justify-center">
-        <span className="status-dot h-2 w-2 rounded-full bg-violet-bright text-violet-bright" />
+        <span className="status-dot h-2 w-2 rounded-full bg-orchid-bright text-orchid-bright" />
       </span>
-      <span className="h-px flex-1 bg-gradient-to-r from-violet-bright/50 to-transparent" />
+      <span className="h-px flex-1 bg-gradient-to-r from-orchid-bright/50 to-transparent" />
     </li>
   );
 }
@@ -98,12 +98,12 @@ function TimelineRow({
         onClick={() => onSelect(event.id)}
         whileHover={{ x: 2 }}
         className={cn(
-          "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors",
+          "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors",
           selected ? "bg-white/[0.06]" : "hover:bg-white/[0.03]",
           past && "opacity-55",
         )}
       >
-        <span className="w-14 shrink-0 text-right font-mono text-[11px] text-ink-muted">
+        <span className="w-14 shrink-0 text-right font-mono text-micro text-ink-muted">
           {event.start ? formatClock(new Date(event.start)) : "--:--"}
         </span>
         <span
@@ -117,7 +117,7 @@ function TimelineRow({
             <span className="truncate text-sm text-ink">{event.title}</span>
             {event.joinLink && <Video className="h-3 w-3 shrink-0 text-ink-faint" />}
           </span>
-          <span className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-faint">
+          <span className="mt-0.5 flex items-center gap-2 text-micro text-ink-faint">
             {event.durationMinutes != null && <span>{event.durationMinutes}m</span>}
             {event.attendeeCount > 0 && <span>· {event.attendeeCount} people</span>}
           </span>

@@ -3,13 +3,13 @@
 import { motion } from "framer-motion";
 import { Pin } from "lucide-react";
 import { CATEGORY_META, type Accent, type MemoryRecord } from "@/lib/memory/types";
-import { riseIn } from "@/lib/motion";
+import { riseIn, spring } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { ProvenanceBadge, KindTag } from "./provenance-badge";
 import { ConfidenceMeter } from "./confidence-meter";
 
 const ACCENT_VAR: Record<Accent, string> = {
-  violet: "var(--violet-bright)",
+  orchid: "var(--orchid-bright)",
   cyan: "var(--cyan-bright)",
   green: "var(--green)",
   amber: "var(--amber)",
@@ -39,7 +39,7 @@ export function ShardCard({
       variants={riseIn}
       onClick={() => onSelect(record)}
       whileHover={{ y: -3 }}
-      transition={{ type: "spring", stiffness: 320, damping: 30 }}
+      transition={spring}
       className="glass group relative w-full overflow-hidden rounded-[var(--radius-md)] p-4 text-left transition-colors hover:border-white/15"
     >
       {/* category accent seam + soft confidence glow */}
@@ -54,12 +54,12 @@ export function ShardCard({
 
       {/* header row */}
       <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-medium" style={{ color }}>
+        <span className="inline-flex items-center gap-1.5 text-micro font-medium" style={{ color }}>
           <CatIcon className="h-3 w-3" />
           {cat.label}
         </span>
         <div className="flex items-center gap-1.5">
-          {record.pinned && <Pin className="h-3 w-3 fill-current text-violet-bright" />}
+          {record.pinned && <Pin className="h-3 w-3 fill-current text-orchid-bright" />}
           <KindTag kind={record.kind} />
         </div>
       </div>
@@ -73,13 +73,13 @@ export function ShardCard({
           {record.entities.slice(0, 3).map((e) => (
             <span
               key={e.id}
-              className="rounded-md bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-ink-muted"
+              className="rounded-md bg-white/[0.04] px-1.5 py-0.5 text-micro text-ink-muted"
             >
               {e.label}
             </span>
           ))}
           {record.entities.length > 3 && (
-            <span className="px-1 py-0.5 text-[10px] text-ink-faint">
+            <span className="px-1 py-0.5 text-micro text-ink-faint">
               +{record.entities.length - 3}
             </span>
           )}

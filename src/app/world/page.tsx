@@ -20,7 +20,7 @@ import { EmptyState, StatusBadge } from "@/components/ui/workspace";
 import { fetchWorld } from "@/lib/world/client";
 import type { Belief, LifecycleState, WorldReadResult } from "@/lib/world/types";
 
-type Tone = "green" | "cyan" | "amber" | "rose" | "violet" | "faint";
+type Tone = "green" | "cyan" | "amber" | "rose" | "orchid" | "faint";
 
 const LIFECYCLE_TONE: Record<LifecycleState, Tone> = {
   ACTIVE: "green",
@@ -45,7 +45,7 @@ function BeliefRow({ belief }: { belief: Belief }) {
     <div className="rounded-[var(--radius-md)] bg-white/[0.02] hairline p-4">
       <div className="flex items-baseline justify-between gap-3">
         <code className="font-mono text-xs text-ink">{belief.key}</code>
-        <span className="font-mono text-[10px] text-ink-faint">r{belief.revision}</span>
+        <span className="font-mono text-micro text-ink-faint">r{belief.revision}</span>
       </div>
       <div className="mt-1.5 text-sm text-ink">
         {typeof belief.value === "object"
@@ -55,11 +55,11 @@ function BeliefRow({ belief }: { belief: Belief }) {
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <StatusBadge label={belief.lifecycleState} tone={LIFECYCLE_TONE[belief.lifecycleState]} />
         <span className="eyebrow">{belief.epistemicState}</span>
-        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-ink-faint">
+        <span className="inline-flex items-center gap-1.5 font-mono text-micro text-ink-faint">
           <span className={`h-1.5 w-1.5 rounded-full ${confidenceDot(c.tier)}`} />
           {c.tier} · {c.value.toFixed(2)} · {c.basis}
         </span>
-        <span className="font-mono text-[10px] text-ink-faint">
+        <span className="font-mono text-micro text-ink-faint">
           {belief.provenance.length} evidence
         </span>
       </div>

@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { Eyebrow } from "@/components/ui/primitives";
+import { ease } from "@/lib/motion";
 
 /**
  * Compact "in development" state for OS workspaces not yet built.
@@ -24,11 +25,11 @@ export function ModuleStub({
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="glass-panel relative flex max-w-md flex-col items-center rounded-[var(--radius-xl)] px-12 py-10 text-center"
+        transition={ease}
+        className="glass-panel relative flex max-w-md flex-col items-center rounded-[var(--radius-2xl)] px-12 py-10 text-center"
       >
         <span className="absolute inset-x-14 top-0 h-px bg-gradient-to-r from-transparent via-wine-bright/50 to-transparent" />
-        <div className="glass grid h-12 w-12 place-items-center rounded-2xl">
+        <div className="glass grid h-12 w-12 place-items-center rounded-lg">
           <Icon className="h-5 w-5 text-wine-bright" />
         </div>
         <h2 className="mt-4 text-lg font-medium tracking-tight text-ink">

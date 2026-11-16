@@ -6,7 +6,7 @@ import { Ring } from "@/components/ui/ring";
 import { KIND_META, type AutomationUnit, type UnitKind } from "@/lib/automations/types";
 
 const ACCENT_VAR: Record<string, string> = {
-  violet: "var(--violet-bright)",
+  orchid: "var(--orchid-bright)",
   cyan: "var(--cyan-bright)",
   green: "var(--green)",
   amber: "var(--amber)",

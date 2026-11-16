@@ -13,5 +13,7 @@ export const metadata: Metadata = { title: { absolute: "Cognitive Atlas Preview 
  */
 export default function AtlasLayout({ children }: { children: React.ReactNode }) {
   if (!atlasPreviewEnabled()) notFound();
-  return children;
+  // `contents`: no box of its own, so the Atlas lays out exactly as before. The
+  // class pins the token values the Atlas was approved with (see globals.css).
+  return <div className="atlas-token-scope contents">{children}</div>;
 }

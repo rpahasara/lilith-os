@@ -18,7 +18,7 @@ export function RecordingControl() {
   if (phase === "unavailable") return null;
 
   const pill =
-    "flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 font-mono text-[10px] uppercase " +
+    "flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 font-mono text-micro uppercase " +
     "tracking-wider text-ink-faint transition-colors hover:border-white/20 hover:text-ink-muted disabled:opacity-50";
 
   return (
@@ -38,7 +38,7 @@ export function RecordingControl() {
         </button>
       )}
       {(phase === "finished" || phase === "interrupted") && (
-        <div className="glass flex max-w-xl items-start gap-2 rounded-2xl px-3 py-2 text-[12px] text-ink-muted">
+        <div className="glass flex max-w-xl items-start gap-2 rounded-lg px-3 py-2 text-caption text-ink-muted">
           <span className="break-words">
             {phase === "finished" && evidence ? recordingConfirmation(evidence) : error}
           </span>
@@ -48,7 +48,7 @@ export function RecordingControl() {
         </div>
       )}
       {error && (phase === "idle" || phase === "recording") && (
-        <span className="text-[11px] text-rose">{error}</span>
+        <span className="text-micro text-rose">{error}</span>
       )}
     </div>
   );

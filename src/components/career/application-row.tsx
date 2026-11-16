@@ -10,7 +10,7 @@ import { timeAgo, shortDate } from "@/lib/utils";
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+      <p className="font-mono text-micro uppercase tracking-wider text-ink-faint">
         {label}
       </p>
       <p className="truncate text-xs text-ink-muted">{value}</p>
@@ -25,14 +25,14 @@ export function ApplicationRow({ app, selected, onSelect }: { app: Application; 
     >
       <div className="flex items-start gap-3">
         {/* company mark */}
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-violet-deep/60 to-cyan-deep/50 text-sm font-semibold text-white ring-1 ring-white/10">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-orchid-deep/60 to-cyan-deep/50 text-sm font-semibold text-white ring-1 ring-white/10">
           {app.company.charAt(0)}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="truncate text-[15px] font-medium text-ink">
+              <h3 className="truncate text-lead font-medium text-ink">
                 {app.role}
               </h3>
               <p className="truncate text-xs text-ink-muted">
@@ -64,7 +64,7 @@ export function ApplicationRow({ app, selected, onSelect }: { app: Application; 
 
           {/* confidence */}
           <div className="mt-3 flex items-center gap-3">
-            <span className="font-mono text-[9px] uppercase tracking-wider text-ink-faint">
+            <span className="font-mono text-micro uppercase tracking-wider text-ink-faint">
               Confidence
             </span>
             <ConfidenceBar value={app.confidence} className="max-w-[220px]" />
@@ -92,7 +92,7 @@ export function ApplicationRow({ app, selected, onSelect }: { app: Application; 
 
           {/* next action call-to-action */}
           {app.nextAction && (
-            <span className="mt-3 flex items-center gap-1.5 text-xs font-medium text-violet-bright transition-opacity group-hover:opacity-80">
+            <span className="mt-3 flex items-center gap-1.5 text-xs font-medium text-orchid-bright transition-opacity group-hover:opacity-80">
               {app.nextAction.label}
               <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
             </span>

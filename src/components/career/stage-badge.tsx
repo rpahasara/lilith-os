@@ -2,7 +2,7 @@ import { STAGE_META, type Stage } from "@/lib/career/types";
 import { cn } from "@/lib/utils";
 
 const STYLES: Record<string, string> = {
-  violet: "bg-violet-bright/12 text-violet-bright",
+  orchid: "bg-orchid-bright/12 text-orchid-bright",
   cyan: "bg-cyan-bright/12 text-cyan-bright",
   green: "bg-green/12 text-green",
   amber: "bg-amber/12 text-amber",
@@ -15,7 +15,7 @@ export function StageBadge({ stage, className }: { stage: Stage; className?: str
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-micro font-medium",
         STYLES[meta.accent],
         className,
       )}

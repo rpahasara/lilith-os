@@ -31,7 +31,7 @@ export function NextCard({ view }: { view: HomeMeetingsView }) {
       <div className="flex items-center justify-between">
         <span className="eyebrow text-ink">Next</span>
         {next && (
-          <span className="rounded-full border border-gold/15 bg-gold/[0.08] px-2.5 py-1 font-mono text-[10px] text-gold">
+          <span className="rounded-full border border-gold/15 bg-gold/[0.08] px-2.5 py-1 font-mono text-micro text-gold">
             {countdownLabel(next)}
           </span>
         )}
@@ -49,8 +49,8 @@ export function NextCard({ view }: { view: HomeMeetingsView }) {
         <div className="mt-4 flex items-start gap-2.5" role="status">
           <CloudOff className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" />
           <div className="leading-tight">
-            <p className="text-[13px] text-ink">Meetings unavailable</p>
-            <p className="mt-1 text-[11px] text-ink-faint">
+            <p className="text-compact text-ink">Meetings unavailable</p>
+            <p className="mt-1 text-micro text-ink-faint">
               No calendar data can be read right now.
             </p>
           </div>
@@ -59,7 +59,7 @@ export function NextCard({ view }: { view: HomeMeetingsView }) {
 
       {view.kind === "live" && !next && (
         <div className="mt-4 leading-tight">
-          <p className="text-[15px] font-medium text-ink">Nothing scheduled</p>
+          <p className="text-lead font-medium text-ink">Nothing scheduled</p>
           <p className="mt-1 text-xs text-ink-faint">No upcoming meetings on your calendar.</p>
         </div>
       )}
@@ -72,10 +72,10 @@ export function NextCard({ view }: { view: HomeMeetingsView }) {
                 {clockIn(next.startMs, tz)}
               </span>
               {next.endMs != null && (
-                <span className="text-[11px] text-ink-faint">– {clockIn(next.endMs, tz)}</span>
+                <span className="text-micro text-ink-faint">– {clockIn(next.endMs, tz)}</span>
               )}
             </div>
-            <h3 className="mt-2.5 text-[15px] font-medium leading-tight text-ink">{next.title}</h3>
+            <h3 className="mt-2.5 text-lead font-medium leading-tight text-ink">{next.title}</h3>
             {next.calendar && <p className="mt-1 text-xs text-ink-faint">{next.calendar}</p>}
             {next.attendeeCount > 0 && (
               <div className="mt-2 flex items-center gap-1.5 text-ink-faint">

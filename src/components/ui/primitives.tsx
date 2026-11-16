@@ -56,14 +56,14 @@ export function WorkspaceHeader({
   return (
     <div className="workspace-header flex flex-wrap items-center justify-between gap-4">
       <div className="flex min-w-0 items-center gap-3.5">
-        <span className="glass relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl text-wine-bright">
+        <span className="glass relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg text-wine-bright">
           <span className="absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-pearl/55 to-transparent" />
           <Icon className="h-5 w-5" strokeWidth={1.75} />
         </span>
         <div className="min-w-0">
           <Eyebrow className="mb-1 text-wine-bright/80">{eyebrow}</Eyebrow>
           <h1 className="text-[1.65rem] font-semibold tracking-[-0.035em] text-ink">{title}</h1>
-          <p className="mt-0.5 max-w-2xl text-[13px] leading-relaxed text-ink-muted">{description}</p>
+          <p className="mt-0.5 max-w-2xl text-compact leading-relaxed text-ink-muted">{description}</p>
         </div>
       </div>
       {(typeof isDemo === "boolean" || unavailable) && (
@@ -87,10 +87,10 @@ export function MetricTile({
   const color = accent === "faint" ? "text-ink-muted" : accentText[accent];
   return (
     <motion.div variants={riseIn} className="glass metric-tile rounded-[var(--radius-md)] px-4 py-3.5">
-      <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-ink-muted">{label}</p>
+      <p className="font-mono text-micro uppercase tracking-[0.16em] text-ink-muted">{label}</p>
       <p className="mt-1.5 flex items-baseline gap-1.5">
         <span className={cn("font-mono text-[1.4rem] font-semibold tracking-[-0.04em]", color)}>{value}</span>
-        {suffix && <span className="text-[11px] text-ink-faint">{suffix}</span>}
+        {suffix && <span className="text-micro text-ink-faint">{suffix}</span>}
       </p>
     </motion.div>
   );
@@ -98,7 +98,6 @@ export function MetricTile({
 
 /* --------------------------------------------------------------- Accent map */
 export const accentText = {
-  violet: "text-violet-bright",
   orchid: "text-orchid-bright",
   wine: "text-wine-bright",
   gold: "text-gold",
@@ -109,7 +108,6 @@ export const accentText = {
 } as const;
 
 export const accentBg = {
-  violet: "bg-violet-bright",
   orchid: "bg-orchid-bright",
   wine: "bg-wine-bright",
   gold: "bg-gold",

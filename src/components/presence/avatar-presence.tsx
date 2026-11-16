@@ -215,7 +215,7 @@ const AvatarScene = dynamic(
     ssr: false,
     loading: () => (
       <div className="absolute inset-0 grid place-items-center">
-        <div className="h-44 w-32 rounded-full bg-gradient-to-b from-violet-bright/30 to-cyan-bright/20 blur-2xl animate-breathe" />
+        <div className="h-44 w-32 rounded-full bg-gradient-to-b from-orchid-bright/30 to-cyan-bright/20 blur-2xl animate-breathe" />
       </div>
     ),
   },
@@ -659,17 +659,17 @@ export function AvatarPresence({
       />
         </div>
       </div>
-      {showPreviewControls && <aside className={`fixed right-4 top-[120px] z-[100] max-h-[calc(100vh-160px)] overflow-y-auto rounded-xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-md ${debugPanelCollapsed ? "w-11" : "w-[300px] p-2"} max-[900px]:w-11 max-[900px]:p-0`}>
+      {showPreviewControls && <aside className={`fixed right-4 top-[120px] z-[100] max-h-[calc(100vh-160px)] overflow-y-auto rounded-2xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-md ${debugPanelCollapsed ? "w-11" : "w-[300px] p-2"} max-[900px]:w-11 max-[900px]:p-0`}>
         <button
           type="button"
           aria-label={debugPanelCollapsed ? "Expand debug controls" : "Collapse debug controls"}
           onClick={() => setDebugPanelCollapsed((current) => !current)}
-          className="sticky top-0 ml-auto grid h-10 w-10 place-items-center rounded-lg bg-black/80 text-base text-white/75 hover:text-white"
+          className="sticky top-0 ml-auto grid h-10 w-10 place-items-center rounded-xl bg-black/80 text-base text-white/75 hover:text-white"
         >
           {debugPanelCollapsed ? "◀" : "▶"}
         </button>
         <div className={`${debugPanelCollapsed ? "hidden" : "space-y-2"} max-[900px]:hidden`}>
-      <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/10 p-1 text-[10px] uppercase tracking-wider">
+      <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/10 p-1 text-[10px] uppercase tracking-wider">
         {POSE_MODES.map((mode) => (
           <button
             key={mode}
@@ -684,7 +684,7 @@ export function AvatarPresence({
             }}
             className={`rounded-full px-3 py-1.5 transition ${
               poseMode === mode
-                ? "bg-violet-bright/30 text-white"
+                ? "bg-orchid-bright/30 text-white"
                 : "text-white/55 hover:text-white"
             }`}
           >
@@ -700,7 +700,7 @@ export function AvatarPresence({
           </button>
         ))}
       </div>
-      <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-2">
+      <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-2">
         <p className="text-[10px] uppercase tracking-wider text-cyan-100">
           Presence Director · V1
         </p>
@@ -765,7 +765,7 @@ export function AvatarPresence({
         </div>
       </div>
       {directorState.scenario === "dashboard-close" && (
-        <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+        <div className="space-y-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-wider text-fuchsia-100">
               Dashboard Arm Polish
@@ -856,7 +856,7 @@ export function AvatarPresence({
       <button
         type="button"
         onClick={() => setSpringsEnabled((current) => !current)}
-        className={`w-full rounded-lg border border-white/10 px-3 py-2 text-[10px] uppercase tracking-wider ${springsEnabled ? "bg-amber-400/25 text-amber-100" : "bg-emerald-400/20 text-emerald-100"}`}
+        className={`w-full rounded-xl border border-white/10 px-3 py-2 text-[10px] uppercase tracking-wider ${springsEnabled ? "bg-amber-400/25 text-amber-100" : "bg-emerald-400/20 text-emerald-100"}`}
       >
         Springs Test {springsEnabled ? "On" : "Off"}
       </button>
@@ -864,19 +864,19 @@ export function AvatarPresence({
         <button
           type="button"
           onClick={() => setAutoBlinkEnabled((current) => !current)}
-          className={`rounded-lg border border-white/10 px-2 py-2 text-[10px] uppercase tracking-wider ${autoBlinkEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
+          className={`rounded-xl border border-white/10 px-2 py-2 text-[10px] uppercase tracking-wider ${autoBlinkEnabled ? "bg-cyan-400/20 text-cyan-100" : "bg-black/40 text-white/55"}`}
         >
           Auto Blink {autoBlinkEnabled ? "On" : "Off"}
         </button>
         <button
           type="button"
           onClick={() => setManualBlinkSequence((current) => current + 1)}
-          className="rounded-lg border border-white/10 bg-violet-400/20 px-2 py-2 text-[10px] uppercase tracking-wider text-violet-100"
+          className="rounded-xl border border-white/10 bg-violet-400/20 px-2 py-2 text-[10px] uppercase tracking-wider text-violet-100"
         >
           Manual Blink Test
         </button>
       </div>
-      <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
+      <div className="space-y-2 rounded-xl border border-white/10 bg-black/35 p-2">
         <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
@@ -906,7 +906,7 @@ export function AvatarPresence({
           />
         </label>
       </div>
-      <div className="space-y-2 rounded-lg border border-sky-300/20 bg-sky-950/20 p-2">
+      <div className="space-y-2 rounded-xl border border-sky-300/20 bg-sky-950/20 p-2">
         <div className="text-[10px] uppercase tracking-wider text-sky-100/70">
           Forward Gaze Calibration
         </div>
@@ -948,7 +948,7 @@ export function AvatarPresence({
           </label>
         ))}
       </div>
-      <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+      <div className="space-y-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
         <div className="text-[10px] uppercase tracking-wider text-fuchsia-100/70">
           Front-Facing Stance
         </div>
@@ -1022,7 +1022,7 @@ export function AvatarPresence({
             </label>
           ))}
       </div>
-      <div className="space-y-1 rounded-lg border border-white/10 bg-black/35 p-2">
+      <div className="space-y-1 rounded-xl border border-white/10 bg-black/35 p-2">
         <div className="text-[10px] uppercase tracking-wider text-white/50">
           State Expression
         </div>
@@ -1051,7 +1051,7 @@ export function AvatarPresence({
           Follow App State
         </button>
       </div>
-      <div className="space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
+      <div className="space-y-2 rounded-xl border border-fuchsia-300/20 bg-fuchsia-950/20 p-2">
         <button
           type="button"
           onClick={() => {
@@ -1113,7 +1113,7 @@ export function AvatarPresence({
           </>
         )}
       </div>
-      <div className="space-y-2 rounded-lg border border-rose-300/20 bg-rose-950/20 p-2">
+      <div className="space-y-2 rounded-xl border border-rose-300/20 bg-rose-950/20 p-2">
         <button
           type="button"
           onClick={() => {
@@ -1221,7 +1221,7 @@ export function AvatarPresence({
             Stop Speech
           </button>
         </div>
-        <div className="space-y-1 rounded-lg border border-rose-300/20 bg-rose-950/20 p-2">
+        <div className="space-y-1 rounded-xl border border-rose-300/20 bg-rose-950/20 p-2">
           <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-rose-100/70">
             <span>Voice (POC)</span>
             <span className="normal-case text-cyan-100">{voiceState.status}</span>
@@ -1308,7 +1308,7 @@ export function AvatarPresence({
             </button>
           </div>
         </div>
-        <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2">
+        <div className="space-y-1 rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-2">
           <button
             type="button"
             onClick={() => setSpeakingMotionEnabled((current) => !current)}
@@ -1350,7 +1350,7 @@ export function AvatarPresence({
           </p>
         </div>
       </div>
-      <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-2">
+      <div className="space-y-2 rounded-xl border border-white/10 bg-black/35 p-2">
         <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
@@ -1381,7 +1381,7 @@ export function AvatarPresence({
             className="mt-1 block w-full"
           />
         </label>
-        <div className="space-y-1 rounded-lg border border-violet-300/20 bg-violet-950/20 p-2">
+        <div className="space-y-1 rounded-xl border border-violet-300/20 bg-violet-950/20 p-2">
           <button
             type="button"
             onClick={() => setAmbientIdleEnabled((current) => !current)}
@@ -1453,7 +1453,7 @@ export function AvatarPresence({
           </div>
         </div>
       </div>
-      <div className="space-y-1 rounded-lg border border-indigo-300/20 bg-indigo-950/20 p-2">
+      <div className="space-y-1 rounded-xl border border-indigo-300/20 bg-indigo-950/20 p-2">
         <button
           type="button"
           onClick={() => setRareMotionEnabled((current) => !current)}
@@ -1500,7 +1500,7 @@ export function AvatarPresence({
           </div>
         </div>
       </div>
-      <div className="space-y-1 rounded-lg border border-teal-300/20 bg-teal-950/20 p-2">
+      <div className="space-y-1 rounded-xl border border-teal-300/20 bg-teal-950/20 p-2">
         <button
           type="button"
           onClick={() => setOrchestratorEnabled((current) => !current)}
@@ -1572,7 +1572,7 @@ export function AvatarPresence({
         </p>
       </div>
       {SHOW_CALIBRATION_DEBUG && (
-        <div className="space-y-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-2 text-[10px] text-white/70">
+        <div className="space-y-2 rounded-xl border border-amber-300/20 bg-amber-950/20 p-2 text-[10px] text-white/70">
           <div className="uppercase tracking-wider text-amber-200">
             Arm Neutral Polish (POC)
           </div>
@@ -1872,7 +1872,7 @@ export function AvatarPresence({
         </div>
       )}
       {SHOW_CALIBRATION_DEBUG && poseMode === "hsinNeutral" && (
-        <div className="space-y-1 rounded-lg border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
+        <div className="space-y-1 rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-2 text-[10px] text-white/70">
           <div className="uppercase tracking-wider text-emerald-200">
             Canonical arm-chain calibration
           </div>
@@ -1958,11 +1958,11 @@ export function AvatarPresence({
       <button
         type="button"
         onClick={() => setHandOverrideEnabled((current) => !current)}
-        className={`w-full rounded-lg border border-white/10 px-3 py-2 text-[10px] uppercase tracking-wider ${handOverrideEnabled ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/70 text-white/60"}`}
+        className={`w-full rounded-xl border border-white/10 px-3 py-2 text-[10px] uppercase tracking-wider ${handOverrideEnabled ? "bg-fuchsia-400/25 text-fuchsia-100" : "bg-black/70 text-white/60"}`}
       >
         Hsin Hand Override {handOverrideEnabled ? "On" : "Off"}
       </button>
-      <div className="space-y-1 rounded-lg border border-white/10 bg-black/70 p-2 text-[10px] text-white/70">
+      <div className="space-y-1 rounded-xl border border-white/10 bg-black/70 p-2 text-[10px] text-white/70">
         <button
           type="button"
           onClick={() => setForearmOverrideEnabled((current) => !current)}
@@ -2010,7 +2010,7 @@ export function AvatarPresence({
           </fieldset>
         ))}
       </div>
-      <div className="rounded-lg border border-white/10 bg-black/70 p-2 text-[10px] text-white/65">
+      <div className="rounded-xl border border-white/10 bg-black/70 p-2 text-[10px] text-white/65">
         <button
           type="button"
           onClick={() => setPoseMode("relaxed")}
@@ -2045,7 +2045,7 @@ export function AvatarPresence({
           Hand Inspect {handInspectionView ? "On" : "Off"}
         </button>
         {handInspectionView && (
-          <div className="flex max-w-80 flex-wrap gap-1 rounded-lg border border-white/10 bg-black/70 p-1 backdrop-blur">
+          <div className="flex max-w-80 flex-wrap gap-1 rounded-xl border border-white/10 bg-black/70 p-1 backdrop-blur">
             {([
               ["leftFront", "Left Hand Front"],
               ["leftSide", "Left Hand Side"],
@@ -2071,7 +2071,7 @@ export function AvatarPresence({
           </div>
         )}
         {inspectPose && (
-          <div className="flex max-w-80 flex-wrap gap-1 rounded-lg border border-white/10 bg-black/70 p-1 backdrop-blur">
+          <div className="flex max-w-80 flex-wrap gap-1 rounded-xl border border-white/10 bg-black/70 p-1 backdrop-blur">
             {([
               ["front", "Front"],
               ["leftThreeQuarter", "Left 3/4"],
@@ -2089,7 +2089,7 @@ export function AvatarPresence({
             ))}
           </div>
         )}
-        <div className="space-y-1 rounded-lg border border-white/10 bg-black/70 p-2 normal-case tracking-normal text-white/70">
+        <div className="space-y-1 rounded-xl border border-white/10 bg-black/70 p-2 normal-case tracking-normal text-white/70">
           <div className="uppercase tracking-wider text-white/90">Hand IK targets</div>
           {(["left", "right"] as const).map((side) => (
             <fieldset key={side} className="border-t border-white/10 pt-1">
@@ -2118,7 +2118,7 @@ export function AvatarPresence({
             </fieldset>
           ))}
         </div>
-        <div className="space-y-1 rounded-lg border border-white/10 bg-black/70 p-2 normal-case tracking-normal text-white/70">
+        <div className="space-y-1 rounded-xl border border-white/10 bg-black/70 p-2 normal-case tracking-normal text-white/70">
           <div className="uppercase tracking-wider text-white/90">Hand orientation</div>
           {(["left", "right"] as const).map((side) => (
             <fieldset key={side} className="border-t border-white/10 pt-1">
@@ -2150,7 +2150,7 @@ export function AvatarPresence({
           ))}
         </div>
       </div>
-      {!inspectPose && <details className="rounded-lg border border-white/10 bg-black/40 p-2 text-[10px] text-white/75">
+      {!inspectPose && <details className="rounded-xl border border-white/10 bg-black/40 p-2 text-[10px] text-white/75">
         <summary className="cursor-pointer select-none uppercase tracking-wider text-white">
           Relaxed pose tuning
         </summary>

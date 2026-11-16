@@ -17,6 +17,7 @@ import { lilithSpeech } from "@/lib/voice/speech-controller";
 import { voiceSettings } from "@/lib/voice/voice-settings";
 import { ElevenLabsTTSProvider } from "@/lib/voice/elevenlabs-tts-provider";
 import { decideReplyVoicing } from "@/lib/voice/reply-voicing";
+import { ease, settle } from "@/lib/motion";
 
 // Same opt-in as the avatar calibration tools (default off, even in `next dev`).
 const SHOW_PRESENCE_CONTROLS = process.env.NEXT_PUBLIC_PRESENCE_DEBUG === "1";
@@ -198,7 +199,7 @@ export function PresenceHero() {
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: 0.7 }}
+        transition={{ ...ease, delay: 0.2 }}
         className="text-center"
       >
         <h1 className="text-3xl font-medium tracking-[-0.045em] text-ink [text-shadow:0_2px_28px_rgba(0,0,0,0.72)] sm:text-[2.6rem]">
@@ -227,7 +228,7 @@ export function PresenceHero() {
               <HistoryTrigger count={history.length} onOpen={() => setHistoryOpen(true)} />
               <button
                 onClick={reset}
-                className="rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+                className="rounded-full px-2.5 py-1 font-mono text-micro uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
               >
                 Clear
               </button>
@@ -242,8 +243,8 @@ export function PresenceHero() {
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.4 }}
-                className="max-w-md text-[15px] leading-relaxed text-ink-muted [text-shadow:0_2px_18px_rgba(0,0,0,0.7)]"
+                transition={settle}
+                className="max-w-md text-lead leading-relaxed text-ink-muted [text-shadow:0_2px_18px_rgba(0,0,0,0.7)]"
               >
                 {ACTIVITY_META[activity].hint}
               </motion.p>
@@ -258,7 +259,7 @@ export function PresenceHero() {
                   key={a}
                   onClick={() => override({ activity: a })}
                   className={cn(
-                    "rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.14em] transition-all",
+                    "rounded-full border px-2.5 py-1 font-mono text-micro uppercase tracking-[0.14em] transition-all",
                     activity === a
                       ? "border-wine/25 bg-wine/[0.12] text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
                       : "border-transparent text-ink-faint hover:border-white/10 hover:bg-white/[0.035] hover:text-ink-muted",
@@ -308,7 +309,7 @@ function HistoryTrigger({ count, onOpen }: { count: number; onOpen: () => void }
   return (
     <button
       onClick={onOpen}
-      className="flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
+      className="flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-micro uppercase tracking-wider text-ink-faint transition-colors hover:text-ink-muted"
     >
       <History className="h-3 w-3" /> History · {count}
     </button>

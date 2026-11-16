@@ -157,9 +157,9 @@ export function CommandInput({
           }}
           aria-label="Ask Lilith, or give a command"
           placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
-          className="min-w-0 flex-1 bg-transparent text-[15px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+          className="min-w-0 flex-1 bg-transparent text-lead text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
         />
-        <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-[10px] text-ink-faint sm:flex">
+        <kbd className="hidden items-center gap-1 rounded-md border border-white/10 bg-black/15 px-1.5 py-0.5 font-mono text-micro text-ink-faint sm:flex">
           Ctrl Space
         </kbd>
         {/* Voice input (speech-to-text) is not built yet: disabled, not a stub. */}
@@ -217,7 +217,7 @@ export function CommandInput({
               setRecall(-1);
               inputRef.current?.focus();
             }}
-            className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-[11px] text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink"
+            className="rounded-full border border-white/[0.09] bg-black/[0.12] px-3 py-1.5 text-micro text-ink-muted backdrop-blur-md transition-all hover:border-wine/25 hover:bg-wine/[0.07] hover:text-ink"
           >
             {s}
           </button>
