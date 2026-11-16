@@ -37,6 +37,7 @@ export function SidebarRail() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={active ? "page" : undefined}
               className="group relative flex w-[68px] flex-col items-center gap-1 py-2.5"
             >
               {active && (

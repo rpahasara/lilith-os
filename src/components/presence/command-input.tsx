@@ -155,6 +155,7 @@ export function CommandInput({
               setValue("");
             }
           }}
+          aria-label="Ask Lilith, or give a command"
           placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
           className="min-w-0 flex-1 bg-transparent text-[15px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
         />

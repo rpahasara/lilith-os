@@ -25,9 +25,10 @@
 
 /* =========================================================================
    LILITH OS — Design tokens
-   Base: deep space near-black (NASA color grading)
-   Primary: violet — the AI presence identity
-   Secondary: electric cyan — system, data, telemetry
+   Base: near-black wine night
+   Primary: wine / crimson-rose — the AI presence identity
+   Secondary: orchid, with pearl highlights and gold as a rare accent
+   System: cyan — data and telemetry only, never brand
    ========================================================================= */
 
 :root {
@@ -199,8 +200,7 @@ body {
     0 -18px 32px -24px rgb(0 0 0 / 0.5) inset,
     0 22px 52px -30px rgba(0, 0, 0, 0.82),
     0 8px 28px -24px rgb(var(--glass-tint) / 0.18);
-  backdrop-filter: blur(18px) saturate(126%) brightness(0.96);
-  -webkit-backdrop-filter: blur(18px) saturate(126%) brightness(0.96);
+  /* No backdrop-filter, on purpose — see the note above glass-strong. */
 }
 
 /* Tier 2 — INTERACTIVE glass (chips, secondary buttons, sidebar active, top +
@@ -217,13 +217,19 @@ body {
     0 -16px 30px -22px rgb(0 0 0 / 0.52) inset,
     0 18px 42px -28px rgba(0, 0, 0, 0.86),
     0 8px 28px -24px rgb(var(--glass-tint) / 0.18);
-  backdrop-filter: blur(20px) saturate(132%) brightness(0.97) contrast(1.04);
-  -webkit-backdrop-filter: blur(20px) saturate(132%) brightness(0.97) contrast(1.04);
+  /* No backdrop-filter, on purpose — see the note above glass-strong. */
 }
 
-/* Tier 3 — PRIMARY interactive glass (command input). Strongest readable
-   material: firmer border, stronger inner floor + contact shadow. Colour still
-   comes from the environment; crimson illumination is added per-component. */
+/* Tier 3 — PRIMARY interactive glass (command input, drawers, popovers).
+   Strongest readable material: firmer border, stronger inner floor + contact
+   shadow. Colour still comes from the environment; crimson illumination is
+   added per-component.
+
+   Backdrop blur lives on this tier ONLY. Tier 3 floats over content, where
+   blurring what is behind is what keeps its text legible. Tiers 1 and 2 sit
+   over the wallpaper, which is already blurred once for the whole page; a
+   second blur per card changed little and cost a compositing layer each
+   (about twenty on a workspace page). They are translucent, not frosted. */
 @utility glass-strong {
   background:
     radial-gradient(120% 92% at 50% 40%, rgba(10, 7, 12, 0.54), rgba(10, 7, 12, 0.34) 78%),
@@ -235,8 +241,12 @@ body {
     0 -20px 36px -18px rgb(0 0 0 / 0.5) inset,
     0 26px 56px -30px rgba(0, 0, 0, 0.9),
     0 12px 34px -24px rgb(var(--glass-tint) / 0.16);
-  backdrop-filter: blur(24px) saturate(136%) brightness(0.98) contrast(1.05);
-  -webkit-backdrop-filter: blur(24px) saturate(136%) brightness(0.98) contrast(1.05);
+  /* Written through a custom property so the build keeps BOTH declarations.
+     Given two literal values it collapsed them into the -webkit- one alone,
+     which Chromium and Firefox ignore — so the blur silently never applied. */
+  --glass-backdrop: blur(24px) saturate(136%) brightness(0.98) contrast(1.05);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
 }
 
 /* Inner illumination for premium glass objects (first child of a `relative`

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CloudOff, FlaskConical, Radio, ChevronDown, Check, X } from "lucide-react";
 import type { Diagnostics } from "@/lib/api";
@@ -20,12 +20,32 @@ export function ConnectionStatus({
   diagnostics?: Diagnostics;
 }) {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  // Escape or a press outside closes the diagnostics.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onPress = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPress);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPress);
+    };
+  }, [open]);
   const okCount = diagnostics?.endpoints.filter((e) => e.ok).length ?? 0;
   const total = diagnostics?.endpoints.length ?? 0;
 
   return (
-    <div className="relative">
+    <div ref={root} className="relative">
       <button
+        type="button"
+        aria-expanded={diagnostics ? open : undefined}
+        aria-controls={diagnostics ? panelId : undefined}
         onClick={() => diagnostics && setOpen((o) => !o)}
         className={cn(
           "flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-wider transition-colors",
@@ -63,6 +83,7 @@ export function ConnectionStatus({
       <AnimatePresence>
         {open && diagnostics && (
           <motion.div
+            id={panelId}
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
