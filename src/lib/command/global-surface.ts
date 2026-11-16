@@ -25,7 +25,15 @@ export function isCommandCenter(pathname: string): boolean {
   return pathname === COMMAND_CENTER_PATH;
 }
 
-/** Where a turn was launched from; passed to the command core as context. */
+/**
+ * Where a turn was launched from; passed to the command core as context.
+ *
+ * This is page origin only: a coarse label such as "career". It is not object
+ * context. Which memory, application or meeting is open or selected is never
+ * derived here, and nothing should present this label as Lilith understanding
+ * what is on the page. Object-level context needs its own authorized
+ * interface and is out of scope for this surface.
+ */
 export function surfaceFor(pathname: string): string {
   if (isCommandCenter(pathname)) return "home";
   const first = pathname.split("/").filter(Boolean)[0];

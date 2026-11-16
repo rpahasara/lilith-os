@@ -56,6 +56,17 @@ import { useCommand } from "./command-provider";
  *
  * The panel does not drive the avatar: the Command Center owns the avatar's
  * reactions and voice, and picks an in-flight turn up when it is opened.
+ *
+ * Deliberately not here (owner decisions, 2026-11-16):
+ *  - Voice. The panel is text-first; replies are spoken only on the Command
+ *    Center. Nothing here plays audio.
+ *  - Clearing. Clearing the transcript, starting a new conversation and
+ *    forgetting stored information are three different operations with
+ *    different Privacy and FORGET consequences; none is offered here until
+ *    their semantics are defined.
+ *  - Object context. A turn carries the page it was launched from and nothing
+ *    else. Lilith is not told what is selected or shown on that page, and the
+ *    panel does not suggest that she is.
  */
 
 interface GlobalCommandValue {
@@ -396,7 +407,7 @@ export function GlobalCommandPanel() {
                     <p className="py-6 text-center text-body leading-relaxed text-ink-muted">
                       {unavailable
                         ? "Nothing can be sent until a backend is configured."
-                        : "This is the same conversation as on the Command Center. Ask something, or start with a suggestion."}
+                        : "This is the same conversation as on the Command Center. Lilith does not see what is open on this page unless you tell her."}
                     </p>
                   )}
                 </div>
