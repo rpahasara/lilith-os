@@ -1,62 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import { useMemory } from "@/hooks/use-memory";
-import type { MemoryRecord, SearchScope } from "@/lib/memory/types";
 import { MEMORY_IDENTITY, MemoryHeader } from "@/components/memory/memory-header";
 import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
-import { MemorySearch } from "@/components/memory/memory-search";
 import { MemoryViewSwitch } from "@/components/memory/memory-view-switch";
 import { atlasPreviewEnabled } from "@/lib/memory/atlas/preview";
-import { CategoryFilter, type CategorySelection } from "@/components/memory/category-filter";
-import { MemoryGrid } from "@/components/memory/memory-grid";
-import { RecentlyLearned } from "@/components/memory/recently-learned";
-import { PinnedPanel } from "@/components/memory/pinned-panel";
-import { RelationshipPreview } from "@/components/memory/relationship-preview";
-import { MemoryDetail } from "@/components/memory/memory-detail";
+import { MemoryExplorer } from "@/components/memory/memory-explorer";
 import { MemorySkeleton } from "@/components/memory/memory-skeleton";
-import { GlassCard } from "@/components/ui/card";
-import { PanelHeader } from "@/components/ui/primitives";
-
-/** Client-side keyword match over a record. Semantic search arrives with the backend. */
-function matches(r: MemoryRecord, q: string): boolean {
-  const hay = [
-    r.summary,
-    r.content,
-    r.category,
-    r.kind,
-    ...r.tags,
-    ...r.entities.map((e) => e.label),
-    r.provenance.label,
-  ]
-    .join(" ")
-    .toLowerCase();
-  return hay.includes(q);
-}
 
 /** Brain / Timeline open the Cognitive Atlas preview; a build can leave it out. */
 const ATLAS_PREVIEW = atlasPreviewEnabled();
 
+/**
+ * The Memory Archive: a read-only evidence explorer over what the backend
+ * returns. The exploring itself lives in `MemoryExplorer`; this page owns the
+ * loading, unavailable and simulated-data states around it.
+ */
 export default function MemoryPage() {
   const { data, unavailable, loading, retry } = useMemory();
-  const [category, setCategory] = useState<CategorySelection>("all");
-  const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<SearchScope>("memory");
-  const [selected, setSelected] = useState<MemoryRecord | null>(null);
-
-  const shown = useMemo(() => {
-    if (!data) return [];
-    const q = query.trim().toLowerCase();
-    return data.records
-      .filter((r) => (category === "all" ? true : r.category === category))
-      .filter((r) => (q ? matches(r, q) : true))
-      .sort(
-        (a, b) =>
-          Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
-          (b.importance ?? 0) - (a.importance ?? 0) ||
-          new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime(),
-      );
-  }, [data, category, query]);
 
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
@@ -79,11 +40,7 @@ export default function MemoryPage() {
       ) : !data ? null : (
         <>
           {data.isDemo && <DemoBanner />}
-          <MemoryHeader
-            overview={data.overview}
-            isDemo={data.isDemo}
-            diagnostics={data.diagnostics}
-          />
+          <MemoryHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
           {/* Brain / Timeline open the Cognitive Atlas prototype (synthetic data). */}
           {ATLAS_PREVIEW && (
@@ -92,57 +49,7 @@ export default function MemoryPage() {
             </div>
           )}
 
-          <MemorySearch
-            query={query}
-            onQuery={setQuery}
-            scope={scope}
-            onScope={setScope}
-            resultCount={shown.length}
-          />
-
-          <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-            {/* memory field */}
-            <div className="space-y-4">
-              <GlassCard className="p-5" animated={false}>
-                <PanelHeader
-                  title="Memory shards"
-                  action={
-                    <span className="font-mono text-micro text-ink-faint">
-                      {shown.length} shown
-                    </span>
-                  }
-                />
-                <div className="mt-4">
-                  <CategoryFilter
-                    active={category}
-                    onChange={setCategory}
-                    counts={data.overview.byCategory}
-                    total={data.records.length}
-                  />
-                </div>
-                <div className="mt-4">
-                  <MemoryGrid records={shown} onSelect={setSelected} />
-                </div>
-              </GlassCard>
-            </div>
-
-            {/* cognition rail */}
-            <div className="space-y-4">
-              <RecentlyLearned events={data.overview.recentActivity} />
-              <PinnedPanel records={data.records} onSelect={setSelected} />
-              <RelationshipPreview
-                entities={data.entities}
-                relationships={data.relationships}
-              />
-            </div>
-          </div>
-
-          <MemoryDetail
-            record={selected}
-            allRecords={data.records}
-            onClose={() => setSelected(null)}
-            onSelectRelated={setSelected}
-          />
+          <MemoryExplorer data={data} />
         </>
       )}
     </div>
