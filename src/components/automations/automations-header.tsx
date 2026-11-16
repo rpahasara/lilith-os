@@ -6,6 +6,14 @@ import type { AutomationHealth } from "@/lib/automations/types";
 import type { Diagnostics } from "@/lib/api";
 import { staggerContainer } from "@/lib/motion";
 import { MetricTile, WorkspaceHeader } from "@/components/ui/primitives";
+import type { WorkspaceIdentity } from "@/components/ui/data-state";
+
+export const AUTOMATIONS_IDENTITY: WorkspaceIdentity = {
+  icon: Cpu,
+  eyebrow: "Agent fabric",
+  title: "Autonomous Operations",
+  description: "Lilith's background agents, watchers, and services.",
+};
 
 export function AutomationsHeader({
   health,
@@ -18,7 +26,7 @@ export function AutomationsHeader({
 }) {
   return (
     <div>
-      <WorkspaceHeader icon={Cpu} eyebrow="Agent fabric" title="Autonomous Operations" description="Lilith's background agents, watchers, and services — live." isDemo={isDemo} diagnostics={diagnostics} />
+      <WorkspaceHeader {...AUTOMATIONS_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />
 
       <motion.div
         variants={staggerContainer}

@@ -9,7 +9,8 @@
  *  2. Direct: set `NEXT_PUBLIC_LILITH_API_URL` to hit the backend straight from
  *     the browser (requires the backend to allow the origin via CORS).
  *
- * If neither yields a reachable backend, callers fall back to demo data.
+ * If neither yields a reachable backend, a workspace is `unavailable`. Sample
+ * data is shown only by explicit opt-in (see `lib/data-mode.ts`).
  */
 
 const DIRECT = process.env.NEXT_PUBLIC_LILITH_API_URL?.replace(/\/+$/, "");
@@ -74,13 +75,13 @@ export async function fetchEndpoint<T = unknown>(
 }
 
 export interface Diagnostics {
-  mode: "live" | "demo";
+  mode: "live" | "demo" | "unavailable";
   transport: "direct" | "proxy";
   endpoints: { path: string; ok: boolean; status: number; error?: string }[];
 }
 
 export function toDiagnostics(
-  mode: "live" | "demo",
+  mode: Diagnostics["mode"],
   results: EndpointResult[],
 ): Diagnostics {
   return {

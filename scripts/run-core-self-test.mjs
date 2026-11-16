@@ -24,17 +24,20 @@ await build({
     contents: `
       import { runCoreSelfTest } from "@/lib/command/core/self-test";
       import { runMemorySelfTest } from "@/lib/memory/self-test";
+      import { runArchiveSelfTest } from "@/lib/memory/archive-self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
       import { runShellHealthSelfTest } from "@/lib/system/self-test";
       import { runControlsSelfTest } from "@/lib/ui/controls-self-test";
+      import { runShellSelfTest } from "@/lib/ui/shell-self-test";
       import { runHomeSelfTest } from "@/lib/home/self-test";
       import { runTurnSelfTest } from "@/lib/conversation/turn-self-test";
       import { runVoiceSelfTest } from "@/lib/voice/voice-self-test";
       import { runDiagnosticsSelfTest } from "@/lib/diagnostics-self-test";
+      import { runDataModeSelfTest } from "@/lib/data-mode-self-test";
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
       import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...(await runConversationSelfTest()),
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));

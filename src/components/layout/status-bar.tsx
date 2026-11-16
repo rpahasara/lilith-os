@@ -14,14 +14,14 @@ import {
 const DOT: Record<ShellHealth["state"], Accent> = {
   checking: "violet",
   live: "green",
-  demo: "amber",
+  unconfigured: "amber",
   unreachable: "rose",
 };
 
 const TEXT: Record<ShellHealth["state"], string> = {
   checking: "text-ink-faint",
   live: "text-green",
-  demo: "text-amber",
+  unconfigured: "text-amber",
   unreachable: "text-rose",
 };
 

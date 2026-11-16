@@ -19,6 +19,7 @@ import {
   type PipelineStage,
 } from "./types";
 import { fetchEndpoint, toDiagnostics, type EndpointResult } from "@/lib/api";
+import { demoDataEnabled, unavailable, type Loaded } from "@/lib/data-mode";
 
 const ALL_STAGES: string[] = [...STAGES, ...TERMINAL_STAGES];
 
@@ -176,10 +177,13 @@ function latestActivityByApp(rawActivity: any): Map<string, { title: string; at:
 }
 
 /**
- * Fetch everything the Career screen needs. Never throws — resolves to usable
- * data, falling back to the demo adapter when the backend is absent.
+ * Fetch everything the Career screen needs. Never throws. When the backend is
+ * absent it resolves to `unavailable` — or to the sample data, if `demo`.
  */
-export async function getCareerData(signal?: AbortSignal): Promise<CareerData> {
+export async function getCareerData(
+  signal?: AbortSignal,
+  demo: boolean = demoDataEnabled(),
+): Promise<Loaded<CareerData>> {
   const paths = [
     "/career/applications",
     "/career/pipeline",
@@ -193,11 +197,13 @@ export async function getCareerData(signal?: AbortSignal): Promise<CareerData> {
 
   const results = [appsRes, pipeRes, actRes, ovRes];
 
-  // Applications are the backbone. Without them we serve demo data.
+  // Applications are the backbone. Without them the workspace is unavailable;
+  // sample data is shown only when it was explicitly asked for.
   if (!appsRes.ok || appsRes.data == null) {
-    const demo = buildDemoCareerData();
-    demo.diagnostics = toDiagnostics("demo", results);
-    return demo;
+    if (!demo) return unavailable(results);
+    const sample = buildDemoCareerData();
+    sample.diagnostics = toDiagnostics("demo", results);
+    return sample;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

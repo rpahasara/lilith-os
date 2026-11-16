@@ -19,7 +19,7 @@ export type ProbeFetch = (
   init?: EndpointRequest,
 ) => Promise<EndpointResult>;
 
-export type ShellHealthState = "checking" | "live" | "demo" | "unreachable";
+export type ShellHealthState = "checking" | "live" | "unconfigured" | "unreachable";
 
 export interface ShellHealth {
   state: ShellHealthState;
@@ -46,7 +46,8 @@ export const SHELL_HEALTH_TIMEOUT_MS = 8_000;
  * Map one probe result to a shell state. Pure, so it is covered by the
  * headless self-test.
  *  - 2xx                → live (with latency)
- *  - 503 (proxy has no LILITH_API_URL) → demo: workspaces fall back to demo data
+ *  - 503 (proxy has no LILITH_API_URL) → unconfigured: there is no backend to
+ *    reach, so workspaces are unavailable (sample data is opt-in only)
  *  - anything else      → unreachable (502 tunnel down, 0 timeout, 401/403 …)
  */
 export function deriveShellHealth(
@@ -64,7 +65,7 @@ export function deriveShellHealth(
     };
   }
   return {
-    state: result.status === 503 ? "demo" : "unreachable",
+    state: result.status === 503 ? "unconfigured" : "unreachable",
     latencyMs: null,
     httpStatus: result.status,
     checkedAt,
@@ -91,8 +92,8 @@ export function shellHealthLabel(h: ShellHealth): string {
       return "Checking";
     case "live":
       return "Online";
-    case "demo":
-      return "Demo data";
+    case "unconfigured":
+      return "No backend configured";
     case "unreachable":
       return "Backend unreachable";
   }

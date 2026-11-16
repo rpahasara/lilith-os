@@ -26,14 +26,7 @@ const KIND: Record<ActivityEvent["kind"], { icon: LucideIcon; color: string }> =
 export function ActivityTimeline({ activity }: { activity: ActivityEvent[] }) {
   return (
     <GlassCard className="p-5" animated={false}>
-      <PanelHeader
-        title="Career activity"
-        action={
-          <button className="font-mono text-[10px] text-ink-faint transition-colors hover:text-ink-muted">
-            VIEW ALL
-          </button>
-        }
-      />
+      <PanelHeader title="Career activity" />
 
       <motion.ol
         variants={staggerContainer}

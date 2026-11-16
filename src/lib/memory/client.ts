@@ -28,6 +28,7 @@ import {
   type Relationship,
 } from "./types";
 import { fetchEndpoint, toDiagnostics, type EndpointResult } from "@/lib/api";
+import { demoDataEnabled, unavailable, type Loaded } from "@/lib/data-mode";
 
 const CATEGORY_SET = new Set<string>(CATEGORIES);
 const ENTITY_SET = new Set<string>(Object.keys(ENTITY_META));
@@ -196,11 +197,14 @@ function normalizeOverview(raw: any, records: MemoryRecord[], entityCount: numbe
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
- * Fetch everything the Memory screen needs. Never throws — resolves to usable
- * data, falling back to the demo adapter when the backend is absent (today,
- * always). Records are the backbone: without them the payload is demo.
+ * Fetch everything the Memory screen needs. Never throws. Records are the
+ * backbone: without them it resolves to `unavailable` — or to the sample data,
+ * if `demo`.
  */
-export async function getMemoryData(signal?: AbortSignal): Promise<MemoryData> {
+export async function getMemoryData(
+  signal?: AbortSignal,
+  demo: boolean = demoDataEnabled(),
+): Promise<Loaded<MemoryData>> {
   const paths = ["/memory/records", "/memory/entities", "/memory/overview"];
 
   const [recRes, entRes, ovRes] = (await Promise.all(
@@ -208,11 +212,13 @@ export async function getMemoryData(signal?: AbortSignal): Promise<MemoryData> {
   )) as EndpointResult[];
   const results = [recRes, entRes, ovRes];
 
-  // Records are the backbone. Without them we serve demo data.
+  // Records are the backbone. Without them the workspace is unavailable; sample
+  // data is shown only when it was explicitly asked for.
   if (!recRes.ok || recRes.data == null) {
-    const demo = buildDemoMemoryData();
-    demo.diagnostics = toDiagnostics("demo", results);
-    return demo;
+    if (!demo) return unavailable(results);
+    const sample = buildDemoMemoryData();
+    sample.diagnostics = toDiagnostics("demo", results);
+    return sample;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

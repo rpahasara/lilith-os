@@ -24,6 +24,7 @@ import {
   type CommandTask,
 } from "@/lib/command";
 import { RealCommandCore, runCoreSelfTest } from "@/lib/command/core";
+import { demoCommandsEnabled } from "@/lib/data-mode";
 import { useConversation } from "@/components/conversation/conversation-provider";
 import { usePresence } from "@/components/presence/presence-engine";
 
@@ -195,8 +196,7 @@ export function CommandProvider({ children }: { children: ReactNode }) {
       // turn. Fixture-driven commands are available only when explicitly enabled
       // for development/demo use.
       const realIntent = RealCommandCore.matches(text);
-      const demoEnabled =
-        process.env.NEXT_PUBLIC_LILITH_ENABLE_DEMO_COMMANDS === "true";
+      const demoEnabled = demoCommandsEnabled();
       const core: CommandCore | null = realIntent
         ? realRef.current
         : demoEnabled && (opts?.forceCommand || matchFixture(text) !== null)

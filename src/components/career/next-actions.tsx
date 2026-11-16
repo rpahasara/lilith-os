@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle2, ChevronRight } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
 import type { Application } from "@/lib/career/types";
@@ -19,7 +19,7 @@ export function NextActions({ applications }: { applications: Application[] }) {
     .slice(0, 5);
 
   return (
-    <GlassCard className="p-5" interactive>
+    <GlassCard className="p-5">
       <PanelHeader
         title="Next actions"
         action={
@@ -39,9 +39,9 @@ export function NextActions({ applications }: { applications: Application[] }) {
           <motion.li
             key={a.id}
             variants={riseIn}
-            className="group flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-white/[0.03]"
+            className="flex items-center gap-3 rounded-xl p-2"
           >
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-ink-faint transition-colors group-hover:text-green" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-ink-faint" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] text-ink">{a.nextAction?.label}</p>
               <p className="truncate text-[11px] text-ink-faint">
@@ -49,7 +49,6 @@ export function NextActions({ applications }: { applications: Application[] }) {
                 {a.nextAction?.due && ` · due ${shortDate(a.nextAction.due)}`}
               </p>
             </div>
-            <ChevronRight className="h-4 w-4 shrink-0 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100" />
           </motion.li>
         ))}
       </motion.ul>

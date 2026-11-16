@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Lilith OS — Your AI Command Center",
+  // each route sets its own title; this is the pattern and the fallback
+  title: { default: "Lilith OS — Your AI Command Center", template: "%s · Lilith OS" },
   description:
     "Lilith OS is a personal AI operating system. Presence, memory, and command in one cinematic workspace.",
 };

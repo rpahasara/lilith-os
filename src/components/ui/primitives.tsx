@@ -41,6 +41,7 @@ export function WorkspaceHeader({
   title,
   description,
   isDemo,
+  unavailable,
   diagnostics,
 }: {
   icon: LucideIcon;
@@ -48,6 +49,8 @@ export function WorkspaceHeader({
   title: string;
   description: string;
   isDemo?: boolean;
+  /** the workspace could not reach its data; shown on the connection chip. */
+  unavailable?: boolean;
   diagnostics?: Diagnostics;
 }) {
   return (
@@ -63,7 +66,9 @@ export function WorkspaceHeader({
           <p className="mt-0.5 max-w-2xl text-[13px] leading-relaxed text-ink-muted">{description}</p>
         </div>
       </div>
-      {typeof isDemo === "boolean" && <ConnectionStatus isDemo={isDemo} diagnostics={diagnostics} />}
+      {(typeof isDemo === "boolean" || unavailable) && (
+        <ConnectionStatus isDemo={Boolean(isDemo)} unavailable={unavailable} diagnostics={diagnostics} />
+      )}
     </div>
   );
 }
@@ -133,26 +138,5 @@ export function StatusDot({
       )}
       style={{ color: `var(--${accent === "green" ? "green" : accent})` }}
     />
-  );
-}
-
-/* ---------------------------------------------------------------- Bars mini */
-export function Bars({
-  values,
-  accent = "cyan",
-}: {
-  values: number[];
-  accent?: Accent;
-}) {
-  return (
-    <div className="flex items-end gap-0.5">
-      {values.map((v, i) => (
-        <span
-          key={i}
-          className={cn("w-[3px] rounded-full", accentBg[accent])}
-          style={{ height: `${v * 3}px`, opacity: 0.35 + v * 0.12 }}
-        />
-      ))}
-    </div>
   );
 }

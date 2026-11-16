@@ -6,6 +6,14 @@ import type { MemoryOverview } from "@/lib/memory/types";
 import type { Diagnostics } from "@/lib/api";
 import { staggerContainer } from "@/lib/motion";
 import { MetricTile, WorkspaceHeader } from "@/components/ui/primitives";
+import type { WorkspaceIdentity } from "@/components/ui/data-state";
+
+export const MEMORY_IDENTITY: WorkspaceIdentity = {
+  icon: Brain,
+  eyebrow: "Cognitive archive",
+  title: "Memory",
+  description: "Lilith's living knowledge — what she knows about your people, work, and world.",
+};
 
 export function MemoryHeader({
   overview,
@@ -18,7 +26,7 @@ export function MemoryHeader({
 }) {
   return (
     <div>
-      <WorkspaceHeader icon={Brain} eyebrow="Cognitive archive" title="Memory" description="Lilith's living knowledge — what she knows about your people, work, and world." isDemo={isDemo} diagnostics={diagnostics} />
+      <WorkspaceHeader {...MEMORY_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />
 
       <motion.div
         variants={staggerContainer}

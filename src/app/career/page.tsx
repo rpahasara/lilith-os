@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import { useCareer } from "@/hooks/use-career";
-import { CareerHeader } from "@/components/career/career-header";
+import { CAREER_IDENTITY, CareerHeader } from "@/components/career/career-header";
+import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { CareerSkeleton } from "@/components/career/career-skeleton";
 import { PipelineOverview } from "@/components/career/pipeline-overview";
 import { ApplicationTracker } from "@/components/career/application-tracker";
@@ -15,16 +16,24 @@ import { ApplicationDetail } from "@/components/career/application-detail";
 import type { Application, Stage } from "@/lib/career/types";
 
 export default function CareerPage() {
-  const { data, loading } = useCareer();
+  const { data, unavailable, loading, retry } = useCareer();
   const [selectedStage, setSelectedStage] = useState<Stage | null>(null);
   const [selected, setSelected] = useState<Application | null>(null);
 
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
-      {loading || !data ? (
+      {loading ? (
         <CareerSkeleton />
-      ) : (
+      ) : unavailable ? (
+        <WorkspaceUnavailable
+          identity={CAREER_IDENTITY}
+          what="Career data"
+          diagnostics={unavailable.diagnostics}
+          onRetry={retry}
+        />
+      ) : !data ? null : (
         <>
+          {data.isDemo && <DemoBanner />}
           <CareerHeader
             overview={data.overview}
             isDemo={data.isDemo}

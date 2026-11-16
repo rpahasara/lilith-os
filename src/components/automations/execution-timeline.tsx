@@ -19,14 +19,7 @@ const OUTCOME: Record<string, { icon: LucideIcon; color: string }> = {
 export function ExecutionTimeline({ activity }: { activity: AutomationEvent[] }) {
   return (
     <GlassCard className="p-5" animated={false}>
-      <PanelHeader
-        title="Execution timeline"
-        action={
-          <button className="font-mono text-[10px] text-ink-faint transition-colors hover:text-ink-muted">
-            VIEW ALL
-          </button>
-        }
-      />
+      <PanelHeader title="Execution timeline" />
 
       {activity.length === 0 ? (
         <p className="mt-4 text-sm text-ink-faint">No recent executions.</p>

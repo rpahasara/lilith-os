@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { ArrowUp, Loader2, Mic, Sparkles, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { unavailable } from "@/components/ui/unavailable";
+import { defaultSuggestions } from "@/lib/command/suggestions";
 
 interface CommandInputProps {
   onFocusChange?: (focused: boolean) => void;
@@ -24,7 +25,8 @@ interface CommandInputProps {
   onStop?: () => void;
 }
 
-const DEFAULT_SUGGESTIONS = ["System health", "Summarise inbox", "Compare AWS cost", "Plan my day"];
+// Only what Lilith can actually do (see lib/command/suggestions.ts).
+const DEFAULT_SUGGESTIONS = defaultSuggestions();
 
 export function CommandInput({
   onFocusChange,
@@ -153,6 +155,7 @@ export function CommandInput({
               setValue("");
             }
           }}
+          aria-label="Ask Lilith, or give a command"
           placeholder={loading ? "Lilith is thinking…" : "Ask Lilith, or command anything…"}
           className="min-w-0 flex-1 bg-transparent text-[15px] text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
         />

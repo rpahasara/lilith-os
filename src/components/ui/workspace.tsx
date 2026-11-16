@@ -1,6 +1,6 @@
 "use client";
 
-import { type ComponentType, type ReactNode, useEffect } from "react";
+import { type ComponentType, type ReactNode, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,56 @@ export function ContextAction({ icon: Icon, title, description, disabled, onClic
   return <button type="button" disabled={disabled} onClick={onClick} className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-left transition-colors hover:border-white/15 hover:bg-white/[0.045] disabled:cursor-not-allowed disabled:opacity-45"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/[0.05] text-ink-muted"><Icon className="h-3.5 w-3.5" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-ink">{title}</span>{description && <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-faint">{description}</span>}</span><ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></button>;
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The shared detail drawer. It is a modal dialog, so it behaves like one:
+ * focus moves into it when it opens, Tab stays inside it, Escape closes it, and
+ * focus returns to whatever opened it.
+ */
 export function DetailDrawer({ open, onClose, eyebrow, title, children, footer }: { open: boolean; onClose: () => void; eyebrow?: string; title: string; children: ReactNode; footer?: ReactNode }) {
-  useEffect(() => { if (!open) return; const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose(); window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [open, onClose]);
-  return <AnimatePresence>{open && <><motion.button type="button" aria-label="Close detail panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-black/55 backdrop-blur-sm" /><motion.aside initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", stiffness: 320, damping: 34 }} role="dialog" aria-modal="true" aria-label={title} className="glass-strong scroll-area fixed inset-y-0 right-0 z-50 flex w-full max-w-[30rem] flex-col overflow-y-auto"><div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/[0.06] bg-base/75 px-6 py-5 backdrop-blur-xl"><div className="min-w-0">{eyebrow && <p className="eyebrow text-wine-bright/80">{eyebrow}</p>}<h2 className="mt-1 truncate text-xl font-semibold tracking-tight text-ink">{title}</h2></div><button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.06] text-ink-muted hover:text-ink" aria-label="Close"><X className="h-4 w-4" /></button></div><div className="flex-1 p-6">{children}</div>{footer && <div className="sticky bottom-0 border-t border-white/[0.06] bg-base/80 p-4 backdrop-blur-xl">{footer}</div>}</motion.aside></>}</AnimatePresence>;
+  const panel = useRef<HTMLElement>(null);
+  // callers usually pass an inline handler; keep the latest without re-running the effect
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const raf = requestAnimationFrame(() =>
+      panel.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true }),
+    );
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close.current();
+        return;
+      }
+      if (event.key !== "Tab" || !panel.current) return;
+      const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const outside = !panel.current.contains(active);
+      if (event.shiftKey && (active === first || outside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || outside)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("keydown", onKey);
+      opener?.focus?.({ preventScroll: true });
+    };
+  }, [open]);
+
+  return <AnimatePresence>{open && <><motion.button type="button" tabIndex={-1} aria-label="Close detail panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-black/55 backdrop-blur-sm" /><motion.aside ref={panel} initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", stiffness: 320, damping: 34 }} role="dialog" aria-modal="true" aria-label={title} className="glass-strong scroll-area fixed inset-y-0 right-0 z-50 flex w-full max-w-[30rem] flex-col overflow-y-auto"><div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/[0.06] bg-base/75 px-6 py-5 backdrop-blur-xl"><div className="min-w-0">{eyebrow && <p className="eyebrow text-wine-bright/80">{eyebrow}</p>}<h2 className="mt-1 truncate text-xl font-semibold tracking-tight text-ink">{title}</h2></div><button type="button" data-autofocus onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.06] text-ink-muted hover:text-ink" aria-label="Close"><X className="h-4 w-4" /></button></div><div className="flex-1 p-6">{children}</div>{footer && <div className="sticky bottom-0 border-t border-white/[0.06] bg-base/80 p-4 backdrop-blur-xl">{footer}</div>}</motion.aside></>}</AnimatePresence>;
 }
