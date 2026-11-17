@@ -229,6 +229,9 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
   check("a refused read is a failure", !refused.ok && refused.reason === "refused");
   const down = await fetchSnapshot(undefined, fakeFetch(null, ENTITIES, { records: 0, entities: 0 }).impl);
   check("an unreachable backend is a failure", !down.ok && down.reason === "unreachable");
+  const serverError = await fetchSnapshot(undefined, fakeFetch(null, ENTITIES, { records: 500, entities: 200 }).impl);
+  check("a server error is a failure, named as an error rather than silence",
+    !serverError.ok && serverError.reason === "error");
   const unconfigured = await fetchSnapshot(undefined, fakeFetch(null, ENTITIES, { records: 503, entities: 503 }).impl);
   check("an unconfigured backend is a failure", !unconfigured.ok && unconfigured.reason === "unconfigured");
   const noEntities = await fetchSnapshot(undefined, fakeFetch({ records: BASE }, null, { records: 200, entities: 500 }).impl);
@@ -288,6 +291,19 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
         onExplore: () => {},
       }),
     ).includes("between entities") && html.includes("Share an entity · derived here"));
+  check("relationships kept from an earlier entities read are marked as such",
+    renderToStaticMarkup(
+      createElement(RealNodeInspector, {
+        node: panelStore.node("c1")!,
+        store: panelStore,
+        entities: snapshotOf(BASE).entities ?? [],
+        relationships: snapshotOf(BASE).relationships ?? [],
+        entitiesStale: true,
+        onClose: () => {},
+        onSelect: () => {},
+        onExplore: () => {},
+      }),
+    ).includes("from an earlier read"));
   check("the timeline says record dates are not learning history",
     renderToStaticMarkup(createElement(RealTimelineNotice, { nodes: panelStore.getState().nodes })).includes("not the moment Lilith learned it"));
 

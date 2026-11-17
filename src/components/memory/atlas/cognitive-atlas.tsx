@@ -591,7 +591,8 @@ export default function CognitiveAtlas() {
             <div>
               <h1 className="text-lg font-semibold leading-tight tracking-[-0.03em] text-ink">Cognitive Atlas</h1>
               <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-                <span className="text-ink-muted">{state.nodes.length}</span> {isReal ? "records" : "memories"} ·{" "}
+                <span className="text-ink-muted">{state.nodes.length}</span>{" "}
+                {isReal ? (state.nodes.length === 1 ? "record" : "records") : "memories"} ·{" "}
                 <span className="text-ink-muted">{state.links.length}</span> pathways ·{" "}
                 <span className="text-ink-muted">{REGIONS.length}</span> domains
               </p>
@@ -677,6 +678,7 @@ export default function CognitiveAtlas() {
                     store={store}
                     entities={real.entities}
                     relationships={real.relationships}
+                    entitiesStale={real.entitiesStale}
                     onClose={() => setSelection(null)}
                     onSelect={selectNode}
                     onExplore={(n: AtlasNode) => {

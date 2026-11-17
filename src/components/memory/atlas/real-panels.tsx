@@ -55,6 +55,7 @@ export function RealNodeInspector({
   store,
   entities,
   relationships,
+  entitiesStale = false,
   onClose,
   onSelect,
   onExplore,
@@ -64,6 +65,8 @@ export function RealNodeInspector({
   store: AtlasStore;
   entities: Entity[];
   relationships: Relationship[];
+  /** the latest entities read failed; relationships are from an earlier read. */
+  entitiesStale?: boolean;
   onClose: () => void;
   onSelect: (id: string) => void;
   onExplore: (node: AtlasNode) => void;
@@ -208,6 +211,12 @@ export function RealNodeInspector({
             <p className="mt-1.5 text-[10px] leading-snug text-ink-faint">
               Relationships here are between entities, as the source records them — not between memories.
             </p>
+            {entitiesStale && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-snug text-amber">
+                <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+                The latest read of entities failed; these relationships are from an earlier read.
+              </p>
+            )}
           </Section>
         )}
 

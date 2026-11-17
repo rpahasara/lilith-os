@@ -86,7 +86,7 @@ export function AtlasLabels({
             <button
               type="button"
               aria-pressed={on}
-              aria-label={`${regionLabel(region.id, origin)}: ${count} ${origin === "real" ? "records" : "memories"}. ${region.blurb}`}
+              aria-label={`${regionLabel(region.id, origin)}: ${count} ${origin === "real" ? (count === 1 ? "record" : "records") : count === 1 ? "memory" : "memories"}. ${region.blurb}`}
               onMouseEnter={() => onHoverRegion(region.id)}
               onMouseLeave={() => onHoverRegion(null)}
               onFocus={() => onHoverRegion(region.id)}

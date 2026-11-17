@@ -69,7 +69,7 @@ export interface MemorySnapshot {
   unidentified: number;
 }
 
-export type SnapshotFailure = "unconfigured" | "refused" | "unreachable" | "malformed";
+export type SnapshotFailure = "unconfigured" | "refused" | "unreachable" | "error" | "malformed";
 
 export type SnapshotResult =
   | { ok: true; snapshot: MemorySnapshot }
@@ -80,7 +80,8 @@ export type SnapshotFetch = (path: string, signal?: AbortSignal) => Promise<Endp
 function failure(res: EndpointResult): SnapshotFailure {
   if (res.status === 503) return "unconfigured";
   if (res.status === 401 || res.status === 403) return "refused";
-  return "unreachable";
+  // status 0: no HTTP answer at all (network error, aborted, timed out)
+  return res.status === 0 ? "unreachable" : "error";
 }
 
 /** Raw records array, or null when the body is not the shape we expect. */
@@ -395,8 +396,9 @@ export function stepReal(prev: RealView | null, result: SnapshotResult, layout: 
 
 /** Plain words for a failed check. */
 export const FAILURE_LINE: Record<SnapshotFailure, string> = {
-  unconfigured: "No backend is configured for this app.",
+  unconfigured: "The backend is not configured or is unavailable.",
   refused: "The backend refused the request.",
   unreachable: "The backend did not answer.",
+  error: "The backend answered with an error.",
   malformed: "The backend answered with something that is not a list of records.",
 };
