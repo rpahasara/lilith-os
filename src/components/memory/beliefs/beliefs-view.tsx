@@ -31,7 +31,7 @@ export const BELIEFS_IDENTITY = {
   eyebrow: "Memory · Beliefs",
   title: "Beliefs",
   description:
-    "What LILITH currently holds true, reconciled from evidence. Separate from memories: each belief shows how it is known, how sure LILITH is and what supports it. Read-only.",
+    "The World Model's current interpretation of what LILITH has received. Beliefs are neither memories nor verified facts: each shows how it was received, how consistently its sources agree and what supports it. Read-only.",
 };
 
 const DOT: Record<ConfidenceTier, string> = {
@@ -106,14 +106,14 @@ function Inspector({ belief, subject, notice }: { belief: Belief; subject: strin
       {notice && <p role="status" className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs text-ink-muted">{notice}</p>}
 
       <section>
-        <Eyebrow>Current value</Eyebrow>
+        <Eyebrow>Current interpretation</Eyebrow>
         <p className="mt-1.5 text-lg font-medium text-ink [overflow-wrap:anywhere]">{formatValue(belief.value)}</p>
         <p className="mt-1 text-xs text-ink-faint">{humanize(belief.predicate)} of {subject}</p>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3">
-          <Eyebrow>How LILITH knows</Eyebrow>
+          <Eyebrow>How LILITH received this</Eyebrow>
           <p className="mt-1 text-sm font-medium text-ink">{epi?.label ?? humanize(belief.epistemicState)}</p>
           <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">{epi?.detail}</p>
         </div>
@@ -142,7 +142,7 @@ function Inspector({ belief, subject, notice }: { belief: Belief; subject: strin
           </div>
           <span className="font-mono text-xs text-ink">{TIER[belief.confidence.tier]} · {belief.confidence.value.toFixed(2)}</span>
         </div>
-        <p className="mt-1.5 text-xs text-ink-faint">{confidenceBasis(belief.confidence.basis)}. Derived from fixed rules, not a model&apos;s guess.</p>
+        <p className="mt-1.5 text-xs text-ink-faint">{confidenceBasis(belief.confidence.basis)}. Derived from fixed rules about its sources; it says how consistently they agree, not whether this is true.</p>
       </section>
 
       <section>
@@ -179,8 +179,8 @@ function Inspector({ belief, subject, notice }: { belief: Belief; subject: strin
       </section>
 
       <p className="border-t border-white/[0.06] pt-3 text-micro leading-relaxed text-ink-faint">
-        Read-only. Earlier values are not kept by the store yet, so this is LILITH&apos;s current interpretation only. Source
-        identifiers and free-text notes are not shown.
+        Read-only. This is the World Model&apos;s current interpretation of what it received, not a verified fact. Earlier
+        values are not kept by the store yet. Source identifiers and free-text notes are not shown.
       </p>
     </div>
   );
@@ -267,7 +267,8 @@ export function BeliefsView() {
               {lastReconciled && <p className="font-mono text-micro text-ink-faint">last reconciled {formatStamp(lastReconciled) ?? lastReconciled}</p>}
             </div>
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
-              Private owner context is not shown here.{all.length >= WORLD_LIST_LIMIT && ` The store returned its first ${WORLD_LIST_LIMIT}.`}
+              Interpretations, not verified facts: confidence describes how consistently the sources agree, and only a
+              Verified belief has been independently checked. Private owner context is not shown here.{all.length >= WORLD_LIST_LIMIT && ` The store returned its first ${WORLD_LIST_LIMIT}.`}
             </p>
 
             <div className="mt-4 flex flex-col gap-2.5 @lg:flex-row @lg:items-center">

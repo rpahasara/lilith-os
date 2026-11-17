@@ -18,7 +18,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { KNOWN_ORIGINS, fetchBelief, fetchWorld, isVisibleBelief, safeProvenance, unavailable } from "@/lib/world/client";
 import {
-  confidenceBasis, countBeliefs, countLine, evidenceLine, filterBeliefs, formatStamp, formatValue,
+  EPISTEMIC, LIFECYCLE, confidenceBasis, countBeliefs, countLine, evidenceLine, filterBeliefs, formatStamp, formatValue,
   groupBySubject, humanize, NO_FILTERS,
 } from "@/lib/world/present";
 import type { Belief } from "@/lib/world/types";
@@ -171,6 +171,17 @@ export async function runBeliefsP19SelfTest(): Promise<Result[]> {
   check("the inspector is the shared dialog and re-reads under the same rules", /<DetailDrawer/.test(view) && /fetchBelief\(open\.key/.test(view));
   check("an unavailable store is the shared honest state with a retry", /<WorkspaceUnavailable/.test(view) && /onRetry=/.test(view));
   check("owner context is mentioned without a number", /Private owner context is not shown here\./.test(view));
+
+  /* receiving, believing, verifying ------------------------------------------------------ */
+  check("Observed means received, and says it is not verified", /Received from a connected source/.test(EPISTEMIC.OBSERVED.detail) && /Not independently verified/.test(EPISTEMIC.OBSERVED.detail));
+  check("what you stated is not presented as verified either", /Not independently verified/.test(EPISTEMIC.USER_ASSERTED.detail));
+  check("only Verified claims to have been checked",
+    (Object.keys(EPISTEMIC) as (keyof typeof EPISTEMIC)[]).filter((k) => /independently checked/i.test(EPISTEMIC[k].detail)).join() === "VERIFIED");
+  check("a current belief is an interpretation, not a fact", /interpretation, not a verified fact/.test(LIFECYCLE.ACTIVE.detail));
+  check("the page frames beliefs as interpretations of what was received",
+    /current interpretation of what LILITH has received/.test(view) && /neither memories nor verified facts/.test(view) &&
+      /confidence describes how consistently the sources agree/.test(view) && /not whether this is true/.test(view));
+  check("the backend's states are shown as they are (no upgrade)", !/VERIFIED|"Verified"/.test(view.replace(/Verified belief has been independently checked/, "")));
   const loading = renderToStaticMarkup(createElement(BeliefsView));
   check("first render: the header, the Beliefs lens and a reading state", /Beliefs/.test(loading) && /Reading the belief store/.test(loading) && /aria-current="page"[^>]*>[\s\S]*?Beliefs/.test(loading));
 

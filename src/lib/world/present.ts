@@ -6,11 +6,12 @@
  * values, and counts that describe exactly the beliefs on screen. Nothing here
  * reads the network or changes a belief.
  *
- * A belief is LILITH's current interpretation of one fact about one subject
- * ("this application's status is Applied"). It is not a memory: memories are
- * records with their own provenance, beliefs are reconciled from evidence and
- * carry an epistemic state. Earlier values are not kept by the store yet, so
- * everything here describes the present interpretation only.
+ * A belief is the World Model's current interpretation of one claim about one
+ * subject ("this application's status is Applied"). It is not a memory (memories
+ * are records with their own provenance) and not a verified fact: high
+ * confidence means the sources agree, not that the claim is true, and the
+ * sources themselves may include tests or mistakes. Earlier values are not kept
+ * by the store yet, so everything here describes the present interpretation.
  */
 
 import type { Belief, BeliefProvenance, ConfidenceTier, EpistemicState, LifecycleState } from "./types";
@@ -23,15 +24,21 @@ export function humanize(code: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : code;
 }
 
+/*
+ * Receiving, believing and verifying are different things. OBSERVED means LILITH
+ * RECEIVED it from a connected source (an email, say): the source may itself be
+ * a test or a mistake. Only VERIFIED means it was independently checked. The
+ * words below keep the backend's states exactly; they never upgrade them.
+ */
 export const EPISTEMIC: Record<EpistemicState, { label: string; detail: string }> = {
-  OBSERVED: { label: "Observed", detail: "Seen directly in a connected source." },
-  USER_ASSERTED: { label: "Stated by you", detail: "You said this directly." },
+  OBSERVED: { label: "Observed", detail: "Received from a connected source, such as an email. Not independently verified." },
+  USER_ASSERTED: { label: "Stated by you", detail: "You said this directly. Not independently verified." },
   INFERRED: { label: "Inferred", detail: "Reasoned from other evidence. It may be wrong and never outranks evidence." },
-  VERIFIED: { label: "Verified", detail: "Independently checked by the verification step." },
+  VERIFIED: { label: "Verified", detail: "Independently checked by the verification step: the only state that means checked." },
 };
 
 export const LIFECYCLE: Record<Exclude<LifecycleState, "SUPERSEDED">, { label: string; detail: string; tone: "green" | "amber" | "faint" }> = {
-  ACTIVE: { label: "Current", detail: "LILITH's current best interpretation.", tone: "green" },
+  ACTIVE: { label: "Current", detail: "The World Model's current interpretation, not a verified fact.", tone: "green" },
   CONFLICTED: { label: "Conflicted", detail: "Trusted sources disagree and the rules cannot settle it safely.", tone: "amber" },
   STALE: { label: "Stale", detail: "Still known, but older than its freshness window.", tone: "faint" },
 };
