@@ -41,6 +41,7 @@ export function TimelineToday({
         action={
           <span className="font-mono text-micro text-ink-faint">
             {visible.length} {visible.length === 1 ? "event" : "events"}
+            {visible.length > 0 && <> · <span className="text-green">{visible.filter((e) => e.prepared).length}</span> prepared</>}
           </span>
         }
       />

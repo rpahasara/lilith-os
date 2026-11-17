@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
-import { STAGE_META, type PipelineStage, type Stage } from "@/lib/career/types";
+import { STAGE_META, type CareerOverview, type PipelineStage, type Stage } from "@/lib/career/types";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/motion";
 
@@ -16,14 +16,24 @@ const NODE_ACCENT: Record<string, string> = {
   faint: "var(--ink-faint)",
 };
 
-export function PipelineOverview({ pipeline, selectedStage, onSelect }: { pipeline: PipelineStage[]; selectedStage?: Stage | null; onSelect?: (stage: Stage) => void }) {
+export function PipelineOverview({ pipeline, overview, selectedStage, onSelect }: { pipeline: PipelineStage[]; overview?: CareerOverview; selectedStage?: Stage | null; onSelect?: (stage: Stage) => void }) {
   return (
     <GlassCard className="p-5">
       <PanelHeader
         title="Pipeline overview"
         action={
-          <span className="font-mono text-micro text-ink-faint">
-            {pipeline.reduce((s, p) => s + p.count, 0)} in flight
+          <span className="flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 font-mono text-micro text-ink-faint">
+            <span>{pipeline.reduce((s, p) => s + p.count, 0)} in flight</span>
+            {overview && (
+              <>
+                <span title="Response rate, as reported by the career pipeline">
+                  response <span className="text-cyan-bright">{overview.responseRate}%</span>
+                </span>
+                <span title="Weighted pipeline confidence, 0–100">
+                  health <span className="text-orchid-bright">{overview.pipelineHealth}</span>/100
+                </span>
+              </>
+            )}
           </span>
         }
       />
