@@ -271,12 +271,13 @@ export function BeliefsView() {
               Verified belief has been independently checked. Private owner context is not shown here.{all.length >= WORLD_LIST_LIMIT && ` The store returned its first ${WORLD_LIST_LIMIT}.`}
             </p>
 
-            <div className="mt-4 flex flex-col gap-2.5 @lg:flex-row @lg:items-center">
+            {/* one row only on a wide card (56rem+); below that the filters stack and wrap, never scroll */}
+            <div className="mt-4 flex flex-col gap-2.5 @4xl:flex-row @4xl:items-center">
               <FilterTabs items={lifecycleTabs} value={filters.lifecycle} onChange={(lifecycle) => setFilters((f) => ({ ...f, lifecycle }))} layoutId="beliefs-lifecycle" className="flex-wrap rounded-2xl @md:flex-nowrap @md:rounded-full" />
               {kinds.length > 1 && (
                 <FilterTabs items={epistemicTabs} value={filters.epistemic} onChange={(epistemic) => setFilters((f) => ({ ...f, epistemic }))} layoutId="beliefs-epistemic" className="flex-wrap rounded-2xl @md:flex-nowrap @md:rounded-full" />
               )}
-              <label className="relative @lg:ml-auto @lg:w-60">
+              <label className="relative @4xl:ml-auto @4xl:w-60">
                 <span className="sr-only">Search beliefs</span>
                 <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
                 <input
