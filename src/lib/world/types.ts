@@ -91,6 +91,13 @@ export interface BeliefProvenance {
   originRef?: string;
   /** short human "why" — safe summary, not full content. */
   note?: string;
+  /**
+   * A readable name for where the evidence came from ("Career pipeline record"),
+   * mapped from known source ids only. The browser read client fills this and
+   * leaves sourceId, correlationId, originRef and note empty: those can carry
+   * record ids, message ids or account names and are never displayed.
+   */
+  origin?: string;
 }
 
 /* ------------------------------------------------------------ confidence */
@@ -178,9 +185,10 @@ export interface BeliefTraceEvent {
 
 /** Reason the World Model read surface is unavailable — honest, never faked. */
 export type WorldUnavailableReason =
-  | "backend-not-configured" // LILITH_API_URL unset (503)
+  | "backend-not-configured" // no backend, or no read credential, for this deployment (503)
   | "backend-unreachable" // tunnel/VM down (502/0)
-  | "endpoint-not-live" // /os/world not shipped yet — Slice 7 Phase B (404)
+  | "not-authorized" // the read was refused (401/403)
+  | "endpoint-not-live" // the belief store did not answer at this address (404)
   | "error"; // other non-ok
 
 /**

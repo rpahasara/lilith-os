@@ -69,9 +69,10 @@ export function runShellSelfTest(): Result[] {
   /* titles ----------------------------------------------------------------- */
   check("the root layout defines a title template",
     /template: "%s · Lilith OS"/.test(src("app", "layout.tsx")));
-  const titles = ["career", "memory", "automations", "meetings", "system", "world"].map((route) => {
-    const file = join(root, "src", "app", route, "layout.tsx");
-    const m = existsSync(file) ? /title: "([^"]+)"/.exec(readFileSync(file, "utf8")) : null;
+  // /world is now a redirect to Memory → Beliefs, which carries the World Model's title.
+  const titles = ["career", "memory", "automations", "meetings", "system", "memory/beliefs"].map((route) => {
+    const file = join(root, "src", "app", ...route.split("/"), "layout.tsx");
+    const m = existsSync(file) ? /title: (?:\{ absolute: )?"([^"]+)"/.exec(readFileSync(file, "utf8")) : null;
     return m?.[1] ?? "";
   });
   check("every workspace route has its own, distinct title",

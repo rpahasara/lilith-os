@@ -381,9 +381,86 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
         ] as const) {
           forwarded.length = 0;
           const r = await get([...path]);
-          check(`read proxy forwards ${path.join("/")}`, r.status === 200 && forwarded.length === 1 && forwarded[0] === expected,
+          // the stand-in answers "{}": fine to forward, except a belief, which must validate (fails closed, 502)
+          const status = path[0] === "os" && path[1] === "world" ? 502 : 200;
+          check(`read proxy forwards ${path.join("/")}`, r.status === status && forwarded.length === 1 && forwarded[0] === expected,
             `${r.status} ${forwarded.join(",")}`);
         }
+
+        // Owner-context beliefs: never readable through the web app (P1-9, world-visibility).
+        for (const search of ["?entity_type=owner", "?entity_type=Owner", "?limit=5&entity_type=%20owner%20", "?entity_type=career.application&entity_type=owner"]) {
+          forwarded.length = 0;
+          const r = await readProxyRoute.GET(fakeRequest({ [ACCESS_JWT_HEADER]: owner }, {}, search), { params: Promise.resolve({ path: ["os", "world"] }) });
+          check(`read proxy refuses an owner-context belief list (${search})`, r.status === 403 && forwarded.length === 0, `${r.status} forwarded=${forwarded.length}`);
+        }
+        // Belief responses are redacted HERE, at the HTTP boundary, not only in the browser client.
+        const answer = (body: unknown, status = 200) => {
+          globalThis.fetch = (async (input: RequestInfo | URL) => {
+            forwarded.push(String(input));
+            return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+          }) as typeof fetch;
+        };
+        // invented, but shaped exactly like the backend's wire belief, sensitive fields included
+        const raw = (entityType: string, id: string, value: unknown) => ({
+          key: `${entityType}:${id}:role`, entity_type: entityType, entity_id: id, predicate: "role", value,
+          lifecycle_state: "ACTIVE", epistemic_state: "OBSERVED",
+          confidence: { value: 0.9, tier: "high", basis: "observed+2corrob" },
+          provenance: [
+            { source_class: "LIVE_CONNECTOR", source_id: "career-store", source_type: "career.application", correlation_id: "evt_SECRET_CORR",
+              observed_at: "2026-03-04 10:05:00", confidence: 0.9, origin_ref: "job_applications/SECRET_ORIGIN", note: "acct:secret.account@example.invalid" },
+            { source_class: "LIVE_CONNECTOR", source_id: "mystery-SECRET-SOURCE", source_type: "career.application", observed_at: "2026-03-04T10:05:00Z", confidence: 0.8 },
+          ],
+          observed_at: "2026-03-04 10:05:00", created_at: "2026-03-01T08:00:00.123456+00:00", updated_at: "2026-03-04T10:06:00Z",
+          expires_at: null, revision: 3, supersedes: [], contradicted_by: ["2026-03-05T00:00:00Z"],
+        });
+        const SENSITIVE = /source_id|correlation_id|origin_ref|"note"|SECRET|acct:|secret\.account|"meta"|"total"|by_epistemic|by_lifecycle|last_reconciled|PRIVATE/;
+
+        forwarded.length = 0;
+        answer({
+          beliefs: [raw("career.application", "7", "Invented Platform Engineer"), raw("owner", "owner", "PRIVATE owner memory")],
+          meta: { total: 42, by_lifecycle: { ACTIVE: 41 }, by_epistemic: { USER_ASSERTED: 11 }, last_reconciled_at: "2030-01-01T00:00:00Z" },
+        });
+        const list = await readProxyRoute.GET(fakeRequest({ [ACCESS_JWT_HEADER]: owner }, {}, "?entity_type=career.application"), { params: Promise.resolve({ path: ["os", "world"] }) });
+        const listText = await list.text();
+        check("read proxy still forwards a belief list for other entity types", list.status === 200 && forwarded.length === 1 && forwarded[0].endsWith("/os/world?entity_type=career.application"), `${list.status} ${forwarded.join(",")}`);
+        check("a belief list reaches the browser with no ids, refs, notes, store-wide counts or owner rows (HTTP body)",
+          !SENSITIVE.test(listText) && JSON.parse(listText).beliefs.length === 1, listText.slice(0, 400));
+        check("the list keeps what the inspector needs, with a readable label for a known source only",
+          /"source_label":"Career pipeline record"/.test(listText) && (listText.match(/source_label/g) ?? []).length === 1 &&
+            /"source_class":"LIVE_CONNECTOR"/.test(listText) && /"observed_at":"2026-03-04 10:05:00"/.test(listText) && /"contradicted_by":\["conflict"\]/.test(listText));
+
+        answer(raw("career.application", "7", "Invented Platform Engineer"));
+        const one = await get(["os", "world", "career.application:7:role"]);
+        const oneText = await one.text();
+        check("a single belief reaches the browser redacted (HTTP body)", one.status === 200 && !SENSITIVE.test(oneText) && oneText.includes("Invented Platform Engineer"), oneText.slice(0, 400));
+
+        answer(raw("owner", "owner", "PRIVATE owner memory"));
+        const hidden = await get(["os", "world", "owner:owner:memory.x.1"]);
+        const hiddenBody = await hidden.text();
+        check("read proxy answers an owner-context belief like an unknown key (404, no value)",
+          hidden.status === 404 && hiddenBody === JSON.stringify({ detail: "no belief for key" }), `${hidden.status} ${hiddenBody}`);
+        answer({ ...raw("career.application", "x", "v"), entity_type: " OWNER " });
+        check("read proxy hides owner context whatever its casing", (await get(["os", "world", "x"])).status === 404);
+
+        for (const [label, body] of [
+          ["not JSON", "<html>SECRET</html>"],
+          ["a list without beliefs", { meta: { total: 9 } }],
+          ["a belief missing its confidence", { ...raw("career.application", "7", "v"), confidence: undefined }],
+          ["a belief with an unknown state", { ...raw("career.application", "7", "v"), epistemic_state: "SECRET_STATE" }],
+          ["a belief with a malformed timestamp", { ...raw("career.application", "7", "v"), updated_at: "SECRET yesterday" }],
+        ] as const) {
+          answer(body);
+          const r = await get(["os", "world", "career.application:7:role"]);
+          const text = await r.text();
+          check(`read proxy fails closed on ${label} (502, nothing forwarded)`, r.status === 502 && !SENSITIVE.test(text), `${r.status} ${text}`);
+        }
+        answer({ detail: "SECRET backend detail: /var/lib/SECRET.db" }, 500);
+        const failed = await get(["os", "world"]);
+        const failedText = await failed.text();
+        check("a store error keeps its status but not its body", failed.status === 500 && !SENSITIVE.test(failedText), failedText);
+        answer({ detail: "no belief for key" }, 404);
+        const missing = await get(["os", "world", "nope"]);
+        check("an unknown key stays a 404 with the backend's wording", missing.status === 404 && (await missing.text()) === JSON.stringify({ detail: "no belief for key" }));
       } finally {
         globalThis.fetch = realFetch;
         setEnv(HOSTED_ENV);

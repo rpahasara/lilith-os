@@ -201,8 +201,8 @@ export function runExplorerSelfTest(): Result[] {
 
   /* navigation and the Atlas -------------------------------------------------------------------------- */
   const route = src("app", "memory", "page.tsx");
-  check("the Brain / Archive / Timeline switch is kept, also when Memory is unavailable",
-    (route.match(/<MemoryViewSwitch active="archive" \/>/g) ?? []).length === 2 && /ATLAS_PREVIEW && \(/.test(route));
+  check("the memory switch is kept, also when Memory is unavailable",
+    (route.match(/<MemoryViewSwitch active="archive" \/>/g) ?? []).length === 2);
   check("the Archive does not reach into the Atlas, or the Atlas into it",
     !/memory\/atlas\/(synthetic|store|simulation)/.test(code + route) && !/memory-explorer|lib\/memory\/explorer/.test(src("components", "memory", "atlas", "cognitive-atlas.tsx")));
 

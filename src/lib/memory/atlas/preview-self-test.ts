@@ -67,13 +67,14 @@ export function runAtlasPreviewSelfTest(): Result[] {
     !/"use client"/.test(layout) && /if \(!atlasPreviewEnabled\(\)\) notFound\(\);/.test(layout));
 
   const archive = src("app", "memory", "page.tsx");
-  const switches = archive.match(/<MemoryViewSwitch\b/g) ?? [];
-  const gated = archive.match(/ATLAS_PREVIEW && \(\s*<div className="flex justify-end">\s*<MemoryViewSwitch\b/g) ?? [];
-  check("the Archive shows the Brain / Archive / Timeline switch only when the preview is on",
-    /const ATLAS_PREVIEW = atlasPreviewEnabled\(\);/.test(archive) && switches.length > 0 && gated.length === switches.length,
-    `${gated.length} of ${switches.length} gated`);
+  // The switch is always on the Archive (Beliefs is always reachable); it offers
+  // Brain and Timeline, the Atlas, only when the preview is in the build.
+  const viewSwitch = src("components", "memory", "memory-view-switch.tsx");
+  check("the memory switch offers Brain / Timeline only when the preview is on",
+    /const ATLAS_VIEWS: MemoryView\[\] = \["brain", "timeline"\]/.test(viewSwitch) &&
+      /VIEWS\.filter\(\(v\) => atlasPreviewEnabled\(\) \|\| !ATLAS_VIEWS\.includes\(v\.key\)\)/.test(viewSwitch));
   check("the switch stays reachable when Memory data is unavailable",
-    /<WorkspaceUnavailable[\s\S]*?\/>\s*\{ATLAS_PREVIEW && \(/.test(archive));
+    /<WorkspaceUnavailable[\s\S]*?\/>\s*<div className="flex justify-end">\s*<MemoryViewSwitch active="archive" \/>/.test(archive));
 
   const flagReaders = filesUnder().filter((file) =>
     /process\.env\.NEXT_PUBLIC_LILITH_ATLAS_PREVIEW/.test(readFileSync(file, "utf8")));

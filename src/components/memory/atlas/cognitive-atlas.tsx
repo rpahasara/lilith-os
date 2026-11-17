@@ -192,7 +192,7 @@ export default function CognitiveAtlas() {
   }, []);
   const changeView = useCallback(
     (next: MemoryView) => {
-      if (next === "archive") return;
+      if (next === "archive" || next === "beliefs") return; // links, not in-place views
       setView(next);
       setRecall(null);
       setPlaying(false);

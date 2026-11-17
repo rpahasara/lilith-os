@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
+import { isWorldPath, sanitizeWorldResponse, worldListRefused } from "@/server/world-visibility";
 
 /**
  * Server-side proxy to the private LILITH backend.
@@ -78,6 +79,10 @@ export async function GET(
   if (!ALLOWED.some((p) => joined === p || joined.startsWith(`${p}/`))) {
     return NextResponse.json({ error: "path not allowed" }, { status: 403 });
   }
+  // Owner-context beliefs are never readable through the web app (see world-visibility).
+  if (worldListRefused(joined, req.nextUrl.searchParams)) {
+    return NextResponse.json({ error: "not readable here" }, { status: 403 });
+  }
 
   const url = `${base}/${joined}${req.nextUrl.search}`;
 
@@ -89,6 +94,15 @@ export async function GET(
       signal: AbortSignal.timeout(10_000),
     });
     const body = await upstream.text();
+    // World Model responses are rebuilt from an allow-list, never forwarded as-is
+    // (see world-visibility): no owner context, no ids/refs/notes, no store-wide counts.
+    if (isWorldPath(joined)) {
+      const safe = sanitizeWorldResponse(joined, upstream.status, body);
+      return new NextResponse(safe.body, {
+        status: safe.status,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
     return new NextResponse(body, {
       status: upstream.status,
       headers: {
