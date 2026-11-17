@@ -41,10 +41,10 @@ export function UnitCard({ unit, selected, onSelect }: { unit: AutomationUnit; s
   return (
     <motion.button type="button" onClick={() => onSelect(unit)} aria-pressed={selected}
       className={cn(
-        "group rounded-[var(--radius-md)] border bg-white/[0.015] p-4 transition-colors",
-        selected ? "border-wine-bright/35 bg-wine/10 text-left" : failed
+        "group rounded-[var(--radius-md)] border bg-white/[0.015] p-4 text-left transition-colors",
+        selected ? "border-wine-bright/35 bg-wine/10" : failed
           ? "border-rose/25 hover:border-rose/40"
-          : "border-white/[0.06] text-left hover:border-white/12 hover:bg-white/[0.03]",
+          : "border-white/[0.06] hover:border-white/12 hover:bg-white/[0.03]",
       )}
     >
       {/* header */}
