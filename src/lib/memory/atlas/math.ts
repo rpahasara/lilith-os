@@ -67,3 +67,8 @@ export function noise3(x: number, y: number, z: number): number {
   const y1 = x01 + (x11 - x01) * uy;
   return (y0 + (y1 - y0) * uz) * 2 - 1;
 }
+
+/** History fraction (0 = oldest) for a timestamp. Live arrivals pin to the end. */
+export function bornAt(createdAt: number, origin: number, now: number): number {
+  return Math.min(0.96, Math.max(0, ((createdAt - origin) / (now - origin)) * 0.96));
+}

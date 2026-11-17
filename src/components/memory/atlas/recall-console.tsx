@@ -2,7 +2,7 @@
 
 import { type FormEvent, Fragment, useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, FlaskConical, Route, X } from "lucide-react";
+import { ChevronRight, Database, FlaskConical, Route, X } from "lucide-react";
 import { REGION_BY_ID } from "@/lib/memory/atlas/regions";
 import { RECALL_CUES } from "@/lib/memory/atlas/simulation";
 import type { AtlasStore } from "@/lib/memory/atlas/store";
@@ -23,6 +23,32 @@ export interface RecallState {
  *
  * Matching is local keyword search over the synthetic set; no model runs.
  */
+/** Wording per source. Real memory: following drawn links, never "recall". */
+const COPY = {
+  synthetic: {
+    strip: "Simulated recall",
+    help: "A simulation: it follows links between the synthetic memories. It does not search Lilith’s real memory.",
+    miss: "No synthetic memory matches that cue — try one of these threads.",
+    tag: "Simulated",
+    form: "Simulated recall",
+    input: "Simulated recall cue",
+    placeholder: "Trace an association…",
+    action: "Trace",
+    unit: "memories",
+  },
+  real: {
+    strip: "Association path",
+    help: "Follows the links drawn between real records — links the source states and shared entities. It is not Lilith’s recall, and nothing is recorded.",
+    miss: "No record’s title, tags or entities match that word.",
+    tag: "Explore",
+    form: "Explore associations",
+    input: "Word to start from",
+    placeholder: "Follow associations from…",
+    action: "Follow",
+    unit: "records",
+  },
+} as const;
+
 export function RecallConsole({
   store,
   recall,
@@ -30,7 +56,12 @@ export function RecallConsole({
   onClear,
   onSelect,
   className,
+  origin = "synthetic",
+  cues = RECALL_CUES,
 }: {
+  origin?: "synthetic" | "real";
+  /** suggested starting words. */
+  cues?: readonly string[];
   store: AtlasStore;
   recall: RecallState | null;
   /** returns false when the cue matched nothing. */
@@ -43,6 +74,7 @@ export function RecallConsole({
   const [miss, setMiss] = useState(false);
   const chain = useRef<HTMLOListElement>(null);
   const helpId = useId();
+  const copy = COPY[origin];
 
   // keep the newest memory in the chain in view as the recall advances
   const step = recall?.step;
@@ -74,14 +106,14 @@ export function RecallConsole({
           >
             <div className="flex items-center justify-between gap-3">
               <p className="eyebrow truncate">
-                <span className="text-wine-bright">Simulated recall</span>
+                <span className="text-wine-bright">{copy.strip}</span>
                 <span className="mx-1.5 text-ink-faint">·</span>
                 <span className="normal-case tracking-normal text-ink-muted">“{recall.trace.cue}”</span>
               </p>
               <div className="flex shrink-0 items-center gap-2.5">
                 <span className="font-mono text-[10px] text-ink-faint">
                   {recall.done ? (
-                    <RecallSummary store={store} trace={recall.trace} />
+                    <RecallSummary store={store} trace={recall.trace} unit={copy.unit} />
                   ) : (
                     `${recall.step + 1} / ${recall.trace.nodes.length}`
                   )}
@@ -89,7 +121,7 @@ export function RecallConsole({
                 <button
                   type="button"
                   onClick={onClear}
-                  aria-label="Clear recall"
+                  aria-label={origin === "real" ? "Clear association path" : "Clear recall"}
                   className="grid h-6 w-6 place-items-center rounded-full bg-white/[0.06] text-ink-muted transition-colors hover:text-ink"
                 >
                   <X className="h-3 w-3" />
@@ -112,7 +144,7 @@ export function RecallConsole({
                         className="flex shrink-0 flex-col items-center px-0.5"
                       >
                         <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-ink-faint">
-                          {via.kind.replace(/^(shares|same domain) · /, "")}
+                          {via.basis === "explicit" ? "linked" : via.kind.replace(/^(shares|same domain) · /, "")}
                         </span>
                         <ChevronRight className="h-3 w-3 text-ink-faint" />
                       </motion.li>
@@ -161,12 +193,10 @@ export function RecallConsole({
             miss ? "text-amber" : "text-ink-muted",
           )}
         >
-          {miss
-            ? "No synthetic memory matches that cue — try one of these threads."
-            : "A simulation: it follows links between the synthetic memories. It does not search Lilith’s real memory."}
+          {miss ? copy.miss : copy.help}
         </p>
         <div className="flex flex-wrap items-center justify-center gap-1.5">
-          {RECALL_CUES.map((preset) => (
+          {cues.map((preset) => (
             <button
               key={preset}
               type="button"
@@ -189,22 +219,29 @@ export function RecallConsole({
       <form
         onSubmit={submit}
         role="search"
-        aria-label="Simulated recall"
+        aria-label={copy.form}
         className="relative flex h-11 w-full max-w-[400px] items-center gap-2 overflow-hidden rounded-full border border-white/[0.1] bg-[rgba(12,8,13,0.5)] pl-1.5 pr-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_18px_40px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl transition-[max-width,border-color,background-color] duration-500 ease-out focus-within:max-w-[560px] focus-within:border-wine-bright/60 focus-within:bg-[rgba(12,8,13,0.7)] focus-within:shadow-[0_0_0_3px_rgba(225,132,157,0.14)]"
       >
-        <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber/25 bg-amber/10 py-1 pl-2 pr-2.5 font-mono text-[9px] uppercase tracking-[0.12em] text-amber">
-          <FlaskConical className="h-2.5 w-2.5" />
-          Simulated
-        </span>
+        {origin === "real" ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-cyan/25 bg-cyan/10 py-1 pl-2 pr-2.5 font-mono text-[9px] uppercase tracking-[0.12em] text-cyan-bright">
+            <Database className="h-2.5 w-2.5" />
+            {copy.tag}
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-amber/25 bg-amber/10 py-1 pl-2 pr-2.5 font-mono text-[9px] uppercase tracking-[0.12em] text-amber">
+            <FlaskConical className="h-2.5 w-2.5" />
+            {copy.tag}
+          </span>
+        )}
         <input
           value={cue}
           onChange={(e) => {
             setCue(e.target.value);
             setMiss(false);
           }}
-          aria-label="Simulated recall cue"
+          aria-label={copy.input}
           aria-describedby={helpId}
-          placeholder="Trace an association…"
+          placeholder={copy.placeholder}
           enterKeyHint="go"
           // focus is shown by the pill itself (border + width), not a box inside it
           style={{ outline: "none" }}
@@ -217,18 +254,18 @@ export function RecallConsole({
           className="flex items-center gap-1.5 border border-wine/30 bg-gradient-to-r from-wine-deep/70 to-wine/50 px-3 py-1.5 text-[11px] font-medium text-ink transition-[border-color,box-shadow,opacity] hover:border-wine-bright/50 hover:shadow-[0_10px_30px_-14px_rgba(201,84,115,0.9)] disabled:opacity-0"
         >
           <Route className="h-3 w-3" />
-          Trace
+          {copy.action}
         </button>
       </form>
     </div>
   );
 }
 
-function RecallSummary({ store, trace }: { store: AtlasStore; trace: RecallTrace }) {
+function RecallSummary({ store, trace, unit }: { store: AtlasStore; trace: RecallTrace; unit: string }) {
   const domains = new Set(trace.nodes.map((id) => store.node(id)?.region));
   return (
     <>
-      {trace.nodes.length} memories · {domains.size} domains
+      {trace.nodes.length} {unit} · {domains.size} domains
     </>
   );
 }

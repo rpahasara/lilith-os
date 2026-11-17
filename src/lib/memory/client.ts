@@ -114,7 +114,8 @@ function normalizeProvenance(raw: any) {
   };
 }
 
-function normalizeEntity(r: any): Entity {
+/** Exported for the Atlas real-memory source (same contract). */
+export function normalizeEntity(r: any): Entity {
   return {
     id: str(r.id ?? r.entity_id),
     type: asEntityType(r.type ?? r.entity_type),
@@ -124,7 +125,7 @@ function normalizeEntity(r: any): Entity {
   };
 }
 
-function normalizeRelationship(r: any, i: number): Relationship {
+export function normalizeRelationship(r: any, i: number): Relationship {
   return {
     id: str(r.id ?? i),
     from: str(r.from ?? r.source),

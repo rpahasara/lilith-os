@@ -16,13 +16,13 @@
  * without a React render. The same loop lays out the DOM that floats in brain
  * space: the domain callouts and the hover card.
  */
-import { type RefObject, useEffect, useMemo, useRef } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { BrainLayout } from "@/lib/memory/atlas/brain-shape";
 import { REGIONS, REGION_BY_ID, REGION_RGB, hexToRgb } from "@/lib/memory/atlas/regions";
 import type { AppliedEvent, AtlasStore } from "@/lib/memory/atlas/store";
-import type { AtlasFocus, RecallTrace, Vec3 } from "@/lib/memory/atlas/types";
+import type { AtlasFocus, AtlasLink, RecallTrace, Vec3 } from "@/lib/memory/atlas/types";
 import {
   ALWAYS,
   NodeBuffers,
@@ -93,6 +93,14 @@ export interface BrainSceneProps {
   visuals: SceneVisuals;
   /** show the domain callouts. */
   labels: boolean;
+  /** idle stirring may pulse individual memories. Off for real memory: a
+   *  random pulse on a real record would look like activity that did not
+   *  happen, so idle motion stays at the level of whole regions. */
+  idleMemories?: boolean;
+  /** dim ambient memory pathways as they get denser, so many overlapping
+   *  additive lines never wash the brain out. Focused pathways keep full
+   *  strength. Off for the simulation, which is drawn as designed. */
+  adaptiveGlow?: boolean;
   /** px of the canvas (the whole viewport) that the OS chrome and any open
    *  overlays cover — the brain centres itself in what is left. */
   insets: { left: number; right: number; top: number; bottom: number };
@@ -104,6 +112,14 @@ export interface BrainSceneProps {
   onHover: (id: string | null) => void;
   onSelect: (id: string | null) => void;
 }
+
+/** Most hidden associations one focus can draw at once. */
+const OVERLAY_CAPACITY = 1024;
+/** Pathway count up to which ambient memory pathways keep full strength
+ *  (about the simulation's own density); beyond it they dim with the square
+ *  root of the count, never below DENSITY_FLOOR. */
+const DENSITY_REF = 300;
+const DENSITY_FLOOR = 0.28;
 
 const FOV = 36;
 const TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
@@ -164,6 +180,9 @@ function Brain(props: BrainSceneProps) {
   live.current = props;
 
   /* ---------------------------------------------------------- GPU resources */
+  // bumped when live arrivals fill the node or pathway buffers: the buffers
+  // are then rebuilt from the store, sized to what it holds now
+  const [generation, setGeneration] = useState(0);
   const world = useMemo(() => {
     const u = {
       uTime: { value: 0 },
@@ -184,9 +203,15 @@ function Brain(props: BrainSceneProps) {
       uWave: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, ALWAYS)) },
       uWaveGain: { value: new Float32Array(4) },
     };
+    const memGain = { value: 1 };
     const cortex = buildCortexGeometry(layout);
-    const nodes = new NodeBuffers(360);
-    const paths = new PathBuffers(1100);
+    const initial = store.getState();
+    // room for what the store already holds plus later arrivals (slots of
+    // removed items are not reused)
+    const nodes = new NodeBuffers(Math.max(360, initial.nodes.length + 160));
+    const paths = new PathBuffers(Math.max(1100, initial.links.length + 600));
+    // associations drawn only while focused (filled from focus.extra)
+    const overlay = new PathBuffers(OVERLAY_CAPACITY);
     const tracts = buildTracts(layout);
     const rings = buildRingGeometry();
     const hull = buildHull(layout);
@@ -221,14 +246,18 @@ function Brain(props: BrainSceneProps) {
         ...u,
         uColor: { value: new THREE.Vector3(0.88, 0.52, 0.62) },
       }),
+      // memory pathways: same shaders, their own ambient gain (tracts keep uPathGain)
+      memPaths: additive(GLSL.PATH_VERT, GLSL.PATH_FRAG, { ...u, uPathGain: memGain }),
+      memPackets: additive(GLSL.PACKET_VERT, GLSL.PACKET_FRAG, { ...u, uPathGain: memGain }),
     };
-    return { u, cortex, nodes, paths, tracts, rings, reticle, heart, hull, materials };
-  }, [layout, store]);
+    return { u, memGain, cortex, nodes, paths, overlay, tracts, rings, reticle, heart, hull, materials };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation only signals a rebuild
+  }, [layout, store, generation]);
 
   useEffect(
     () => () => {
-      const { cortex, nodes, paths, tracts, rings, reticle, heart, materials } = world;
-      for (const g of [cortex.geometry, nodes.geometry, paths.lines, paths.packets, tracts.lines, tracts.packets, rings, reticle, heart]) {
+      const { cortex, nodes, paths, overlay, tracts, rings, reticle, heart, materials } = world;
+      for (const g of [cortex.geometry, nodes.geometry, paths.lines, paths.packets, overlay.lines, overlay.packets, tracts.lines, tracts.packets, rings, reticle, heart]) {
         g.dispose();
       }
       Object.values(materials).forEach((m) => m.dispose());
@@ -377,10 +406,29 @@ function Brain(props: BrainSceneProps) {
   }, [props.formKey]);
 
   /* focus → per-vertex emphasis */
+  const overlayLines = useRef<THREE.LineSegments>(null);
+  const overlayPackets = useRef<THREE.Points>(null);
   useEffect(() => {
     world.nodes.setStates(props.focus.nodes);
     world.paths.setStates(props.focus.links);
-  }, [props.focus, world]);
+    // associations the simplified drawing leaves out, shown while focused
+    const { overlay } = world;
+    overlay.clear();
+    const lit = new Set<string>();
+    const t = world.u.uTime.value;
+    for (const extra of props.focus.extra ?? []) {
+      const a = store.node(extra.source);
+      const b = store.node(extra.target);
+      if (!a || !b || overlay.count >= overlay.capacity) continue;
+      const link: AtlasLink = { ...extra, basis: "shared-entity", kind: "", born: 0, live: false };
+      addLink(overlay, link, a, b, t);
+      lit.add(extra.id);
+    }
+    overlay.setStates(lit);
+    // drawn only when there is something to show (the simulation never has)
+    if (overlayLines.current) overlayLines.current.visible = overlay.count > 0;
+    if (overlayPackets.current) overlayPackets.current.visible = overlay.count > 0;
+  }, [props.focus, world, store]);
 
   /* selection + hover reticle */
   useEffect(() => {
@@ -406,7 +454,7 @@ function Brain(props: BrainSceneProps) {
 
   /* store events → animation */
   useEffect(() => {
-    const onEvent = ({ event, node, links }: AppliedEvent) => {
+    const onEvent = ({ event, node, links, removed }: AppliedEvent) => {
       const t = world.u.uTime.value;
       const r = rig.current;
       if (event.type === "memory.learned" && node) {
@@ -438,10 +486,57 @@ function Brain(props: BrainSceneProps) {
         world.nodes.pulse(node.id, t);
         r.impulse[REGION_BY_ID[node.region].index] += 0.3;
         fireWave(node.position, 0.5);
+      } else if (event.type === "record.observed" && node) {
+        // a record seen for the first time in this session's snapshots
+        world.nodes.add(node, t);
+        world.nodes.pulse(node.id, t + 0.5);
+        r.impulse[REGION_BY_ID[node.region].index] += 0.6;
+        fireWave(node.position, 0.7);
+      } else if (event.type === "record.changed" && node) {
+        const before = world.nodes.positions.subarray(
+          (world.nodes.index.get(node.id) ?? 0) * 3,
+          (world.nodes.index.get(node.id) ?? 0) * 3 + 3,
+        );
+        const moved = before[0] !== node.position[0] || before[1] !== node.position[1] || before[2] !== node.position[2];
+        world.nodes.update(node);
+        if (moved) {
+          // its pathways follow it to the new region
+          for (const l of store.linksOf(node.id)) {
+            const a = store.node(l.source);
+            const b = store.node(l.target);
+            world.paths.remove(l.id);
+            if (a && b) addLink(world.paths, l, a, b, t);
+          }
+        }
+        world.nodes.pulse(node.id, t);
+        r.impulse[REGION_BY_ID[node.region].index] += 0.25;
+      } else if (event.type === "link.observed") {
+        for (const l of links) {
+          const a = store.node(l.source);
+          const b = store.node(l.target);
+          if (!a || !b) continue;
+          addLink(world.paths, l, a, b, t);
+          world.nodes.pulse(a.id, t);
+          world.nodes.pulse(b.id, t + 1.0);
+        }
+      }
+      if (removed) {
+        // withdrawn: out of the scene and out of every index it kept
+        for (const id of removed.links) world.paths.remove(id);
+        for (const id of removed.nodes) {
+          const i = world.nodes.index.get(id);
+          if (i !== undefined) fireWave([world.nodes.positions[i * 3], world.nodes.positions[i * 3 + 1], world.nodes.positions[i * 3 + 2]], 0.3);
+          world.nodes.remove(id);
+        }
       }
       // a new node may be part of the current focus
       world.nodes.setStates(live.current.focus.nodes);
       world.paths.setStates(live.current.focus.links);
+      // Full buffers would silently drop what arrives next (the header would
+      // count pathways the brain does not draw): rebuild them from the store.
+      if (world.nodes.count >= world.nodes.capacity || world.paths.count >= world.paths.capacity) {
+        setGeneration((g) => g + 1);
+      }
     };
     return store.onEvent(onEvent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -744,6 +839,11 @@ function Brain(props: BrainSceneProps) {
     u.uTimeline.value = p.timeline ? 1 : 0;
     u.uGain.value = damp(u.uGain.value, p.visuals.glow, 5, dt);
     u.uPathGain.value = damp(u.uPathGain.value, p.visuals.pathways ? 1 : 0, 5, dt);
+    const drawnLinks = store.getState().links.length;
+    const density = p.adaptiveGlow
+      ? Math.max(DENSITY_FLOOR, Math.min(1, Math.sqrt(DENSITY_REF / Math.max(1, drawnLinks))))
+      : 1;
+    world.memGain.value = damp(world.memGain.value, (p.visuals.pathways ? 1 : 0) * density, 5, dt);
 
     // focus
     u.uDim.value = damp(u.uDim.value, p.focus.dim, 4.5, dt);
@@ -779,7 +879,9 @@ function Brain(props: BrainSceneProps) {
     if (!still && r.form >= 1 && t > r.nextThought && world.nodes.count) {
       r.nextThought = t + 1.4 + Math.random() * 2.6;
       const i = Math.floor(Math.random() * world.nodes.count);
-      if (world.nodes.born[i] <= asOf) {
+      if (p.idleMemories === false) {
+        r.impulse[Math.floor(Math.random() * 7)] += 0.12;
+      } else if (world.nodes.born[i] <= asOf) {
         const node = store.node(world.nodes.ids[i]);
         if (node) {
           world.nodes.pulse(node.id, t);
@@ -851,8 +953,10 @@ function Brain(props: BrainSceneProps) {
       <lineSegments geometry={world.tracts.lines} material={materials.paths} frustumCulled={false} />
       <points geometry={world.tracts.packets} material={materials.packets} frustumCulled={false} />
       <points geometry={world.cortex.geometry} material={materials.cortex} frustumCulled={false} />
-      <lineSegments geometry={world.paths.lines} material={materials.paths} frustumCulled={false} />
-      <points geometry={world.paths.packets} material={materials.packets} frustumCulled={false} />
+      <lineSegments geometry={world.paths.lines} material={materials.memPaths} frustumCulled={false} />
+      <points geometry={world.paths.packets} material={materials.memPackets} frustumCulled={false} />
+      <lineSegments ref={overlayLines} visible={false} geometry={world.overlay.lines} material={materials.memPaths} frustumCulled={false} />
+      <points ref={overlayPackets} visible={false} geometry={world.overlay.packets} material={materials.memPackets} frustumCulled={false} />
       {props.recall &&
         props.recall.trace.links.slice(0, Math.max(0, props.recall.step)).map((linkId, i) => (
           <TraceSegment

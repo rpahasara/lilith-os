@@ -1,7 +1,8 @@
 "use client";
 
 import { REGIONS, REGION_BY_ID } from "@/lib/memory/atlas/regions";
-import type { AtlasNode, RegionId } from "@/lib/memory/atlas/types";
+import { regionLabel } from "@/lib/memory/atlas/real-source";
+import type { AtlasNode, AtlasOrigin, RegionId } from "@/lib/memory/atlas/types";
 import { cn } from "@/lib/utils";
 
 type Register = (key: string) => (el: HTMLElement | SVGElement | null) => void;
@@ -27,10 +28,13 @@ export function AtlasLabels({
   hovered,
   onHoverRegion,
   onSelectRegion,
+  origin = "synthetic",
 }: {
+  /** real memory names the Career field "Career · Work" (it holds both). */
+  origin?: AtlasOrigin;
   register: Register;
   counts: Map<RegionId, number>;
-  /** memories learned this session, per domain. */
+  /** simulation: learned this session; real: newly observed this session. */
   live: Map<RegionId, number>;
   active: RegionId | null;
   /** fade the callouts back (a memory or a recall has the stage). */
@@ -82,7 +86,7 @@ export function AtlasLabels({
             <button
               type="button"
               aria-pressed={on}
-              aria-label={`${region.label}: ${count} memories. ${region.blurb}`}
+              aria-label={`${regionLabel(region.id, origin)}: ${count} ${origin === "real" ? (count === 1 ? "record" : "records") : count === 1 ? "memory" : "memories"}. ${region.blurb}`}
               onMouseEnter={() => onHoverRegion(region.id)}
               onMouseLeave={() => onHoverRegion(null)}
               onFocus={() => onHoverRegion(region.id)}
@@ -103,7 +107,7 @@ export function AtlasLabels({
                 className="h-1.5 w-1.5 rounded-full"
                 style={{ background: region.color, boxShadow: `0 0 8px ${region.color}` }}
               />
-              {region.label}
+              {regionLabel(region.id, origin)}
               {/* counts are dropped on phone-width screens to keep labels off the brain */}
               <span className="text-ink-faint max-sm:hidden">{count}</span>
               {fresh > 0 && <span className="max-sm:hidden" style={{ color: region.color }}>+{fresh}</span>}
@@ -126,8 +130,11 @@ export function AtlasLabels({
               style={{ color: hoveredRegion.color }}
             >
               <span className="h-1 w-1 rounded-full" style={{ background: hoveredRegion.color }} />
-              {hoveredRegion.label}
-              <span className="text-ink-faint">· {hovered.confidence}% confident</span>
+              {regionLabel(hoveredRegion.id, origin)}
+              {/* only a confidence the source stated */}
+              {typeof hovered.confidence === "number" && (
+                <span className="text-ink-faint">· {hovered.confidence}% confident</span>
+              )}
             </p>
           </div>
         )}

@@ -11,7 +11,7 @@ import type { AtlasStore } from "@/lib/memory/atlas/store";
 import type { AtlasNode, AtlasRegion, AtlasState, RegionId } from "@/lib/memory/atlas/types";
 import { cn } from "@/lib/utils";
 
-function when(ms?: number) {
+export function when(ms?: number) {
   if (!ms) return "—";
   return new Date(ms).toLocaleString("en-GB", {
     day: "numeric",
@@ -21,7 +21,7 @@ function when(ms?: number) {
   });
 }
 
-function Section({ label, children, action }: { label: string; children: ReactNode; action?: ReactNode }) {
+export function Section({ label, children, action }: { label: string; children: ReactNode; action?: ReactNode }) {
   return (
     <section>
       <div className="flex items-center justify-between">
@@ -33,14 +33,17 @@ function Section({ label, children, action }: { label: string; children: ReactNo
   );
 }
 
-function Shell({
+export function Shell({
   region,
+  regionName,
   onClose,
   children,
   footer,
   className,
 }: {
   region: AtlasRegion;
+  /** overrides the region's name in the header (real memory: "Career · Work"). */
+  regionName?: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
@@ -56,7 +59,7 @@ function Shell({
       <div className="relative flex items-center justify-between gap-3 px-5 pt-4">
         <span className="inline-flex items-center gap-2 text-xs font-medium" style={{ color: region.color }}>
           <span className="h-2 w-2 rounded-full" style={{ background: region.color, boxShadow: `0 0 10px ${region.color}` }} />
-          {region.label}
+          {regionName ?? region.label}
           <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint">{region.lobe}</span>
         </span>
         <button
@@ -276,7 +279,7 @@ export function RegionInspector({
   const region = REGION_BY_ID[regionId];
   const members = state.nodes.filter((n) => n.region === regionId);
   const confidence = members.length
-    ? Math.round(members.reduce((s, n) => s + n.confidence, 0) / members.length)
+    ? Math.round(members.reduce((s, n) => s + (n.confidence ?? 0), 0) / members.length)
     : 0;
   const inferred = members.filter((n) => n.kind === "inference").length;
 
@@ -292,7 +295,7 @@ export function RegionInspector({
     else if (b.region === regionId) bridges.set(a.region, (bridges.get(a.region) ?? 0) + 1);
   }
   const bridgePeak = Math.max(1, ...bridges.values());
-  const strongest = [...members].sort((a, b) => b.importance - a.importance).slice(0, 6);
+  const strongest = [...members].sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 6);
 
   return (
     <Shell region={region} onClose={onClose} className={className} footer={SYNTHETIC_NOTE}>

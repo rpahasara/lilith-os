@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import dynamic from "next/dynamic";
 import { REGIONS, REGION_RGB, REGION_BY_ID } from "@/lib/memory/atlas/regions";
+import { renderWeight } from "@/lib/memory/atlas/render";
 import { detectWebGL } from "@/lib/presence/capabilities";
 import type { BrainSceneProps } from "./scene/brain-scene";
 
@@ -72,6 +73,8 @@ const TILT = 0.13;
 function BrainStill({ layout, store, focus, asOf, insets, anchors, labels, visuals }: BrainSceneProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  // redraw when the graph changes (a real snapshot added or removed records)
+  const graph = useSyncExternalStore(store.subscribe, store.getState, store.getState);
 
   useEffect(() => {
     const parent = ref.current?.parentElement;
@@ -125,13 +128,13 @@ function BrainStill({ layout, store, focus, asOf, insets, anchors, labels, visua
     }
 
     // the memories, with the current focus picked out
-    for (const node of store.getState().nodes) {
+    for (const node of graph.nodes) {
       if (node.born > asOf) continue;
       const p = project(node.position[0], node.position[1], node.position[2]);
       const [r, g, b] = REGION_RGB[REGION_BY_ID[node.region].index].map((v) => Math.round(v * 255));
       const state = focus.nodes.get(node.id) ?? 0;
       const dim = focus.dim && !state ? 0.25 : 1;
-      const radius = (2.2 + (node.importance / 100) * 3.2) * (state === 2 ? 1.7 : 1);
+      const radius = (2.2 + (renderWeight(node) / 100) * 3.2) * (state === 2 ? 1.7 : 1);
       const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 3);
       halo.addColorStop(0, `rgba(${r},${g},${b},${(0.85 * p.depth * dim).toFixed(2)})`);
       halo.addColorStop(0.35, `rgba(${r},${g},${b},${(0.3 * p.depth * dim).toFixed(2)})`);
@@ -161,7 +164,7 @@ function BrainStill({ layout, store, focus, asOf, insets, anchors, labels, visua
         el.style.visibility = labels ? "visible" : "hidden";
       }
     }
-  }, [layout, store, focus, asOf, insets, anchors, labels, visuals, size]);
+  }, [layout, graph, focus, asOf, insets, anchors, labels, visuals, size]);
 
   return (
     <canvas

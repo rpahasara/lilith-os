@@ -8,11 +8,15 @@
 import * as THREE from "three";
 import type { BrainLayout } from "@/lib/memory/atlas/brain-shape";
 import { REGION_BY_ID, REGION_RGB, hexToRgb } from "@/lib/memory/atlas/regions";
+import { renderWeight } from "@/lib/memory/atlas/render";
 import { hash01, mulberry32 } from "@/lib/memory/atlas/math";
 import type { AtlasLink, AtlasNode, Vec3 } from "@/lib/memory/atlas/types";
 
 /** Birth time (scene seconds) for anything that already existed at mount. */
 export const ALWAYS = -100;
+
+/** A timeline position no marker reaches: a slot set to it is never drawn. */
+const HIDDEN = 99;
 
 const BOUNDS = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 8);
 
@@ -104,13 +108,37 @@ export class NodeBuffers {
     this.positions.set(node.position, i * 3);
     this.color.array.set(REGION_RGB[REGION_BY_ID[node.region].index], i * 3);
     this.seed.array[i] = hash01(node.id, 11);
-    this.sizes[i] = 0.028 + (node.importance / 100) * 0.044;
+    this.sizes[i] = 0.028 + (renderWeight(node) / 100) * 0.044;
     this.born[i] = node.born;
     this.birth.array[i] = birthTime;
     for (const a of [this.position, this.color, this.seed, this.size, this.bornAttr, this.birth]) {
       a.needsUpdate = true;
     }
     this.geometry.setDrawRange(0, this.count);
+  }
+
+  /** Redraw a node in place (its region, position or drawing weight changed). */
+  update(node: AtlasNode) {
+    const i = this.index.get(node.id);
+    if (i === undefined) return;
+    this.positions.set(node.position, i * 3);
+    this.color.array.set(REGION_RGB[REGION_BY_ID[node.region].index], i * 3);
+    this.sizes[i] = 0.028 + (renderWeight(node) / 100) * 0.044;
+    this.position.needsUpdate = this.color.needsUpdate = this.size.needsUpdate = true;
+  }
+
+  /**
+   * Take a node out of the scene. Its slot is hidden (born beyond any point on
+   * the timeline) and forgotten by id; nothing reads it again. Slots are not
+   * reused — the buffer is sized with headroom for that.
+   */
+  remove(id: string) {
+    const i = this.index.get(id);
+    if (i === undefined) return;
+    this.index.delete(id);
+    this.ids[i] = "";
+    this.born[i] = HIDDEN;
+    this.bornAttr.needsUpdate = true;
   }
 
   pulse(id: string, time: number) {
@@ -216,6 +244,25 @@ export class PathBuffers {
     for (const key in p) p[key].needsUpdate = true;
     this.lines.setDrawRange(0, this.count * VERTS);
     this.packets.setDrawRange(0, this.count);
+  }
+
+  /** Empty the buffer (used for the focus overlay, which is refilled whole). */
+  clear() {
+    this.index.clear();
+    this.count = 0;
+    this.lines.setDrawRange(0, 0);
+    this.packets.setDrawRange(0, 0);
+  }
+
+  /** Take a pathway out of the scene (hidden in place, forgotten by id). */
+  remove(id: string) {
+    const i = this.index.get(id);
+    if (i === undefined) return;
+    this.index.delete(id);
+    (this.l.born.array as Float32Array).fill(HIDDEN, i * VERTS, (i + 1) * VERTS);
+    this.p.born.array[i] = HIDDEN;
+    this.l.born.needsUpdate = true;
+    this.p.born.needsUpdate = true;
   }
 
   setStates(lit: ReadonlySet<string>) {

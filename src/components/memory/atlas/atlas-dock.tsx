@@ -5,11 +5,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   Ellipsis,
+  Database,
   FlaskConical,
   Focus,
   Pause,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   SlidersHorizontal,
   Tag,
@@ -224,6 +226,11 @@ function MenuAction({ icon: Icon, label, hint, disabled, onClick }: { icon: Luci
 
 export interface AtlasDockProps {
   view: "brain" | "timeline";
+  /** what the brain is showing. Real memory has no simulation controls. */
+  source?: "simulation" | "real";
+  /** real memory: read the memory read model again now. */
+  onCheck?: () => void;
+  checking?: boolean;
   /** whether the brain is in motion (false: paused, or held for reduced motion). */
   motion: boolean;
   /** the system asks for reduced motion and the viewer has not overridden it. */
@@ -282,7 +289,13 @@ export function AtlasDock(props: AtlasDockProps) {
   }, [menu, onMenu]);
 
   const motionLabel = props.motion ? "Pause motion" : "Resume motion";
-  const feed = props.view === "timeline" ? "Growth log" : "Activity feed";
+  const real = props.source === "real";
+  const feed = real ? "Observed changes" : props.view === "timeline" ? "Growth log" : "Activity feed";
+  const feedHint = real
+    ? "Differences between read-only snapshots"
+    : props.view === "brain"
+      ? "Simulated — not real memory activity"
+      : undefined;
 
   return (
     <div ref={container} className={cn("relative", props.className)}>
@@ -362,24 +375,42 @@ export function AtlasDock(props: AtlasDockProps) {
                   onChange={props.onDomains}
                 />
                 <div className="my-1 border-t border-white/[0.06]" />
-                <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-amber">
-                  <FlaskConical className="h-3 w-3" />
-                  Simulation
-                </p>
-                <Switch
-                  label="Simulated activity"
-                  hint="Synthetic learning, linking and reinforcement"
-                  checked={props.simulating}
-                  disabled={props.view !== "brain"}
-                  onChange={props.onSimulating}
-                />
-                <MenuAction
-                  icon={Plus}
-                  label="Learn a memory now"
-                  hint={props.remaining ? `${props.remaining} synthetic memories left in the pool` : "The synthetic pool is spent"}
-                  disabled={props.view !== "brain" || props.remaining === 0}
-                  onClick={props.onTeach}
-                />
+                {real ? (
+                  <>
+                    <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-cyan-bright">
+                      <Database className="h-3 w-3" />
+                      Real memory · read-only
+                    </p>
+                    <MenuAction
+                      icon={RefreshCw}
+                      label={props.checking ? "Checking…" : "Check for changes now"}
+                      hint="Reads the memory records again. Nothing is written."
+                      disabled={props.checking || !props.onCheck}
+                      onClick={() => props.onCheck?.()}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-amber">
+                      <FlaskConical className="h-3 w-3" />
+                      Simulation
+                    </p>
+                    <Switch
+                      label="Simulated activity"
+                      hint="Synthetic learning, linking and reinforcement"
+                      checked={props.simulating}
+                      disabled={props.view !== "brain"}
+                      onChange={props.onSimulating}
+                    />
+                    <MenuAction
+                      icon={Plus}
+                      label="Learn a memory now"
+                      hint={props.remaining ? `${props.remaining} synthetic memories left in the pool` : "The synthetic pool is spent"}
+                      disabled={props.view !== "brain" || props.remaining === 0}
+                      onClick={props.onTeach}
+                    />
+                  </>
+                )}
                 <MenuAction
                   icon={RotateCcw}
                   label="Replay assembly"
@@ -442,7 +473,7 @@ export function AtlasDock(props: AtlasDockProps) {
         <DockButton
           icon={Activity}
           label={feed}
-          hint={props.view === "brain" ? "Simulated — not real memory activity" : undefined}
+          hint={feedHint}
           shortcut="A"
           active={props.activity}
           pressed={props.activity}

@@ -12,7 +12,7 @@
 import type { MemoryKind, ProvenanceKind } from "@/lib/memory/types";
 import type { BrainLayout } from "./brain-shape";
 import { placeNode } from "./brain-shape";
-import { hash01 } from "./math";
+import { bornAt, hash01 } from "./math";
 import { REGIONS, REGION_BY_ID } from "./regions";
 import type { AtlasLink, AtlasNode, AtlasNodeInput, RegionId, Vec3 } from "./types";
 
@@ -232,6 +232,7 @@ export function seedToInput(id: string, region: RegionId, seed: Seed, createdAt:
   const context = REGION_BY_ID[region].blurb;
   return {
     id,
+    origin: "synthetic",
     region,
     title,
     detail: inferred
@@ -255,10 +256,7 @@ export interface SyntheticGraph {
   now: number;
 }
 
-/** History fraction (0 = oldest) for a timestamp. Live arrivals pin to the end. */
-export function bornAt(createdAt: number, origin: number, now: number): number {
-  return Math.min(0.96, Math.max(0, ((createdAt - origin) / (now - origin)) * 0.96));
-}
+export { bornAt };
 
 export function buildSyntheticGraph(layout: BrainLayout, now = Date.now()): SyntheticGraph {
   const origin = now - HISTORY_DAYS * DAY;
@@ -273,7 +271,7 @@ export function buildSyntheticGraph(layout: BrainLayout, now = Date.now()): Synt
       const createdAt = Math.round(now - age * DAY);
       const input = seedToInput(id, region.id, seed, createdAt);
       // the first few in every domain are its anchors
-      if (i < 3) input.importance = Math.max(input.importance, 82 + Math.round(hash01(id, 4) * 14));
+      if (i < 3) input.importance = Math.max(input.importance ?? 0, 82 + Math.round(hash01(id, 4) * 14));
       const position = placeNode(layout, region.id, id, taken);
       taken.push(position);
       const reinforcements = Math.round(hash01(id, 6) * 7);
@@ -299,11 +297,12 @@ export function buildSyntheticGraph(layout: BrainLayout, now = Date.now()): Synt
     const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
     if (seen.has(key)) return;
     seen.add(key);
-    const createdAt = Math.max(a.createdAt, b.createdAt) + 3_600_000;
+    const createdAt = Math.max(a.createdAt ?? 0, b.createdAt ?? 0) + 3_600_000;
     links.push({
       id: `l-${links.length + 1}`,
       source: a.id,
       target: b.id,
+      basis: "synthetic",
       kind,
       strength,
       createdAt,
