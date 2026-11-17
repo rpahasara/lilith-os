@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
-import { HIDDEN_BELIEF_BODY, isWorldDetail, worldDetailHidden, worldListRefused } from "@/server/world-visibility";
+import { isWorldPath, sanitizeWorldResponse, worldListRefused } from "@/server/world-visibility";
 
 /**
  * Server-side proxy to the private LILITH backend.
@@ -94,9 +94,12 @@ export async function GET(
       signal: AbortSignal.timeout(10_000),
     });
     const body = await upstream.text();
-    if (upstream.ok && isWorldDetail(joined) && worldDetailHidden(body)) {
-      return new NextResponse(HIDDEN_BELIEF_BODY, {
-        status: 404,
+    // World Model responses are rebuilt from an allow-list, never forwarded as-is
+    // (see world-visibility): no owner context, no ids/refs/notes, no store-wide counts.
+    if (isWorldPath(joined)) {
+      const safe = sanitizeWorldResponse(joined, upstream.status, body);
+      return new NextResponse(safe.body, {
+        status: safe.status,
         headers: { "content-type": "application/json", "cache-control": "no-store" },
       });
     }

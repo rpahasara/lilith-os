@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { KNOWN_ORIGINS, fetchBelief, fetchWorld, isVisibleBelief, safeProvenance, unavailable } from "@/lib/world/client";
+import { fetchBelief, fetchWorld, isVisibleBelief, safeProvenance, unavailable } from "@/lib/world/client";
 import {
   EPISTEMIC, LIFECYCLE, confidenceBasis, countBeliefs, countLine, evidenceLine, filterBeliefs, formatStamp, formatValue,
   groupBySubject, humanize, NO_FILTERS,
@@ -25,7 +25,7 @@ import type { Belief } from "@/lib/world/types";
 import { MemoryViewSwitch } from "@/components/memory/memory-view-switch";
 import { BeliefsView } from "@/components/memory/beliefs/beliefs-view";
 import { isNavActive } from "@/components/layout/nav";
-import { worldDetailHidden, worldListRefused } from "@/server/world-visibility";
+import { SOURCE_LABELS, sanitizeWorldResponse, worldListRefused } from "@/server/world-visibility";
 
 interface Result {
   name: string;
@@ -121,16 +121,23 @@ export async function runBeliefsP19SelfTest(): Promise<Result[]> {
     isVisibleBelief({ entity: { entityType: "career.application", entityId: "1" }, lifecycleState: "STALE" }));
   check("the proxy rule refuses owner lists and hides owner details",
     worldListRefused("os/world", new URLSearchParams("entity_type=owner")) && !worldListRefused("os/world", new URLSearchParams("entity_type=career.application")) &&
-      worldDetailHidden(JSON.stringify({ entity_type: "owner" })) && !worldDetailHidden(JSON.stringify({ entity_type: "career.application" })) && !worldDetailHidden("not json"));
+      sanitizeWorldResponse("os/world/k", 200, JSON.stringify(WIRE[7])).status === 404 &&
+      sanitizeWorldResponse("os/world/k", 200, JSON.stringify(WIRE[0])).status === 200 &&
+      sanitizeWorldResponse("os/world/k", 200, "not json").status === 502);
   const messages = [503, 401, 404, 502, 0, 500].map((status) => unavailable({ path: "/os/world", ok: false, status, data: null }).detail);
   check("unavailable reasons are honest and name no internals", messages.every((m) => !/Slice|LILITH_API_URL|tunnel|VM\b/.test(m)), messages.join(" | "));
 
   /* provenance ------------------------------------------------------------------------- */
-  const p = safeProvenance(WIRE[0].provenance[0]);
+  // The proxy rebuilds the belief; the client then reads only the safe fields.
+  const served = JSON.parse(sanitizeWorldResponse("os/world/k", 200, JSON.stringify(WIRE[0])).body) as { provenance: Parameters<typeof safeProvenance>[0][] };
+  const p = safeProvenance(served.provenance[0]);
   check("evidence keeps no source id, correlation id, origin ref or note",
     p.sourceId === undefined && p.correlationId === undefined && p.originRef === undefined && p.note === undefined, JSON.stringify(p));
-  check("known sources get a readable origin; unknown ones get none",
-    p.origin === KNOWN_ORIGINS["career-store"] && safeProvenance({ source_class: "SYSTEM", source_id: "mystery-42" }).origin === undefined);
+  const unknownSource = JSON.parse(sanitizeWorldResponse("os/world/k", 200, JSON.stringify({ ...WIRE[0], provenance: [{ source_class: "SYSTEM", source_id: "mystery-42" }] })).body);
+  check("known sources get a readable origin from the proxy's allow-list; unknown ones get none",
+    p.origin === SOURCE_LABELS["career-store"] && unknownSource.provenance[0].source_label === undefined && !JSON.stringify(unknownSource).includes("mystery-42"));
+  const defensive = safeProvenance({ ...(WIRE[0].provenance[0] as object), source_class: "LIVE_CONNECTOR" } as Parameters<typeof safeProvenance>[0]);
+  check("even an unredacted entry yields only safe fields in the client", JSON.stringify(defensive).match(/invented|evt_|acct/) === null, JSON.stringify(defensive));
   const line = evidenceLine(p);
   check("an evidence line is words, not identifiers",
     line.source === "Career pipeline record" && line.kind === "Career application" && line.when === "4 Mar 2026 · 10:05" && line.confidence === "0.90",

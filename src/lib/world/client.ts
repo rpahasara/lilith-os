@@ -15,10 +15,10 @@
  *   - Superseded beliefs are not part of the current picture and are dropped.
  *   - The store-wide `meta` counts include both of the above, so they are not
  *     passed on: every number the UI shows is counted from what it displays.
- *   - Provenance keeps only what is safe to show: the class and type of source,
- *     when it was observed, its confidence, and a readable origin for known
- *     sources. Source ids, correlation ids, origin refs and free-text notes
- *     (which can hold account names) are not kept.
+ *   - Provenance arrives already redacted: the web proxy rebuilds every belief
+ *     response from an allow-list (src/server/world-visibility.ts), so source
+ *     ids, correlation ids, origin refs, free-text notes and store-wide counts
+ *     never reach the browser. This client still reads only the safe fields.
  */
 
 import { fetchEndpoint, toDiagnostics, type EndpointResult } from "@/lib/api";
@@ -26,7 +26,10 @@ import type { Belief, BeliefProvenance, WorldReadResult, WorldUnavailableReason 
 
 /* ------------------------------------------------------------- wire shapes */
 
-/** snake_case wire shape returned by GET /os/world (see backend spec). */
+/**
+ * snake_case wire shape the web proxy returns for GET /os/world (a redacted
+ * subset of the backend spec; see src/server/world-visibility.ts).
+ */
 interface WireBelief {
   key: string;
   entity_type: string;
@@ -38,19 +41,16 @@ interface WireBelief {
   confidence: { value: number; tier: Belief["confidence"]["tier"]; basis: string };
   provenance: Array<{
     source_class: string;
-    source_id?: string;
     source_type?: string;
-    correlation_id?: string;
     observed_at?: string;
-    freshness?: string;
     confidence?: number;
-    origin_ref?: string;
-    note?: string;
+    /** readable label for a known source, set by the proxy's allow-list */
+    source_label?: string;
   }>;
-  observed_at?: string;
+  observed_at?: string | null;
   created_at: string;
   updated_at: string;
-  expires_at?: string;
+  expires_at?: string | null;
   revision: number;
   supersedes?: string[];
   contradicted_by?: string[];
@@ -63,23 +63,16 @@ interface WireWorldResponse {
 /* -------------------------------------------------------------- normalise */
 
 /**
- * Readable names for the evidence sources the backend is known to use. A
- * source id that is not listed is not shown at all (it could be anything).
+ * Only the provenance fields that are safe to put on screen. The proxy has
+ * already removed everything else; anything unexpected is still ignored here.
  */
-export const KNOWN_ORIGINS: Record<string, string> = {
-  "career-store": "Career pipeline record",
-  "career-events": "Career activity event",
-};
-
-/** Only the provenance fields that are safe to put on screen. */
 export function safeProvenance(p: WireBelief["provenance"][number]): BeliefProvenance {
   return {
     sourceClass: p.source_class as BeliefProvenance["sourceClass"],
-    sourceType: p.source_type,
-    observedAt: p.observed_at,
-    freshness: p.freshness as BeliefProvenance["freshness"],
+    sourceType: typeof p.source_type === "string" ? p.source_type : undefined,
+    observedAt: typeof p.observed_at === "string" ? p.observed_at : undefined,
     confidence: typeof p.confidence === "number" ? p.confidence : undefined,
-    origin: p.source_id ? KNOWN_ORIGINS[p.source_id] : undefined,
+    origin: typeof p.source_label === "string" ? p.source_label : undefined,
   };
 }
 
@@ -97,10 +90,10 @@ function normBelief(w: WireBelief): Belief {
       basis: w.confidence.basis,
     },
     provenance: (w.provenance ?? []).map(safeProvenance),
-    observedAt: w.observed_at,
+    observedAt: w.observed_at ?? undefined,
     createdAt: w.created_at,
     updatedAt: w.updated_at,
-    expiresAt: w.expires_at,
+    expiresAt: w.expires_at ?? undefined,
     revision: w.revision,
     supersedes: w.supersedes,
     contradictedBy: w.contradicted_by,
