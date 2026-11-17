@@ -94,7 +94,7 @@ export function runWorkspaceP16SelfTest(): Result[] {
 
   const fleet = renderToStaticMarkup(createElement(FleetOverview, { health: { score: 86, total: 7, running: 4, active: 1, waiting: 1, failed: 1 } }));
   check("automations health and status counts move onto the fleet panel",
-    /86 ?%/.test(text(fleet)) && /Running 4 Active 1 Waiting 1 Failed 1/.test(text(fleet)) && /7 ?units/.test(text(fleet)), text(fleet).slice(0, 200));
+    /86 ?%/.test(text(fleet)) && /Running 4 Active 1 Scheduled 1 Failed 1/.test(text(fleet)) && /7 ?units/.test(text(fleet)), text(fleet).slice(0, 200));
 
   const units = [
     unit("a", { kind: "service" }),

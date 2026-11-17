@@ -20,13 +20,14 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "paused", label: "Paused" },
 ];
 
-// failed first (needs attention), then running, active, waiting, inactive
+// failed first (needs attention), then running, active, scheduled, inactive, unknown
 const STATUS_ORDER: Record<string, number> = {
   failed: 0,
   running: 1,
   active: 2,
   waiting: 3,
   inactive: 4,
+  unknown: 5,
 };
 
 /** The units a filter shows (also gives each tab its count). */
