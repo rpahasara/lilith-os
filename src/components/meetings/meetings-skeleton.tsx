@@ -10,7 +10,7 @@ export function MeetingsSkeleton() {
           <div className="h-3 w-72 rounded bg-white/[0.03]" />
         </div>
       </div>
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
           <div className="h-40 rounded-[var(--radius-xl)] bg-white/[0.03]" />
           <div className="h-56 rounded-[var(--radius-xl)] bg-white/[0.03]" />

@@ -33,7 +33,7 @@ export default function AutomationsPage() {
           {data.isDemo && <DemoBanner />}
           <AutomationsHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
-          <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
             {/* operations column */}
             <div className="space-y-4">
               <SystemsGrid units={data.units} selectedId={selected?.id} onSelect={setSelected} />

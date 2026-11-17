@@ -93,6 +93,16 @@ export function runMobileNavP18SelfTest(): Result[] {
   check("the providers are untouched: the sheet lives inside the shell, not around it",
     /data-shell-root=""/.test(shell) && /<ShellProviders>/.test(shell) && !/MobileNav/.test(shell));
 
+  /* the recovered width is usable: no workspace grid can outgrow the page ---------- */
+  const grids = [
+    ["src", "app", "career", "page.tsx"], ["src", "app", "automations", "page.tsx"], ["src", "app", "meetings", "page.tsx"],
+    ["src", "app", "system", "page.tsx"], ["src", "components", "memory", "memory-explorer.tsx"],
+    ["src", "components", "career", "career-skeleton.tsx"], ["src", "components", "automations", "automations-skeleton.tsx"],
+    ["src", "components", "meetings", "meetings-skeleton.tsx"], ["src", "components", "memory", "memory-skeleton.tsx"],
+  ];
+  const loose = grids.filter((p) => /className="grid gap-4 xl:grid-cols-/.test(read(...p)) || !/className="grid grid-cols-1 gap-4 xl:grid-cols-/.test(read(...p)));
+  check("every workspace grid is one minmax(0,1fr) column below xl", loose.length === 0, loose.map((p) => p.at(-1)).join());
+
   /* pipeline affordance + dependencies ---------------------------------------------- */
   const pipe = read("src", "components", "career", "pipeline-overview.tsx");
   check("the pipeline strip shows which edge has more stages, and nothing when it fits",

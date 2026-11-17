@@ -10,7 +10,7 @@ export function AutomationsSkeleton() {
           <div className="h-3 w-72 rounded bg-white/[0.03]" />
         </div>
       </div>
-      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
         <div className="grid gap-3 sm:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-44 rounded-[var(--radius-md)] bg-white/[0.03]" />

@@ -27,7 +27,7 @@ export default function SystemPage() {
   }, []);
   return <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
     <WorkspaceHeader icon={Activity} eyebrow="Control surface" title="System" description="Runtime visibility, integrations, permissions, and diagnostics in one place." />
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
       <div className="space-y-4">
         <GlassCard className="p-5" animated={false}>
           <SectionHeader title="Runtime" description="What this client can verify without exposing sensitive configuration." action={<StatusBadge label="Client active" tone="green"/>}/>

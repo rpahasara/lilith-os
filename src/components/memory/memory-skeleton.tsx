@@ -16,7 +16,7 @@ export function MemorySkeleton() {
         ))}
       </div>
       <div className="h-24 rounded-[var(--radius-xl)] bg-white/[0.03]" />
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_340px]">
         <div className="space-y-4">
           <div className="h-64 rounded-[var(--radius-xl)] bg-white/[0.03]" />
           <div className="grid gap-3 sm:grid-cols-2">
