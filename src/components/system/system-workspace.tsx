@@ -58,7 +58,7 @@ function clock(iso: string | null): string {
 
 function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
-    <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] items-baseline gap-3 py-2.5">
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-3 py-2.5 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)]">
       <dt className="text-xs text-ink-faint">{label}</dt>
       <dd className="min-w-0 text-xs text-ink [overflow-wrap:anywhere]">
         {children}
