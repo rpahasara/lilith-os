@@ -11,7 +11,7 @@ export function CareerSkeleton() {
         </div>
       </div>
       <div className="h-32 rounded-[var(--radius-xl)] bg-white/[0.03]" />
-      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
         <div className="h-96 rounded-[var(--radius-xl)] bg-white/[0.03]" />
         <div className="h-96 rounded-[var(--radius-xl)] bg-white/[0.03]" />
       </div>

@@ -217,6 +217,7 @@ export function GlobalCommandLauncher() {
         aria-label={name}
         aria-description={PRESENCE_DETAIL[presence]}
         title={PRESENCE_DETAIL[presence]}
+        data-global-command-launcher-compact=""
         {...popup}
         className="glass relative grid h-10 w-10 shrink-0 place-items-center rounded-full md:hidden"
       >
@@ -298,7 +299,13 @@ export function GlobalCommandPanel() {
     return () => {
       cancelAnimationFrame(settle);
       document.removeEventListener("keydown", onKey);
-      (opener && document.contains(opener) ? opener : launcherRef.current)?.focus();
+      // Back to the opener; if it is gone (it was in the mobile navigation sheet,
+      // say), to whichever launcher is on screen: the field, or below md the
+      // compact button (the field is display:none there).
+      const launcher = launcherRef.current?.offsetParent
+        ? launcherRef.current
+        : document.querySelector<HTMLElement>("[data-global-command-launcher-compact]");
+      (opener && document.contains(opener) ? opener : launcher)?.focus();
     };
   }, [open, close, launcherRef]);
 

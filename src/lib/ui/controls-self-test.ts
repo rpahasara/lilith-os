@@ -64,8 +64,9 @@ function render(c: ComponentType<any>, props: Record<string, unknown> = {}) { //
 
 /** Controls with real handlers today, per surface. */
 const FUNCTIONAL: Record<string, string[]> = {
-  // The launcher opens Lilith over the page (one control per breakpoint).
-  "top bar": ["Ask Lilith"],
+  // The launcher opens Lilith over the page (one control per breakpoint); below
+  // md the fox opens the navigation sheet (P1-8).
+  "top bar": ["Ask Lilith", "Open navigation"],
   "sidebar rail": [],
   // Suggestion chips fill the input; Send submits (disabled while empty).
   // Only chips backed by a real intent are offered by default.

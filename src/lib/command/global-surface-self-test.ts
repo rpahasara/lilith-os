@@ -171,7 +171,10 @@ export function runGlobalSurfaceSelfTest(): Result[] {
     /role="dialog"/.test(surface) && /aria-modal="true"/.test(surface) && /aria-label="Lilith"/.test(surface) &&
       /role="status"\s+aria-live="polite"\s+data-surface-line=""/.test(surface));
   check("the panel traps Tab, closes on Escape and returns focus",
-    /event\.key !== "Tab"/.test(surface) && /event\.key === "Escape"/.test(surface) && /launcherRef\.current\)\?\.focus\(\)/.test(surface));
+    /event\.key !== "Tab"/.test(surface) && /event\.key === "Escape"/.test(surface) &&
+      // back to the opener, else the launcher on screen (the compact one below md)
+      /launcherRef\.current\?\.offsetParent/.test(surface) && /\[data-global-command-launcher-compact\]/.test(surface) &&
+      /: launcher\)\?\.focus\(\)/.test(surface));
   check("Escape is left to the input while it is recalling history", /if \(event\.defaultPrevented\) return;/.test(surface));
   check("the panel never opens over the Command Center", /if \(onHome\) setOpen\(false\);/.test(surface));
   check("the panel states the connection, and a recording, when they apply",

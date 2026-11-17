@@ -227,7 +227,7 @@ export function MemoryExplorer({ data }: { data: MemoryData }) {
       </div>
 
       {/* --------------------------------------------------------- two panes */}
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] xl:items-start">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] xl:items-start">
         <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-black/20">
           <div aria-hidden className={cn("hidden border-b border-white/[0.06] px-4 py-2 font-mono text-micro uppercase tracking-[0.12em] text-ink-faint", ROW_COLUMNS)}>
             <span className="pl-4">Memory</span>

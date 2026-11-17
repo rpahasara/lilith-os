@@ -52,7 +52,7 @@ export function SystemsGrid({ units, selectedId, onSelect }: { units: Automation
     <GlassCard className="flex flex-col p-5" animated={false}>
       <SectionHeader title="Automation systems" description={`${shown.length} unit${shown.length === 1 ? "" : "s"} in this view`} action={<Button size="sm" disabled title="Automation creation API is not connected"><Plus className="h-3.5 w-3.5" />Create automation</Button>} />
 
-      <div className="mt-4"><FilterTabs items={FILTERS.map((item) => ({ ...item, count: matching(units, item.key).length }))} value={filter} onChange={setFilter} layoutId="systems-filter" /></div>
+      <div className="mt-4"><FilterTabs items={FILTERS.map((item) => ({ ...item, count: matching(units, item.key).length }))} value={filter} onChange={setFilter} layoutId="systems-filter" className="max-md:flex-wrap max-md:rounded-2xl" /></div>
 
       <div
         key={filter}

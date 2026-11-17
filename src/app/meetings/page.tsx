@@ -82,7 +82,7 @@ export default function MeetingsPage() {
           {data.isDemo && <DemoBanner />}
           <MeetingsHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
-          <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_340px]">
             {/* time column: the meeting, its brief right beneath it, then the day */}
             <div className="space-y-4">
               <NextMeeting

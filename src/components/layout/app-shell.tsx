@@ -46,7 +46,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           Skip to content
         </a>
         <MotionPreferences>
-        <div className="relative flex h-dvh w-full overflow-hidden">
+        {/* data-shell-root: what the mobile navigation sheet makes inert while open */}
+        <div data-shell-root="" className="relative flex h-dvh w-full overflow-hidden">
           <SidebarRail />
           <div className="flex min-w-0 flex-1 flex-col">
             <TopBar />

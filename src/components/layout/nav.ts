@@ -29,3 +29,8 @@ export const nav: NavItem[] = [
   { label: "Meetings", href: "/meetings", icon: CalendarClock, ready: true },
   { label: "System", href: "/system", icon: Activity },
 ];
+
+/** The one rule for "you are here", shared by the desktop rail and the mobile sheet. */
+export function isNavActive(pathname: string, href: string): boolean {
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}

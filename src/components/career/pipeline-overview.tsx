@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { GlassCard } from "@/components/ui/card";
 import { PanelHeader } from "@/components/ui/primitives";
@@ -16,7 +17,40 @@ const NODE_ACCENT: Record<string, string> = {
   faint: "var(--ink-faint)",
 };
 
+/**
+ * Which ends of a horizontal scroller have more to show. The pipeline strip keeps
+ * its intentional sideways scroll on narrow screens; these flags fade the edge
+ * that has more stages behind it, so the scroll reads as a scroll. A strip that
+ * fits (desktop) reports neither and is drawn exactly as before.
+ */
+function useScrollEdges() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const rest = el.scrollWidth - el.clientWidth - el.scrollLeft;
+      const next = { start: el.scrollLeft > 2, end: rest > 2 };
+      setEdges((cur) => (cur.start === next.start && cur.end === next.end ? cur : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, []);
+  const mask = edges.start || edges.end
+    ? `linear-gradient(to right, ${edges.start ? "transparent, #000 2.5rem" : "#000, #000"}, ${edges.end ? "#000 calc(100% - 2.5rem), transparent" : "#000"})`
+    : undefined;
+  return { ref, edges, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined };
+}
+
 export function PipelineOverview({ pipeline, overview, selectedStage, onSelect }: { pipeline: PipelineStage[]; overview?: CareerOverview; selectedStage?: Stage | null; onSelect?: (stage: Stage) => void }) {
+  const strip = useScrollEdges();
   return (
     <GlassCard className="p-5">
       <PanelHeader
@@ -38,7 +72,13 @@ export function PipelineOverview({ pipeline, overview, selectedStage, onSelect }
         }
       />
 
-      <div className="mt-5 overflow-x-auto pb-1">
+      <div
+        ref={strip.ref}
+        style={strip.style}
+        data-scroll-start={strip.edges.start || undefined}
+        data-scroll-end={strip.edges.end || undefined}
+        className="mt-5 overflow-x-auto overscroll-x-contain pb-1"
+      >
         <div className="flex min-w-[640px] items-end justify-between gap-2">
           {pipeline.map((p, i) => {
             const meta = STAGE_META[p.stage];
