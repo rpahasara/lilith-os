@@ -10,11 +10,6 @@ export function CareerSkeleton() {
           <div className="h-3 w-64 rounded bg-white/[0.03]" />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="h-[72px] rounded-[var(--radius-md)] bg-white/[0.03]" />
-        ))}
-      </div>
       <div className="h-32 rounded-[var(--radius-xl)] bg-white/[0.03]" />
       <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
         <div className="h-96 rounded-[var(--radius-xl)] bg-white/[0.03]" />

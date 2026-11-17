@@ -1,11 +1,8 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { Briefcase } from "lucide-react";
-import type { CareerOverview } from "@/lib/career/types";
 import type { Diagnostics } from "@/lib/api";
-import { staggerContainer } from "@/lib/motion";
-import { MetricTile, WorkspaceHeader } from "@/components/ui/primitives";
+import { WorkspaceHeader } from "@/components/ui/primitives";
 import type { WorkspaceIdentity } from "@/components/ui/data-state";
 
 export const CAREER_IDENTITY: WorkspaceIdentity = {
@@ -15,31 +12,11 @@ export const CAREER_IDENTITY: WorkspaceIdentity = {
   description: "Lilith is tracking your opportunities and moving the pipeline forward.",
 };
 
-export function CareerHeader({
-  overview,
-  isDemo,
-  diagnostics,
-}: {
-  overview: CareerOverview;
-  isDemo: boolean;
-  diagnostics?: Diagnostics;
-}) {
-  return (
-    <div>
-      <WorkspaceHeader {...CAREER_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />
-
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
-        className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
-      >
-        <MetricTile label="Active" value={overview.totalActive} accent="cyan" />
-        <MetricTile label="Interviews" value={overview.interviews} accent="wine" />
-        <MetricTile label="Offers" value={overview.offers} accent="green" />
-        <MetricTile label="Response rate" value={overview.responseRate} suffix="%" accent="cyan" />
-        <MetricTile label="Pipeline health" value={overview.pipelineHealth} suffix="/100" accent="orchid" />
-      </motion.div>
-    </div>
-  );
+/**
+ * The page header. The five-tile row that sat under it repeated the pipeline
+ * (active, interviews, offers); the two figures it alone showed — response rate
+ * and pipeline health — now sit on the pipeline itself.
+ */
+export function CareerHeader({ isDemo, diagnostics }: { isDemo: boolean; diagnostics?: Diagnostics }) {
+  return <WorkspaceHeader {...CAREER_IDENTITY} isDemo={isDemo} diagnostics={diagnostics} />;
 }

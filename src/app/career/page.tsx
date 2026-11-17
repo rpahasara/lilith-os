@@ -9,9 +9,8 @@ import { CareerSkeleton } from "@/components/career/career-skeleton";
 import { PipelineOverview } from "@/components/career/pipeline-overview";
 import { ApplicationTracker } from "@/components/career/application-tracker";
 import { ActivityTimeline } from "@/components/career/activity-timeline";
-import { InsightsPanel } from "@/components/career/insights-panel";
-import { NextActions } from "@/components/career/next-actions";
-import { InterviewPrep } from "@/components/career/interview-prep";
+import { LilithInsights } from "@/components/ui/lilith-insights";
+import { NextSteps } from "@/components/career/next-steps";
 import { ApplicationDetail } from "@/components/career/application-detail";
 import type { Application, Stage } from "@/lib/career/types";
 
@@ -34,13 +33,14 @@ export default function CareerPage() {
       ) : !data ? null : (
         <>
           {data.isDemo && <DemoBanner />}
-          <CareerHeader
-            overview={data.overview}
-            isDemo={data.isDemo}
-            diagnostics={data.diagnostics}
-          />
+          <CareerHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
-          <PipelineOverview pipeline={data.pipeline} selectedStage={selectedStage} onSelect={(stage) => setSelectedStage((current) => current === stage ? null : stage)} />
+          <PipelineOverview
+            pipeline={data.pipeline}
+            overview={data.overview}
+            selectedStage={selectedStage}
+            onSelect={(stage) => setSelectedStage((current) => (current === stage ? null : stage))}
+          />
 
           <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
             {/* main column */}
@@ -49,11 +49,10 @@ export default function CareerPage() {
               <ActivityTimeline activity={data.activity} />
             </div>
 
-            {/* intelligence rail */}
+            {/* rail: what to do, then what Lilith noticed */}
             <div className="space-y-4">
-              <InsightsPanel insights={data.insights} />
-              <NextActions applications={data.applications} />
-              <InterviewPrep applications={data.applications} />
+              <NextSteps applications={data.applications} selectedId={selected?.id} onSelect={setSelected} />
+              <LilithInsights insights={data.insights} />
             </div>
           </div>
           <ApplicationDetail application={selected} activity={data.activity} onClose={() => setSelected(null)} />

@@ -29,12 +29,19 @@ const STATUS_ORDER: Record<string, number> = {
   inactive: 4,
 };
 
+/** The units a filter shows (also gives each tab its count). */
+export function matching(units: AutomationUnit[], filter: Filter): AutomationUnit[] {
+  if (filter === "all") return units;
+  if (filter === "failed") return units.filter((u) => u.status === "failed");
+  if (filter === "paused") return units.filter((u) => !u.enabled || u.status === "inactive");
+  return units.filter((u) => u.kind === filter);
+}
+
 export function SystemsGrid({ units, selectedId, onSelect }: { units: AutomationUnit[]; selectedId?: string; onSelect: (unit: AutomationUnit) => void }) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const shown = useMemo(() => {
-    const list = filter === "all" ? units : filter === "failed" ? units.filter((u) => u.status === "failed") : filter === "paused" ? units.filter((u) => !u.enabled || u.status === "inactive") : units.filter((u) => u.kind === filter);
-    return [...list].sort(
+    return [...matching(units, filter)].sort(
       (a, b) =>
         (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9) ||
         a.name.localeCompare(b.name),
@@ -45,7 +52,7 @@ export function SystemsGrid({ units, selectedId, onSelect }: { units: Automation
     <GlassCard className="flex flex-col p-5" animated={false}>
       <SectionHeader title="Automation systems" description={`${shown.length} unit${shown.length === 1 ? "" : "s"} in this view`} action={<Button size="sm" disabled title="Automation creation API is not connected"><Plus className="h-3.5 w-3.5" />Create automation</Button>} />
 
-      <div className="mt-4"><FilterTabs items={FILTERS} value={filter} onChange={setFilter} layoutId="systems-filter" /></div>
+      <div className="mt-4"><FilterTabs items={FILTERS.map((item) => ({ ...item, count: matching(units, item.key).length }))} value={filter} onChange={setFilter} layoutId="systems-filter" /></div>
 
       <div
         key={filter}

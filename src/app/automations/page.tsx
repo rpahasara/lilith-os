@@ -8,7 +8,7 @@ import { DemoBanner, WorkspaceUnavailable } from "@/components/ui/data-state";
 import { AutomationsSkeleton } from "@/components/automations/automations-skeleton";
 import { SystemsGrid } from "@/components/automations/systems-grid";
 import { ExecutionTimeline } from "@/components/automations/execution-timeline";
-import { OpsInsights } from "@/components/automations/ops-insights";
+import { LilithInsights } from "@/components/ui/lilith-insights";
 import { FleetOverview } from "@/components/automations/fleet-overview";
 import { AutomationDetail } from "@/components/automations/automation-detail";
 import type { AutomationUnit } from "@/lib/automations/types";
@@ -31,11 +31,7 @@ export default function AutomationsPage() {
       ) : !data ? null : (
         <>
           {data.isDemo && <DemoBanner />}
-          <AutomationsHeader
-            health={data.health}
-            isDemo={data.isDemo}
-            diagnostics={data.diagnostics}
-          />
+          <AutomationsHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
           <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
             {/* operations column */}
@@ -44,10 +40,10 @@ export default function AutomationsPage() {
               <ExecutionTimeline activity={data.activity} />
             </div>
 
-            {/* intelligence rail */}
+            {/* rail: the fleet, then what Lilith noticed */}
             <div className="space-y-4">
-              <FleetOverview units={data.units} score={data.health.score} />
-              <OpsInsights insights={data.insights} />
+              <FleetOverview health={data.health} />
+              <LilithInsights insights={data.insights} />
             </div>
           </div>
           <AutomationDetail unit={selected} activity={data.activity} onClose={() => setSelected(null)} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMeetings } from "@/hooks/use-meetings";
 import { getMeetingBrief } from "@/lib/meetings/client";
 import { demoBriefFor } from "@/lib/meetings/demo";
@@ -19,6 +19,7 @@ export default function MeetingsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [brief, setBrief] = useState<PrepBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
+  const intelligence = useRef<HTMLDivElement>(null);
 
   // Nearest upcoming meeting (backend's `next`, matched to the full event).
   const nextEvent = useMemo(() => {
@@ -58,6 +59,13 @@ export default function MeetingsPage() {
     return () => ac.abort();
   }, [data, selectedEvent]);
 
+  /** Choosing a meeting in the schedule brings its brief into view (it sits above). */
+  const selectFromSchedule = (id: string) => {
+    setSelectedId(id);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    intelligence.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest" });
+  };
+
   return (
     <div className="workspace-page scroll-area h-full space-y-5 overflow-y-auto pr-1">
       {loading ? (
@@ -72,14 +80,10 @@ export default function MeetingsPage() {
       ) : !data ? null : (
         <>
           {data.isDemo && <DemoBanner />}
-          <MeetingsHeader
-            overview={data.overview}
-            isDemo={data.isDemo}
-            diagnostics={data.diagnostics}
-          />
+          <MeetingsHeader isDemo={data.isDemo} diagnostics={data.diagnostics} />
 
           <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
-            {/* time column */}
+            {/* time column: the meeting, its brief right beneath it, then the day */}
             <div className="space-y-4">
               <NextMeeting
                 event={nextEvent}
@@ -90,20 +94,22 @@ export default function MeetingsPage() {
                 }
                 onOpen={setSelectedId}
               />
+              <div ref={intelligence} className="scroll-mt-4">
+                <MeetingIntelligence
+                  event={selectedEvent}
+                  context={data.context}
+                  brief={brief}
+                  briefLoading={briefLoading}
+                />
+              </div>
               <TimelineToday
                 events={data.events}
                 selectedId={effectiveId ?? undefined}
-                onSelect={setSelectedId}
-              />
-              <MeetingIntelligence
-                event={selectedEvent}
-                context={data.context}
-                brief={brief}
-                briefLoading={briefLoading}
+                onSelect={selectFromSchedule}
               />
             </div>
 
-            {/* intelligence rail */}
+            {/* rail */}
             <div className="space-y-4">
               <FocusWindows events={data.events} />
               <FollowupsPanel followups={data.followups} />
