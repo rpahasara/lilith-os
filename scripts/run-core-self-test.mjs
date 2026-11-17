@@ -37,6 +37,7 @@ await build({
       import { runMobileOverflowSelfTest } from "@/lib/ui/mobile-overflow-self-test";
       import { runMobileNavP18SelfTest } from "@/lib/ui/mobile-nav-p18-self-test";
       import { runBeliefsP19SelfTest } from "@/lib/world/beliefs-p19-self-test";
+      import { runSystemP19bSelfTest } from "@/lib/system/system-p19b-self-test";
       import { runFoundationsSelfTest } from "@/lib/ui/foundations-self-test";
       import { runGlobalSurfaceSelfTest } from "@/lib/command/global-surface-self-test";
       import { runShellPresenceSelfTest } from "@/lib/presence/shell-presence-self-test";
@@ -48,7 +49,7 @@ await build({
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
       import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
       const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...runExplorerSelfTest(), ...runAtlasPreviewSelfTest(), ...(await runAtlasRealSelfTest()), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runWorkspaceP16SelfTest(), ...runMotionP17SelfTest(), ...runMobileOverflowSelfTest(), ...runMobileNavP18SelfTest(), ...(await runBeliefsP19SelfTest()), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runShellPresenceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runWorkspaceP16SelfTest(), ...runMotionP17SelfTest(), ...runMobileOverflowSelfTest(), ...runMobileNavP18SelfTest(), ...(await runBeliefsP19SelfTest()), ...(await runSystemP19bSelfTest()), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runShellPresenceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));

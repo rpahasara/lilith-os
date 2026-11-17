@@ -11,6 +11,7 @@
  * actually waits on. It is NOT model latency.
  */
 import { fetchEndpoint, type EndpointRequest, type EndpointResult } from "@/lib/api";
+import { platformFrom, type PlatformSnapshot } from "./platform";
 
 /** The probe's fetch seam (the real one is `fetchEndpoint`). */
 export type ProbeFetch = (
@@ -29,6 +30,11 @@ export interface ShellHealth {
   httpStatus: number | null;
   /** ISO timestamp of the last completed probe. */
   checkedAt: string | null;
+  /**
+   * The platform units in the same response (System reads these). Null until a
+   * live probe returns them; the probe makes no extra request for them.
+   */
+  platform: PlatformSnapshot | null;
 }
 
 export const INITIAL_SHELL_HEALTH: ShellHealth = {
@@ -36,6 +42,7 @@ export const INITIAL_SHELL_HEALTH: ShellHealth = {
   latencyMs: null,
   httpStatus: null,
   checkedAt: null,
+  platform: null,
 };
 
 export const SHELL_HEALTH_PATH = "/system/status";
@@ -51,7 +58,7 @@ export const SHELL_HEALTH_TIMEOUT_MS = 8_000;
  *  - anything else      → unreachable (502 tunnel down, 0 timeout, 401/403 …)
  */
 export function deriveShellHealth(
-  result: Pick<EndpointResult, "ok" | "status">,
+  result: Pick<EndpointResult, "ok" | "status"> & { data?: unknown },
   elapsedMs: number,
   now: Date = new Date(),
 ): ShellHealth {
@@ -62,6 +69,7 @@ export function deriveShellHealth(
       latencyMs: Math.max(0, Math.round(elapsedMs)),
       httpStatus: result.status,
       checkedAt,
+      platform: platformFrom(result.data),
     };
   }
   return {
@@ -69,6 +77,7 @@ export function deriveShellHealth(
     latencyMs: null,
     httpStatus: result.status,
     checkedAt,
+    platform: null,
   };
 }
 

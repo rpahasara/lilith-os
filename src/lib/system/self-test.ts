@@ -47,9 +47,9 @@ export async function runShellHealthSelfTest(): Promise<Result[]> {
     deriveShellHealth(res(true, 200), -3, NOW).latencyMs === 0);
 
   check("labels never claim more than measured",
-    shellHealthLabel({ state: "unconfigured", latencyMs: null, httpStatus: 503, checkedAt: null }) === "No backend configured" &&
-    shellHealthLabel({ state: "unreachable", latencyMs: null, httpStatus: 0, checkedAt: null }) === "Backend unreachable" &&
-    shellHealthLabel({ state: "checking", latencyMs: null, httpStatus: null, checkedAt: null }) === "Checking");
+    shellHealthLabel({ state: "unconfigured", latencyMs: null, httpStatus: 503, checkedAt: null, platform: null }) === "No backend configured" &&
+    shellHealthLabel({ state: "unreachable", latencyMs: null, httpStatus: 0, checkedAt: null, platform: null }) === "Backend unreachable" &&
+    shellHealthLabel({ state: "checking", latencyMs: null, httpStatus: null, checkedAt: null, platform: null }) === "Checking");
 
   // probe: read-only GET of the status path, timed by the injected clock.
   let seenPath = "";

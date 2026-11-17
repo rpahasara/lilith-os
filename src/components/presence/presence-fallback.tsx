@@ -32,7 +32,7 @@ export function StaticPresence({ animate = true }: { animate?: boolean }) {
  * of crashing the Command Center.
  */
 export class PresenceErrorBoundary extends Component<
-  { children: ReactNode; fallback?: ReactNode },
+  { children: ReactNode; fallback?: ReactNode; onFailure?: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -44,6 +44,7 @@ export class PresenceErrorBoundary extends Component<
   componentDidCatch(error: unknown) {
     // Non-fatal by design: report one sanitized line, keep the OS running.
     reportProblem("presence", "renderer failed, falling back to static", error);
+    this.props.onFailure?.();
   }
 
   render() {
