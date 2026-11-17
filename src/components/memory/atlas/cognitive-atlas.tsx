@@ -478,6 +478,22 @@ export default function CognitiveAtlas() {
   const root = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState<Frame>({ left: 120, top: 76, right: 32, bottom: 56, vw: 1440, vh: 900 });
+
+  /* On narrow screens the header wraps (title, status + source, views); how
+     tall it ends up depends on the width, so it is measured, not assumed. */
+  const header = useRef<HTMLElement>(null);
+  const [headerH, setHeaderH] = useState(88);
+  useEffect(() => {
+    const el = header.current;
+    if (!el) return;
+    const measure = () => setHeaderH(Math.round(el.getBoundingClientRect().height));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // where panels below the header may start, on narrow screens
+  const belowHeader = headerH + 20;
   useEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -511,8 +527,8 @@ export default function CognitiveAtlas() {
     () => ({
       left: frame.left + (desktop && domainsOpen ? 262 : 0),
       right: frame.right + (desktop && rightOpen ? 356 : 0),
-      // on narrow screens the header wraps onto a second row
-      top: frame.top + (desktop ? 40 : 92),
+      // on narrow screens the header wraps onto further rows
+      top: frame.top + (desktop ? 40 : Math.max(92, headerH + 4)),
       // the timeline is a slim strip: the brain keeps most of its size beside it
       bottom: frame.bottom + (view === "timeline" ? 150 : desktop ? 84 : 124),
     }),
@@ -582,7 +598,7 @@ export default function CognitiveAtlas() {
         />
 
         {/* --------------------------------------------------------- header */}
-        <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <header ref={header} className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
           <div className="flex items-center gap-3">
             <span className="glass relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl text-wine-bright">
               <span className="absolute inset-x-1 top-0 h-px bg-gradient-to-r from-transparent via-pearl/55 to-transparent" />
@@ -641,7 +657,8 @@ export default function CognitiveAtlas() {
               animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
               exit={{ opacity: 0, x: -16, filter: "blur(6px)" }}
               transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute left-0 top-[64px] z-20 w-[250px] max-xl:top-[112px]"
+              className="absolute left-0 top-[64px] z-20 w-[250px]"
+              style={desktop ? undefined : { top: Math.max(112, belowHeader) }}
             >
               <RegionIndex
                 origin={origin}
@@ -658,9 +675,10 @@ export default function CognitiveAtlas() {
         {/* ----------------- contextual inspector / optional activity panel */}
         <div
           className={cn(
-            "pointer-events-none absolute right-0 top-[56px] z-20 flex w-[min(100%,344px)] flex-col max-xl:top-[112px]",
+            "pointer-events-none absolute right-0 top-[56px] z-20 flex w-[min(100%,344px)] flex-col",
             view === "timeline" ? "bottom-[164px]" : "bottom-[76px] max-xl:bottom-[120px]",
           )}
+          style={desktop ? undefined : { top: Math.max(112, belowHeader) }}
         >
           <AnimatePresence mode="wait">
             {rightOpen && (
