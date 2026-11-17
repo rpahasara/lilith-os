@@ -38,7 +38,7 @@ function filesUnder(...path: string[]): string[] {
 
 /** Anything that would let the Atlas read or write real data. */
 /** The one file allowed to read the backend: the read-only Real memory source. */
-const REAL_READER = /lib[\/]memory[\/]atlas[\/]real-source.ts$/;
+const REAL_READER = /lib[\\/]memory[\\/]atlas[\\/]real-source\.ts$/;
 const BACKEND_ACCESS = [
   /\bfetch\s*\(/,
   /fetchEndpoint/,
