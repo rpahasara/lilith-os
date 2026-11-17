@@ -5,6 +5,7 @@ import { PresenceProvider } from "@/components/presence/presence-engine";
 import { ConversationProvider } from "@/components/conversation/conversation-provider";
 import { CommandProvider } from "@/components/command";
 import { MotionPreferences } from "./motion-preferences";
+import { RouteTransition } from "./route-transition";
 import { ShellHealthProvider } from "./shell-health-provider";
 import { GlobalCommandPanel, GlobalCommandProvider } from "@/components/command/global-command";
 
@@ -54,7 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               tabIndex={-1}
               className="scroll-area min-h-0 flex-1 overflow-y-auto px-4 pb-2 outline-none sm:px-7 lg:px-8 xl:overflow-hidden"
             >
-              {children}
+              <RouteTransition>{children}</RouteTransition>
             </main>
             <StatusBar />
           </div>
