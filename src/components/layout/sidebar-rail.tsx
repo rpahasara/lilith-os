@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { nav } from "./nav";
+import { isNavActive, nav } from "./nav";
 import { cn } from "@/lib/utils";
 import { user } from "@/lib/data";
 import { FoxMark } from "@/components/ui/fox-mark";
@@ -12,8 +12,10 @@ import { springSnap } from "@/lib/motion";
 export function SidebarRail() {
   const pathname = usePathname();
 
+  // Below md the rail gives its width back to the page; the fox in the top bar
+  // opens the same destinations as a sheet (mobile-nav.tsx).
   return (
-    <aside className="relative z-20 flex h-full w-[88px] shrink-0 flex-col items-center justify-between bg-[linear-gradient(90deg,rgba(8,5,9,0.72),rgba(8,5,9,0.3)_76%,transparent)] py-5 backdrop-blur-[2px]">
+    <aside className="relative z-20 flex h-full max-md:hidden w-[88px] shrink-0 flex-col items-center justify-between bg-[linear-gradient(90deg,rgba(8,5,9,0.72),rgba(8,5,9,0.3)_76%,transparent)] py-5 backdrop-blur-[2px]">
       <span className="shell-divider pointer-events-none absolute inset-y-5 right-0 w-px" />
       {/* mark */}
       <Link href="/" aria-label="Lilith command center" className="group flex flex-col items-center gap-2">
@@ -29,10 +31,7 @@ export function SidebarRail() {
       {/* nav */}
       <nav aria-label="Primary workspaces" className="flex flex-col items-center gap-1.5">
         {nav.map((item) => {
-          const active =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+          const active = isNavActive(pathname, item.href);
           const Icon = item.icon;
           return (
             <Link
