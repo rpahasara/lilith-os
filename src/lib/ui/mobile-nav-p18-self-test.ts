@@ -103,6 +103,10 @@ export function runMobileNavP18SelfTest(): Result[] {
   const loose = grids.filter((p) => /className="grid gap-4 xl:grid-cols-/.test(read(...p)) || !/className="grid grid-cols-1 gap-4 xl:grid-cols-/.test(read(...p)));
   check("every workspace grid is one minmax(0,1fr) column below xl", loose.length === 0, loose.map((p) => p.at(-1)).join());
 
+  const systems = read("src", "components", "automations", "systems-grid.tsx");
+  check("Automations filters wrap on phones instead of hiding behind a sideways scroll",
+    /layoutId="systems-filter" className="max-md:flex-wrap max-md:rounded-2xl"/.test(systems));
+
   /* pipeline affordance + dependencies ---------------------------------------------- */
   const pipe = read("src", "components", "career", "pipeline-overview.tsx");
   check("the pipeline strip shows which edge has more stages, and nothing when it fits",
