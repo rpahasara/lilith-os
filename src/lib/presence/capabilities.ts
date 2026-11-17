@@ -11,7 +11,7 @@
 import { useEffect, useState } from "react";
 import type { RendererKind } from "./types";
 
-/** User preference for how present Lilith should be. Control lands in Settings. */
+/** User preference for how present Lilith should be. Set from System → Preferences. */
 export type PresencePreference = "full" | "orb" | "off";
 
 export const PRESENCE_PREF_KEY = "lilith-os:presence-pref";
@@ -51,19 +51,32 @@ export function readPresencePreference(): PresencePreference {
   return "full";
 }
 
-/** Persist the presence preference. */
-export function writePresencePreference(pref: PresencePreference): void {
-  if (typeof window === "undefined") return;
+/** Same-tab notice of a preference change (the `storage` event only reaches other tabs). */
+export const PRESENCE_PREF_EVENT = "lilith-os:presence-pref";
+
+/**
+ * Persist the presence preference and tell this tab. Returns false when the
+ * browser would not store it (private mode, blocked storage): the choice then
+ * holds for this page only.
+ */
+export function writePresencePreference(pref: PresencePreference): boolean {
+  if (typeof window === "undefined") return false;
+  let saved = false;
   try {
     window.localStorage.setItem(PRESENCE_PREF_KEY, pref);
+    saved = window.localStorage.getItem(PRESENCE_PREF_KEY) === pref;
   } catch {
-    /* ignore */
+    /* storage unavailable */
   }
+  window.dispatchEvent(new CustomEvent<PresencePreference>(PRESENCE_PREF_EVENT, { detail: pref }));
+  return saved;
 }
 
 /** Read the dev renderer override, if any (see {@link PRESENCE_RENDERER_KEY}). */
 export function readRendererOverride(): RendererKind | null {
-  if (typeof window === "undefined") return null;
+  // A development tool only: a production build never reads it, so a stale key
+  // in someone's browser cannot change what they see.
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return null;
   try {
     const v = window.localStorage.getItem(PRESENCE_RENDERER_KEY);
     if (v === "orb" || v === "avatar" || v === "edge" || v === "voice") return v;
@@ -111,7 +124,7 @@ export function useWebGL(): boolean {
   return ok;
 }
 
-/** Live presence preference, reacting to storage changes across tabs. */
+/** Live presence preference, reacting to changes in this tab and in others. */
 export function usePresencePreference(): PresencePreference {
   const [pref, setPref] = useState<PresencePreference>("full");
   useEffect(() => {
@@ -120,8 +133,16 @@ export function usePresencePreference(): PresencePreference {
     const onStorage = (e: StorageEvent) => {
       if (e.key === PRESENCE_PREF_KEY) setPref(readPresencePreference());
     };
+    const onLocal = (e: Event) => {
+      const next = (e as CustomEvent<PresencePreference>).detail;
+      if (next === "full" || next === "orb" || next === "off") setPref(next);
+    };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(PRESENCE_PREF_EVENT, onLocal);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PRESENCE_PREF_EVENT, onLocal);
+    };
   }, []);
   return pref;
 }

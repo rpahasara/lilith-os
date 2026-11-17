@@ -11,6 +11,7 @@ import { usePresence } from "./presence-engine";
 import { PresenceOrb } from "./presence-orb";
 import { AvatarPresence } from "./avatar-presence";
 import { PresenceErrorBoundary, StaticPresence } from "./presence-fallback";
+import { presenceRenderReport } from "@/lib/presence/renderer-report";
 
 // Development-only diagnostics; dropped from production builds (see lib/diagnostics).
 const DEV_DIAGNOSTICS = process.env.NODE_ENV !== "production";
@@ -49,16 +50,19 @@ function usePerfGuard(enabled: boolean, graceMs = 0): boolean {
 
     const tick = (now: number) => {
       if (stopped) return;
-      if (now < measureAfter) {
-        frames = 0;
-        windowStart = now;
-        raf = requestAnimationFrame(tick);
-        return;
-      }
       frames += 1;
       const elapsed = now - windowStart;
       if (elapsed >= 1000) {
         const fps = (frames * 1000) / elapsed;
+        // Every visible window is reported (System shows it); only windows that
+        // start after the startup grace count toward degrading, as before.
+        if (!document.hidden) presenceRenderReport.setFps(fps);
+        if (windowStart < measureAfter) {
+          frames = 0;
+          windowStart = now;
+          raf = requestAnimationFrame(tick);
+          return;
+        }
         if (!document.hidden && fps < 20) {
           lowStreak.current += 1;
           if (lowStreak.current >= 2) {
@@ -105,6 +109,19 @@ export function PresenceStage() {
   // Large local avatars need time to download and parse before FPS is a useful
   // signal. The guard remains active after this one-time startup grace period.
   const degraded = usePerfGuard(wantsLive, kind === "avatar" ? 20_000 : 0);
+  // set by the error boundary when a renderer throws (it then shows the still image)
+  const [failed, setFailed] = useState(false);
+
+  // Report what is actually drawn, and why, for the System workspace.
+  useEffect(() => {
+    const live = kind === "avatar" ? "avatar" : "orb";
+    if (preference === "off") presenceRenderReport.setRendered("off", "preference-off");
+    else if (reducedMotion) presenceRenderReport.setRendered("static", "reduced-motion");
+    else if (!webgl) presenceRenderReport.setRendered("static", "no-webgl");
+    else if (degraded) presenceRenderReport.setRendered("static", "performance");
+    else if (failed) presenceRenderReport.setRendered("static", "error");
+    else presenceRenderReport.setRendered(live, "live");
+  }, [preference, reducedMotion, webgl, degraded, failed, kind]);
 
   let content: React.ReactNode;
   if (preference === "off") {
@@ -128,7 +145,7 @@ export function PresenceStage() {
       data-presence-renderer={preference === "off" ? "off" : kind}
       data-presence-activity={signal.activity}
     >
-      <PresenceErrorBoundary fallback={<StaticPresence />}>
+      <PresenceErrorBoundary fallback={<StaticPresence />} onFailure={() => setFailed(true)}>
         {content}
       </PresenceErrorBoundary>
     </div>

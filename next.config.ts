@@ -1,4 +1,6 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SECURITY_HEADERS } from "./src/server/web-hosting/security-headers";
 import { AVATAR_SOURCE, versionOfFile } from "./src/server/web-hosting/avatar";
 
@@ -6,6 +8,9 @@ import { AVATAR_SOURCE, versionOfFile } from "./src/server/web-hosting/avatar";
 // loads /avatar/hsin-<version>.vrm, which can therefore be cached as immutable.
 // Computed when the config loads (build / dev start); not a secret.
 const avatarVersion = versionOfFile(AVATAR_SOURCE);
+
+// The app's own version, from package.json, for System → About (not a secret).
+const appVersion = String((JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version?: unknown }).version ?? "");
 
 // The CSP is production-only: `next dev` needs 'unsafe-eval' for Fast Refresh.
 const headers =
@@ -26,6 +31,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   env: {
     NEXT_PUBLIC_HSIN_AVATAR_VERSION: avatarVersion,
+    NEXT_PUBLIC_LILITH_VERSION: appVersion,
   },
   async headers() {
     return [{ source: "/:path*", headers: [...headers] }];

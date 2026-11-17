@@ -96,7 +96,7 @@ export function runMobileNavP18SelfTest(): Result[] {
   /* the recovered width is usable: no workspace grid can outgrow the page ---------- */
   const grids = [
     ["src", "app", "career", "page.tsx"], ["src", "app", "automations", "page.tsx"], ["src", "app", "meetings", "page.tsx"],
-    ["src", "app", "system", "page.tsx"], ["src", "components", "memory", "memory-explorer.tsx"],
+    ["src", "components", "system", "system-workspace.tsx"], ["src", "components", "memory", "memory-explorer.tsx"],
     ["src", "components", "career", "career-skeleton.tsx"], ["src", "components", "automations", "automations-skeleton.tsx"],
     ["src", "components", "meetings", "meetings-skeleton.tsx"], ["src", "components", "memory", "memory-skeleton.tsx"],
   ];

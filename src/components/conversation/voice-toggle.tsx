@@ -23,6 +23,22 @@ import type { SpeechControllerSnapshot } from "@/lib/voice/types";
  * - If voice could not play (TTS not configured, or audio blocked), the switch
  *   stays on but says so, and replies stay text.
  */
+/**
+ * The one way to turn spoken replies on or off (this switch and System →
+ * Preferences both use it). Off stops any current audio at once; on unlocks
+ * browser audio inside the owner's click and plays nothing.
+ */
+export function setVoiceReplies(on: boolean): void {
+  if (!on) {
+    voiceSettings.setAutoSpeak(false);
+    lilithSpeech.stop();
+    return;
+  }
+  voiceSettings.setAutoSpeak(true);
+  // Unlock audio inside this click (browser autoplay policy). Plays nothing.
+  void ensureAudioContext().catch(() => {});
+}
+
 export function VoiceToggle() {
   useEffect(() => {
     voiceSettings.hydrate(browserVoiceStorage());
@@ -44,15 +60,8 @@ export function VoiceToggle() {
   const sinceRequest = useRef(speech.requestId);
 
   function toggle() {
-    if (on) {
-      voiceSettings.setAutoSpeak(false);
-      lilithSpeech.stop();
-      return;
-    }
-    sinceRequest.current = lilithSpeech.getSnapshot().requestId;
-    voiceSettings.setAutoSpeak(true);
-    // Unlock audio inside this click (browser autoplay policy). Plays nothing.
-    void ensureAudioContext().catch(() => {});
+    if (!on) sinceRequest.current = lilithSpeech.getSnapshot().requestId;
+    setVoiceReplies(!on);
   }
 
   return (

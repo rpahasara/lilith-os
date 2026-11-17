@@ -156,7 +156,7 @@ export async function runDataModeSelfTest(): Promise<Result[]> {
     !/—\s*live/i.test(source("components", "automations", "automations-header.tsx")));
   check("no internal slice or baseline labels in the UI",
     !/eyebrow="Slice/.test(source("app", "world", "page.tsx")) &&
-      !/value="Home V2|status="Module-owned"/.test(source("app", "system", "page.tsx")));
+      !/value="Home V2|status="Module-owned"/.test(source("app", "system", "page.tsx") + source("components", "system", "system-workspace.tsx")));
 
   return out;
 }
