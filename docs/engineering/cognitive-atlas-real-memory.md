@@ -118,8 +118,9 @@ anything. The first read builds the graph whole (nothing is animated as
 ### Failures never delete
 
 A read is accepted only when `/memory/records` answers 2xx with a records
-array. Network errors, 401/403, 5xx, 503 (not configured) and malformed bodies
-are failed checks: nothing is removed, the header turns to "stale since HH:MM",
+array. No answer at all, 401/403 (refused), other HTTP errors, 503 (not
+configured or unavailable) and malformed or truncated bodies are failed checks,
+each named as such: nothing is removed, the header turns to "stale since HH:MM",
 and the Observed changes panel names the failure. With no successful read yet,
 Real mode shows "Real memory is unavailable" and draws no memories — no sample
 or simulated records take their place. Records without an id are left out (and
@@ -169,8 +170,15 @@ removal, failures, privacy and the simulation staying intact.
 - Fingerprints compare stated fields only; a backend change that alters no
   field is invisible (correctly).
 - Removed GPU slots are not reused; buffers are sized with headroom (160 nodes,
-  600 pathways beyond the first snapshot). A very long session with heavy churn
-  could exhaust it; reopening the mode rebuilds.
+  600 pathways beyond the current graph) and rebuilt from the store whenever
+  live arrivals fill them, so everything counted is drawn.
+- Shared-entity pathways grow quickly with heavy entity overlap: an invented
+  450-record set drew 5,379 pathways at ~44 fps (60 fps at today's real size).
+  `SHARED_ENTITY_LINK_CAP` is the lever if real data ever gets that dense.
+- On narrow screens the domain labels can show over an open panel. This is the
+  existing Atlas behaviour (the Simulation does the same) and is not changed here.
+- If only the entities read fails, records still update and the inspector
+  marks entity relationships as coming from an earlier read.
 - Real mode follows the existing Memory authorization (same proxy and session
   as the Archive). Merging this makes Real mode reachable, opt-in, wherever the
   Atlas preview is enabled; Simulation remains the default.
