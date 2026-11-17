@@ -85,6 +85,14 @@ export function runMobileOverflowSelfTest(): Result[] {
     [APP.role, APP.company, APP.location!, APP.lastActivityLabel, APP.sourceAccount, "3 events", APP.recruiter!.contact!, APP.nextAction!.label, "Follow-up signal"]
       .every((t) => row.includes(t)));
   check("the row keeps its button semantics", /^<button type="button"[^>]*aria-pressed/.test(row) || /<button[^>]*type="button"/.test(row));
+  const metaGrid = /class="(mt-3 grid [^"]*)"/.exec(row)?.[1] ?? "";
+  check("details drop to one column on the narrowest cards and keep 4 from @md",
+    /(^|\s)grid-cols-1(\s|$)/.test(metaGrid) && /@min-\[13rem\]:grid-cols-2/.test(metaGrid) && /@md:grid-cols-4/.test(metaGrid), metaGrid);
+  const header = /class="(contents [^"]*)"/.exec(row)?.[1] ?? "";
+  check("narrow: the header joins the row grid; @md: the approved flex header",
+    /(^|\s)contents(\s|$)/.test(header) && /@md:flex/.test(header) && /@md:justify-between/.test(header) && /@md:items-start/.test(header), header);
+  const badges = classOf(row, "div", "Follow-up signal");
+  check("from @md the badges keep the header's top alignment", /@md:self-auto/.test(badges), badges);
   const mark = classOf(row, "div", ">E<");
   check("from @md the company mark is the approved 44px tile spanning the row",
     /@md:h-11/.test(mark) && /@md:w-11/.test(mark) && /@md:row-span-2/.test(mark), mark);
