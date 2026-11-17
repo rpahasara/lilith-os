@@ -39,11 +39,13 @@ export function ApplicationTracker({ applications, stageFilter, selectedId, onSe
   }, [applications, filter, stageFilter]);
 
   return (
-    <GlassCard className="flex flex-col p-5" animated={false}>
+    // The card is a size container: rows lay out by the width they actually get
+    // (narrow below @md = 28rem), so a phone stacks instead of scrolling sideways.
+    <GlassCard className="@container flex flex-col p-4 sm:p-5" animated={false}>
       <SectionHeader title="Application tracker" description={stageFilter ? `Pipeline focus · ${STAGE_META[stageFilter].label}` : `${shown.length} opportunities shown`} action={<Button size="sm" disabled title="Requires the career write API"><Plus className="h-3.5 w-3.5" />Add application</Button>} />
 
-      {/* filter segmented control */}
-      <div className="mt-4"><FilterTabs items={FILTERS} value={filter} onChange={setFilter} layoutId="tracker-filter" /></div>
+      {/* filter segmented control — wraps when narrow, so every filter stays in view */}
+      <div className="mt-4"><FilterTabs items={FILTERS} value={filter} onChange={setFilter} layoutId="tracker-filter" className="flex-wrap rounded-2xl @md:flex-nowrap @md:rounded-full" /></div>
 
       {/* rows */}
       <div

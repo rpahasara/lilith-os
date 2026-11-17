@@ -44,6 +44,19 @@ const PEEK_TOP_FRAMING: PresenceFraming = {
 };
 
 /**
+ * Stage-anchored viewports overshoot the square stage (170% / 156%) so long
+ * hair has room to dissolve. On a wide layout that room is there; below `xl` the
+ * stage fills its column and the overshoot would run past the page edge. So the
+ * cap is also `100cqw`: the presence hero is an inline-size container below `xl`
+ * only (see presence-hero), which keeps the canvas inside the column there.
+ * From `xl` up no container is in scope, `cqw` falls back to the small-viewport
+ * width (always wider than the pixel cap), and the desktop framing is unchanged.
+ * The camera keeps its vertical framing, so a narrower canvas never scales or
+ * distorts her; it only trims horizontal room that was off-screen anyway.
+ */
+export const STAGE_FIT = "100cqw";
+
+/**
  * Build the V1 table around the existing approved dashboard object. Passing
  * that object in keeps dashboard framing single-source and reference-identical.
  */
@@ -60,7 +73,7 @@ export function createPresenceProfiles(
         cropMode: "dashboard-dissolve",
         className: "absolute left-1/2 top-0 h-full -translate-x-1/2",
         width: "170%",
-        maxWidth: "780px",
+        maxWidth: `min(780px, ${STAGE_FIT})`,
         horizontalMask: "linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%)",
         verticalMask: "linear-gradient(to bottom, #000 0%, #000 84%, transparent 100%)",
         transformOrigin: "50% 50%",
@@ -76,7 +89,7 @@ export function createPresenceProfiles(
         cropMode: "full-body",
         className: "absolute left-1/2 top-0 h-full -translate-x-1/2",
         width: "156%",
-        maxWidth: "760px",
+        maxWidth: `min(760px, ${STAGE_FIT})`,
         horizontalMask: "linear-gradient(to right, transparent 0%, #000 8%, #000 92%, transparent 100%)",
         verticalMask: "linear-gradient(to bottom, #000 0%, #000 94%, transparent 100%)",
         transformOrigin: "50% 50%",

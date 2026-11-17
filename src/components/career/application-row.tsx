@@ -7,13 +7,28 @@ import { ConfidenceBar } from "./confidence-bar";
 import type { Application } from "@/lib/career/types";
 import { timeAgo, shortDate } from "@/lib/utils";
 
+/*
+ * Two layouts, chosen by the width the tracker card actually has (it is an
+ * `@container`), not by the viewport:
+ *
+ *   @md and up (28rem+, every tablet and desktop width) — the approved row:
+ *     company mark beside one column of title, activity, confidence and meta,
+ *     with single-line titles that truncate.
+ *   narrow (a phone) — the mark sits beside the title only, the body spans the
+ *     full row underneath, and titles, companies and contacts wrap instead of
+ *     truncating, so nothing is cut off and nothing scrolls sideways.
+ *
+ * The grid reproduces the old `flex gap-3` layout exactly at @md: the mark spans
+ * both rows, so the body starts straight under the header as before.
+ */
+
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <p className="font-mono text-micro uppercase tracking-wider text-ink-faint">
         {label}
       </p>
-      <p className="truncate text-xs text-ink-muted">{value}</p>
+      <p className="text-xs text-ink-muted [overflow-wrap:anywhere] @md:truncate">{value}</p>
     </div>
   );
 }
@@ -21,45 +36,45 @@ function Meta({ label, value }: { label: string; value: string }) {
 export function ApplicationRow({ app, selected, onSelect }: { app: Application; selected?: boolean; onSelect: (app: Application) => void }) {
   return (
     <motion.button type="button" onClick={() => onSelect(app)} aria-pressed={selected}
-      className={`group w-full rounded-[var(--radius-md)] border p-4 text-left transition-colors ${selected ? "border-wine-bright/35 bg-wine/10" : "border-white/[0.06] bg-white/[0.015] hover:border-white/12 hover:bg-white/[0.03]"}`}
+      className={`group w-full rounded-[var(--radius-md)] border p-3 text-left transition-colors @md:p-4 ${selected ? "border-wine-bright/35 bg-wine/10" : "border-white/[0.06] bg-white/[0.015] hover:border-white/12 hover:bg-white/[0.03]"}`}
     >
-      <div className="flex items-start gap-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 @md:gap-x-3">
         {/* company mark */}
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-orchid-deep/60 to-cyan-deep/50 text-sm font-semibold text-white ring-1 ring-white/10">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-orchid-deep/60 to-cyan-deep/50 text-xs font-semibold text-white ring-1 ring-white/10 @md:row-span-2 @md:h-11 @md:w-11 @md:rounded-2xl @md:text-sm">
           {app.company.charAt(0)}
         </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="truncate text-lead font-medium text-ink">
-                {app.role}
-              </h3>
-              <p className="truncate text-xs text-ink-muted">
-                {app.company}
-                {app.location && (
-                  <span className="text-ink-faint"> · {app.location}</span>
-                )}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {app.followUp && (
-                <span
-                  title="Follow-up signal"
-                  className="grid h-6 w-6 place-items-center rounded-full bg-amber/12 text-amber"
-                >
-                  <Bell className="h-3 w-3" />
-                </span>
+        <div className="flex min-w-0 flex-col items-start gap-1.5 @md:flex-row @md:justify-between @md:gap-3">
+          <div className="min-w-0">
+            <h3 className="text-lead font-medium text-ink [overflow-wrap:anywhere] @md:truncate">
+              {app.role}
+            </h3>
+            <p className="text-xs text-ink-muted [overflow-wrap:anywhere] @md:truncate">
+              {app.company}
+              {app.location && (
+                <span className="text-ink-faint"> · {app.location}</span>
               )}
-              <StageBadge stage={app.stage} />
-            </div>
+            </p>
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {app.followUp && (
+              <span
+                title="Follow-up signal"
+                className="grid h-6 w-6 place-items-center rounded-full bg-amber/12 text-amber"
+              >
+                <Bell className="h-3 w-3" />
+              </span>
+            )}
+            <StageBadge stage={app.stage} />
+          </div>
+        </div>
 
-          {/* last activity */}
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-ink-muted">
-            <Radio className="h-3 w-3 text-cyan-bright/70" />
+        <div className="col-span-2 min-w-0 @md:col-span-1 @md:col-start-2">
+          {/* last activity — flows as one paragraph when narrow */}
+          <p className="mt-2 text-xs text-ink-muted @md:flex @md:items-center @md:gap-1.5">
+            <Radio className="mr-1.5 inline h-3 w-3 align-[-2px] text-cyan-bright/70 @md:mr-0" />
             {app.lastActivityLabel}
-            <span className="text-ink-faint">· {timeAgo(app.lastActivity)}</span>
+            <span className="ml-1 text-ink-faint @md:ml-0">· {timeAgo(app.lastActivity)}</span>
           </p>
 
           {/* confidence */}
