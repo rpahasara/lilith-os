@@ -16,7 +16,7 @@
  * without a React render. The same loop lays out the DOM that floats in brain
  * space: the domain callouts and the hover card.
  */
-import { type RefObject, useEffect, useMemo, useRef } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { BrainLayout } from "@/lib/memory/atlas/brain-shape";
@@ -168,6 +168,9 @@ function Brain(props: BrainSceneProps) {
   live.current = props;
 
   /* ---------------------------------------------------------- GPU resources */
+  // bumped when live arrivals fill the node or pathway buffers: the buffers
+  // are then rebuilt from the store, sized to what it holds now
+  const [generation, setGeneration] = useState(0);
   const world = useMemo(() => {
     const u = {
       uTime: { value: 0 },
@@ -230,7 +233,8 @@ function Brain(props: BrainSceneProps) {
       }),
     };
     return { u, cortex, nodes, paths, tracts, rings, reticle, heart, hull, materials };
-  }, [layout, store]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- generation only signals a rebuild
+  }, [layout, store, generation]);
 
   useEffect(
     () => () => {
@@ -491,6 +495,11 @@ function Brain(props: BrainSceneProps) {
       // a new node may be part of the current focus
       world.nodes.setStates(live.current.focus.nodes);
       world.paths.setStates(live.current.focus.links);
+      // Full buffers would silently drop what arrives next (the header would
+      // count pathways the brain does not draw): rebuild them from the store.
+      if (world.nodes.count >= world.nodes.capacity || world.paths.count >= world.paths.capacity) {
+        setGeneration((g) => g + 1);
+      }
     };
     return store.onEvent(onEvent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
