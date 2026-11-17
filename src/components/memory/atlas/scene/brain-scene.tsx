@@ -22,7 +22,7 @@ import * as THREE from "three";
 import type { BrainLayout } from "@/lib/memory/atlas/brain-shape";
 import { REGIONS, REGION_BY_ID, REGION_RGB, hexToRgb } from "@/lib/memory/atlas/regions";
 import type { AppliedEvent, AtlasStore } from "@/lib/memory/atlas/store";
-import type { AtlasFocus, RecallTrace, Vec3 } from "@/lib/memory/atlas/types";
+import type { AtlasFocus, AtlasLink, RecallTrace, Vec3 } from "@/lib/memory/atlas/types";
 import {
   ALWAYS,
   NodeBuffers,
@@ -97,6 +97,10 @@ export interface BrainSceneProps {
    *  random pulse on a real record would look like activity that did not
    *  happen, so idle motion stays at the level of whole regions. */
   idleMemories?: boolean;
+  /** dim ambient memory pathways as they get denser, so many overlapping
+   *  additive lines never wash the brain out. Focused pathways keep full
+   *  strength. Off for the simulation, which is drawn as designed. */
+  adaptiveGlow?: boolean;
   /** px of the canvas (the whole viewport) that the OS chrome and any open
    *  overlays cover — the brain centres itself in what is left. */
   insets: { left: number; right: number; top: number; bottom: number };
@@ -108,6 +112,14 @@ export interface BrainSceneProps {
   onHover: (id: string | null) => void;
   onSelect: (id: string | null) => void;
 }
+
+/** Most hidden associations one focus can draw at once. */
+const OVERLAY_CAPACITY = 1024;
+/** Pathway count up to which ambient memory pathways keep full strength
+ *  (about the simulation's own density); beyond it they dim with the square
+ *  root of the count, never below DENSITY_FLOOR. */
+const DENSITY_REF = 300;
+const DENSITY_FLOOR = 0.28;
 
 const FOV = 36;
 const TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
@@ -191,12 +203,15 @@ function Brain(props: BrainSceneProps) {
       uWave: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, ALWAYS)) },
       uWaveGain: { value: new Float32Array(4) },
     };
+    const memGain = { value: 1 };
     const cortex = buildCortexGeometry(layout);
     const initial = store.getState();
     // room for what the store already holds plus later arrivals (slots of
     // removed items are not reused)
     const nodes = new NodeBuffers(Math.max(360, initial.nodes.length + 160));
     const paths = new PathBuffers(Math.max(1100, initial.links.length + 600));
+    // associations drawn only while focused (filled from focus.extra)
+    const overlay = new PathBuffers(OVERLAY_CAPACITY);
     const tracts = buildTracts(layout);
     const rings = buildRingGeometry();
     const hull = buildHull(layout);
@@ -231,15 +246,18 @@ function Brain(props: BrainSceneProps) {
         ...u,
         uColor: { value: new THREE.Vector3(0.88, 0.52, 0.62) },
       }),
+      // memory pathways: same shaders, their own ambient gain (tracts keep uPathGain)
+      memPaths: additive(GLSL.PATH_VERT, GLSL.PATH_FRAG, { ...u, uPathGain: memGain }),
+      memPackets: additive(GLSL.PACKET_VERT, GLSL.PACKET_FRAG, { ...u, uPathGain: memGain }),
     };
-    return { u, cortex, nodes, paths, tracts, rings, reticle, heart, hull, materials };
+    return { u, memGain, cortex, nodes, paths, overlay, tracts, rings, reticle, heart, hull, materials };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- generation only signals a rebuild
   }, [layout, store, generation]);
 
   useEffect(
     () => () => {
-      const { cortex, nodes, paths, tracts, rings, reticle, heart, materials } = world;
-      for (const g of [cortex.geometry, nodes.geometry, paths.lines, paths.packets, tracts.lines, tracts.packets, rings, reticle, heart]) {
+      const { cortex, nodes, paths, overlay, tracts, rings, reticle, heart, materials } = world;
+      for (const g of [cortex.geometry, nodes.geometry, paths.lines, paths.packets, overlay.lines, overlay.packets, tracts.lines, tracts.packets, rings, reticle, heart]) {
         g.dispose();
       }
       Object.values(materials).forEach((m) => m.dispose());
@@ -391,7 +409,21 @@ function Brain(props: BrainSceneProps) {
   useEffect(() => {
     world.nodes.setStates(props.focus.nodes);
     world.paths.setStates(props.focus.links);
-  }, [props.focus, world]);
+    // associations the simplified drawing leaves out, shown while focused
+    const { overlay } = world;
+    overlay.clear();
+    const lit = new Set<string>();
+    const t = world.u.uTime.value;
+    for (const extra of props.focus.extra ?? []) {
+      const a = store.node(extra.source);
+      const b = store.node(extra.target);
+      if (!a || !b || overlay.count >= overlay.capacity) continue;
+      const link: AtlasLink = { ...extra, basis: "shared-entity", kind: "", born: 0, live: false };
+      addLink(overlay, link, a, b, t);
+      lit.add(extra.id);
+    }
+    overlay.setStates(lit);
+  }, [props.focus, world, store]);
 
   /* selection + hover reticle */
   useEffect(() => {
@@ -802,6 +834,11 @@ function Brain(props: BrainSceneProps) {
     u.uTimeline.value = p.timeline ? 1 : 0;
     u.uGain.value = damp(u.uGain.value, p.visuals.glow, 5, dt);
     u.uPathGain.value = damp(u.uPathGain.value, p.visuals.pathways ? 1 : 0, 5, dt);
+    const drawnLinks = store.getState().links.length;
+    const density = p.adaptiveGlow
+      ? Math.max(DENSITY_FLOOR, Math.min(1, Math.sqrt(DENSITY_REF / Math.max(1, drawnLinks))))
+      : 1;
+    world.memGain.value = damp(world.memGain.value, (p.visuals.pathways ? 1 : 0) * density, 5, dt);
 
     // focus
     u.uDim.value = damp(u.uDim.value, p.focus.dim, 4.5, dt);
@@ -911,8 +948,10 @@ function Brain(props: BrainSceneProps) {
       <lineSegments geometry={world.tracts.lines} material={materials.paths} frustumCulled={false} />
       <points geometry={world.tracts.packets} material={materials.packets} frustumCulled={false} />
       <points geometry={world.cortex.geometry} material={materials.cortex} frustumCulled={false} />
-      <lineSegments geometry={world.paths.lines} material={materials.paths} frustumCulled={false} />
-      <points geometry={world.paths.packets} material={materials.packets} frustumCulled={false} />
+      <lineSegments geometry={world.paths.lines} material={materials.memPaths} frustumCulled={false} />
+      <points geometry={world.paths.packets} material={materials.memPackets} frustumCulled={false} />
+      <lineSegments geometry={world.overlay.lines} material={materials.memPaths} frustumCulled={false} />
+      <points geometry={world.overlay.packets} material={materials.memPackets} frustumCulled={false} />
       {props.recall &&
         props.recall.trace.links.slice(0, Math.max(0, props.recall.step)).map((linkId, i) => (
           <TraceSegment

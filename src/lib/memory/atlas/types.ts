@@ -113,8 +113,9 @@ export interface AtlasLink {
   source: string;
   target: string;
   basis: LinkBasis;
-  /** shared-entity links: the entities both memories carry. */
+  /** shared-entity links: the entities both memories carry (labels, ids). */
   via?: string[];
+  viaIds?: string[];
   /** human label for the association. */
   kind: string;
   /** 0–1. Real links: a rendering weight, not a measured strength. */
@@ -133,7 +134,7 @@ export type AtlasNodeInput = Omit<
 >;
 
 export type AtlasLinkInput = Pick<AtlasLink, "source" | "target" | "kind" | "strength"> &
-  Partial<Pick<AtlasLink, "id" | "basis" | "via">>;
+  Partial<Pick<AtlasLink, "id" | "basis" | "via" | "viaIds">>;
 
 /**
  * Simulation events (`memory.*`) describe invented cognition. Real-memory
@@ -148,8 +149,10 @@ export type AtlasEvent =
   | { type: "record.observed"; at: number; node: AtlasNodeInput; links: AtlasLinkInput[] }
   | { type: "record.changed"; at: number; node: AtlasNodeInput }
   | { type: "record.withdrawn"; at: number; nodeId: string }
-  | { type: "link.observed"; at: number; link: AtlasLinkInput }
-  | { type: "link.withdrawn"; at: number; linkId: string };
+  /** `quiet`: a change to what is drawn (derived pathways), not to what the
+   *  source states — applied to the graph, not logged or counted. */
+  | { type: "link.observed"; at: number; link: AtlasLinkInput; quiet?: boolean }
+  | { type: "link.withdrawn"; at: number; linkId: string; quiet?: boolean };
 
 /** One line in the "live cognition" feed. */
 export interface AtlasActivity {
@@ -189,4 +192,7 @@ export interface AtlasFocus {
   region: number;
   /** 0 = no dimming, 1 = everything outside the focus recedes. */
   dim: number;
+  /** associations to draw only while focused (real memory: those the
+   *  simplified drawing leaves out). */
+  extra?: { id: string; source: string; target: string; strength: number }[];
 }

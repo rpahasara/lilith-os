@@ -210,6 +210,11 @@ export function createAtlasStore(graph: AtlasGraph, layout: BrainLayout): AtlasS
         applied.links.push(link);
         const a = nodes.get(link.source)!;
         const b = nodes.get(link.target)!;
+        if (event.type === "link.observed" && event.quiet) {
+          // a change to what is drawn, not to what the source says
+          state = { ...state, links: [...state.links, link] };
+          break;
+        }
         if (event.type === "memory.linked") session.linked += 1;
         else changes.links += 1;
         state = {
@@ -232,6 +237,10 @@ export function createAtlasStore(graph: AtlasGraph, layout: BrainLayout): AtlasS
         if (!link) return;
         unindex(link);
         applied.removed = { nodes: [], links: [link.id] };
+        if (event.quiet) {
+          state = { ...state, links: state.links.filter((l) => l.id !== link.id) };
+          break;
+        }
         changes.links += 1;
         const a = nodes.get(link.source);
         state = {

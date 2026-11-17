@@ -21,8 +21,11 @@ import { RealNodeInspector, RealTimelineNotice } from "@/components/memory/atlas
 import { buildBrainLayout } from "./brain-shape";
 import {
   CATEGORY_REGION,
-  SHARED_ENTITY_LINK_CAP,
+  EXPLICIT_STRENGTH,
+  EXTRA_EVERY,
   UNMAPPED_REGIONS,
+  associationTotals,
+  associationsOf,
   buildRealGraph,
   fetchSnapshot,
   projectLinks,
@@ -125,6 +128,17 @@ function snapshotOf(rows: Raw[], at = T0): MemorySnapshot {
   };
 }
 
+/** Connected components among `ids` using the given links (union-find). */
+function components(ids: string[], links: readonly { source: string; target: string }[]): number {
+  const parent = new Map(ids.map((id) => [id, id]));
+  const find = (x: string): string => (parent.get(x) === x ? x : find(parent.get(x)!));
+  for (const l of links) {
+    if (!parent.has(l.source) || !parent.has(l.target)) continue;
+    parent.set(find(l.source), find(l.target));
+  }
+  return new Set(ids.map(find)).size;
+}
+
 /* -------------------------------------------------------------------- test */
 
 export async function runAtlasRealSelfTest(): Promise<Result[]> {
@@ -164,7 +178,7 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
     graph.nodes.every((n, i) => n.id === again.nodes[i].id && n.position.join() === again.nodes[i].position.join()));
 
   /* links --------------------------------------------------------------------- */
-  const links = projectLinks(records);
+  const links = projectLinks(records, layout);
   const explicit = links.filter((l) => l.basis === "explicit");
   const shared = links.filter((l) => l.basis === "shared-entity");
   check("the source's own relation becomes an explicit link",
@@ -172,24 +186,60 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
   check("a pair the source linked is not also drawn as shared-entity",
     !shared.some((l) => l.id === "shared:k1|p1"));
   check("shared-entity links name the entities they share",
-    shared.some((l) => l.id === "shared:c1|w1" && l.via?.join() === "Acme Test Co") &&
-      shared.some((l) => l.id === "shared:c1|p1" && l.via?.join() === "Robin Example"));
+    shared.some((l) => l.id === "shared:c1|w1" && l.via?.join() === "Acme Test Co" && l.viaIds?.join() === "org_acme"));
+  check("source-stated links are drawn stronger than derived ones",
+    shared.every((l) => l.strength < EXPLICIT_STRENGTH));
   check("entity-to-entity relationships are never drawn as memory links",
-    links.every((l) => l.basis !== "synthetic") &&
-      projectLinks(records).length === links.length && // independent of the entities payload
-      !links.some((l) => /works at/.test(l.kind)));
-  const crowd = Array.from({ length: SHARED_ENTITY_LINK_CAP + 1 }, (_, i) =>
-    normalizeRecord(raw(`crowd${i}`, { entities: [{ id: "topic_x", type: "topic", label: "Common topic" }] })));
-  check("an entity on too many records draws no pathways", projectLinks(crowd).length === 0);
+    links.every((l) => l.basis !== "synthetic") && !links.some((l) => /works at/.test(l.kind)));
   check("a relation to a record that is not present is not drawn",
-    projectLinks([normalizeRecord(raw("lonely", { related: ["missing"] }))]).length === 0);
+    projectLinks([normalizeRecord(raw("lonely", { related: ["missing"] }))], layout).length === 0);
+
+  /* sparse drawing, complete data ------------------------------------------------- */
+  const topic = (i: number) => ({ id: `topic_${i}`, type: "concept", label: `Topic ${i}` });
+  const crowd = Array.from({ length: 60 }, (_, i) => normalizeRecord(raw(`crowd${String(i).padStart(2, "0")}`, { entities: [topic(0)] })));
+  const crowdLinks = projectLinks(crowd, layout);
+  check("one entity on many records is drawn as a sparse tree, not every pair",
+    crowdLinks.length >= 59 && crowdLinks.length <= 59 + Math.ceil(60 / EXTRA_EVERY) && crowdLinks.length < (60 * 59) / 2,
+    String(crowdLinks.length));
+  check("that group stays connected", components(crowd.map((r) => r.id), crowdLinks) === 1);
+  const crowdGraph = buildRealGraph({ ...snapshotOf([]), records: crowd }, layout);
+  check("every association stays in the data even when not drawn",
+    associationsOf("crowd00", crowdGraph.nodes, crowdGraph.links).shared.length === 59 &&
+      associationTotals(crowdGraph.nodes, crowdGraph.links).total === (60 * 59) / 2);
+  const shuffled = [...crowd].reverse();
+  check("the drawn set is deterministic, whatever order records arrive in",
+    JSON.stringify(projectLinks(shuffled, layout)) === JSON.stringify(crowdLinks));
+
+  // 1,000 records, each carrying two of 40 topics, some linked by the source
+  const big = Array.from({ length: 1000 }, (_, i) =>
+    normalizeRecord(raw(`big${String(i).padStart(4, "0")}`, {
+      category: CATEGORIES[i % CATEGORIES.length],
+      entities: [topic(i % 40), topic((i * 7 + 3) % 40)],
+      related: i % 50 === 0 ? [`big${String(i + 1).padStart(4, "0")}`] : [],
+    })));
+  const bigLinks = projectLinks(big, layout);
+  const bigGraph = buildRealGraph({ ...snapshotOf([]), records: big }, layout);
+  const bigTotals = associationTotals(bigGraph.nodes, bigGraph.links);
+  check("at 1,000 records the drawing grows with the records, not their pairs",
+    bigLinks.length < 4 * big.length && bigTotals.total > 10 * bigLinks.length,
+    `${bigLinks.length} drawn of ${bigTotals.total}`);
+  check("every entity group stays connected in the drawing",
+    Array.from({ length: 40 }, (_, t) => big.filter((r) => r.entities.some((e) => e.id === `topic_${t}`)).map((r) => r.id))
+      .every((ids) => components(ids, bigLinks) === 1));
+  check("every source-stated link is drawn",
+    bigLinks.filter((l) => l.basis === "explicit").length === 20);
+  const pair = projectLinks([
+    normalizeRecord(raw("pa", { entities: [ACME, ROBIN] })),
+    normalizeRecord(raw("pb", { entities: [ACME, ROBIN] })),
+  ], layout);
+  check("a drawn pathway names every entity the pair shares", pair.length === 1 && pair[0].via?.length === 2);
 
   /* reconciliation ------------------------------------------------------------- */
   const store = createAtlasStore(buildRealGraph(snapshotOf(BASE), layout), layout);
   const placed = store.node("c1")!.position.join();
   const next = BASE.filter((r) => r.id !== "pe1").map((r) => (r.id === "c1" ? { ...r, summary: "Interview moved" } : r));
   next.push(raw("n1", { category: "people", summary: "New test contact", entities: [ROBIN] }));
-  const diff = reconcile(store.getState(), snapshotOf(next, T0 + 60_000));
+  const diff = reconcile(store.getState(), snapshotOf(next, T0 + 60_000), layout);
   for (const e of diff.events) store.apply(e);
   const s = store.getState();
   check("a new record is reported as observed, not learned",
@@ -206,10 +256,21 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
       !JSON.stringify(s).includes("Robin is a test contact"));
   check("new shared-entity links arrive after their records",
     diff.events.findIndex((e) => e.type === "link.observed") > diff.events.findIndex((e) => e.type === "record.observed"));
+  check("changes to derived pathways are applied quietly, not reported as source changes",
+    diff.events.filter((e) => e.type === "link.observed" || e.type === "link.withdrawn").every((e) => "quiet" in e && e.quiet) &&
+      !s.activity.some((a) => a.type === "link.observed" || a.type === "link.withdrawn") && s.changes.links === 0);
   check("the counters describe differences, not cognition",
     s.changes.observed === 1 && s.changes.changed === 1 && s.changes.withdrawn === 1 && s.session.recalled === 0);
-  const quiet = reconcile(store.getState(), snapshotOf(next, T0 + 120_000));
+  const quiet = reconcile(store.getState(), snapshotOf(next, T0 + 120_000), layout);
   check("an unchanged snapshot produces no events", quiet.events.length === 0, String(quiet.events.length));
+  const growStore = createAtlasStore(buildRealGraph({ ...snapshotOf([]), records: crowd }, layout), layout);
+  const homes = new Map(growStore.getState().nodes.map((n) => [n.id, n.position.join()]));
+  const grown = [...crowd, normalizeRecord(raw("crowd99", { entities: [topic(0)] }))];
+  for (const e of reconcile(growStore.getState(), { ...snapshotOf([], T0 + 60_000), records: grown }, layout).events) growStore.apply(e);
+  check("refreshing keeps every existing record where it was",
+    growStore.getState().nodes.every((n) => !homes.has(n.id) || homes.get(n.id) === n.position.join()));
+  check("after a refresh the group is still connected",
+    components(grown.map((r) => r.id), growStore.getState().links) === 1);
 
   /* reads -------------------------------------------------------------------- */
   const ok = fakeFetch({ records: BASE });
@@ -270,6 +331,8 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
       store: panelStore,
       entities: snapshotOf(BASE).entities ?? [],
       relationships: snapshotOf(BASE).relationships ?? [],
+      nodes: panelStore.getState().nodes,
+      links: panelStore.getState().links,
       onClose: () => {},
       onSelect: () => {},
       onExplore: () => {},
@@ -286,6 +349,8 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
         store: panelStore,
         entities: snapshotOf(BASE).entities ?? [],
         relationships: snapshotOf(BASE).relationships ?? [],
+        nodes: panelStore.getState().nodes,
+        links: panelStore.getState().links,
         onClose: () => {},
         onSelect: () => {},
         onExplore: () => {},
@@ -298,6 +363,8 @@ export async function runAtlasRealSelfTest(): Promise<Result[]> {
         store: panelStore,
         entities: snapshotOf(BASE).entities ?? [],
         relationships: snapshotOf(BASE).relationships ?? [],
+        nodes: panelStore.getState().nodes,
+        links: panelStore.getState().links,
         entitiesStale: true,
         onClose: () => {},
         onSelect: () => {},

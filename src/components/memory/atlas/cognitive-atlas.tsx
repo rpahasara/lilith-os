@@ -35,7 +35,7 @@ import { createSimulation, matchCue, traceAssociations } from "@/lib/memory/atla
 import { createAtlasStore } from "@/lib/memory/atlas/store";
 import { buildSyntheticGraph } from "@/lib/memory/atlas/synthetic";
 import type { AtlasFocus, AtlasNode, RegionId } from "@/lib/memory/atlas/types";
-import { FAILURE_LINE } from "@/lib/memory/atlas/real-source";
+import { FAILURE_LINE, associationTotals, associationsOf, entityMembers } from "@/lib/memory/atlas/real-source";
 import { cn } from "@/lib/utils";
 import { AtlasDock, BACKDROP_SHADE, DEFAULT_VISUALS, GLOW_GAIN, type AtlasVisuals } from "./atlas-dock";
 import { NodeInspector, RegionInspector } from "./atlas-inspector";
@@ -149,6 +149,8 @@ export default function CognitiveAtlas() {
 
   const [view, setView] = useState<AtlasView>("brain");
   const [selection, setSelection] = useState<Selection>(null);
+  /* Real memory: an entity whose records and pathways are highlighted */
+  const [entityFocus, setEntityFocus] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hotRegion, setHotRegion] = useState<RegionId | null>(null);
   const [recall, setRecall] = useState<RecallState | null>(null);
@@ -203,6 +205,7 @@ export default function CognitiveAtlas() {
     (next: AtlasSource) => {
       setSource(next);
       setSelection(null);
+      setEntityFocus(null);
       setHoveredId(null);
       setRecall(null);
       setPlaying(false);
@@ -297,7 +300,10 @@ export default function CognitiveAtlas() {
     });
   }, []);
 
-  const selectNode = useCallback((id: string | null) => setSelection(id ? { type: "node", id } : null), []);
+  const selectNode = useCallback((id: string | null) => {
+    setEntityFocus(null);
+    setSelection(id ? { type: "node", id } : null);
+  }, []);
   const selectRegion = useCallback((id: RegionId | null) => {
     setRecall(null);
     setSelection(id ? { type: "region", id } : null);
@@ -332,6 +338,7 @@ export default function CognitiveAtlas() {
       const target = e.target as HTMLElement | null;
       if (e.key === "Escape") {
         if (menu) setMenu(null);
+        else if (entityFocus) setEntityFocus(null);
         else if (selection) setSelection(null);
         else if (recall) setRecall(null);
         else {
@@ -391,7 +398,7 @@ export default function CognitiveAtlas() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menu, selection, recall, toggleMotion, resetView, toggleActivity]);
+  }, [menu, entityFocus, selection, recall, toggleMotion, resetView, toggleActivity]);
 
   /* what the scene should emphasise */
   const focus = useMemo<AtlasFocus>(() => {
@@ -411,11 +418,30 @@ export default function CognitiveAtlas() {
       if (selectedNode) nodes.set(selectedNode.id, 2);
       return { nodes, links, region: -1, dim: 1 };
     }
+    if (isReal && selectedNode && entityFocus) {
+      // every record carrying the entity, and the pathways that join them
+      const members = new Set(entityMembers(entityFocus, state.nodes));
+      members.forEach((id) => nodes.set(id, 1));
+      nodes.set(selectedNode.id, 2);
+      for (const l of state.links) {
+        if (!members.has(l.source) || !members.has(l.target)) continue;
+        if (l.basis === "explicit" || l.viaIds?.includes(entityFocus)) links.add(l.id);
+      }
+      return { nodes, links, region: -1, dim: 1 };
+    }
     if (selectedNode) {
       neighbours(selectedNode.id);
       nodes.set(selectedNode.id, 2);
       store.linksOf(selectedNode.id).forEach((l) => links.add(l.id));
-      return { nodes, links, region: -1, dim: 1 };
+      if (!isReal) return { nodes, links, region: -1, dim: 1 };
+      // Real memory: also the associations the simplified drawing leaves out
+      const extra: NonNullable<AtlasFocus["extra"]> = [];
+      for (const { id: other, via } of associationsOf(selectedNode.id, state.nodes, state.links).shared) {
+        if (!nodes.has(other)) nodes.set(other, 1);
+        if (store.between(selectedNode.id, other)) continue;
+        extra.push({ id: `assoc:${selectedNode.id}|${other}`, source: selectedNode.id, target: other, strength: 0.34 + Math.min(3, via.length) * 0.07 });
+      }
+      return { nodes, links, region: -1, dim: 1, extra };
     }
     if (selectedRegion) {
       for (const n of state.nodes) if (n.region === selectedRegion) nodes.set(n.id, 1);
@@ -427,7 +453,10 @@ export default function CognitiveAtlas() {
       return { nodes, links, region: -1, dim: 0 };
     }
     return NO_FOCUS;
-  }, [recall, selectedNode, selectedRegion, hoveredId, state, store]);
+  }, [recall, selectedNode, selectedRegion, hoveredId, state, store, isReal, entityFocus]);
+
+  /* Real memory: every association, against what the brain draws */
+  const totals = useMemo(() => (isReal ? associationTotals(state.nodes, state.links) : null), [isReal, state.nodes, state.links]);
 
   /* where the camera should settle */
   const cameraView = useMemo<CameraIntent>(() => {
@@ -574,6 +603,7 @@ export default function CognitiveAtlas() {
             visuals={sceneVisuals}
             labels={labelsOn}
             idleMemories={!isReal}
+            adaptiveGlow={isReal}
             insets={insets}
             surface={surface}
             anchors={anchors}
@@ -610,6 +640,11 @@ export default function CognitiveAtlas() {
                 <span className="text-ink-muted">{state.nodes.length}</span>{" "}
                 {isReal ? (state.nodes.length === 1 ? "record" : "records") : "memories"} ·{" "}
                 <span className="text-ink-muted">{state.links.length}</span> pathways ·{" "}
+                {totals && totals.total !== state.links.length && (
+                  <span title="Every pair of records the source links or that shares an entity. The brain draws a simplified set; select a record to see all of its associations.">
+                    <span className="text-ink-muted">{totals.total}</span> associations ·{" "}
+                  </span>
+                )}
                 <span className="text-ink-muted">{REGIONS.length}</span> domains
               </p>
             </div>
@@ -697,7 +732,11 @@ export default function CognitiveAtlas() {
                     entities={real.entities}
                     relationships={real.relationships}
                     entitiesStale={real.entitiesStale}
-                    onClose={() => setSelection(null)}
+                    nodes={state.nodes}
+                    links={state.links}
+                    focusedEntity={entityFocus}
+                    onFocusEntity={(id) => setEntityFocus((current) => (current === id ? null : id))}
+                    onClose={() => selectNode(null)}
                     onSelect={selectNode}
                     onExplore={(n: AtlasNode) => {
                       if (view !== "brain") changeView("brain");
@@ -709,6 +748,7 @@ export default function CognitiveAtlas() {
                     region={selectedRegion}
                     state={state}
                     store={store}
+                    associations={totals?.byRegion.get(selectedRegion) ?? 0}
                     onClose={() => setSelection(null)}
                     onSelect={selectNode}
                   />

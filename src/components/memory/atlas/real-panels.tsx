@@ -10,13 +10,13 @@
  */
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { AlertTriangle, Database, FlaskConical, Link2, Loader2, RefreshCw, Route, Share2 } from "lucide-react";
+import { AlertTriangle, Database, FlaskConical, Focus, Link2, Loader2, RefreshCw, Route, Share2 } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { ConfidenceMeter } from "@/components/memory/confidence-meter";
 import { KindTag, ProvenanceBadge } from "@/components/memory/provenance-badge";
 import { entityRelations } from "@/lib/memory/explorer";
 import { CATEGORY_META, ENTITY_META, type Entity, type MemoryCategory, type Relationship } from "@/lib/memory/types";
-import { FAILURE_LINE, UNMAPPED_REGIONS, regionLabel, type SnapshotFailure } from "@/lib/memory/atlas/real-source";
+import { FAILURE_LINE, UNMAPPED_REGIONS, associationsOf, regionLabel, type SnapshotFailure } from "@/lib/memory/atlas/real-source";
 import { REGIONS, REGION_BY_ID } from "@/lib/memory/atlas/regions";
 import type { AtlasStore } from "@/lib/memory/atlas/store";
 import type { AtlasLink, AtlasNode, AtlasState, RegionId } from "@/lib/memory/atlas/types";
@@ -56,11 +56,21 @@ export function RealNodeInspector({
   entities,
   relationships,
   entitiesStale = false,
+  nodes,
+  links,
+  focusedEntity = null,
+  onFocusEntity,
   onClose,
   onSelect,
   onExplore,
   className,
 }: {
+  /** the whole graph, so every association is listed, not only drawn ones. */
+  nodes: readonly AtlasNode[];
+  links: readonly AtlasLink[];
+  /** the entity whose records are highlighted on the brain, if any. */
+  focusedEntity?: string | null;
+  onFocusEntity?: (entityId: string) => void;
   node: AtlasNode;
   store: AtlasStore;
   entities: Entity[];
@@ -73,15 +83,19 @@ export function RealNodeInspector({
   className?: string;
 }) {
   const region = REGION_BY_ID[node.region];
-  const around = store
-    .linksOf(node.id)
-    .map((link) => ({ link, other: store.node(link.source === node.id ? link.target : link.source) }))
-    .filter((a): a is { link: AtlasLink; other: AtlasNode } => Boolean(a.other));
-  const explicit = around.filter((a) => a.link.basis === "explicit");
-  const shared = around
-    .filter((a) => a.link.basis === "shared-entity")
-    .sort((a, b) => (b.link.via?.length ?? 0) - (a.link.via?.length ?? 0));
+  // every association, from the data — the brain may draw only some of them
+  const all = associationsOf(node.id, nodes, links);
+  const resolve = (id: string) => store.node(id);
+  const explicit = all.explicit
+    .map((id) => ({ other: resolve(id), drawn: true, note: "stated relation" }))
+    .filter((a): a is { other: AtlasNode; drawn: boolean; note: string } => Boolean(a.other));
+  const shared = all.shared
+    .map(({ id, via }) => ({ other: resolve(id), drawn: Boolean(store.between(node.id, id)), note: via.join(", ") }))
+    .filter((a): a is { other: AtlasNode; drawn: boolean; note: string } => Boolean(a.other));
+  const total = explicit.length + shared.length;
+  const drawnCount = explicit.length + shared.filter((a) => a.drawn).length;
   const refs = node.entityRefs ?? [];
+  const membersOf = (entityId: string) => nodes.filter((n) => n.entityRefs?.some((e) => e.id === entityId)).length;
 
   return (
     <Shell
@@ -94,7 +108,7 @@ export function RealNodeInspector({
           <button
             type="button"
             onClick={() => onExplore(node)}
-            disabled={around.length === 0}
+            disabled={drawnCount === 0}
             className="group flex w-full items-center justify-center gap-2 rounded-full border border-wine/30 bg-gradient-to-r from-wine-deep/50 to-wine/30 px-4 py-2 text-xs font-medium text-ink transition-[border-color,box-shadow] hover:border-wine-bright/50 hover:shadow-[0_10px_30px_-14px_rgba(201,84,115,0.9)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Route className="h-3.5 w-3.5 text-wine-bright" />
@@ -178,14 +192,37 @@ export function RealNodeInspector({
               {refs.map((ref) => {
                 const rels = entityRelations(ref.id, entities, relationships);
                 const Icon = ENTITY_META[ref.type]?.icon;
+                const count = membersOf(ref.id);
+                const on = focusedEntity === ref.id;
                 return (
-                  <li key={ref.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-2.5 py-1.5">
+                  <li
+                    key={ref.id}
+                    className={cn(
+                      "rounded-lg border bg-white/[0.02] px-2.5 py-1.5 transition-colors",
+                      on ? "border-white/25 bg-white/[0.05]" : "border-white/[0.06]",
+                    )}
+                  >
                     <p className="flex items-center gap-1.5 text-xs text-ink-muted">
                       {Icon && <Icon className="h-3 w-3 text-ink-faint" />}
                       {ref.label}
                       <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
                         {ENTITY_META[ref.type]?.label ?? ref.type}
                       </span>
+                      {onFocusEntity && count > 1 && (
+                        <button
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => onFocusEntity(ref.id)}
+                          title={on ? "Stop highlighting" : `Highlight the ${count} records that carry ${ref.label}`}
+                          className={cn(
+                            "ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] transition-colors",
+                            on ? "bg-white/[0.1] text-ink" : "text-ink-faint hover:bg-white/[0.06] hover:text-ink",
+                          )}
+                        >
+                          <Focus className="h-2.5 w-2.5" />
+                          {count} records
+                        </button>
+                      )}
                     </p>
                     {rels.length > 0 && (
                       <ul className="mt-1 space-y-0.5 pl-4">
@@ -222,9 +259,19 @@ export function RealNodeInspector({
 
         <Section
           label="Associations"
-          action={<span className="font-mono text-[10px] text-ink-faint">{around.length} pathways</span>}
+          action={
+            <span className="font-mono text-[10px] text-ink-faint">
+              {total}
+              {drawnCount !== total && <> · {drawnCount} drawn</>}
+            </span>
+          }
         >
-          {around.length === 0 ? (
+          {drawnCount !== total && (
+            <p className="mb-2 text-[10px] leading-snug text-ink-faint">
+              The brain draws a simplified set of pathways. While this record is selected, all {total} are shown.
+            </p>
+          )}
+          {total === 0 ? (
             <p className="text-xs text-ink-faint">The source links this record to no other, and it shares no entity with one.</p>
           ) : (
             <div className="space-y-3">
@@ -232,7 +279,7 @@ export function RealNodeInspector({
                 <AssociationList
                   heading="Linked by the source"
                   icon={Link2}
-                  items={explicit.map(({ link, other }) => ({ link, other, note: "stated relation" }))}
+                  items={explicit}
                   onSelect={onSelect}
                 />
               )}
@@ -240,7 +287,7 @@ export function RealNodeInspector({
                 <AssociationList
                   heading="Share an entity · derived here"
                   icon={Share2}
-                  items={shared.map(({ link, other }) => ({ link, other, note: (link.via ?? []).join(", ") }))}
+                  items={shared}
                   onSelect={onSelect}
                 />
               )}
@@ -276,7 +323,7 @@ function AssociationList({
 }: {
   heading: string;
   icon: typeof Link2;
-  items: { link: AtlasLink; other: AtlasNode; note: string }[];
+  items: { other: AtlasNode; drawn: boolean; note: string }[];
   onSelect: (id: string) => void;
 }) {
   return (
@@ -286,10 +333,10 @@ function AssociationList({
         {heading}
       </p>
       <ul className="-mx-2 space-y-0.5">
-        {items.map(({ link, other, note }) => {
+        {items.map(({ other, drawn, note }) => {
           const r = REGION_BY_ID[other.region];
           return (
-            <li key={link.id}>
+            <li key={other.id}>
               <button
                 type="button"
                 onClick={() => onSelect(other.id)}
@@ -303,7 +350,8 @@ function AssociationList({
                   <span className="line-clamp-2 text-xs text-ink-muted group-hover:text-ink">{other.title}</span>
                   <span className="mt-0.5 block truncate font-mono text-[9px] uppercase tracking-[0.1em] text-ink-faint">
                     {note}
-                    {link.live && <span className="text-cyan-bright"> · newly observed</span>}
+                    {!drawn && <span title="Not among the simplified pathways; shown while selected"> · not drawn</span>}
+                    {other.live && <span className="text-cyan-bright"> · newly observed</span>}
                   </span>
                 </span>
               </button>
@@ -321,6 +369,7 @@ export function RealRegionInspector({
   region: regionId,
   state,
   store,
+  associations,
   onClose,
   onSelect,
   className,
@@ -328,6 +377,8 @@ export function RealRegionInspector({
   region: RegionId;
   state: AtlasState;
   store: AtlasStore;
+  /** every association touching this region (drawn or not). */
+  associations: number;
   onClose: () => void;
   onSelect: (id: string) => void;
   className?: string;
@@ -371,10 +422,11 @@ export function RealRegionInspector({
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {[
             { label: "Records", value: members.length },
-            { label: "Pathways", value: internal + [...bridges.values()].reduce((s, v) => s + v, 0) },
+            { label: "Drawn", value: internal + [...bridges.values()].reduce((s, v) => s + v, 0) },
+            { label: "Associations", value: associations },
           ].map((m) => (
             <div key={m.label} className="rounded-[var(--radius-md)] border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
               <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint">{m.label}</p>

@@ -246,6 +246,14 @@ export class PathBuffers {
     this.packets.setDrawRange(0, this.count);
   }
 
+  /** Empty the buffer (used for the focus overlay, which is refilled whole). */
+  clear() {
+    this.index.clear();
+    this.count = 0;
+    this.lines.setDrawRange(0, 0);
+    this.packets.setDrawRange(0, 0);
+  }
+
   /** Take a pathway out of the scene (hidden in place, forgotten by id). */
   remove(id: string) {
     const i = this.index.get(id);
