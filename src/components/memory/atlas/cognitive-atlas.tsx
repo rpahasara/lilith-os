@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Cognitive Atlas — a living map of Lilith's memory (PROTOTYPE).
+ * Cognitive Atlas — a living map of Lilith's memory.
  *
  * The brain is the interface. It floats free in the Memory workspace — no
  * stage, no frame — rendered on a viewport-wide transparent layer behind the
@@ -9,10 +9,14 @@
  * domains are callouts on the brain, a memory or a domain opens a contextual
  * inspector, and everything secondary sits behind one small control dock.
  *
- * This component owns interaction state and composes those layers. All memory
- * content is synthetic (see lib/memory/atlas/synthetic.ts); the only thing that
- * mutates the graph is `store.apply(event)`, which is where real memory events
- * will arrive later.
+ * Two sources, chosen explicitly and never mixed (Simulation is the default):
+ *  - SIMULATION — the synthetic graph and its invented activity
+ *    (lib/memory/atlas/synthetic.ts, simulation.ts), labelled as such;
+ *  - REAL MEMORY — a read-only projection of the memory read model
+ *    (lib/memory/atlas/real-source.ts, ./use-real-atlas.ts). Only what the
+ *    backend returns; on failure an honest notice, never a stand-in.
+ * Each has its own store; the brain, its interactions and its settings are
+ * shared. `/memory/atlas?source=real` opens Real memory directly.
  */
 import {
   useCallback,
@@ -23,7 +27,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { Brain, FlaskConical } from "lucide-react";
+import { AlertTriangle, Brain, Database, FlaskConical } from "lucide-react";
 import { MemoryViewSwitch, type MemoryView } from "@/components/memory/memory-view-switch";
 import { buildBrainLayout } from "@/lib/memory/atlas/brain-shape";
 import { REGIONS, REGION_BY_ID } from "@/lib/memory/atlas/regions";
@@ -31,6 +35,7 @@ import { createSimulation, matchCue, traceAssociations } from "@/lib/memory/atla
 import { createAtlasStore } from "@/lib/memory/atlas/store";
 import { buildSyntheticGraph } from "@/lib/memory/atlas/synthetic";
 import type { AtlasFocus, AtlasNode, RegionId } from "@/lib/memory/atlas/types";
+import { FAILURE_LINE } from "@/lib/memory/atlas/real-source";
 import { cn } from "@/lib/utils";
 import { AtlasDock, BACKDROP_SHADE, DEFAULT_VISUALS, GLOW_GAIN, type AtlasVisuals } from "./atlas-dock";
 import { NodeInspector, RegionInspector } from "./atlas-inspector";
@@ -40,6 +45,16 @@ import { CognitionFeed, GrowthLog, ThoughtTicker } from "./cognition-feed";
 import { GrowthTimeline } from "./growth-timeline";
 import { RecallConsole, type RecallState } from "./recall-console";
 import { RegionIndex } from "./region-index";
+import {
+  ObservedChanges,
+  RealNodeInspector,
+  RealRegionInspector,
+  RealStateNotice,
+  RealTimelineNotice,
+  SourceSwitch,
+  type AtlasSource,
+} from "./real-panels";
+import { useRealAtlas } from "./use-real-atlas";
 import type { CameraIntent, SceneAnchors, SceneApi, SceneVisuals } from "./scene/brain-scene";
 
 type Selection = { type: "node"; id: string } | { type: "region"; id: RegionId } | null;
@@ -61,6 +76,17 @@ function useMediaQuery(query: string, serverValue: boolean) {
     () => serverValue,
   );
 }
+
+/** The page's address for a view and source. */
+function atlasHref(view: AtlasView, source: AtlasSource) {
+  const params = new URLSearchParams();
+  if (view === "timeline") params.set("view", "timeline");
+  if (source === "real") params.set("source", "real");
+  const q = params.toString();
+  return q ? `/memory/atlas?${q}` : "/memory/atlas";
+}
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
 function useTabHidden() {
   return useSyncExternalStore(
@@ -105,11 +131,20 @@ export default function CognitiveAtlas() {
   const hidden = useTabHidden();
 
   /* the brain, the synthetic graph and its event source — built once */
-  const [{ layout, store, simulation }] = useState(() => {
+  const [{ layout, simStore, simulation, blank }] = useState(() => {
     const layout = buildBrainLayout();
-    const store = createAtlasStore(buildSyntheticGraph(layout), layout);
-    return { layout, store, simulation: createSimulation(store) };
+    const simStore = createAtlasStore(buildSyntheticGraph(layout), layout);
+    // what Real mode draws while it has no confirmed snapshot: no memories at all
+    const blank = createAtlasStore({ nodes: [], links: [], origin: 0, now: 1 }, layout);
+    return { layout, simStore, simulation: createSimulation(simStore), blank };
   });
+
+  /* Which source the brain shows. Simulation unless chosen; never remembered. */
+  const [source, setSource] = useState<AtlasSource>("simulation");
+  const real = useRealAtlas(layout, source === "real", hidden);
+  const isReal = source === "real";
+  const store = isReal ? (real.phase === "ready" ? real.store : blank) : simStore;
+  const origin = isReal ? "real" : "synthetic";
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
 
   const [view, setView] = useState<AtlasView>("brain");
@@ -147,21 +182,38 @@ export default function CognitiveAtlas() {
     [visuals.orbit, visuals.pathways, visuals.glow],
   );
 
-  /* /memory/atlas?view=timeline deep-links into the timeline */
+  /* /memory/atlas?view=timeline&source=real deep-link into a view and a source */
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("view") === "timeline") setView("timeline");
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("view") === "timeline") setView("timeline");
+    if (params.get("source") === "real") setSource("real");
   }, []);
-  const changeView = useCallback((next: MemoryView) => {
-    if (next === "archive") return;
-    setView(next);
-    setRecall(null);
-    setPlaying(false);
-    if (next === "brain") setScrub(1);
-    window.history.replaceState(null, "", next === "timeline" ? "/memory/atlas?view=timeline" : "/memory/atlas");
-  }, []);
+  const changeView = useCallback(
+    (next: MemoryView) => {
+      if (next === "archive") return;
+      setView(next);
+      setRecall(null);
+      setPlaying(false);
+      if (next === "brain") setScrub(1);
+      window.history.replaceState(null, "", atlasHref(next, source));
+    },
+    [source],
+  );
+  const changeSource = useCallback(
+    (next: AtlasSource) => {
+      setSource(next);
+      setSelection(null);
+      setHoveredId(null);
+      setRecall(null);
+      setPlaying(false);
+      setScrub(1);
+      window.history.replaceState(null, "", atlasHref(view, next));
+    },
+    [view],
+  );
 
   /* ambient synthetic activity — only while the live brain is on screen and in motion */
-  const simRunning = simulating && moving && !hidden && view === "brain";
+  const simRunning = !isReal && simulating && moving && !hidden && view === "brain";
   useEffect(() => {
     if (!simRunning) return;
     simulation.start();
@@ -184,10 +236,23 @@ export default function CognitiveAtlas() {
 
   const logged = useRef(0);
   useEffect(() => {
-    if (!recall?.done || logged.current === recall.trace.id) return;
+    // only the simulation records a "recall"; following real links records nothing
+    if (isReal || !recall?.done || logged.current === recall.trace.id) return;
     logged.current = recall.trace.id;
     store.apply({ type: "memory.recalled", at: Date.now(), cue: recall.trace.cue, chain: recall.trace.nodes });
-  }, [recall, store]);
+  }, [recall, store, isReal]);
+
+  /* Real memory: starting words drawn from entities several records share */
+  const realCues = useMemo(() => {
+    if (!isReal) return [];
+    const counts = new Map<string, number>();
+    for (const n of state.nodes) for (const e of new Set(n.entities)) counts.set(e, (counts.get(e) ?? 0) + 1);
+    return [...counts]
+      .filter(([, c]) => c > 1)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 5)
+      .map(([label]) => label);
+  }, [isReal, state.nodes]);
 
   const startRecall = useCallback(
     (seedId: string, cue: string) => {
@@ -243,7 +308,8 @@ export default function CognitiveAtlas() {
   const hoveredNode = hoveredId ? store.node(hoveredId) ?? null : null;
   const inspecting = Boolean(selectedNode || selectedRegion);
   // the marker sits exactly where the chart draws it; at the far right it means "now"
-  const asOf = view === "timeline" && scrub < 0.999 ? scrub * 0.96 : NOW;
+  // Real memory has no growth history: everything present is shown
+  const asOf = !isReal && view === "timeline" && scrub < 0.999 ? scrub * 0.96 : NOW;
 
   /* ------------------------------------------------------------- controls */
   const api = useRef<SceneApi | null>(null);
@@ -485,12 +551,13 @@ export default function CognitiveAtlas() {
             recall={recall}
             hotRegion={hotRegion ? REGION_BY_ID[hotRegion].index : -1}
             asOf={asOf}
-            timeline={view === "timeline"}
+            timeline={!isReal && view === "timeline"}
             calm={!moving}
             paused={hidden}
             formKey={formKey}
             visuals={sceneVisuals}
             labels={labelsOn}
+            idleMemories={!isReal}
             insets={insets}
             surface={surface}
             anchors={anchors}
@@ -503,6 +570,7 @@ export default function CognitiveAtlas() {
         {/* pointer surface: drag, zoom, hover and click all land here */}
         <div ref={surface} className="absolute inset-0 touch-none" />
         <AtlasLabels
+          origin={origin}
           register={register}
           counts={counts}
           live={fresh}
@@ -523,20 +591,42 @@ export default function CognitiveAtlas() {
             <div>
               <h1 className="text-lg font-semibold leading-tight tracking-[-0.03em] text-ink">Cognitive Atlas</h1>
               <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
-                <span className="text-ink-muted">{state.nodes.length}</span> memories ·{" "}
+                <span className="text-ink-muted">{state.nodes.length}</span> {isReal ? "records" : "memories"} ·{" "}
                 <span className="text-ink-muted">{state.links.length}</span> pathways ·{" "}
                 <span className="text-ink-muted">{REGIONS.length}</span> domains
               </p>
             </div>
           </div>
           <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-amber/25 bg-amber/10 px-2.5 py-1 text-[10px] font-medium text-amber backdrop-blur-md"
-              title="This is a preview. Every memory shown here is invented; the Atlas is not connected to Lilith's real memory."
-            >
-              <FlaskConical className="h-3 w-3" />
-              Preview · Synthetic data
-            </span>
+            {isReal ? (
+              real.phase === "ready" && real.stale ? (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full border border-amber/25 bg-amber/10 px-2.5 py-1 text-[10px] font-medium text-amber backdrop-blur-md"
+                  title={`The latest read failed: ${FAILURE_LINE[real.stale.failure]} Showing the last successful snapshot.`}
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  Real memory · stale since {clock(real.lastGoodAt)}
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full border border-cyan/25 bg-cyan/10 px-2.5 py-1 text-[10px] font-medium text-cyan-bright backdrop-blur-md"
+                  title="Records read from Lilith's memory read model. Read-only: nothing here writes, and nothing is stored in this browser."
+                >
+                  <Database className="h-3 w-3" />
+                  Real memory · read-only
+                  {real.phase === "ready" && <span className="text-ink-faint">· read {clock(real.lastGoodAt)}</span>}
+                </span>
+              )
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber/25 bg-amber/10 px-2.5 py-1 text-[10px] font-medium text-amber backdrop-blur-md"
+                title="This is a preview. Every memory shown here is invented; the simulation is not connected to Lilith's real memory."
+              >
+                <FlaskConical className="h-3 w-3" />
+                Preview · Synthetic data
+              </span>
+            )}
+            <SourceSwitch value={source} onChange={changeSource} />
             <MemoryViewSwitch active={view} onSelect={changeView} inPlace={["brain", "timeline"]} />
           </div>
         </header>
@@ -553,6 +643,7 @@ export default function CognitiveAtlas() {
               className="absolute left-0 top-[64px] z-20 w-[250px] max-xl:top-[112px]"
             >
               <RegionIndex
+                origin={origin}
                 nodes={state.nodes}
                 active={selectedRegion}
                 onHover={setHotRegion}
@@ -580,7 +671,42 @@ export default function CognitiveAtlas() {
                 transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
                 className="pointer-events-auto flex max-h-full min-h-0 flex-col"
               >
-                {selectedNode ? (
+                {isReal && real.phase === "ready" && selectedNode ? (
+                  <RealNodeInspector
+                    node={selectedNode}
+                    store={store}
+                    entities={real.entities}
+                    relationships={real.relationships}
+                    onClose={() => setSelection(null)}
+                    onSelect={selectNode}
+                    onExplore={(n: AtlasNode) => {
+                      if (view !== "brain") changeView("brain");
+                      startRecall(n.id, n.title);
+                    }}
+                  />
+                ) : isReal && selectedRegion ? (
+                  <RealRegionInspector
+                    region={selectedRegion}
+                    state={state}
+                    store={store}
+                    onClose={() => setSelection(null)}
+                    onSelect={selectNode}
+                  />
+                ) : isReal ? (
+                  real.phase === "ready" ? (
+                    <ObservedChanges
+                      state={state}
+                      firstAt={real.firstAt}
+                      lastGoodAt={real.lastGoodAt}
+                      stale={real.stale}
+                      checking={real.checking}
+                      onCheck={real.check}
+                      onSelect={selectNode}
+                      onClose={() => setSideOpen(false)}
+                      className="max-h-full"
+                    />
+                  ) : null
+                ) : selectedNode ? (
                   <NodeInspector
                     node={selectedNode}
                     store={store}
@@ -636,6 +762,7 @@ export default function CognitiveAtlas() {
           {view === "brain" && !sideOpen && !menu && (
             // steps back while the dock is in use, so tooltips have clear air
             <ThoughtTicker
+              origin={origin}
               activity={state.activity}
               onSelect={selectNode}
               className="w-[min(100%,300px)] transition-opacity duration-200 group-has-[[role=toolbar]:hover]/zone:opacity-0 group-has-[[role=toolbar]:focus-within]/zone:opacity-0"
@@ -644,6 +771,9 @@ export default function CognitiveAtlas() {
           <AtlasDock
             className="pointer-events-auto"
             view={view}
+            source={source}
+            onCheck={isReal ? real.check : undefined}
+            checking={real.phase === "ready" || real.phase === "unavailable" ? real.checking : real.phase === "loading"}
             motion={moving}
             heldForReducedMotion={reducedMotion && motionChoice === null}
             onMotion={toggleMotion}
@@ -687,6 +817,8 @@ export default function CognitiveAtlas() {
                 className="flex justify-center"
               >
                 <RecallConsole
+                  origin={origin}
+                  cues={isReal ? realCues : undefined}
                   store={store}
                   recall={recall}
                   onRecall={recallCue}
@@ -703,23 +835,40 @@ export default function CognitiveAtlas() {
                 exit={{ opacity: 0, y: 12 }}
                 transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               >
-                <GrowthTimeline
-                  nodes={state.nodes}
-                  links={state.links}
-                  origin={store.origin}
-                  now={store.now}
-                  scrub={scrub}
-                  playing={playing}
-                  onScrub={(v) => {
-                    setPlaying(false);
-                    setScrub(v);
-                  }}
-                  onPlay={togglePlay}
-                />
+                {isReal ? (
+                  <RealTimelineNotice nodes={state.nodes} />
+                ) : (
+                  <GrowthTimeline
+                    nodes={state.nodes}
+                    links={state.links}
+                    origin={store.origin}
+                    now={store.now}
+                    scrub={scrub}
+                    playing={playing}
+                    onScrub={(v) => {
+                      setPlaying(false);
+                      setScrub(v);
+                    }}
+                    onPlay={togglePlay}
+                  />
+                )}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
+
+        {isReal && real.phase !== "ready" && real.phase !== "off" && (
+          <RealStateNotice
+            phase={real.phase === "loading" ? "loading" : "unavailable"}
+            failure={real.phase === "unavailable" ? real.failure : undefined}
+            checking={real.phase === "unavailable" && real.checking}
+            onRetry={real.check}
+            onSimulation={() => changeSource("simulation")}
+          />
+        )}
+        {isReal && real.phase === "ready" && state.nodes.length === 0 && (
+          <RealStateNotice phase="empty" onSimulation={() => changeSource("simulation")} />
+        )}
 
         <p className="pointer-events-none absolute bottom-1 right-0 z-10 hidden font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint/80 xl:block">
           {!webgl

@@ -2,20 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, FlaskConical, GitMerge, Pause, Play, Route, Sparkles, X, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Database, FlaskConical, GitMerge, Pause, Play, Route, Sparkles, X, type LucideIcon } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { REGION_BY_ID } from "@/lib/memory/atlas/regions";
 import type { AtlasActivity, AtlasEvent, AtlasNode, AtlasState } from "@/lib/memory/atlas/types";
+export type { AtlasActivity };
 import { cn } from "@/lib/utils";
 
-const KIND: Record<AtlasEvent["type"], { label: string; icon: LucideIcon }> = {
+export const KIND: Record<AtlasEvent["type"], { label: string; icon: LucideIcon }> = {
   "memory.learned": { label: "Learned", icon: Sparkles },
   "memory.linked": { label: "Linked", icon: GitMerge },
   "memory.reinforced": { label: "Reinforced", icon: ArrowUpRight },
   "memory.recalled": { label: "Recalled", icon: Route },
+  // real memory: differences between two snapshots of the read model
+  "record.observed": { label: "Newly observed", icon: Sparkles },
+  "record.changed": { label: "Changed", icon: ArrowUpRight },
+  "record.withdrawn": { label: "No longer in the read model", icon: X },
+  "link.observed": { label: "Association observed", icon: GitMerge },
+  "link.withdrawn": { label: "Association gone", icon: X },
 };
 
-function ago(at: number, now: number) {
+export function ago(at: number, now: number) {
   const s = Math.max(0, Math.round((now - at) / 1000));
   if (s < 5) return "now";
   if (s < 60) return `${s}s`;
@@ -23,7 +30,7 @@ function ago(at: number, now: number) {
 }
 
 /** A clock that ticks every few seconds so relative times stay honest. */
-function useTick(ms: number) {
+export function useTick(ms: number) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
@@ -118,7 +125,7 @@ export function CognitionFeed({
   );
 }
 
-function FeedRow({
+export function FeedRow({
   item,
   now,
   onSelect,
@@ -178,7 +185,7 @@ export function GrowthLog({
 }) {
   const visible = nodes
     .filter((n) => n.born <= asOf)
-    .sort((a, b) => b.createdAt - a.createdAt)
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     .slice(0, 16);
   return (
     <GlassCard strong animated={false} className={cn("flex min-h-0 flex-col", className)}>
@@ -208,7 +215,7 @@ export function GrowthLog({
                   <span className="line-clamp-2 text-xs text-ink-muted group-hover:text-ink">{n.title}</span>
                   <span className="mt-0.5 block font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">
                     {region.label} ·{" "}
-                    {new Date(n.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                    {new Date(n.createdAt ?? 0).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
                   </span>
                 </span>
               </button>
@@ -220,7 +227,7 @@ export function GrowthLog({
   );
 }
 
-function CloseButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function CloseButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -241,7 +248,10 @@ export function ThoughtTicker({
   activity,
   onSelect,
   className,
+  origin = "synthetic",
 }: {
+  /** real memory: the row names an observed difference, not a thought. */
+  origin?: "synthetic" | "real";
   activity: AtlasActivity[];
   onSelect: (id: string) => void;
   className?: string;
@@ -284,10 +294,17 @@ export function ThoughtTicker({
             <span className="min-w-0">
               <span className="flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-[0.16em]" style={{ color: region.color }}>
                 {kind.label} · {region.label}
-                <span className="flex items-center gap-0.5 text-amber/90">
-                  <FlaskConical className="h-2 w-2" />
-                  simulated
-                </span>
+                {origin === "real" ? (
+                  <span className="flex items-center gap-0.5 text-cyan-bright/90">
+                    <Database className="h-2 w-2" />
+                    snapshot
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-0.5 text-amber/90">
+                    <FlaskConical className="h-2 w-2" />
+                    simulated
+                  </span>
+                )}
               </span>
               <span className="block truncate text-[11px] leading-tight text-ink-muted">{item.text}</span>
             </span>

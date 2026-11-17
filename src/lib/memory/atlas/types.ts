@@ -5,12 +5,14 @@
  * brain-shaped volume, every association is a pathway between two nodes, and
  * everything that happens to memory arrives as an `AtlasEvent`.
  *
- * PROTOTYPE STATUS: the only event source today is the synthetic simulation in
- * `simulation.ts`. Nothing here reads, writes or implies real LILITH memory.
- * The event contract below is the seam a real source will plug into later
- * (see `docs/engineering/cognitive-atlas-prototype.md`).
+ * Two sources feed it, never mixed in one store:
+ *  - SIMULATION: the synthetic graph and activity in `synthetic.ts` /
+ *    `simulation.ts`. Invented, and labelled as such.
+ *  - REAL MEMORY: a read-only projection of the authorized memory read model
+ *    (`real-source.ts`). Only what the backend returns; nothing is filled in.
+ * See `docs/engineering/cognitive-atlas-real-memory.md`.
  */
-import type { MemoryKind, ProvenanceKind } from "@/lib/memory/types";
+import type { EntityType, MemoryCategory, MemoryKind, ProvenanceKind } from "@/lib/memory/types";
 
 export const REGION_IDS = [
   "career",
@@ -48,21 +50,42 @@ export interface AtlasRegion {
   focusAt: Vec3;
 }
 
+/** Where a node or link came from. One store holds one origin only. */
+export type AtlasOrigin = "synthetic" | "real";
+
+export interface AtlasEntityRef {
+  id: string;
+  type: EntityType;
+  label: string;
+}
+
 export interface AtlasNode {
   id: string;
+  origin: AtlasOrigin;
   region: RegionId;
+  /** Real records: the category the source gave, kept even where the brain
+   *  places it in a region of another name (Work sits in the Career field). */
+  category?: MemoryCategory;
   title: string;
   detail: string;
   kind: MemoryKind;
   tags: string[];
   /** named entities this memory mentions. */
   entities: string[];
-  provenance: { kind: ProvenanceKind; label: string; at: number };
-  /** 0–100 */
-  confidence: number;
-  /** 0–100 — drives node size. */
-  importance: number;
-  createdAt: number; // epoch ms
+  /** Real records keep the structured references, for the inspector. */
+  entityRefs?: AtlasEntityRef[];
+  /** `at` and `account` only when the source states them. */
+  provenance: { kind: ProvenanceKind; label: string; at?: number; account?: string };
+  /** 0–100, as stated by the source. Absent when the source gives none. */
+  confidence?: number;
+  /** 0–100, as stated by the source. Absent when the source gives none. Node
+   *  size falls back to a rendering default (`renderWeight`), never to this. */
+  importance?: number;
+  /** epoch ms. Synthetic: when it was "learned". Real: the record's own
+   *  created_at, if any — not proof of when Lilith learned it. */
+  createdAt?: number;
+  /** Real records: the record's updated_at, if any. */
+  updatedAt?: number;
   reinforcedAt?: number;
   reinforcements: number;
   recalls: number;
@@ -74,15 +97,29 @@ export interface AtlasNode {
   live: boolean;
 }
 
+/**
+ * Why two memories are joined.
+ *  - synthetic:     invented by the simulation.
+ *  - explicit:      the source lists the two records as related.
+ *  - shared-entity: derived here — the source tagged both with the same
+ *                   entity. A lookup, not a claim that the memories relate.
+ * Entity-to-entity relationships are not memory links; they are shown on the
+ * entities themselves (inspector), never drawn as pathways.
+ */
+export type LinkBasis = "synthetic" | "explicit" | "shared-entity";
+
 export interface AtlasLink {
   id: string;
   source: string;
   target: string;
+  basis: LinkBasis;
+  /** shared-entity links: the entities both memories carry. */
+  via?: string[];
   /** human label for the association. */
   kind: string;
-  /** 0–1 */
+  /** 0–1. Real links: a rendering weight, not a measured strength. */
   strength: number;
-  createdAt: number;
+  createdAt?: number;
   born: number;
   live: boolean;
 }
@@ -95,13 +132,24 @@ export type AtlasNodeInput = Omit<
   "position" | "born" | "live" | "reinforcements" | "recalls"
 >;
 
-export type AtlasLinkInput = Pick<AtlasLink, "source" | "target" | "kind" | "strength">;
+export type AtlasLinkInput = Pick<AtlasLink, "source" | "target" | "kind" | "strength"> &
+  Partial<Pick<AtlasLink, "id" | "basis" | "via">>;
 
+/**
+ * Simulation events (`memory.*`) describe invented cognition. Real-memory
+ * events (`record.*`, `link.*`) describe only what differs between two
+ * successful snapshots of the read model — never learning, forgetting or recall.
+ */
 export type AtlasEvent =
   | { type: "memory.learned"; at: number; node: AtlasNodeInput; links: AtlasLinkInput[] }
   | { type: "memory.linked"; at: number; link: AtlasLinkInput }
   | { type: "memory.reinforced"; at: number; nodeId: string; confidence?: number }
-  | { type: "memory.recalled"; at: number; cue: string; chain: string[] };
+  | { type: "memory.recalled"; at: number; cue: string; chain: string[] }
+  | { type: "record.observed"; at: number; node: AtlasNodeInput; links: AtlasLinkInput[] }
+  | { type: "record.changed"; at: number; node: AtlasNodeInput }
+  | { type: "record.withdrawn"; at: number; nodeId: string }
+  | { type: "link.observed"; at: number; link: AtlasLinkInput }
+  | { type: "link.withdrawn"; at: number; linkId: string };
 
 /** One line in the "live cognition" feed. */
 export interface AtlasActivity {
@@ -117,8 +165,10 @@ export interface AtlasState {
   nodes: AtlasNode[];
   links: AtlasLink[];
   activity: AtlasActivity[];
-  /** counts of what arrived through the live stream this session. */
+  /** counts of what arrived through the live stream this session (simulation). */
   session: { learned: number; linked: number; reinforced: number; recalled: number };
+  /** differences observed between real snapshots this session. */
+  changes: { observed: number; changed: number; withdrawn: number; links: number };
 }
 
 /** A traced association chain — the output of a recall. */

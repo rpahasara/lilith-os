@@ -11,6 +11,7 @@
  * None of it touches a network, a model or the real memory system.
  */
 import { LEARN_POOL, seedToInput } from "./synthetic";
+import { renderWeight } from "./render";
 import type { AtlasStore } from "./store";
 import type { AtlasEvent, AtlasLinkInput, AtlasNode, RecallTrace } from "./types";
 
@@ -25,7 +26,7 @@ export function nextLearnEvent(store: AtlasStore, cursor: number): AtlasEvent | 
   const at = Date.now();
   const id = `live-${++liveSerial}`;
   const node = seedToInput(id, item.region, item.seed, at);
-  node.importance = Math.max(node.importance, 58);
+  node.importance = Math.max(node.importance ?? 0, 58);
 
   const { nodes } = store.getState();
   const links: AtlasLinkInput[] = [];
@@ -36,7 +37,7 @@ export function nextLearnEvent(store: AtlasStore, cursor: number): AtlasEvent | 
     let bestScore = -1;
     for (const n of nodes) {
       if (used.has(n.id) || !n.tags.includes(tag)) continue;
-      const score = n.importance + (n.region !== item.region ? 30 : 0);
+      const score = renderWeight(n) + (n.region !== item.region ? 30 : 0);
       if (score > bestScore) {
         bestScore = score;
         best = n;
@@ -175,7 +176,7 @@ export function traceAssociations(
       const score =
         link.strength +
         (regions.has(node.region) ? 0 : 0.45) +
-        node.importance / 400 +
+        renderWeight(node) / 400 +
         (link.kind.startsWith("shares") ? 0.15 : 0);
       if (!best || score > best.score) best = { id: other, link: link.id, score };
     }
@@ -210,7 +211,7 @@ export function matchCue(store: AtlasStore, cue: string): AtlasNode | null {
       if (title.includes(w)) score += 2;
     }
     if (!score) continue;
-    score += node.importance / 100;
+    score += renderWeight(node) / 100;
     if (score > bestScore) {
       bestScore = score;
       best = node;

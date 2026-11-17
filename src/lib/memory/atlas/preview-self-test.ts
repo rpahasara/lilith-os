@@ -1,9 +1,11 @@
 /**
  * Headless regression test for the Cognitive Atlas boundary: the preview ships
- * in every build unless it is switched off, it stays reachable from Memory, it
- * says on screen that it is a preview on synthetic data, and it runs on
- * synthetic data only — nothing under `memory/atlas` talks to the backend or to
- * Lilith's real memory.
+ * in every build unless it is switched off, it stays reachable from Memory, the
+ * simulation says on screen that it is synthetic, and exactly one file —
+ * `real-source.ts`, the read-only Real memory projection — talks to the
+ * backend. Everything else under `memory/atlas` (the synthetic data and
+ * simulation included) reaches real memory only through it, if at all.
+ * Real memory's own rules are tested in `real-self-test.ts`.
  *
  * Reads source: the things under test are a route convention and an import
  * boundary. Run by `npm run test:core`.
@@ -35,6 +37,8 @@ function filesUnder(...path: string[]): string[] {
 }
 
 /** Anything that would let the Atlas read or write real data. */
+/** The one file allowed to read the backend: the read-only Real memory source. */
+const REAL_READER = /lib[\/]memory[\/]atlas[\/]real-source.ts$/;
 const BACKEND_ACCESS = [
   /\bfetch\s*\(/,
   /fetchEndpoint/,
@@ -84,16 +88,19 @@ export function runAtlasPreviewSelfTest(): Result[] {
   ];
   const offenders: string[] = [];
   for (const file of atlasFiles) {
+    if (REAL_READER.test(file)) continue;
     const text = readFileSync(file, "utf8");
     for (const pattern of BACKEND_ACCESS) {
       if (pattern.test(text)) offenders.push(`${file.slice(root.length + 1)} ~ ${pattern.source}`);
     }
   }
   check("the Atlas has files to check", atlasFiles.length >= 15, String(atlasFiles.length));
-  check("nothing in the Atlas reads or writes the backend or real memory", offenders.length === 0, offenders.join("; "));
+  check("only the read-only Real memory source reads the backend", offenders.length === 0, offenders.join("; "));
+  check("the Real memory source exists and is the only reader",
+    atlasFiles.filter((f) => REAL_READER.test(f)).length === 1);
 
   const atlas = src("components", "memory", "atlas", "cognitive-atlas.tsx");
-  check("the Atlas says on screen that it is a preview on synthetic data",
+  check("the simulation says on screen that it is a preview on synthetic data",
     /Preview · Synthetic data/.test(atlas) && /not connected to Lilith's real memory/.test(atlas));
   check("the Atlas inspector says nothing real is read or changed",
     /Nothing real is read or changed/.test(src("components", "memory", "atlas", "atlas-inspector.tsx")));

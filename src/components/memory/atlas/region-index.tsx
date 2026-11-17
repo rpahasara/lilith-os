@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import { X } from "lucide-react";
 import { GlassCard } from "@/components/ui/card";
 import { REGIONS } from "@/lib/memory/atlas/regions";
-import type { AtlasNode, RegionId } from "@/lib/memory/atlas/types";
+import { UNMAPPED_REGIONS, regionLabel } from "@/lib/memory/atlas/real-source";
+import type { AtlasNode, AtlasOrigin, RegionId } from "@/lib/memory/atlas/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,7 +19,9 @@ export function RegionIndex({
   onSelect,
   onClose,
   className,
+  origin = "synthetic",
 }: {
+  origin?: AtlasOrigin;
   nodes: AtlasNode[];
   active: RegionId | null;
   onHover: (region: RegionId | null) => void;
@@ -84,17 +87,17 @@ export function RegionIndex({
                   />
                   <span className="min-w-0 flex-1">
                     <span className={cn("block text-[13px] leading-tight", on ? "text-ink" : "text-ink-muted group-hover:text-ink")}>
-                      {region.label}
+                      {regionLabel(region.id, origin)}
                     </span>
                     <span className="block font-mono text-[9px] uppercase tracking-[0.14em] text-ink-faint">
-                      {region.lobe}
+                      {origin === "real" && UNMAPPED_REGIONS.includes(region.id) ? "no memory category maps here" : region.lobe}
                     </span>
                   </span>
                   {s.live > 0 && (
                     <span
                       className="rounded-full px-1.5 py-px font-mono text-[9px]"
                       style={{ color: region.color, background: `${region.color}1f` }}
-                      title={`${s.live} learned this session`}
+                      title={origin === "real" ? `${s.live} newly observed this session` : `${s.live} learned this session`}
                     >
                       +{s.live}
                     </span>

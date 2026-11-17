@@ -93,6 +93,10 @@ export interface BrainSceneProps {
   visuals: SceneVisuals;
   /** show the domain callouts. */
   labels: boolean;
+  /** idle stirring may pulse individual memories. Off for real memory: a
+   *  random pulse on a real record would look like activity that did not
+   *  happen, so idle motion stays at the level of whole regions. */
+  idleMemories?: boolean;
   /** px of the canvas (the whole viewport) that the OS chrome and any open
    *  overlays cover — the brain centres itself in what is left. */
   insets: { left: number; right: number; top: number; bottom: number };
@@ -185,8 +189,11 @@ function Brain(props: BrainSceneProps) {
       uWaveGain: { value: new Float32Array(4) },
     };
     const cortex = buildCortexGeometry(layout);
-    const nodes = new NodeBuffers(360);
-    const paths = new PathBuffers(1100);
+    const initial = store.getState();
+    // room for what the store already holds plus later arrivals (slots of
+    // removed items are not reused)
+    const nodes = new NodeBuffers(Math.max(360, initial.nodes.length + 160));
+    const paths = new PathBuffers(Math.max(1100, initial.links.length + 600));
     const tracts = buildTracts(layout);
     const rings = buildRingGeometry();
     const hull = buildHull(layout);
@@ -406,7 +413,7 @@ function Brain(props: BrainSceneProps) {
 
   /* store events → animation */
   useEffect(() => {
-    const onEvent = ({ event, node, links }: AppliedEvent) => {
+    const onEvent = ({ event, node, links, removed }: AppliedEvent) => {
       const t = world.u.uTime.value;
       const r = rig.current;
       if (event.type === "memory.learned" && node) {
@@ -438,6 +445,48 @@ function Brain(props: BrainSceneProps) {
         world.nodes.pulse(node.id, t);
         r.impulse[REGION_BY_ID[node.region].index] += 0.3;
         fireWave(node.position, 0.5);
+      } else if (event.type === "record.observed" && node) {
+        // a record seen for the first time in this session's snapshots
+        world.nodes.add(node, t);
+        world.nodes.pulse(node.id, t + 0.5);
+        r.impulse[REGION_BY_ID[node.region].index] += 0.6;
+        fireWave(node.position, 0.7);
+      } else if (event.type === "record.changed" && node) {
+        const before = world.nodes.positions.subarray(
+          (world.nodes.index.get(node.id) ?? 0) * 3,
+          (world.nodes.index.get(node.id) ?? 0) * 3 + 3,
+        );
+        const moved = before[0] !== node.position[0] || before[1] !== node.position[1] || before[2] !== node.position[2];
+        world.nodes.update(node);
+        if (moved) {
+          // its pathways follow it to the new region
+          for (const l of store.linksOf(node.id)) {
+            const a = store.node(l.source);
+            const b = store.node(l.target);
+            world.paths.remove(l.id);
+            if (a && b) addLink(world.paths, l, a, b, t);
+          }
+        }
+        world.nodes.pulse(node.id, t);
+        r.impulse[REGION_BY_ID[node.region].index] += 0.25;
+      } else if (event.type === "link.observed") {
+        for (const l of links) {
+          const a = store.node(l.source);
+          const b = store.node(l.target);
+          if (!a || !b) continue;
+          addLink(world.paths, l, a, b, t);
+          world.nodes.pulse(a.id, t);
+          world.nodes.pulse(b.id, t + 1.0);
+        }
+      }
+      if (removed) {
+        // withdrawn: out of the scene and out of every index it kept
+        for (const id of removed.links) world.paths.remove(id);
+        for (const id of removed.nodes) {
+          const i = world.nodes.index.get(id);
+          if (i !== undefined) fireWave([world.nodes.positions[i * 3], world.nodes.positions[i * 3 + 1], world.nodes.positions[i * 3 + 2]], 0.3);
+          world.nodes.remove(id);
+        }
       }
       // a new node may be part of the current focus
       world.nodes.setStates(live.current.focus.nodes);
@@ -779,7 +828,9 @@ function Brain(props: BrainSceneProps) {
     if (!still && r.form >= 1 && t > r.nextThought && world.nodes.count) {
       r.nextThought = t + 1.4 + Math.random() * 2.6;
       const i = Math.floor(Math.random() * world.nodes.count);
-      if (world.nodes.born[i] <= asOf) {
+      if (p.idleMemories === false) {
+        r.impulse[Math.floor(Math.random() * 7)] += 0.12;
+      } else if (world.nodes.born[i] <= asOf) {
         const node = store.node(world.nodes.ids[i]);
         if (node) {
           world.nodes.pulse(node.id, t);

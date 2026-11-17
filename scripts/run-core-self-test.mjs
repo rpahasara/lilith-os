@@ -27,6 +27,7 @@ await build({
       import { runArchiveSelfTest } from "@/lib/memory/archive-self-test";
       import { runExplorerSelfTest } from "@/lib/memory/explorer-self-test";
       import { runAtlasPreviewSelfTest } from "@/lib/memory/atlas/preview-self-test";
+      import { runAtlasRealSelfTest } from "@/lib/memory/atlas/real-self-test";
       import { runConversationSelfTest } from "@/lib/conversation/self-test";
       import { runShellHealthSelfTest } from "@/lib/system/self-test";
       import { runControlsSelfTest } from "@/lib/ui/controls-self-test";
@@ -41,7 +42,7 @@ await build({
       import { runDataModeSelfTest } from "@/lib/data-mode-self-test";
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
       import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
-      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...runExplorerSelfTest(), ...runAtlasPreviewSelfTest(), ...(await runConversationSelfTest()),
+      const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...runExplorerSelfTest(), ...runAtlasPreviewSelfTest(), ...(await runAtlasRealSelfTest()), ...(await runConversationSelfTest()),
                        ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runShellPresenceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
