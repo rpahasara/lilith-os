@@ -406,6 +406,8 @@ function Brain(props: BrainSceneProps) {
   }, [props.formKey]);
 
   /* focus → per-vertex emphasis */
+  const overlayLines = useRef<THREE.LineSegments>(null);
+  const overlayPackets = useRef<THREE.Points>(null);
   useEffect(() => {
     world.nodes.setStates(props.focus.nodes);
     world.paths.setStates(props.focus.links);
@@ -423,6 +425,9 @@ function Brain(props: BrainSceneProps) {
       lit.add(extra.id);
     }
     overlay.setStates(lit);
+    // drawn only when there is something to show (the simulation never has)
+    if (overlayLines.current) overlayLines.current.visible = overlay.count > 0;
+    if (overlayPackets.current) overlayPackets.current.visible = overlay.count > 0;
   }, [props.focus, world, store]);
 
   /* selection + hover reticle */
@@ -950,8 +955,8 @@ function Brain(props: BrainSceneProps) {
       <points geometry={world.cortex.geometry} material={materials.cortex} frustumCulled={false} />
       <lineSegments geometry={world.paths.lines} material={materials.memPaths} frustumCulled={false} />
       <points geometry={world.paths.packets} material={materials.memPackets} frustumCulled={false} />
-      <lineSegments geometry={world.overlay.lines} material={materials.memPaths} frustumCulled={false} />
-      <points geometry={world.overlay.packets} material={materials.memPackets} frustumCulled={false} />
+      <lineSegments ref={overlayLines} visible={false} geometry={world.overlay.lines} material={materials.memPaths} frustumCulled={false} />
+      <points ref={overlayPackets} visible={false} geometry={world.overlay.packets} material={materials.memPackets} frustumCulled={false} />
       {props.recall &&
         props.recall.trace.links.slice(0, Math.max(0, props.recall.step)).map((linkId, i) => (
           <TraceSegment

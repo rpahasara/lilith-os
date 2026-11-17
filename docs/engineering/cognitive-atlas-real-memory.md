@@ -85,10 +85,53 @@ Two kinds of memory-to-memory pathway, kept apart in data and on screen:
 - **explicit** (`explicit:a|b`) — the source lists the records as `related`.
   Inspector: "Linked by the source".
 - **shared-entity** (`shared:a|b`) — derived here: both records carry the same
-  entity. The link names the shared entities (`via`). Inspector: "Share an
-  entity · derived here". A pair with an explicit link is not also drawn as
-  shared. An entity carried by more than 24 records draws no pathways (dense
-  and uninformative); it is still listed on each record.
+  entity. The link names every entity the pair shares (`via`, `viaIds`).
+  Inspector: "Share an entity · derived here". A pair with an explicit link is
+  not also drawn as shared.
+
+#### What is drawn vs what exists
+
+Every pair of records that shares an entity is an association, but drawing all
+of them grows quadratically (an invented 450-record set produced 6,785
+pathways and the additive glow turned the brain into a white mass). So Real
+mode separates the data from the drawing:
+
+- **Data (complete).** `associationsOf` lists every association of a record;
+  `associationTotals` counts all of them, overall and per region. The node
+  inspector lists them all ("33 · 4 drawn") and marks the ones not drawn.
+- **Drawing (sparse, deterministic).**
+  - Explicit links are always drawn, and drawn stronger.
+  - For each entity, its records are joined by a minimum spanning tree over
+    their hashed homes (`placeNode` with no neighbours: a function of id and
+    category only), so every group stays connected through short, local
+    pathways. Pairs already drawn (explicit, or by an earlier entity's tree)
+    cost nothing, so trees reuse pathways instead of doubling them.
+  - About one member in `EXTRA_EVERY` (4) gets one extra pathway to its nearest
+    member not already joined to it, so groups read as clusters.
+  - Same records → same drawn set, whatever order they arrive in; positions
+    do not depend on links.
+- **Focus.** Selecting a record lights all of its associations; those the
+  sparse drawing leaves out are drawn in a focus overlay while it stays
+  selected. Highlighting an entity from the inspector lights its records and
+  the pathways that join them (its tree is connected by construction).
+- **Brightness.** Ambient memory pathways dim with the square root of the
+  drawn count beyond ~300 (floor 0.28), Real mode only; focused pathways keep
+  full strength. Tracts and the Simulation use their own, unchanged gain.
+- **Counts.** The header shows drawn pathways and, when they differ, total
+  associations; the region panel shows Drawn and Associations.
+
+Measured (invented records, production build, 1440×900): 10 records → 5 drawn
+of 7, 60 fps; 100 → 160 of 311, 60 fps; 450 → 837 of 6,785, 58–60 fps;
+1,000 → 1,876 of 33,986, 60 fps.
+
+450 invented records, before and after (header: records · drawn pathways ·
+associations):
+
+| Before: all pairs (6,785 drawn) | After: sparse (837 drawn of 6,785) |
+|---|---|
+| ![All-pairs drawing at 450 records](cognitive-atlas-real-memory/450-before.jpg) | ![Sparse drawing at 450 records](cognitive-atlas-real-memory/450-after.jpg) |
+| **A record selected: all 33 associations shown (4 normally drawn)** | **An entity highlighted: its 23 records, one connected tree** |
+| ![Record focus](cognitive-atlas-real-memory/450-record-selected.jpg) | ![Entity focus](cognitive-atlas-real-memory/450-entity-highlight.jpg) |
 
 Pathway brightness for real links is a drawing weight, not a measured strength,
 and is not shown as a value.
@@ -109,7 +152,8 @@ record id and a fingerprint of the stated fields:
 | record not seen before | `record.observed` | "Newly observed" |
 | stated fields differ | `record.changed` | "Changed" (stays in place unless its region changed) |
 | record absent | `record.withdrawn` | "No longer in the read model" |
-| link appears / disappears | `link.observed` / `link.withdrawn` | "Association observed" / "Association gone" |
+| source-stated link appears / disappears | `link.observed` / `link.withdrawn` | "Association observed" / "Association gone" |
+| drawn shared-entity pathway changes | same events, `quiet` | not logged or counted: it follows from record changes (reported above) or from re-simplifying the drawing |
 
 The panel says a difference is not proof that Lilith learned or forgot
 anything. The first read builds the graph whole (nothing is animated as
@@ -172,9 +216,10 @@ removal, failures, privacy and the simulation staying intact.
 - Removed GPU slots are not reused; buffers are sized with headroom (160 nodes,
   600 pathways beyond the current graph) and rebuilt from the store whenever
   live arrivals fill them, so everything counted is drawn.
-- Shared-entity pathways grow quickly with heavy entity overlap: an invented
-  450-record set drew 5,379 pathways at ~44 fps (60 fps at today's real size).
-  `SHARED_ENTITY_LINK_CAP` is the lever if real data ever gets that dense.
+- The sparse drawing is a simplification: which pairs are drawn says nothing
+  about which associations matter more. A refresh that adds a record can
+  re-route a few drawn pathways in its group (quietly); positions never move.
+- A focus overlay shows at most 1,024 hidden associations at once.
 - On narrow screens the domain labels can show over an open panel. This is the
   existing Atlas behaviour (the Simulation does the same) and is not changed here.
 - If only the entities read fails, records still update and the inspector
