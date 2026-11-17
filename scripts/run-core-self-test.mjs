@@ -34,6 +34,7 @@ await build({
       import { runShellSelfTest } from "@/lib/ui/shell-self-test";
       import { runWorkspaceP16SelfTest } from "@/lib/ui/workspace-p16-self-test";
       import { runMotionP17SelfTest } from "@/lib/ui/motion-p17-self-test";
+      import { runMobileOverflowSelfTest } from "@/lib/ui/mobile-overflow-self-test";
       import { runFoundationsSelfTest } from "@/lib/ui/foundations-self-test";
       import { runGlobalSurfaceSelfTest } from "@/lib/command/global-surface-self-test";
       import { runShellPresenceSelfTest } from "@/lib/presence/shell-presence-self-test";
@@ -45,7 +46,7 @@ await build({
       import { runEdgeAuthSelfTest } from "@/server/edge-auth/self-test";
       import { runWebHostingSelfTest } from "@/server/web-hosting/self-test";
       const results = [...(await runCoreSelfTest()), ...runMemorySelfTest(), ...(await runArchiveSelfTest()), ...runExplorerSelfTest(), ...runAtlasPreviewSelfTest(), ...(await runAtlasRealSelfTest()), ...(await runConversationSelfTest()),
-                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runWorkspaceP16SelfTest(), ...runMotionP17SelfTest(), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runShellPresenceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
+                       ...(await runShellHealthSelfTest()), ...runControlsSelfTest(), ...runShellSelfTest(), ...runWorkspaceP16SelfTest(), ...runMotionP17SelfTest(), ...runMobileOverflowSelfTest(), ...runFoundationsSelfTest(), ...runGlobalSurfaceSelfTest(), ...runShellPresenceSelfTest(), ...runHomeSelfTest(), ...(await runTurnSelfTest()), ...(await runVoiceSelfTest()), ...runDiagnosticsSelfTest(), ...(await runDataModeSelfTest()), ...(await runEdgeAuthSelfTest()), ...(await runWebHostingSelfTest())];
       const failed = results.filter((r) => !r.pass);
       for (const r of results) {
         console.log((r.pass ? "PASS" : "FAIL").padEnd(5) + r.name.padEnd(38) + (r.detail ?? ""));

@@ -42,7 +42,9 @@ export default function CareerPage() {
             onSelect={(stage) => setSelectedStage((current) => (current === stage ? null : stage))}
           />
 
-          <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          {/* One column below xl must be minmax(0, 1fr): an auto column grows to
+              the longest unwrapped row title and pushes the page sideways. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
             {/* main column */}
             <div className="space-y-4">
               <ApplicationTracker applications={data.applications} stageFilter={selectedStage} selectedId={selected?.id} onSelect={setSelected} />

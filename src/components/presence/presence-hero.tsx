@@ -194,7 +194,9 @@ export function PresenceHero() {
   }
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-between pb-1 pt-2">
+    // Below xl the hero fills the column and is a size container, so the avatar
+    // viewport can cap itself at the column width (presence-profiles STAGE_FIT).
+    <div className="relative flex h-full flex-col items-center justify-between pb-1 pt-2 max-xl:@container">
       {/* greeting */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
