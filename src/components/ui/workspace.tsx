@@ -1,10 +1,10 @@
 "use client";
 
-import { type ComponentType, type ReactNode, useEffect, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { type ComponentType, type ReactNode, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { spring, springSnap } from "@/lib/motion";
+import { DURATION, EASE_OUT, spring, springSnap } from "@/lib/motion";
 
 export function SectionHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="eyebrow">{title}</p>{description && <p className="mt-1 text-xs text-ink-faint">{description}</p>}</div>{action}</div>;
@@ -29,16 +29,55 @@ export function ContextAction({ icon: Icon, title, description, disabled, onClic
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+type Box = { top: number; left: number; width: number; height: number };
+
+/** Where the drawer opens from: the control that opened it, if it is a row on the page. */
+function originBox(el: Element | null): Box | null {
+  if (!el || !(el instanceof HTMLElement) || el === document.body || !el.closest("main")) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 40 || r.height < 24) return null;
+  return { top: r.top, left: r.left, width: r.width, height: r.height };
+}
+
+/** The drawer's own box (it is `fixed inset-y-0 right-0 w-full max-w-[30rem]`). */
+function drawerBox(): Box {
+  const width = Math.min(window.innerWidth, 480);
+  return { top: 0, left: window.innerWidth - width, width, height: window.innerHeight };
+}
+
 /**
  * The shared detail drawer. It is a modal dialog, so it behaves like one:
  * focus moves into it when it opens, Tab stays inside it, Escape closes it, and
  * focus returns to whatever opened it.
+ *
+ * Row to detail: when a row on the page opens it, a plate the shape of that
+ * row grows into the drawer (and shrinks back into the row on close), so the
+ * detail reads as the row opened up rather than a panel from nowhere. With
+ * "reduce motion" on, or when there is no row to grow from, the drawer simply
+ * fades in (no movement).
  */
 export function DetailDrawer({ open, onClose, eyebrow, title, children, footer }: { open: boolean; onClose: () => void; eyebrow?: string; title: string; children: ReactNode; footer?: ReactNode }) {
   const panel = useRef<HTMLElement>(null);
   // callers usually pass an inline handler; keep the latest without re-running the effect
   const close = useRef(onClose);
   close.current = onClose;
+  const reduce = useReducedMotion();
+  // The opener is read the moment the drawer opens (before the dialog takes
+  // focus), and again as it closes, so the plate meets the row where it is now.
+  const opener = useRef<Element | null>(null);
+  const [from, setFrom] = useState<Box | null>(null);
+  const [back, setBack] = useState<Box | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      opener.current = typeof document === "undefined" ? null : document.activeElement;
+      setFrom(typeof window === "undefined" ? null : originBox(opener.current));
+    } else {
+      setBack(typeof window === "undefined" ? null : originBox(opener.current));
+    }
+  }
+  const morph = !reduce && from !== null;
 
   useEffect(() => {
     if (!open) return;
@@ -77,5 +116,10 @@ export function DetailDrawer({ open, onClose, eyebrow, title, children, footer }
     };
   }, [open]);
 
-  return <AnimatePresence>{open && <><motion.button type="button" tabIndex={-1} aria-label="Close detail panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-black/55 backdrop-blur-sm" /><motion.aside ref={panel} initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={spring} role="dialog" aria-modal="true" aria-label={title} className="glass-strong scroll-area fixed inset-y-0 right-0 z-50 flex w-full max-w-[30rem] flex-col overflow-y-auto"><div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/[0.06] bg-base/75 px-6 py-5 backdrop-blur-xl"><div className="min-w-0">{eyebrow && <p className="eyebrow text-wine-bright/80">{eyebrow}</p>}<h2 className="mt-1 truncate text-xl font-semibold tracking-tight text-ink">{title}</h2></div><button type="button" data-autofocus onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.06] text-ink-muted hover:text-ink" aria-label="Close"><X className="h-4 w-4" /></button></div><div className="flex-1 p-6">{children}</div>{footer && <div className="sticky bottom-0 border-t border-white/[0.06] bg-base/80 p-4 backdrop-blur-xl">{footer}</div>}</motion.aside></>}</AnimatePresence>;
+  const target = typeof window === "undefined" ? null : drawerBox();
+  const plateFrom = from && target ? { ...from, borderRadius: 16 } : null;
+  const plateTo = target ? { ...target, borderRadius: 0 } : null;
+  const plateBack = back ?? from;
+
+  return <AnimatePresence>{open && <><motion.button key="scrim" type="button" tabIndex={-1} aria-label="Close detail panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="fixed inset-0 z-40 cursor-default bg-black/55 backdrop-blur-sm" />{morph && plateFrom && plateTo && <motion.div key="plate" aria-hidden data-drawer-plate initial={{ ...plateFrom, opacity: 1 }} animate={{ ...plateTo, opacity: [1, 1, 0], transition: { duration: DURATION.base + 0.06, ease: EASE_OUT, opacity: { duration: DURATION.base + 0.12, times: [0, 0.75, 1] } } }} exit={plateBack ? { ...plateBack, borderRadius: 16, opacity: [1, 1, 0], transition: { duration: DURATION.base, ease: EASE_OUT, opacity: { duration: DURATION.base, times: [0, 0.8, 1] } } } : { opacity: 0 }} className="pointer-events-none fixed z-50 border border-wine-bright/35 bg-[rgba(24,14,20,0.92)]" />}<motion.aside key="panel" ref={panel} {...(morph ? { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: DURATION.fast, delay: DURATION.fast * 0.7 } }, exit: { opacity: 0, transition: { duration: DURATION.instant } } } : reduce ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } } : { initial: { x: "100%" }, animate: { x: 0 }, exit: { x: "100%" }, transition: spring })} role="dialog" aria-modal="true" aria-label={title} className="glass-strong scroll-area fixed inset-y-0 right-0 z-50 flex w-full max-w-[30rem] flex-col overflow-y-auto"><div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-white/[0.06] bg-base/75 px-6 py-5 backdrop-blur-xl"><div className="min-w-0">{eyebrow && <p className="eyebrow text-wine-bright/80">{eyebrow}</p>}<h2 className="mt-1 truncate text-xl font-semibold tracking-tight text-ink">{title}</h2></div><button type="button" data-autofocus onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.06] text-ink-muted hover:text-ink" aria-label="Close"><X className="h-4 w-4" /></button></div><div className="flex-1 p-6">{children}</div>{footer && <div className="sticky bottom-0 border-t border-white/[0.06] bg-base/80 p-4 backdrop-blur-xl">{footer}</div>}</motion.aside></>}</AnimatePresence>;
 }
