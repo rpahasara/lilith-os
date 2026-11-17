@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { guardApiRequest } from "@/server/edge-auth/guard";
 import { coreApiHeaders } from "@/lib/core-api-credentials";
+import { HIDDEN_BELIEF_BODY, isWorldDetail, worldDetailHidden, worldListRefused } from "@/server/world-visibility";
 
 /**
  * Server-side proxy to the private LILITH backend.
@@ -78,6 +79,10 @@ export async function GET(
   if (!ALLOWED.some((p) => joined === p || joined.startsWith(`${p}/`))) {
     return NextResponse.json({ error: "path not allowed" }, { status: 403 });
   }
+  // Owner-context beliefs are never readable through the web app (see world-visibility).
+  if (worldListRefused(joined, req.nextUrl.searchParams)) {
+    return NextResponse.json({ error: "not readable here" }, { status: 403 });
+  }
 
   const url = `${base}/${joined}${req.nextUrl.search}`;
 
@@ -89,6 +94,12 @@ export async function GET(
       signal: AbortSignal.timeout(10_000),
     });
     const body = await upstream.text();
+    if (upstream.ok && isWorldDetail(joined) && worldDetailHidden(body)) {
+      return new NextResponse(HIDDEN_BELIEF_BODY, {
+        status: 404,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
     return new NextResponse(body, {
       status: upstream.status,
       headers: {

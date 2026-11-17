@@ -2,24 +2,35 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Brain, History, Library, type LucideIcon } from "lucide-react";
+import { Fragment } from "react";
+import { Brain, History, Library, Scale, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { atlasPreviewEnabled } from "@/lib/memory/atlas/preview";
 
-export type MemoryView = "brain" | "archive" | "timeline";
+/** Brain and Timeline are the Cognitive Atlas; a build without it offers Archive and Beliefs only. */
+const ATLAS_VIEWS: MemoryView[] = ["brain", "timeline"];
+
+export type MemoryView = "brain" | "archive" | "timeline" | "beliefs";
 
 const VIEWS: { key: MemoryView; label: string; icon: LucideIcon; href: string }[] = [
   { key: "brain", label: "Brain", icon: Brain, href: "/memory/atlas" },
   { key: "archive", label: "Archive", icon: Library, href: "/memory" },
   { key: "timeline", label: "Timeline", icon: History, href: "/memory/atlas?view=timeline" },
+  { key: "beliefs", label: "Beliefs", icon: Scale, href: "/memory/beliefs" },
 ];
 
+/** Beliefs are not memories: a hairline sets the World Model apart from the three memory lenses. */
+const SET_APART: MemoryView = "beliefs";
+
 /**
- * Brain · Archive · Timeline — the three ways into Memory.
+ * Brain · Archive · Timeline | Beliefs — the ways into Memory.
  *
- * Archive is the existing, backend-wired Memory workspace at /memory. Brain and
- * Timeline are the Cognitive Atlas prototype at /memory/atlas (synthetic data).
- * A view the current page can switch in place is passed through `onSelect`;
- * everything else is a plain link.
+ * Brain, Archive and Timeline are three views of the same memory records
+ * (Archive at /memory; Brain and Timeline in the Cognitive Atlas at
+ * /memory/atlas, which reads either its simulation or real memory). Beliefs is
+ * a different structure, the World Model at /memory/beliefs, so it sits after a
+ * divider. A view the current page can switch in place is passed through
+ * `onSelect`; everything else is a plain link.
  */
 export function MemoryViewSwitch({
   active,
@@ -41,7 +52,7 @@ export function MemoryViewSwitch({
         className,
       )}
     >
-      {VIEWS.map((view) => {
+      {VIEWS.filter((v) => atlasPreviewEnabled() || !ATLAS_VIEWS.includes(v.key)).map((view) => {
         const on = view.key === active;
         const Icon = view.icon;
         const inner = (
@@ -64,9 +75,8 @@ export function MemoryViewSwitch({
           "relative rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors",
           on ? "text-ink" : "text-ink-faint hover:text-ink-muted",
         );
-        return onSelect && inPlace.includes(view.key) ? (
+        const control = onSelect && inPlace.includes(view.key) ? (
           <button
-            key={view.key}
             type="button"
             aria-current={on ? "page" : undefined}
             onClick={() => onSelect(view.key)}
@@ -75,9 +85,15 @@ export function MemoryViewSwitch({
             {inner}
           </button>
         ) : (
-          <Link key={view.key} href={view.href} aria-current={on ? "page" : undefined} className={cls}>
+          <Link href={view.href} aria-current={on ? "page" : undefined} className={cls}>
             {inner}
           </Link>
+        );
+        return (
+          <Fragment key={view.key}>
+            {view.key === SET_APART && <span aria-hidden data-memory-divider="" className="mx-1 h-4 w-px shrink-0 bg-white/[0.12]" />}
+            {control}
+          </Fragment>
         );
       })}
     </nav>

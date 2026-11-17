@@ -384,6 +384,33 @@ export async function runEdgeAuthSelfTest(): Promise<Result[]> {
           check(`read proxy forwards ${path.join("/")}`, r.status === 200 && forwarded.length === 1 && forwarded[0] === expected,
             `${r.status} ${forwarded.join(",")}`);
         }
+
+        // Owner-context beliefs: never readable through the web app (P1-9, world-visibility).
+        for (const search of ["?entity_type=owner", "?entity_type=Owner", "?limit=5&entity_type=%20owner%20", "?entity_type=career.application&entity_type=owner"]) {
+          forwarded.length = 0;
+          const r = await readProxyRoute.GET(fakeRequest({ [ACCESS_JWT_HEADER]: owner }, {}, search), { params: Promise.resolve({ path: ["os", "world"] }) });
+          check(`read proxy refuses an owner-context belief list (${search})`, r.status === 403 && forwarded.length === 0, `${r.status} forwarded=${forwarded.length}`);
+        }
+        forwarded.length = 0;
+        const careerList = await readProxyRoute.GET(fakeRequest({ [ACCESS_JWT_HEADER]: owner }, {}, "?entity_type=career.application"), { params: Promise.resolve({ path: ["os", "world"] }) });
+        check("read proxy still forwards a belief list for other entity types", careerList.status === 200 && forwarded.length === 1 && forwarded[0].endsWith("/os/world?entity_type=career.application"), `${careerList.status} ${forwarded.join(",")}`);
+
+        const answer = (body: object) => {
+          globalThis.fetch = (async (input: RequestInfo | URL) => {
+            forwarded.push(String(input));
+            return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+          }) as typeof fetch;
+        };
+        answer({ key: "owner:owner:memory.x.1", entity_type: "owner", entity_id: "owner", value: "private" });
+        const hidden = await get(["os", "world", "owner:owner:memory.x.1"]);
+        const hiddenBody = await hidden.text();
+        check("read proxy answers an owner-context belief like an unknown key (404, no value)",
+          hidden.status === 404 && hiddenBody === JSON.stringify({ detail: "no belief for key" }) && !hiddenBody.includes("private"), `${hidden.status} ${hiddenBody}`);
+        answer({ key: "x", entity_type: " OWNER ", entity_id: "owner", value: "private" });
+        check("read proxy hides owner context whatever its casing", (await get(["os", "world", "x"])).status === 404);
+        answer({ key: "career.application:7:role", entity_type: "career.application", entity_id: "7", value: "Invented role" });
+        const visible = await get(["os", "world", "career.application:7:role"]);
+        check("read proxy passes a visible belief through unchanged", visible.status === 200 && (await visible.text()).includes("Invented role"));
       } finally {
         globalThis.fetch = realFetch;
         setEnv(HOSTED_ENV);
