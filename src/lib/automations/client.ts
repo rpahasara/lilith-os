@@ -72,33 +72,58 @@ function titleize(unit: string) {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function normalizeResult(v: unknown): RunOutcome | undefined {
-  const s = String(v ?? "").toLowerCase();
+const word = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toLowerCase() : null);
+
+/**
+ * A run's outcome from systemd's `Result` word. systemd says "success" for a
+ * clean run and names the failure otherwise ("exit-code", "signal", "timeout",
+ * "core-dump", "oom-kill", "start-limit-hit"…), so any other word is a failure.
+ */
+export function normalizeResult(v: unknown): RunOutcome | undefined {
+  const s = word(v);
+  if (s === null) return undefined;
   if (s === "success" || s === "ok" || s === "succeeded") return "success";
-  if (s === "failure" || s === "failed" || s === "error") return "failure";
   if (s === "skip" || s === "skipped") return "skip";
-  return undefined;
+  return "failure";
 }
 
-function deriveStatus(r: any, kind: UnitKind): UnitStatus {
-  const active = String(r.active_state ?? r.activeState ?? r.state ?? "").toLowerCase();
-  const sub = String(r.sub_state ?? r.subState ?? "").toLowerCase();
-  const result = String(r.result ?? r.last_result ?? "").toLowerCase();
+/**
+ * A unit's status from the fields the backend actually sends for it
+ * (services/core-api `systemctl_state`): `available`, `active` (ActiveState),
+ * `sub` (SubState), `result` (the last run's Result — for a timer, its paired
+ * service's) and, for timers, `service_active` / `service_sub`. The same reading
+ * as the System workspace (`unitState` in lib/system/platform):
+ *
+ *   - not readable, or no ActiveState  → unknown (never assumed healthy);
+ *   - ActiveState failed, or a last run that did not succeed → failed;
+ *   - a timer whose service is starting or running now → running;
+ *     an armed timer → waiting (shown as "Scheduled"); otherwise inactive;
+ *   - a service starting or running → running; other active → active;
+ *     otherwise inactive.
+ *
+ * Whether a unit is a timer comes from its unit name (or the backend's `type`),
+ * not from its display kind: a watcher is a timer too.
+ */
+export function deriveStatus(r: any): UnitStatus {
+  if (r?.available === false) return "unknown";
+  const active = word(r?.active ?? r?.active_state ?? r?.activeState);
+  const sub = word(r?.sub ?? r?.sub_state ?? r?.subState);
+  if (active === null) return "unknown";
+  const outcome = normalizeResult(r?.result ?? r?.last_result);
+  if (active === "failed" || outcome === "failure") return "failed";
 
-  if (active === "failed" || result === "failure" || result === "failed") return "failed";
-  if (sub === "running") return "running";
-  if (active === "inactive" || active === "dead" || r.enabled === false) {
-    return kind === "service" ? "inactive" : "waiting";
+  const timer = String(r?.unit ?? r?.name ?? "").endsWith(".timer") || word(r?.type) === "timer";
+  if (timer) {
+    const job = word(r?.service_active), jobSub = word(r?.service_sub);
+    if (job === "activating" || job === "reloading" || jobSub === "running" || jobSub === "start") return "running";
+    return active === "active" ? "waiting" : "inactive";
   }
-  if (active === "active") {
-    // a running .service is "running"; an armed timer/watcher is "active"/"waiting"
-    if (kind === "service") return sub === "running" ? "running" : "active";
-    return sub === "waiting" ? "waiting" : "active";
-  }
-  return "active";
+  if (active === "activating" || active === "reloading" || sub === "running") return "running";
+  if (active === "active") return "active";
+  return "inactive";
 }
 
-function normalizeUnit(r: any): AutomationUnit {
+export function normalizeUnit(r: any): AutomationUnit {
   const unit = String(r.unit ?? r.name ?? r.id ?? "unknown");
   const kind = (r.kind as UnitKind) ?? classifyKind(unit);
   const known = KNOWN[unit];
@@ -107,14 +132,17 @@ function normalizeUnit(r: any): AutomationUnit {
         ["success", "failure", "skip"].includes(h) ? h : "success",
       ) as RunOutcome[])
     : undefined;
-  const rawFail = r.failures ?? r.n_failures ?? r.n_restarts;
+  // A failure count only when the backend sends one. `n_restarts` is systemd's
+  // restart counter (always 0 for a oneshot job that fails every run), not a
+  // failure count, so it is not shown as one.
+  const rawFail = r.failures ?? r.n_failures;
 
   return {
     id: unit,
     unit,
     name: known?.name ?? r.display_name ?? titleize(unit),
     kind,
-    status: deriveStatus(r, kind),
+    status: deriveStatus(r),
     purpose: known?.purpose ?? r.purpose ?? r.description ?? "—",
     // trigger *type* is a classification from the unit kind (not fabricated
     // data); a specific schedule string is used only if the backend sends one.
@@ -125,10 +153,10 @@ function normalizeUnit(r: any): AutomationUnit {
     lastRun:
       r.last_run ?? r.last_trigger ?? r.exec_main_start ?? r.last_trigger_at ?? undefined,
     nextRun: r.next_run ?? r.next_trigger ?? r.next_elapse ?? undefined,
-    // backend exposes `result` on each unit ("success" | "failure")
+    // systemd's Result word for the last run ("success", "exit-code", …)
     lastResult: normalizeResult(r.last_result ?? r.result),
     // only report a failure count when the backend actually exposes one
-    failures: rawFail == null ? undefined : Number(rawFail),
+    failures: rawFail == null || !Number.isFinite(Number(rawFail)) ? undefined : Number(rawFail),
     runsToday: r.runs_today ?? r.runs ?? undefined,
     history,
     enabled:
@@ -170,7 +198,7 @@ function normalizeActivity(raw: any): AutomationEvent[] {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-function healthFrom(units: AutomationUnit[]) {
+export function healthFrom(units: AutomationUnit[]) {
   const failed = units.filter((u) => u.status === "failed").length;
   return {
     total: units.length,
@@ -221,9 +249,9 @@ export async function getAutomationsData(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ov: any = ovRes.ok ? (ovRes.data ?? {}) : {};
 
-  // /system/status can be incomplete (it omits lilith-os-api.service), while
-  // /os/overview.automations.services carries the full fleet. Merge both and
-  // dedupe by unit name so every real unit is shown exactly once.
+  // /system/status and /os/overview.automations.services both carry the unit
+  // list (the same per-unit fields). Merge both and dedupe by unit name so each
+  // real unit is shown exactly once, even when only one of them answers.
   const rawUnits = [
     ...collectUnits(statusRes.ok ? statusRes.data : null),
     ...(Array.isArray(ov?.automations?.services) ? ov.automations.services : []),
@@ -254,17 +282,11 @@ export async function getAutomationsData(
     ? normalizeActivity(auditRes.data)
     : normalizeActivity(ov?.recent_activity ?? []);
 
-  // Derive running/active/waiting from real systemd sub-states; prefer the
-  // backend's own total/healthy counts for the headline score when present.
+  // Counts come from the units' own states. The backend's overview
+  // `automations.unhealthy` counts only units whose ActiveState is not
+  // "active" — an armed timer stays "active" while every run of its job fails —
+  // so it is not used to override the failed count or the score.
   const health = healthFrom(units);
-  const ovAuto = ov?.automations;
-  if (ovAuto && typeof ovAuto.total === "number") {
-    const total = ovAuto.total;
-    const failed = Number(ovAuto.unhealthy ?? health.failed) || 0;
-    health.total = total;
-    health.failed = failed;
-    health.score = total ? Math.round(((total - failed) / total) * 100) : 100;
-  }
 
   return {
     isDemo: false,

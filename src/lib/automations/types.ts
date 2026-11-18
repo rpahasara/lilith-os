@@ -12,11 +12,12 @@
 export type UnitKind = "service" | "timer" | "watcher" | "agent";
 
 export type UnitStatus =
-  | "running" // actively doing work now
-  | "active" // healthy + armed (e.g. a scheduled timer waiting to fire)
-  | "waiting" // idle between scheduled runs
-  | "failed" // last run/health check failed
-  | "inactive"; // stopped / disabled
+  | "running" // doing work now (a service running, or a timer's job running)
+  | "active" // a service that is up but not in its running sub-state
+  | "waiting" // an armed timer between runs, whose last run succeeded ("Scheduled")
+  | "failed" // the unit failed, or its last run did not succeed
+  | "inactive" // stopped / not armed
+  | "unknown"; // the backend could not read the unit
 
 export type TriggerType = "continuous" | "schedule" | "event" | "manual";
 
@@ -93,7 +94,8 @@ export const STATUS_META: Record<
 > = {
   running: { label: "Running", accent: "green" },
   active: { label: "Active", accent: "cyan" },
-  waiting: { label: "Waiting", accent: "faint" },
+  waiting: { label: "Scheduled", accent: "faint" },
   failed: { label: "Failed", accent: "rose" },
   inactive: { label: "Inactive", accent: "faint" },
+  unknown: { label: "Unknown", accent: "faint" },
 };

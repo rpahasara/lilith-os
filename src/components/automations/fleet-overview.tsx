@@ -14,7 +14,7 @@ export function FleetOverview({ health }: { health: AutomationHealth }) {
   const states = [
     { label: "Running", value: health.running, dot: "bg-green" },
     { label: "Active", value: health.active, dot: "bg-cyan-bright" },
-    { label: "Waiting", value: health.waiting, dot: "bg-ink-faint" },
+    { label: "Scheduled", value: health.waiting, dot: "bg-ink-faint" },
     { label: "Failed", value: health.failed, dot: health.failed ? "bg-rose" : "bg-white/15" },
   ];
 
