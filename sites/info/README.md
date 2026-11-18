@@ -6,7 +6,7 @@ Separate from the LILITH OS app: no build step, no scripts, no cookies, no analy
 
 Deploy (after review):
 
-Deploy only the five site files (this README is not published): copy `index.html`, `site.css`, `_headers`, `privacy/` and `terms/` to a staging folder, then
+Deploy only the site files (this README is not published): copy `index.html`, `404.html`, `site.css`, `_headers`, `privacy/` and `terms/` to a staging folder, then
 
 ```bash
 npx wrangler pages deploy <staging-folder> --project-name lilith-info --branch main
