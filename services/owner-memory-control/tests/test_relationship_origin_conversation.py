@@ -292,12 +292,17 @@ class RelationshipOriginConversationTests(unittest.TestCase):
         parsed = SIGNER_WIRE.parse_issue_request({**base, "action": fields})
         self.assertIsInstance(parsed.action, SIGNER_WIRE.RelationshipOriginActionV1)
         self.assertEqual(parsed.action.action_digest, action.action_digest)
+        corrected = SIGNER_WIRE.parse_issue_request(                         # owner-approved correction (FM-3)
+            {**base, "action": dict(fields, operation=C.SUPERSEDE, expectedActiveRevisionId="mrev.1")})
+        self.assertIsInstance(corrected.action, SIGNER_WIRE.RelationshipOriginActionV1)
         fi = dict(fields, memoryClass=MA.FIRST_INTERACTION_IDENTITY[0], subjectNamespace=MA.FIRST_INTERACTION_IDENTITY[1],
                   subjectKey=MA.FIRST_INTERACTION_IDENTITY[2], valueSchema=MA.FIRST_INTERACTION_VALUE_SCHEMA,
                   purpose=MA.OWNER_AUTOBIOGRAPHICAL_EPISODE_ADMISSION)
         for bad in (fi, dict(fields, purpose="UNKNOWN_PURPOSE"), dict(fields, purpose=["x"]),
                     dict(fields, purpose=C.LONG_TERM_PERSONAL_PROJECT_RECALL),        # origin tuple, codename purpose
-                    dict(fields, operation=C.SUPERSEDE, expectedActiveRevisionId="mrev.1")):
+                    dict(fields, operation=C.SUPERSEDE),                              # correction without a prior revision
+                    dict(fields, operation="RESTORE", valueSchema=None, expectedActiveRevisionId="mrev.1",
+                         restoreRevisionId="mrev.0")):
             with self.subTest(bad=bad["purpose"]), self.assertRaises(SIGNER_WIRE.ProtocolError) as caught:
                 SIGNER_WIRE.parse_issue_request({**base, "action": bad})
             self.assertEqual(caught.exception.code, "INVALID_ACTION")

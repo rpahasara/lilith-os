@@ -82,6 +82,8 @@ RELATIONSHIP_ORIGIN_PURPOSE = "LONG_TERM_OWNER_RELATIONSHIP_ORIGIN_RECALL"
 RELATIONSHIP_ORIGIN_IDENTITY = ("OWNER_PROVIDED_RELATIONSHIP_ORIGIN", "lilith.core.relationship",
                                 "origin.owner-statement")
 RELATIONSHIP_ORIGIN_VALUE_SCHEMA = "OwnerRelationshipOriginV1"
+# CREATE, and the owner-approved correction (SUPERSEDE) of the active revision; never RESTORE or FORGET.
+RELATIONSHIP_ORIGIN_OPERATIONS = frozenset({C.CREATE, C.SUPERSEDE})
 # The only purposes this signer attests. Each is also gated by L04's canonical config and tuple registry.
 SIGNER_PURPOSES = frozenset({C.LONG_TERM_PERSONAL_PROJECT_RECALL, RELATIONSHIP_ORIGIN_PURPOSE})
 _ACTION_FIELDS = frozenset({
@@ -93,16 +95,17 @@ _ACTION_FIELDS = frozenset({
 @dataclass(frozen=True)
 class RelationshipOriginActionV1(C.FrozenMemoryActionV1):
     """A relationship-origin action: the unchanged `FrozenMemoryActionV1` fields and digest encoding; valid only as
-    CREATE of the one tuple with its value schema (every other field checked by the unchanged base validator)."""
+    CREATE, or an owner-approved SUPERSEDE (correction) bound to the active revision it replaces, of the one tuple with
+    its value schema (the SUPERSEDE shape and every other field checked by the unchanged base validator)."""
 
     def validate(self) -> None:
         if self.purpose != RELATIONSHIP_ORIGIN_PURPOSE:
             raise C.ContractError("purpose is unsupported")
         fields = {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
         C.FrozenMemoryActionV1(**{**fields, "purpose": C.LONG_TERM_PERSONAL_PROJECT_RECALL}).validate()
-        if (self.operation, tuple(self.identity), self.value_schema) != (
-                C.CREATE, RELATIONSHIP_ORIGIN_IDENTITY, RELATIONSHIP_ORIGIN_VALUE_SCHEMA):
-            raise C.ContractError("relationship origin is CREATE of its one tuple only")
+        if self.operation not in RELATIONSHIP_ORIGIN_OPERATIONS or (tuple(self.identity), self.value_schema) != (
+                RELATIONSHIP_ORIGIN_IDENTITY, RELATIONSHIP_ORIGIN_VALUE_SCHEMA):
+            raise C.ContractError("relationship origin is CREATE or SUPERSEDE of its one tuple only")
 
 
 class ProtocolError(ValueError):

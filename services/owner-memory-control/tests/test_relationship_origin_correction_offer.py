@@ -6,8 +6,8 @@ yet upgraded. These proofs therefore cover the offer and the fail-closed boundar
 1. "correct our origin: <full statement>" on a v4 database offers ONE owner-approved SUPERSEDE of the SAME item, bound
    to the ACCEPTED active revision (challenge memoryItemId / expectedActiveRevisionId); an offer writes nothing;
 2. a v3 database, nothing admitted yet, or an unchanged statement refuse at the offer;
-3. until the signer release that admits the correction is installed, the signer refuses it: nothing is written and the
-   original memory is still recalled unchanged.
+3. the FM-3 signer rule parses exactly the bound correction; with an admitting signer the full chain recalls the
+   corrected statement and keeps the original revision as history.
 """
 
 from __future__ import annotations
@@ -85,8 +85,8 @@ class RelationshipOriginCorrectionOfferTests(unittest.TestCase):
         for text in ("correct our origin", "correct our origin:   ", "Correct my origin: x"):
             self.assertEqual(self.fm.offer("sess.c", text).status, FMC.NOT_A_MEMORY_REQUEST, text)
 
-    def test_the_installed_signer_wire_still_refuses_a_correction(self):
-        """Until the signer release with the correction rule is installed, the real signer refuses the action."""
+    def test_the_signer_wire_admits_exactly_this_correction(self):
+        """With the FM-3 signer rule, the real signer wire parses the bound correction (and only that shape)."""
         self.migrate_v4()
         offer = self.fm.offer("sess.c", "Correct our origin: " + CORRECTED)
         action = self.fm._pending[offer.offer_id].action
@@ -96,9 +96,11 @@ class RelationshipOriginCorrectionOfferTests(unittest.TestCase):
                   "payloadDigest": action.payload_digest, "expectedActiveRevisionId": action.expected_active_revision_id,
                   "restoreRevisionId": None, "purpose": action.purpose}
         assertion, credential = self.owner_consents(offer)
+        base = {"challengeId": offer.offer_id, "assertion": dict(assertion), "ownerCredential": dict(credential)}
+        parsed = ROC.SIGNER_WIRE.parse_issue_request({**base, "action": fields})
+        self.assertEqual(parsed.action.action_digest, action.action_digest)
         with self.assertRaises(ROC.SIGNER_WIRE.ProtocolError) as caught:
-            ROC.SIGNER_WIRE.parse_issue_request({"challengeId": offer.offer_id, "assertion": dict(assertion),
-                                                 "ownerCredential": dict(credential), "action": fields})
+            ROC.SIGNER_WIRE.parse_issue_request({**base, "action": dict(fields, expectedActiveRevisionId=None)})
         self.assertEqual(caught.exception.code, "INVALID_ACTION")
 
     def test_with_an_admitting_signer_the_correction_is_the_accepted_memory_and_history_is_kept(self):
